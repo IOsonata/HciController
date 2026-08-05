@@ -187,7 +187,12 @@ void HciTinyUsbProcess(HciTinyUsb_t *pUsb)
     }
 
     pUsb->TaskCount++;
-    tud_task_ext(HCI_TINYUSB_RHPORT, false);
+    /*
+     * tud_task_ext takes a timeout in milliseconds and an in_isr flag, not an
+     * rhport. Zero means do not block, which is what a pump called from the
+     * runtime loop wants.
+     */
+    tud_task_ext(0U, false);
     HciTinyUsbProcessRx(pUsb);
     HciTinyUsbProcessTx(pUsb);
 }

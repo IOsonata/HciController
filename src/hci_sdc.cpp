@@ -160,6 +160,24 @@ static bool HciSdcPutPacket(void *pContext,
 
         case HCI_H4_PACKET_ACL:
         {
+            /*
+             * The parser frames the packet but does not judge its size. The
+             * controller advertises a maximum payload in LE Read Buffer Size
+             * and a host is not entitled to exceed it, so refuse an oversize
+             * packet here rather than let the controller decide what to do
+             * with it. The credit still has to come back, Vol 4 Part E 4.1.1.
+             */
+            if (PacketLen < HCI_SDC_ACL_HEADER_SIZE ||
+                PacketLen - HCI_SDC_ACL_HEADER_SIZE > HCI_SDC_ACL_MAX_PAYLOAD)
+            {
+                pSdc->AclOversizeCount++;
+                if (PacketLen >= HCI_SDC_ACL_HEADER_SIZE)
+                {
+                    HciSdcOweCredit(pSdc, pPacket);
+                }
+                return true;
+            }
+
             int32_t result = pSdc->Ops.AclPut(pSdc->Ops.pContext, pPacket);
             if (result == pSdc->Ops.RetryError)
             {
@@ -191,8 +209,15 @@ static bool HciSdcPutPacket(void *pContext,
             int32_t result = pSdc->Ops.IsoPut(pSdc->Ops.pContext, pPacket);
             if (result == pSdc->Ops.RetryError)
             {
-                pSdc->PutRetryCount++;
-                return false;
+                /*
+                 * For ISO the shared retry code means the SDU arrived too late
+                 * for its transmission point, which retrying can only make
+                 * worse. Refusing would pin the packet in the parser and stop
+                 * the whole host to controller direction, so it is dropped.
+                 * ISO has no packet based flow control, so no credit is owed.
+                 */
+                pSdc->IsoDropCount++;
+                return true;
             }
             if (result != 0)
             {

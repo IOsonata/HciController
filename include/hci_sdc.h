@@ -48,6 +48,18 @@ typedef struct {
  */
 #define HCI_SDC_CREDIT_HANDLES 4U
 
+/*
+ * Largest ACL payload the controller will take, Vol 4 Part E 7.8.2. A host
+ * that respects LE Read Buffer Size never exceeds it; one that does not must
+ * be refused here rather than handed to the controller.
+ */
+/* Handle and flags, then Data_Total_Length. Vol 4 Part E 5.4.2. */
+#define HCI_SDC_ACL_HEADER_SIZE 4U
+
+#ifndef HCI_SDC_ACL_MAX_PAYLOAD
+#define HCI_SDC_ACL_MAX_PAYLOAD 251U
+#endif
+
 /* Vol 4 Part E 7.7.19. */
 #define HCI_SDC_EVENT_NUM_COMPLETED_PACKETS 0x13U
 
@@ -85,6 +97,8 @@ typedef struct {
     uint32_t InvalidOutputTypeCount;
     uint32_t InvalidOutputLengthCount;
     uint32_t CommandDeferredCount;
+    uint32_t AclOversizeCount;
+    uint32_t IsoDropCount;
 } HciSdc_t;
 
 bool HciSdcInit(HciSdc_t *pSdc,

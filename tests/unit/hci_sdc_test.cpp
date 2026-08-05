@@ -338,6 +338,36 @@ int main()
                          &outLen) == HCI_CONTROLLER_GET_EMPTY);
 
         printf("[ok] a refused ACL packet returns its flow control credit\n");
+
+        /*
+         * A packet larger than the controller advertises never reaches the
+         * controller, and still returns its credit. The host is not entitled
+         * to send it, Vol 4 Part E 7.8.2.
+         */
+        backend.AclResult = 0;
+        backend.AclCount = 0U;
+
+        static uint8_t oversize[HCI_SDC_ACL_MAX_PAYLOAD + 8U];
+        memset(oversize, 0, sizeof(oversize));
+        oversize[0] = 0x03U;                     /* handle 0x0003 */
+        assert(ops4->Put(ops4->pContext, HCI_H4_PACKET_ACL, oversize,
+                         sizeof(oversize)));
+        assert(credit.AclOversizeCount == 1U);
+        assert(backend.AclCount == 0U);          /* never handed over */
+
+        /* The largest packet that is allowed still goes through. */
+        assert(ops4->Put(ops4->pContext, HCI_H4_PACKET_ACL, oversize,
+                         HCI_SDC_ACL_HEADER_SIZE + HCI_SDC_ACL_MAX_PAYLOAD));
+        assert(backend.AclCount == 1U);
+
+        assert(ops4->Get(ops4->pContext, &creditType, out, sizeof(out),
+                         &outLen) == HCI_CONTROLLER_GET_PACKET);
+        assert(out[0] == 0x13U);
+        assert(out[2] == 1U);
+        assert(out[3] == 0x03U && out[4] == 0x00U);
+        assert(out[5] == 1U);
+        printf("[ok] an oversize ACL packet is refused and still returns "
+               "its credit\n");
     }
 
     printf("All SDC routing tests passed.\n");
