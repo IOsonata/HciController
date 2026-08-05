@@ -261,22 +261,55 @@ static void TestBringUpOrder(void)
     USBD_IRQHandler();
     assert(gUsbIrq == 1U);
 
-    /* Cable removal must not reach the driver path that stops the crystal. */
+    /*
+     * Cable removal must not reach the driver path that stops the crystal, and
+     * must not touch the TinyUSB event queue from interrupt context. The
+     * handler records it; the thread applies it.
+     */
     gPower.EVENTS_USBREMOVED = 1U;
     POWER_CLOCK_IRQHandler();
     assert(gUsbPowerEvents[1] == 0U);
     assert(gClockRegisterWrites == 0U);
-    assert(gDcdDisconnect == 1U);
+    assert(target.UsbDetachPending);
+    assert(gDcdDisconnect == 0U);
 
-    /* Re-plug only restores the pull up. */
+    HciNrf52840UsbPowerProcess(&target);
+    assert(gDcdDisconnect == 1U);
+    assert(!target.UsbDetachPending);
+
+    /* Re-plug only restores the pull up, and again only from the thread. */
     gPower.EVENTS_USBDETECTED = 1U;
     POWER_CLOCK_IRQHandler();
+    assert(target.UsbAttachPending);
+    assert(gDcdConnect == 0U);
+
+    HciNrf52840UsbPowerProcess(&target);
     assert(gDcdConnect == 1U);
     assert(gUsbPowerEvents[0] == 0U);
+
+    /*
+     * A detach and an attach arriving before the thread runs collapse to the
+     * state the hardware is actually in, which is attached.
+     */
+    gPower.EVENTS_USBREMOVED = 1U;
+    POWER_CLOCK_IRQHandler();
+    gPower.EVENTS_USBDETECTED = 1U;
+    POWER_CLOCK_IRQHandler();
+    HciNrf52840UsbPowerProcess(&target);
+    assert(gDcdDisconnect == 2U && gDcdConnect == 2U);
 
     HciNrf52840Stop(&target);
     assert(gHfclkReleases == 1U);
     assert(!target.HfclkRequested && !target.UsbStarted);
+
+    /* Stop detaches rather than leaving the host enumerated against nothing. */
+    assert(gUsbd.USBPULLUP == 0U);
+    assert(gUsbd.ENABLE == 0U);
+    assert(gUsbd.INTEN == 0U);
+
+    /* And a stopped target can be started again. */
+    assert(ops.Start(ops.pContext));
+    HciNrf52840Stop(&target);
 
     printf("[ok] bring up order and clock ownership\n");
 }

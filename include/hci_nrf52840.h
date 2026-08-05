@@ -38,6 +38,12 @@ typedef struct {
     bool HfclkRequested;
     volatile bool UsbStarted;
     volatile bool UsbReadyDone;
+    /* Cable events, set by POWER_CLOCK and applied by the runtime thread. */
+    volatile bool UsbAttachPending;
+    volatile bool UsbDetachPending;
+    volatile uint32_t UsbAttachCount;
+    volatile uint32_t UsbDetachCount;
+
     uint32_t RandFailCount;
     volatile uint32_t UsbIrqCount;
     volatile uint32_t UsbIrqMark;
@@ -68,6 +74,12 @@ bool HciNrf52840UsbStart(HciNrf52840_t *pTarget);
  * marks are what the storm detector measures.
  */
 void HciNrf52840UsbPassMark(HciNrf52840_t *pTarget);
+
+/*
+ * Apply a cable attach or detach recorded by the interrupt handler. Must be
+ * called from the same context that pumps the device stack.
+ */
+void HciNrf52840UsbPowerProcess(HciNrf52840_t *pTarget);
 
 void HciNrf52840Stop(HciNrf52840_t *pTarget);
 

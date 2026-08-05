@@ -57,21 +57,15 @@
 // Button Pin Definitions (default for nRF52840)
 //=============================================================================
 
-#define BUTTON1_PORT			0
-#define BUTTON1_PIN             13
-#define BUTTON1_PINOP           0
+// The dongle has one button, P1.06. The four button block that used to sit
+// here carried IBK pin numbers: BUTTON1 P0.13 and BUTTON2 P0.04 are the IBK
+// buttons, and BUTTON3 and BUTTON4 were both P0.00, which is XL1, the low
+// frequency crystal pin. Nothing read them, and driving XL1 would stop the
+// crystal, so they are gone rather than left as a trap.
 
-#define BUTTON2_PORT            0
-#define BUTTON2_PIN             4
-#define BUTTON2_PINOP           0
-
-#define BUTTON3_PORT            0
-#define BUTTON3_PIN             0
-#define BUTTON3_PINOP           0
-
-#define BUTTON4_PORT            0
-#define BUTTON4_PIN             0
-#define BUTTON4_PINOP           0
+#define BUTTON1_PORT			UDG_NRF52840_BUT1_PORT
+#define BUTTON1_PIN				UDG_NRF52840_BUT1_PIN
+#define BUTTON1_PINOP			UDG_NRF52840_BUT1_PINOP
 
 #define BUTTON_PINS						UDG_NRF52840_BUT_PINS_CFG
 
@@ -161,9 +155,8 @@
 	{UART_RTS_PORT, UART_RTS_PIN, UART_RTS_PINOP, IOPINDIR_OUTPUT, IOPINRES_NONE, IOPINTYPE_NORMAL},}
 
 
-#define LED_PINS				IBK_NRF52840_LED_PINS_CFG
-
 #else
+#error "No board selected. Define BOARD to a supported board above."
 #endif
 
 //=============================================================================

@@ -180,6 +180,24 @@ static void HciNrf52840ErrataWrite(uint32_t Reg, uint32_t Value)
     }
 }
 
+/*
+ * The cable event flags are written by POWER_CLOCK and read by the runtime
+ * thread, so the read and clear must be one operation. PRIMASK is used rather
+ * than the TaktOS critical section because this file must stay usable before
+ * the runtime exists.
+ */
+static uint32_t HciNrf52840EnterCritical(void)
+{
+    uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    return primask;
+}
+
+static void HciNrf52840ExitCritical(uint32_t State)
+{
+    __set_PRIMASK(State);
+}
+
 static void HciNrf52840UsbdErrataApply(void)
 {
     if (nrf52_errata_187())
@@ -312,34 +330,82 @@ static bool HciNrf52840HfclkStart(HciNrf52840_t *pTarget)
     return false;
 }
 
+/*
+ * Record the cable event and leave. dcd_connect and dcd_disconnect must not
+ * run from here.
+ *
+ * dcd_disconnect pushes into the TinyUSB event queue, and under CFG_TUSB_OS
+ * OPT_OS_NONE the only mutual exclusion on that queue is masking USBD_IRQn.
+ * This handler shares POWER_CLOCK with MPSL and runs above the thread that
+ * calls tud_task, so that mask does not hold it off: it would write the queue
+ * while tud_task is reading it, and on the way out it would re-enable an
+ * interrupt the thread had deliberately masked.
+ *
+ * The flags are acted on in HciNrf52840UsbPowerProcess, in the same context as
+ * tud_task, where the mask means what TinyUSB expects it to mean.
+ */
 static void HciNrf52840UsbPowerIrq(void)
 {
-    /*
-     * Only the pull up is driven from here. The controller stays enabled and
-     * the crystal stays requested from MPSL across a cable cycle, and neither
-     * dcd_connect nor dcd_disconnect touches NRF_CLOCK.
-     */
+    bool wake = false;
+
     if (NRF_POWER->EVENTS_USBDETECTED != 0U)
     {
         NRF_POWER->EVENTS_USBDETECTED = 0U;
-        if (s_pTarget->UsbReadyDone)
-        {
-            dcd_connect(0U);
-        }
+        s_pTarget->UsbAttachPending = true;
+        s_pTarget->UsbAttachCount++;
+        wake = true;
     }
 
     if (NRF_POWER->EVENTS_USBREMOVED != 0U)
     {
         NRF_POWER->EVENTS_USBREMOVED = 0U;
-        if (s_pTarget->UsbReadyDone)
-        {
-            dcd_disconnect(0U);
-        }
+        s_pTarget->UsbDetachPending = true;
+        s_pTarget->UsbDetachCount++;
+        wake = true;
     }
 
     if (NRF_POWER->EVENTS_USBPWRRDY != 0U)
     {
         NRF_POWER->EVENTS_USBPWRRDY = 0U;
+    }
+
+    if (wake && s_pTarget->pRuntime != nullptr)
+    {
+        HciTaktOsWake(s_pTarget->pRuntime, HCI_TAKTOS_EVENT_HOST);
+    }
+}
+
+/*
+ * Apply a cable event recorded by the interrupt handler. Runs in the thread
+ * that pumps tud_task, so the TinyUSB queue is protected the way TinyUSB
+ * assumes. A detach followed by an attach before this runs collapses to an
+ * attach, which is the state the hardware is actually in.
+ */
+void HciNrf52840UsbPowerProcess(HciNrf52840_t *pTarget)
+{
+    if (pTarget == nullptr || !pTarget->UsbReadyDone)
+    {
+        return;
+    }
+
+    uint32_t state = HciNrf52840EnterCritical();
+    const bool attach = pTarget->UsbAttachPending;
+    const bool detach = pTarget->UsbDetachPending;
+    pTarget->UsbAttachPending = false;
+    pTarget->UsbDetachPending = false;
+    HciNrf52840ExitCritical(state);
+
+    if (detach && !attach)
+    {
+        dcd_disconnect(0U);
+    }
+    else if (attach)
+    {
+        if (detach)
+        {
+            dcd_disconnect(0U);
+        }
+        dcd_connect(0U);
     }
 }
 
@@ -567,11 +633,18 @@ static bool HciNrf52840Start(void *pContext)
     s_pTarget = pTarget;
     if (!HciNrf52840MpslInit(pTarget))
     {
+        s_pTarget = nullptr;
         return false;
     }
 
     if (!HciNrf52840SdcInit(pTarget))
     {
+        /*
+         * MPSL is up with five interrupts enabled at this point. Returning
+         * without undoing it leaves the radio subsystem live and nothing
+         * servicing it, because the runtime treats a failed start as fatal.
+         */
+        HciNrf52840Stop(pTarget);
         return false;
     }
 
@@ -846,20 +919,41 @@ void HciNrf52840Stop(HciNrf52840_t *pTarget)
         return;
     }
 
-    NVIC_DisableIRQ(SWI5_EGU5_IRQn);
-    NVIC_DisableIRQ(RADIO_IRQn);
-    NVIC_DisableIRQ(RTC0_IRQn);
-    NVIC_DisableIRQ(TIMER0_IRQn);
-    NVIC_DisableIRQ(POWER_CLOCK_IRQn);
-
+    /*
+     * Detach cleanly first. Leaving the controller enabled with the pull up
+     * asserted keeps the host enumerated against a device that answers
+     * nothing, and the crystal it needs is released further down. This is the
+     * sequence the vendor port uses on cable removal.
+     */
     if (pTarget->UsbEnabled)
     {
         NVIC_DisableIRQ(USBD_IRQn);
         NRF_POWER->INTENCLR = POWER_INTENCLR_USBDETECTED_Msk |
                               POWER_INTENCLR_USBREMOVED_Msk |
                               POWER_INTENCLR_USBPWRRDY_Msk;
+
+        NRF_USBD->USBPULLUP = 0U;
+        NRF_USBD->INTEN = 0U;
+        NRF_USBD->ENABLE = 0U;
+        __ISB();
+        __DSB();
+
         pTarget->UsbStarted = false;
         pTarget->UsbReadyDone = false;
+        pTarget->UsbAttachPending = false;
+        pTarget->UsbDetachPending = false;
+    }
+
+    /*
+     * The radio has to be stopped before MPSL is torn down, and sdc_disable
+     * unwinds an in flight timeslot, which needs MPSL's RADIO and TIMER0
+     * handlers to run. Masking them first makes it block or trip the MPSL
+     * assert, so the interrupts stay live until both are down.
+     */
+    if (pTarget->SdcEnabled)
+    {
+        (void)sdc_disable();
+        pTarget->SdcEnabled = false;
     }
 
     if (pTarget->HfclkRequested)
@@ -868,18 +962,23 @@ void HciNrf52840Stop(HciNrf52840_t *pTarget)
         pTarget->HfclkRequested = false;
     }
 
-    if (pTarget->SdcEnabled)
-    {
-        (void)sdc_disable();
-        pTarget->SdcEnabled = false;
-    }
-
     if (pTarget->MpslInitialized)
     {
         mpsl_uninit();
         pTarget->MpslInitialized = false;
     }
 
+    NVIC_DisableIRQ(SWI5_EGU5_IRQn);
+    NVIC_DisableIRQ(RADIO_IRQn);
+    NVIC_DisableIRQ(RTC0_IRQn);
+    NVIC_DisableIRQ(TIMER0_IRQn);
+    NVIC_DisableIRQ(POWER_CLOCK_IRQn);
+
+    /*
+     * Clear everything Start checks, so a target that was stopped can be
+     * started again without going back through HciNrf52840Init.
+     */
+    pTarget->SdcInitialized = false;
     s_pTarget = nullptr;
 }
 

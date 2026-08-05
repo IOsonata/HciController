@@ -69,6 +69,16 @@ extern NRF_USBD_Type *NRF_USBD;
 #define __ISB() do { } while (0)
 #define __DSB() do { } while (0)
 
+/*
+ * PRIMASK on the host. The firmware uses it to make a read and clear of the
+ * cable event flags atomic against the POWER_CLOCK handler; the host tests are
+ * single threaded, so tracking the value is enough to keep the code honest.
+ */
+static inline uint32_t __get_PRIMASK(void) { return 0U; }
+static inline void __set_PRIMASK(uint32_t) { }
+static inline void __disable_irq(void) { }
+static inline void __enable_irq(void) { }
+
 #ifdef __cplusplus
 extern "C" {
 #endif

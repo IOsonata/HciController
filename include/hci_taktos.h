@@ -51,6 +51,8 @@ typedef struct {
 
 typedef struct {
     TaktOSSem_t WakeSem;
+    /* Given by the runtime thread as it leaves, so a stop can wait for it. */
+    TaktOSSem_t StoppedSem;
     HciTaktOsOps_t Ops;
     HciTaktOsHostOps_t HostOps;
 
@@ -58,6 +60,7 @@ typedef struct {
     volatile bool Started;
     volatile bool Running;
     volatile bool StopRequested;
+    bool HostStarted;
 
     uint32_t WakeCount;
     uint32_t MpslProcessCount;
@@ -65,6 +68,7 @@ typedef struct {
     uint32_t EmptyWakeCount;
     uint32_t SemaphoreFullCount;
     uint32_t StartErrorCount;
+    uint32_t HostRetryCount;
     uint32_t PollWakeCount;
 } HciTaktOs_t;
 
@@ -74,6 +78,13 @@ bool HciTaktOsInit(HciTaktOs_t *pRuntime,
 
 void HciTaktOsWake(HciTaktOs_t *pRuntime, uint32_t Events);
 void HciTaktOsStop(HciTaktOs_t *pRuntime);
+
+/*
+ * Wait for the runtime thread to leave its loop after a stop. Returns false on
+ * timeout, in which case the caller must not tear down anything the thread
+ * uses. Milliseconds.
+ */
+bool HciTaktOsWaitStopped(HciTaktOs_t *pRuntime, uint32_t TimeoutMs);
 void HciTaktOsThread(void *pContext);
 
 #ifdef __cplusplus

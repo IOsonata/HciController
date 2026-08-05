@@ -49,6 +49,10 @@ static_assert(HCI_APP_PACKET_SIZE >= HCI_MSG_BUFFER_MAX_SIZE,
 #define HCI_APP_USB_SETTLE_REPORT 50000U
 #endif
 
+#ifndef HCI_APP_STOP_TIMEOUT_MS
+#define HCI_APP_STOP_TIMEOUT_MS 250U
+#endif
+
 #ifndef HCI_APP_USB_POLL_MS
 #define HCI_APP_USB_POLL_MS 5U
 #endif
@@ -220,6 +224,7 @@ static bool HciAppHostStart(void *pContext)
                 pApp->Runtime.Ops.ProcessMpsl(pApp->Runtime.Ops.pContext);
             }
 
+            HciNrf52840UsbPowerProcess(&pApp->Target);
             HciNrf52840UsbPassMark(&pApp->Target);
             HciTinyUsbProcess(&pApp->Usb);
 
@@ -284,6 +289,13 @@ static void HciAppHostProcess(void *pContext)
 
     if (pApp->HostType == HCI_APP_HOST_USB)
     {
+        /*
+         * Cable attach and detach are recorded by POWER_CLOCK and applied
+         * here, in the same context that pumps the device stack, because the
+         * TinyUSB event queue is only protected against this context.
+         */
+        HciNrf52840UsbPowerProcess(&pApp->Target);
+
         HciTinyUsbProcess(&pApp->Usb);
         HciAppSetHostOpen(pApp, HciTinyUsbIsOpen(&pApp->Usb));
     }
@@ -389,6 +401,20 @@ void HciAppStop(HciApp_t *pApp)
     }
 
     HciTaktOsStop(&pApp->Runtime);
+
+    /*
+     * The runtime thread calls into SDC and MPSL, so it has to be out of its
+     * loop before either is torn down. If it does not stop, leave the target
+     * running rather than pulling it out from under the thread.
+     */
+    if (!HciTaktOsWaitStopped(&pApp->Runtime, HCI_APP_STOP_TIMEOUT_MS))
+    {
+        HciTrace("stop: runtime still running, target left up\r\n");
+        pApp->Initialized = false;
+        s_pApp = nullptr;
+        return;
+    }
+
     HciNrf52840Stop(&pApp->Target);
     if (pApp->pHostIntrf != nullptr)
     {
