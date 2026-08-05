@@ -1,6 +1,6 @@
 # HCI command coverage
 
-The dispatch table in `src/hci_sdc_nrfxlib.cpp` carries 59 commands. Anything
+The dispatch table in `src/hci_sdc_nrfxlib.cpp` carries 60 commands. Anything
 not listed there is answered with Unknown HCI Command, so the table is the
 controller's actual capability, and `HCI_Read_Local_Supported_Commands` reports
 exactly the same set. A host test checks the two against each other in both
@@ -66,6 +66,10 @@ Security
     0x2019  LE Enable Encryption                    status
     0x201A  LE Long Term Key Request Reply
     0x201B  LE Long Term Key Request Negative Reply
+
+Capability
+
+    0x204B  LE Read Transmit Power
 
 Direct test mode
 
@@ -161,34 +165,36 @@ stack waiting for an event that never arrives.
 
 A SoftDevice Controller header declares the whole HCI API, but a library
 variant only contains the commands it was built with, so a declaration is not
-a guarantee that the symbol links. Seven commands therefore sit behind a macro
+a guarantee that the symbol links. Seven commands sit behind a macro
 in `src/hci_sdc_nrfxlib.cpp`, each covering the handler, the table row and the
 supported commands bit together, so the three stay consistent whichever way the
 macro goes.
 
     HCI_SDC_HAS_READ_SUPPORTED_STATES     0   0x201C  LE Read Supported States
-    HCI_SDC_HAS_READ_TRANSMIT_POWER       0   0x204B  LE Read Transmit Power
+    HCI_SDC_HAS_READ_TRANSMIT_POWER       1   0x204B  LE Read Transmit Power
     HCI_SDC_HAS_READ_REMOTE_VERSION       1   0x041D  Read Remote Version Info
     HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT      1   0x0C7B and 0x0C7C
     HCI_SDC_HAS_VS_READ_STATIC_ADDRESSES  1   0xFC09  VS Read Static Addresses
     HCI_SDC_HAS_VS_READ_COUNTERS          1   0xFFF0  VS Read Counters
 
-The first two default to off because a link against the multirole library
-proved the symbols absent. Read Supported States reports legacy advertising
-states and is left out of a build that only enables the extended advertiser.
-Read Transmit Power belongs to LE Power Control. The next two default to on
-because the specification makes them mandatory, and the vendor specific one
-because a board with no public address is unusable to a host without it. The
-counter readout needs no SDC symbol at all and is on for the same reason.
+Do not guess at these. Read the archive:
 
-List what a library really defines with
+    python3 tests/sdc_symbols.py [path to libsoftdevice_controller_*.a]
 
-    arm-none-eabi-nm --defined-only libsoftdevice_controller_multirole.a \
-        | grep " T sdc_hci_cmd_"
+It parses the archive symbol index, which is every symbol the members define,
+and prints what each macro should be set to. No toolchain needed, so the
+question can be settled before the first build as easily as after it. It exits
+non-zero when a default in the source disagrees with the library.
 
-and set the macro to match. That way a missing symbol is an undefined
-reference at link time and a one line change here, rather than a controller
-that advertises a command it cannot run.
+Checked against `libsoftdevice_controller_multirole.a` for nrf52 hard-float:
+`sdc_hci_cmd_le_read_supported_states` is the only entry point the table names
+that the library does not define. Read Supported States reports legacy
+advertising states and is left out of a build that only enables the extended
+advertiser.
+
+A wrong 1 is a link error, which is loud. A wrong 0 is a command answered
+Unknown HCI Command that the controller could have run, which is silent, and is
+worth re-checking whenever nrfxlib moves.
 
 ## How the handlers are written
 

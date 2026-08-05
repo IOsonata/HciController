@@ -25,25 +25,32 @@
 /*
  * The SoftDevice Controller headers declare the whole HCI API, but a library
  * variant only contains the commands it was built with, so a header alone does
- * not mean the symbol links. List what the library really defines with
+ * not mean the symbol links. Every gate below is decided by what is really in
+ * the archive:
  *
- *   arm-none-eabi-nm --defined-only libsoftdevice_controller_multirole.a \
- *       | grep " T sdc_hci_cmd_"
+ *   python3 tests/sdc_symbols.py [path to libsoftdevice_controller_*.a]
  *
- * and set the matching macro to 0 when a symbol is missing, which turns an
- * undefined reference at link time into a one line change here.
+ * which reads the archive symbol index and prints what each macro should be.
+ * It needs no toolchain. A wrong 1 is a link error, which is loud. A wrong 0
+ * is a command answered Unknown HCI Command that the controller could have
+ * run, which is silent, so the check is worth running against a new nrfxlib
+ * rather than assuming.
  *
- * The two below default to 0 because a link against the multirole library
- * proved them absent. Read Supported States reports legacy advertising states
- * and is left out of a build that only enables the extended advertiser. Read
- * Transmit Power belongs to LE Power Control.
+ * Read Supported States is genuinely absent from the multirole library. It
+ * reports legacy advertising states and is left out of a build that only
+ * enables the extended advertiser.
  */
 #ifndef HCI_SDC_HAS_READ_SUPPORTED_STATES
 #define HCI_SDC_HAS_READ_SUPPORTED_STATES 0
 #endif
 
+/*
+ * Vol 4 Part E 7.8.74, the minimum and maximum transmit power the controller
+ * supports across its PHYs. Nothing to do with LE Power Control, which an
+ * earlier comment here claimed, and it needs no sdc_support_ call.
+ */
 #ifndef HCI_SDC_HAS_READ_TRANSMIT_POWER
-#define HCI_SDC_HAS_READ_TRANSMIT_POWER 0
+#define HCI_SDC_HAS_READ_TRANSMIT_POWER 1
 #endif
 
 /*
@@ -1159,6 +1166,10 @@ HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_phy_return_t, 4U);               /* 7.8.47 
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_ext_adv_params_return_t, 1U);     /* 7.8.53 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_max_adv_data_length_return_t, 2U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_number_of_supported_adv_sets_return_t, 1U);
+#if HCI_SDC_HAS_READ_TRANSMIT_POWER
+/* Min_TX_Power and Max_TX_Power, one octet each. Vol 4 Part E 7.8.74. */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_transmit_power_return_t, 2U);
+#endif
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_ip_read_local_supported_commands_return_t, 64U);
 #if HCI_SDC_HAS_VS_READ_STATIC_ADDRESSES
 /* Six octets of address and sixteen of identity root, per the Zephyr command. */
