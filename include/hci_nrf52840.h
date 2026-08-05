@@ -44,7 +44,7 @@ typedef struct {
     volatile uint32_t UsbAttachCount;
     volatile uint32_t UsbDetachCount;
 
-    uint32_t RandFailCount;
+    uint32_t RandRetryCount;
     volatile uint32_t UsbIrqCount;
     volatile uint32_t UsbIrqMark;
     volatile uint32_t UsbStuckCauseCount;

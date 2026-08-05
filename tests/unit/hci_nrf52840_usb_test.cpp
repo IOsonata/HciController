@@ -301,6 +301,8 @@ static void TestBringUpOrder(void)
     HciNrf52840Stop(&target);
     assert(gHfclkReleases == 1U);
     assert(!target.HfclkRequested && !target.UsbStarted);
+    /* Stop must disable a controller that was initialised, not only enabled. */
+    assert(!target.SdcInitialized);
 
     /* Stop detaches rather than leaving the host enumerated against nothing. */
     assert(gUsbd.USBPULLUP == 0U);
@@ -375,6 +377,8 @@ static void TestUsbRegulatorTimeout(void)
     assert(gUsbd.USBPULLUP == 0U);
     assert(gUsbd.INTEN == 0U);
     assert(gHfclkReleases == 1U);
+    /* The release and the flag that records it have to agree. */
+    assert(!target.HfclkRequested);
     assert(gUsbPowerEvents[0] == 0U);
 
     /* A retry after a failure must not claim the port is already up. */

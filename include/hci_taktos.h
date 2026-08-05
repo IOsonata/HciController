@@ -61,6 +61,8 @@ typedef struct {
     volatile bool Running;
     volatile bool StopRequested;
     bool HostStarted;
+    /* Set on entry to the thread body, cleared as it leaves. */
+    volatile bool ThreadLive;
 
     uint32_t WakeCount;
     uint32_t MpslProcessCount;

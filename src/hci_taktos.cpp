@@ -100,11 +100,13 @@ bool HciTaktOsWaitStopped(HciTaktOs_t *pRuntime, uint32_t TimeoutMs)
         return true;
     }
 
-    if (!pRuntime->Started)
+    if (!pRuntime->ThreadLive)
     {
         /*
-         * The thread never reached its loop, so there is nothing inside SDC or
-         * MPSL to wait for.
+         * The thread body was never entered, so there is nothing inside SDC or
+         * MPSL to wait for. Gating on Started instead would short circuit for
+         * the whole of bring up, which is exactly when the thread is deepest
+         * inside mpsl_low_priority_process.
          */
         return true;
     }
@@ -145,6 +147,12 @@ void HciTaktOsThread(void *pContext)
     {
         return;
     }
+
+    /*
+     * Set before anything is brought up. From here on a stop has to wait for
+     * this thread, because everything below calls into MPSL and SDC.
+     */
+    pRuntime->ThreadLive = true;
 
     HciTrace("runtime: target start\r\n");
     if (!pRuntime->Ops.Start(pRuntime->Ops.pContext))
@@ -234,6 +242,7 @@ void HciTaktOsThread(void *pContext)
     }
 
     pRuntime->Running = false;
+    pRuntime->ThreadLive = false;
 
     /* Release anything waiting to tear the target down behind us. */
     (void)TaktOSSemGive(&pRuntime->StoppedSem, false);

@@ -98,8 +98,12 @@
  * Attempts at the random source before giving up. It is polled from low
  * priority processing, so this bounds a stall rather than a busy wait.
  */
-#ifndef HCI_NRF52840_RAND_POLL_LOOPS
-#define HCI_NRF52840_RAND_POLL_LOOPS 1000U
+/*
+ * Attempts allowed when proving the entropy source at start up. This bounds a
+ * start up check, not the SDC callback, which must block per sdc_soc.h.
+ */
+#ifndef HCI_NRF52840_RAND_PROBE_LOOPS
+#define HCI_NRF52840_RAND_PROBE_LOOPS 1000U
 #endif
 
 #define HCI_NRF52840_ERR_HFCLK_TIMEOUT      (-1000)
@@ -108,6 +112,8 @@
 #define HCI_NRF52840_ERR_HFXO_NOT_XTAL      (-1003)
 /* Cable absent is not the same fault as a regulator that never came up. */
 #define HCI_NRF52840_ERR_NO_VBUS            (-1004)
+/* The entropy source SDC requires is absent or produces nothing. */
+#define HCI_NRF52840_ERR_NO_ENTROPY         (-1005)
 
 /*
  * The crystal check the TinyUSB nRF5x port spins on. MPSL reporting the clock
@@ -424,37 +430,73 @@ static void HciNrf52840SdcAssert(const char *file, uint32_t line)
 }
 
 /*
- * SDC calls this from the same context as mpsl_low_priority_process, which is
- * the runtime thread. Spinning here stops MPSL low priority processing for
- * good, with no fault count and no trace, so both waits are bounded and a
- * failure leaves zeros behind rather than hanging the device.
+ * The entropy source SDC uses for pairing and for resolvable addresses.
  *
- * Zero filled randomness is not acceptable for pairing, which is why the
- * failure is counted where the application can see it.
+ * sdc_soc.h states the contract without an escape: "This function must block
+ * until length bytes of random numbers were written to p_buff", and the source
+ * "must conform to Core Spec Vol 2, Part H, Section 2". The signature returns
+ * void because failure is not a permitted outcome. Handing back zeros would
+ * give SDC a predictable session diversifier or a predictable resolvable
+ * address with no way to detect it, so this blocks as documented.
+ *
+ * The case that used to justify bounding this, a source that is absent or
+ * permanently broken, is caught in HciNrf52840RandSourceReady before the
+ * controller is ever enabled. By the time SDC calls this, the source has
+ * already produced bytes once.
  */
 static void HciNrf52840RandPoll(uint8_t *pBuffer, uint8_t Length)
 {
     CryptoRngNrf *rng = CryptoRngNrfInstance();
 
-    if (rng != nullptr)
+    while (rng == nullptr)
     {
-        for (uint32_t loop = 0U; loop < HCI_NRF52840_RAND_POLL_LOOPS; loop++)
+        /*
+         * Unreachable unless the instance disappeared after start up. There is
+         * no legal way to return, so retry rather than fabricate entropy.
+         */
+        if (s_pTarget != nullptr)
         {
-            if (rng->Random(pBuffer, Length) == CRYPTO_STATUS_OK)
-            {
-                return;
-            }
+            s_pTarget->RandRetryCount++;
+        }
+        rng = CryptoRngNrfInstance();
+    }
+
+    while (rng->Random(pBuffer, Length) != CRYPTO_STATUS_OK)
+    {
+        if (s_pTarget != nullptr)
+        {
+            s_pTarget->RandRetryCount++;
+        }
+    }
+}
+
+/*
+ * Prove the entropy source works before the controller is enabled, so a broken
+ * source is a clean start up failure rather than a stall inside SDC later.
+ */
+static bool HciNrf52840RandSourceReady(HciNrf52840_t *pTarget)
+{
+    CryptoRngNrf *rng = CryptoRngNrfInstance();
+
+    if (rng == nullptr)
+    {
+        HciTrace("rand: no source instance\r\n");
+        pTarget->LastError = HCI_NRF52840_ERR_NO_ENTROPY;
+        return false;
+    }
+
+    uint8_t probe[8];
+    for (uint32_t loop = 0U; loop < HCI_NRF52840_RAND_PROBE_LOOPS; loop++)
+    {
+        if (rng->Random(probe, sizeof(probe)) == CRYPTO_STATUS_OK)
+        {
+            return true;
         }
     }
 
-    if (s_pTarget != nullptr)
-    {
-        s_pTarget->RandFailCount++;
-    }
-
-    HciTrace("rand: source unavailable, %u bytes zero filled\r\n",
-             (unsigned)Length);
-    memset(pBuffer, 0, Length);
+    HciTrace("rand: source did not produce bytes\r\n");
+    pTarget->LastError = HCI_NRF52840_ERR_NO_ENTROPY;
+    return false;
 }
 
 static void HciNrf52840SdcCallback(void)
@@ -540,6 +582,11 @@ static bool HciNrf52840SdcInit(HciNrf52840_t *pTarget)
         return false;
     }
     pTarget->SdcInitialized = true;
+
+    if (!HciNrf52840RandSourceReady(pTarget))
+    {
+        return false;
+    }
 
     sdc_rand_source_t randomSource = { HciNrf52840RandPoll };
     result = sdc_rand_source_register(&randomSource);
@@ -709,6 +756,7 @@ static bool HciNrf52840UsbStartFailed(HciNrf52840_t *pTarget,
      * radio events, for the rest of the boot.
      */
     (void)HciNrf52840HfclkRelease();
+    pTarget->HfclkRequested = false;
 
     pTarget->UsbStarted = false;
     pTarget->UsbReadyDone = false;
@@ -950,7 +998,14 @@ void HciNrf52840Stop(HciNrf52840_t *pTarget)
      * handlers to run. Masking them first makes it block or trip the MPSL
      * assert, so the interrupts stay live until both are down.
      */
-    if (pTarget->SdcEnabled)
+    /*
+     * mpsl.h: "All initialized protocol stacks need to be stopped before
+     * calling this function. Failing to do so will lead to undefined
+     * behavior." Initialized, not enabled. sdc_init can succeed and sdc_enable
+     * fail afterwards, and that path used to reach mpsl_uninit with the
+     * controller still initialised.
+     */
+    if (pTarget->SdcInitialized || pTarget->SdcEnabled)
     {
         (void)sdc_disable();
         pTarget->SdcEnabled = false;
