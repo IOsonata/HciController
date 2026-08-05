@@ -1,69 +1,75 @@
 # Prerequisites
 *.d
 
-# Compiled Object files
+# Compiled object files
 *.slo
 *.lo
 *.o
 *.obj
 
-# Precompiled Headers
+# Precompiled headers
 *.gch
 *.pch
 
 # Linker files
 *.ilk
 
-# Debugger Files
+# Debugger files
 *.pdb
 
-# Compiled Dynamic libraries
+# Compiled dynamic libraries
 *.so
 *.dylib
 *.dll
 *.so.*
 
-
 # Fortran module files
 *.mod
 *.smod
 
-# Compiled Static libraries
+# Compiled static libraries
 *.lai
 *.la
 *.a
 *.lib
 
-# Executables
+# Executables and firmware outputs
 *.exe
 *.out
 *.app
+*.elf
+*.hex
+*.bin
+*.map
+*.lst
 
 # Build directories
-build/
-Build/
+/build/
+/Build/
+/Debug/
+/Release/
 build-*/
 
 # CMake generated files
 CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake
-Makefile
 install_manifest.txt
 compile_commands.json
 
-# Temporary files
+# Local product configuration
+/local.mk
+
+# Temporary, test and editor files
 *.tmp
 *.log
 *.bak
 *.swp
-
-# vcpkg
-vcpkg_installed/
-
-# debug information files
-*.dwo
-
-# test output & cache
 Testing/
 .cache/
+vcpkg_installed/
+*.dwo
+.metadata/
+/IOcomposer/.settings/
+.DS_Store
+*~

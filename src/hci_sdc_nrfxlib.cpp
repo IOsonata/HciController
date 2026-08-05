@@ -1,0 +1,944 @@
+/*
+ * Copyright (c) 2026 I-SYST inc.
+ *
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ *
+ * SPDX-License-Identifier: MPL-2.0
+ */
+
+#include "hci_sdc_nrfxlib.h"
+
+#include <string.h>
+
+#include "nrf_errno.h"
+#include "sdc_hci.h"
+#include "sdc_hci_cmd_controller_baseband.h"
+#include "sdc_hci_cmd_link_control.h"
+#include "sdc_hci_cmd_info_params.h"
+#include "sdc_hci_cmd_le.h"
+
+/*
+ * The SoftDevice Controller headers declare the whole HCI API, but a library
+ * variant only contains the commands it was built with. These two are opt in.
+ * List what the library really defines with
+ *
+ *   arm-none-eabi-nm --defined-only libsoftdevice_controller_multirole.a \
+ *       | grep sdc_hci_cmd_le_
+ *
+ * and set the macro when the symbol is there. Read Supported States reports
+ * legacy advertising states and is absent from a build that only enables the
+ * extended advertiser. Read Transmit Power belongs to LE Power Control.
+ */
+#ifndef HCI_SDC_HAS_READ_SUPPORTED_STATES
+#define HCI_SDC_HAS_READ_SUPPORTED_STATES 0
+#endif
+
+#ifndef HCI_SDC_HAS_READ_TRANSMIT_POWER
+#define HCI_SDC_HAS_READ_TRANSMIT_POWER 0
+#endif
+
+static HciCmdResult_t HciSdcComplete(uint8_t Status, size_t ReturnLen)
+{
+    HciCmdResult_t result = {Status, HCI_CMD_RESPONSE_COMPLETE, ReturnLen};
+    return result;
+}
+
+static HciCmdResult_t HciSdcStatus(uint8_t Status, size_t)
+{
+    HciCmdResult_t result = {Status, HCI_CMD_RESPONSE_STATUS, 0U};
+    return result;
+}
+
+static bool HciSdcReturnFits(size_t Required, size_t Capacity)
+{
+    return Required <= Capacity;
+}
+
+/*
+ * Number of PHYs named in a scanning or initiating PHY bitmap. The commands
+ * that take one carry a trailing array with one element per named PHY.
+ */
+static size_t HciSdcPhyCount(uint8_t Phys)
+{
+    size_t count = 0U;
+
+    for (uint8_t mask = Phys; mask != 0U; mask = (uint8_t)(mask & (mask - 1U)))
+    {
+        count++;
+    }
+
+    return count;
+}
+
+static HciCmdResult_t HciSdcCmdSetEventMask(void *,
+                                            const uint8_t *pParams,
+                                            size_t,
+                                            uint8_t *,
+                                            size_t)
+{
+    sdc_hci_cmd_cb_set_event_mask_t params;
+    memcpy(params.raw, pParams, sizeof(params.raw));
+    return HciSdcComplete(sdc_hci_cmd_cb_set_event_mask(&params), 0U);
+}
+
+static HciCmdResult_t HciSdcCmdReset(void *,
+                                     const uint8_t *,
+                                     size_t,
+                                     uint8_t *,
+                                     size_t)
+{
+    return HciSdcComplete(sdc_hci_cmd_cb_reset(), 0U);
+}
+
+static HciCmdResult_t HciSdcCmdReadLocalVersion(void *,
+                                                const uint8_t *,
+                                                size_t,
+                                                uint8_t *pReturn,
+                                                size_t ReturnCapacity)
+{
+    sdc_hci_cmd_ip_read_local_version_information_return_t result;
+    if (!HciSdcReturnFits(sizeof(result), ReturnCapacity))
+    {
+        return HciSdcComplete(HCI_STATUS_MEMORY_CAPACITY_EXCEEDED, 0U);
+    }
+
+    uint8_t status = sdc_hci_cmd_ip_read_local_version_information(&result);
+    if (status == HCI_STATUS_SUCCESS)
+    {
+        memcpy(pReturn, &result, sizeof(result));
+        return HciSdcComplete(status, sizeof(result));
+    }
+
+    return HciSdcComplete(status, 0U);
+}
+
+static HciCmdResult_t HciSdcCmdReadSupportedCommands(void *,
+                                                     const uint8_t *,
+                                                     size_t,
+                                                     uint8_t *pReturn,
+                                                     size_t ReturnCapacity)
+{
+    sdc_hci_cmd_ip_read_local_supported_commands_return_t supported;
+    memset(&supported, 0, sizeof(supported));
+
+    if (!HciSdcReturnFits(sizeof(supported.raw), ReturnCapacity))
+    {
+        return HciSdcComplete(HCI_STATUS_MEMORY_CAPACITY_EXCEEDED, 0U);
+    }
+
+    supported.params.hci_set_event_mask = 1U;
+    supported.params.hci_reset = 1U;
+    supported.params.hci_read_local_version_information = 1U;
+    supported.params.hci_read_local_supported_features = 1U;
+    supported.params.hci_read_bd_addr = 1U;
+    supported.params.hci_le_set_event_mask = 1U;
+    supported.params.hci_le_read_buffer_size_v1 = 1U;
+    supported.params.hci_le_read_local_supported_features = 1U;
+    supported.params.hci_le_set_random_address = 1U;
+    supported.params.hci_le_set_advertising_parameters = 1U;
+    supported.params.hci_le_read_advertising_physical_channel_tx_power = 1U;
+    supported.params.hci_le_set_advertising_data = 1U;
+    supported.params.hci_le_set_scan_response_data = 1U;
+    supported.params.hci_le_set_advertising_enable = 1U;
+    supported.params.hci_le_set_scan_parameters = 1U;
+    supported.params.hci_le_set_scan_enable = 1U;
+
+    supported.params.hci_disconnect = 1U;
+    supported.params.hci_le_create_connection = 1U;
+    supported.params.hci_le_create_connection_cancel = 1U;
+    supported.params.hci_le_connection_update = 1U;
+    supported.params.hci_le_read_channel_map = 1U;
+    supported.params.hci_le_read_remote_features = 1U;
+
+    supported.params.hci_le_read_filter_accept_list_size = 1U;
+    supported.params.hci_le_clear_filter_accept_list = 1U;
+    supported.params.hci_le_add_device_to_filter_accept_list = 1U;
+    supported.params.hci_le_remove_device_from_filter_accept_list = 1U;
+
+    supported.params.hci_le_encrypt = 1U;
+    supported.params.hci_le_rand = 1U;
+    supported.params.hci_le_enable_encryption = 1U;
+    supported.params.hci_le_long_term_key_request_reply = 1U;
+    supported.params.hci_le_long_term_key_request_negative_reply = 1U;
+
+#if HCI_SDC_HAS_READ_SUPPORTED_STATES
+    supported.params.hci_le_read_supported_states = 1U;
+#endif
+#if HCI_SDC_HAS_READ_TRANSMIT_POWER
+    supported.params.hci_le_read_transmit_power = 1U;
+#endif
+
+    supported.params.hci_le_receiver_test_v1 = 1U;
+    supported.params.hci_le_transmitter_test_v1 = 1U;
+    supported.params.hci_le_test_end = 1U;
+
+    supported.params.hci_le_set_data_length = 1U;
+    supported.params.hci_le_read_suggested_default_data_length = 1U;
+    supported.params.hci_le_write_suggested_default_data_length = 1U;
+    supported.params.hci_le_read_maximum_data_length = 1U;
+
+    supported.params.hci_le_read_phy = 1U;
+    supported.params.hci_le_set_default_phy = 1U;
+    supported.params.hci_le_set_phy = 1U;
+
+    supported.params.hci_le_set_advertising_set_random_address = 1U;
+    supported.params.hci_le_set_extended_advertising_parameters = 1U;
+    supported.params.hci_le_set_extended_advertising_data = 1U;
+    supported.params.hci_le_set_extended_scan_response_data = 1U;
+    supported.params.hci_le_set_extended_advertising_enable = 1U;
+    supported.params.hci_le_read_maximum_advertising_data_length = 1U;
+    supported.params.hci_le_read_number_of_supported_advertising_sets = 1U;
+    supported.params.hci_le_remove_advertising_set = 1U;
+    supported.params.hci_le_clear_advertising_sets = 1U;
+
+    supported.params.hci_le_set_extended_scan_parameters = 1U;
+    supported.params.hci_le_set_extended_scan_enable = 1U;
+    supported.params.hci_le_extended_create_connection = 1U;
+
+    memcpy(pReturn, supported.raw, sizeof(supported.raw));
+    return HciSdcComplete(HCI_STATUS_SUCCESS, sizeof(supported.raw));
+}
+
+static HciCmdResult_t HciSdcCmdReadLocalFeatures(void *,
+                                                 const uint8_t *,
+                                                 size_t,
+                                                 uint8_t *pReturn,
+                                                 size_t ReturnCapacity)
+{
+    sdc_hci_cmd_ip_read_local_supported_features_return_t result;
+    if (!HciSdcReturnFits(sizeof(result.raw), ReturnCapacity))
+    {
+        return HciSdcComplete(HCI_STATUS_MEMORY_CAPACITY_EXCEEDED, 0U);
+    }
+
+    uint8_t status = sdc_hci_cmd_ip_read_local_supported_features(&result);
+    if (status == HCI_STATUS_SUCCESS)
+    {
+        memcpy(pReturn, result.raw, sizeof(result.raw));
+        return HciSdcComplete(status, sizeof(result.raw));
+    }
+
+    return HciSdcComplete(status, 0U);
+}
+
+static HciCmdResult_t HciSdcCmdReadBdAddr(void *,
+                                          const uint8_t *,
+                                          size_t,
+                                          uint8_t *pReturn,
+                                          size_t ReturnCapacity)
+{
+    sdc_hci_cmd_ip_read_bd_addr_return_t result;
+    if (!HciSdcReturnFits(sizeof(result.bd_addr), ReturnCapacity))
+    {
+        return HciSdcComplete(HCI_STATUS_MEMORY_CAPACITY_EXCEEDED, 0U);
+    }
+
+    uint8_t status = sdc_hci_cmd_ip_read_bd_addr(&result);
+    if (status == HCI_STATUS_SUCCESS)
+    {
+        memcpy(pReturn, result.bd_addr, sizeof(result.bd_addr));
+        return HciSdcComplete(status, sizeof(result.bd_addr));
+    }
+
+    return HciSdcComplete(status, 0U);
+}
+
+static HciCmdResult_t HciSdcCmdLeSetEventMask(void *,
+                                              const uint8_t *pParams,
+                                              size_t,
+                                              uint8_t *,
+                                              size_t)
+{
+    sdc_hci_cmd_le_set_event_mask_t params;
+    memcpy(params.raw, pParams, sizeof(params.raw));
+    return HciSdcComplete(sdc_hci_cmd_le_set_event_mask(&params), 0U);
+}
+
+static HciCmdResult_t HciSdcCmdLeReadBufferSize(void *,
+                                                const uint8_t *,
+                                                size_t,
+                                                uint8_t *pReturn,
+                                                size_t ReturnCapacity)
+{
+    sdc_hci_cmd_le_read_buffer_size_return_t result;
+    if (!HciSdcReturnFits(sizeof(result), ReturnCapacity))
+    {
+        return HciSdcComplete(HCI_STATUS_MEMORY_CAPACITY_EXCEEDED, 0U);
+    }
+
+    uint8_t status = sdc_hci_cmd_le_read_buffer_size(&result);
+    if (status == HCI_STATUS_SUCCESS)
+    {
+        memcpy(pReturn, &result, sizeof(result));
+        return HciSdcComplete(status, sizeof(result));
+    }
+
+    return HciSdcComplete(status, 0U);
+}
+
+static HciCmdResult_t HciSdcCmdLeReadLocalFeatures(void *,
+                                                   const uint8_t *,
+                                                   size_t,
+                                                   uint8_t *pReturn,
+                                                   size_t ReturnCapacity)
+{
+    sdc_hci_cmd_le_read_local_supported_features_return_t result;
+    if (!HciSdcReturnFits(sizeof(result.raw), ReturnCapacity))
+    {
+        return HciSdcComplete(HCI_STATUS_MEMORY_CAPACITY_EXCEEDED, 0U);
+    }
+
+    uint8_t status = sdc_hci_cmd_le_read_local_supported_features(&result);
+    if (status == HCI_STATUS_SUCCESS)
+    {
+        memcpy(pReturn, result.raw, sizeof(result.raw));
+        return HciSdcComplete(status, sizeof(result.raw));
+    }
+
+    return HciSdcComplete(status, 0U);
+}
+
+static HciCmdResult_t HciSdcCmdLeSetRandomAddress(void *,
+                                                  const uint8_t *pParams,
+                                                  size_t,
+                                                  uint8_t *,
+                                                  size_t)
+{
+    sdc_hci_cmd_le_set_random_address_t params;
+    memcpy(&params, pParams, sizeof(params));
+    return HciSdcComplete(sdc_hci_cmd_le_set_random_address(&params), 0U);
+}
+
+static HciCmdResult_t HciSdcCmdLeSetAdvParams(void *,
+                                              const uint8_t *pParams,
+                                              size_t,
+                                              uint8_t *,
+                                              size_t)
+{
+    sdc_hci_cmd_le_set_adv_params_t params;
+    memcpy(&params, pParams, sizeof(params));
+    return HciSdcComplete(sdc_hci_cmd_le_set_adv_params(&params), 0U);
+}
+
+static HciCmdResult_t HciSdcCmdLeReadAdvTxPower(void *,
+                                                const uint8_t *,
+                                                size_t,
+                                                uint8_t *pReturn,
+                                                size_t ReturnCapacity)
+{
+    sdc_hci_cmd_le_read_adv_physical_channel_tx_power_return_t result;
+    if (!HciSdcReturnFits(sizeof(result), ReturnCapacity))
+    {
+        return HciSdcComplete(HCI_STATUS_MEMORY_CAPACITY_EXCEEDED, 0U);
+    }
+
+    uint8_t status = sdc_hci_cmd_le_read_adv_physical_channel_tx_power(&result);
+    if (status == HCI_STATUS_SUCCESS)
+    {
+        memcpy(pReturn, &result, sizeof(result));
+        return HciSdcComplete(status, sizeof(result));
+    }
+
+    return HciSdcComplete(status, 0U);
+}
+
+static HciCmdResult_t HciSdcCmdLeSetAdvData(void *,
+                                            const uint8_t *pParams,
+                                            size_t,
+                                            uint8_t *,
+                                            size_t)
+{
+    sdc_hci_cmd_le_set_adv_data_t params;
+    memcpy(&params, pParams, sizeof(params));
+    return HciSdcComplete(sdc_hci_cmd_le_set_adv_data(&params), 0U);
+}
+
+static HciCmdResult_t HciSdcCmdLeSetScanResponse(void *,
+                                                 const uint8_t *pParams,
+                                                 size_t,
+                                                 uint8_t *,
+                                                 size_t)
+{
+    sdc_hci_cmd_le_set_scan_response_data_t params;
+    memcpy(&params, pParams, sizeof(params));
+    return HciSdcComplete(sdc_hci_cmd_le_set_scan_response_data(&params), 0U);
+}
+
+static HciCmdResult_t HciSdcCmdLeSetAdvEnable(void *,
+                                              const uint8_t *pParams,
+                                              size_t,
+                                              uint8_t *,
+                                              size_t)
+{
+    sdc_hci_cmd_le_set_adv_enable_t params;
+    memcpy(&params, pParams, sizeof(params));
+    return HciSdcComplete(sdc_hci_cmd_le_set_adv_enable(&params), 0U);
+}
+
+static HciCmdResult_t HciSdcCmdLeSetScanParams(void *,
+                                               const uint8_t *pParams,
+                                               size_t,
+                                               uint8_t *,
+                                               size_t)
+{
+    sdc_hci_cmd_le_set_scan_params_t params;
+    memcpy(&params, pParams, sizeof(params));
+    return HciSdcComplete(sdc_hci_cmd_le_set_scan_params(&params), 0U);
+}
+
+static HciCmdResult_t HciSdcCmdLeSetScanEnable(void *,
+                                               const uint8_t *pParams,
+                                               size_t,
+                                               uint8_t *,
+                                               size_t)
+{
+    sdc_hci_cmd_le_set_scan_enable_t params;
+    memcpy(&params, pParams, sizeof(params));
+    return HciSdcComplete(sdc_hci_cmd_le_set_scan_enable(&params), 0U);
+}
+
+
+/*
+ * The handlers below are all the same few shapes, so they are generated to
+ * keep the mapping between an opcode and its SDC call in one line each. The
+ * shapes are: parameters only, parameters with a return, no parameters, no
+ * parameters with a return, and the variable length forms where the command
+ * carries an array whose size comes from the packet.
+ */
+#define HCI_SDC_CMD_P(Name, SdcFunc, SdcType, Reply)                          \
+    static HciCmdResult_t Name(void *,                                        \
+                               const uint8_t *pParams,                        \
+                               size_t,                                        \
+                               uint8_t *,                                     \
+                               size_t)                                        \
+    {                                                                         \
+        SdcType params;                                                       \
+        memcpy(&params, pParams, sizeof(params));                             \
+        return Reply(SdcFunc(&params), 0U);                                   \
+    }
+
+#define HCI_SDC_CMD_PR(Name, SdcFunc, SdcType, SdcReturn)                     \
+    static HciCmdResult_t Name(void *,                                        \
+                               const uint8_t *pParams,                        \
+                               size_t,                                        \
+                               uint8_t *pReturn,                              \
+                               size_t ReturnCapacity)                         \
+    {                                                                         \
+        SdcType params;                                                       \
+        SdcReturn result;                                                     \
+        if (!HciSdcReturnFits(sizeof(result), ReturnCapacity))                \
+        {                                                                     \
+            return HciSdcComplete(HCI_STATUS_MEMORY_CAPACITY_EXCEEDED, 0U);   \
+        }                                                                     \
+        memcpy(&params, pParams, sizeof(params));                             \
+        uint8_t status = SdcFunc(&params, &result);                           \
+        if (status != HCI_STATUS_SUCCESS)                                     \
+        {                                                                     \
+            return HciSdcComplete(status, 0U);                                \
+        }                                                                     \
+        memcpy(pReturn, &result, sizeof(result));                             \
+        return HciSdcComplete(status, sizeof(result));                        \
+    }
+
+#define HCI_SDC_CMD_N(Name, SdcFunc)                                          \
+    static HciCmdResult_t Name(void *, const uint8_t *, size_t, uint8_t *,    \
+                               size_t)                                        \
+    {                                                                         \
+        return HciSdcComplete(SdcFunc(), 0U);                                 \
+    }
+
+#define HCI_SDC_CMD_NR(Name, SdcFunc, SdcReturn)                              \
+    static HciCmdResult_t Name(void *,                                        \
+                               const uint8_t *,                               \
+                               size_t,                                        \
+                               uint8_t *pReturn,                              \
+                               size_t ReturnCapacity)                         \
+    {                                                                         \
+        SdcReturn result;                                                     \
+        if (!HciSdcReturnFits(sizeof(result), ReturnCapacity))                \
+        {                                                                     \
+            return HciSdcComplete(HCI_STATUS_MEMORY_CAPACITY_EXCEEDED, 0U);   \
+        }                                                                     \
+        uint8_t status = SdcFunc(&result);                                    \
+        if (status != HCI_STATUS_SUCCESS)                                     \
+        {                                                                     \
+            return HciSdcComplete(status, 0U);                                \
+        }                                                                     \
+        memcpy(pReturn, &result, sizeof(result));                             \
+        return HciSdcComplete(status, sizeof(result));                        \
+    }
+
+/*
+ * Variable length commands carry a trailing array. The SDC types are packed
+ * and byte aligned, so the packet is handed over directly rather than copied
+ * into a fixed local.
+ *
+ * The fixed part alone is not enough to bound the read. The length of the
+ * trailing array is carried in a field inside the fixed part, and the SDC call
+ * trusts it. That field has to be checked against the parameter length the
+ * host actually sent, or a short packet with a large count makes SDC read past
+ * the end of the receive buffer. That buffer is reused for every packet and is
+ * not cleared between them, so what lies past the end is the previous packet.
+ *
+ * Three shapes of count field appear in the commands used here, one macro
+ * each. All three compute the number of bytes the array needs and require
+ * ParamLen to match exactly before the packet is handed over. Exactly, not at
+ * least: Vol 4 Part E 5.4.1 fixes Parameter_Total_Length, so trailing bytes
+ * beyond what the count declares mean the host and the controller disagree
+ * about the packet, and guessing which one is right is worse than refusing.
+ */
+
+/* The count field is a byte count, as in Vol 4 Part E 7.8.54. */
+#define HCI_SDC_CMD_VB(Name, SdcFunc, SdcType, ArrayField, CountField, Reply) \
+    static HciCmdResult_t Name(void *,                                        \
+                               const uint8_t *pParams,                        \
+                               size_t ParamLen,                               \
+                               uint8_t *,                                     \
+                               size_t)                                        \
+    {                                                                         \
+        if (ParamLen < offsetof(SdcType, ArrayField))                         \
+        {                                                                     \
+            return Reply(HCI_STATUS_INVALID_HCI_PARAMETERS, 0U);              \
+        }                                                                     \
+        const SdcType *pCmd = reinterpret_cast<const SdcType *>(pParams);     \
+        if (ParamLen - offsetof(SdcType, ArrayField) !=                       \
+            (size_t)pCmd->CountField)                                         \
+        {                                                                     \
+            return Reply(HCI_STATUS_INVALID_HCI_PARAMETERS, 0U);              \
+        }                                                                     \
+        return Reply(SdcFunc(pCmd), 0U);                                      \
+    }
+
+/* The count field is a number of array elements, as in Vol 4 Part E 7.8.56. */
+#define HCI_SDC_CMD_VN(Name, SdcFunc, SdcType, ArrayField, CountField, Reply) \
+    static HciCmdResult_t Name(void *,                                        \
+                               const uint8_t *pParams,                        \
+                               size_t ParamLen,                               \
+                               uint8_t *,                                     \
+                               size_t)                                        \
+    {                                                                         \
+        if (ParamLen < offsetof(SdcType, ArrayField))                         \
+        {                                                                     \
+            return Reply(HCI_STATUS_INVALID_HCI_PARAMETERS, 0U);              \
+        }                                                                     \
+        const SdcType *pCmd = reinterpret_cast<const SdcType *>(pParams);     \
+        const size_t needed = (size_t)pCmd->CountField *                      \
+                              sizeof(pCmd->ArrayField[0]);                    \
+        if (ParamLen - offsetof(SdcType, ArrayField) != needed)               \
+        {                                                                     \
+            return Reply(HCI_STATUS_INVALID_HCI_PARAMETERS, 0U);              \
+        }                                                                     \
+        return Reply(SdcFunc(pCmd), 0U);                                      \
+    }
+
+/*
+ * The count is the number of bits set in a PHY bitmap. Vol 4 Part E 7.8.64
+ * and 7.8.66 give one array element per PHY named in the bitmap. A reserved
+ * bit therefore raises the required length and the packet is rejected, which
+ * is the direction to fail in.
+ */
+#define HCI_SDC_CMD_VP(Name, SdcFunc, SdcType, ArrayField, PhyField, Reply)   \
+    static HciCmdResult_t Name(void *,                                        \
+                               const uint8_t *pParams,                        \
+                               size_t ParamLen,                               \
+                               uint8_t *,                                     \
+                               size_t)                                        \
+    {                                                                         \
+        if (ParamLen < offsetof(SdcType, ArrayField))                         \
+        {                                                                     \
+            return Reply(HCI_STATUS_INVALID_HCI_PARAMETERS, 0U);              \
+        }                                                                     \
+        const SdcType *pCmd = reinterpret_cast<const SdcType *>(pParams);     \
+        const size_t needed = HciSdcPhyCount(pCmd->PhyField) *                \
+                              sizeof(pCmd->ArrayField[0]);                    \
+        if (ParamLen - offsetof(SdcType, ArrayField) != needed)               \
+        {                                                                     \
+            return Reply(HCI_STATUS_INVALID_HCI_PARAMETERS, 0U);              \
+        }                                                                     \
+        return Reply(SdcFunc(pCmd), 0U);                                      \
+    }
+
+/* Link control. */
+HCI_SDC_CMD_P(HciSdcCmdDisconnect, sdc_hci_cmd_lc_disconnect,
+              sdc_hci_cmd_lc_disconnect_t, HciSdcStatus)
+
+/* Connection management. */
+HCI_SDC_CMD_P(HciSdcCmdLeCreateConn, sdc_hci_cmd_le_create_conn,
+              sdc_hci_cmd_le_create_conn_t, HciSdcStatus)
+HCI_SDC_CMD_N(HciSdcCmdLeCreateConnCancel, sdc_hci_cmd_le_create_conn_cancel)
+HCI_SDC_CMD_P(HciSdcCmdLeConnUpdate, sdc_hci_cmd_le_conn_update,
+              sdc_hci_cmd_le_conn_update_t, HciSdcStatus)
+HCI_SDC_CMD_PR(HciSdcCmdLeReadChannelMap, sdc_hci_cmd_le_read_channel_map,
+               sdc_hci_cmd_le_read_channel_map_t,
+               sdc_hci_cmd_le_read_channel_map_return_t)
+HCI_SDC_CMD_P(HciSdcCmdLeReadRemoteFeatures, sdc_hci_cmd_le_read_remote_features,
+              sdc_hci_cmd_le_read_remote_features_t, HciSdcStatus)
+
+/* Filter accept list. */
+HCI_SDC_CMD_NR(HciSdcCmdLeReadAcceptListSize,
+               sdc_hci_cmd_le_read_filter_accept_list_size,
+               sdc_hci_cmd_le_read_filter_accept_list_size_return_t)
+HCI_SDC_CMD_N(HciSdcCmdLeClearAcceptList, sdc_hci_cmd_le_clear_filter_accept_list)
+HCI_SDC_CMD_P(HciSdcCmdLeAddToAcceptList,
+              sdc_hci_cmd_le_add_device_to_filter_accept_list,
+              sdc_hci_cmd_le_add_device_to_filter_accept_list_t, HciSdcComplete)
+HCI_SDC_CMD_P(HciSdcCmdLeRemoveFromAcceptList,
+              sdc_hci_cmd_le_remove_device_from_filter_accept_list,
+              sdc_hci_cmd_le_remove_device_from_filter_accept_list_t,
+              HciSdcComplete)
+
+/* Security. */
+HCI_SDC_CMD_PR(HciSdcCmdLeEncrypt, sdc_hci_cmd_le_encrypt,
+               sdc_hci_cmd_le_encrypt_t, sdc_hci_cmd_le_encrypt_return_t)
+HCI_SDC_CMD_NR(HciSdcCmdLeRand, sdc_hci_cmd_le_rand,
+               sdc_hci_cmd_le_rand_return_t)
+HCI_SDC_CMD_P(HciSdcCmdLeEnableEncryption, sdc_hci_cmd_le_enable_encryption,
+              sdc_hci_cmd_le_enable_encryption_t, HciSdcStatus)
+HCI_SDC_CMD_PR(HciSdcCmdLeLtkReply,
+               sdc_hci_cmd_le_long_term_key_request_reply,
+               sdc_hci_cmd_le_long_term_key_request_reply_t,
+               sdc_hci_cmd_le_long_term_key_request_reply_return_t)
+HCI_SDC_CMD_PR(HciSdcCmdLeLtkNegativeReply,
+               sdc_hci_cmd_le_long_term_key_request_negative_reply,
+               sdc_hci_cmd_le_long_term_key_request_negative_reply_t,
+               sdc_hci_cmd_le_long_term_key_request_negative_reply_return_t)
+
+/*
+ * Capability. The SoftDevice Controller headers declare the whole HCI API,
+ * but a given library variant only contains the commands it was built with,
+ * so these two are opt in. Check what the library actually defines with
+ *
+ *   arm-none-eabi-nm --defined-only libsoftdevice_controller_multirole.a \
+ *       | grep sdc_hci_cmd_le_
+ *
+ * and set the macro when the symbol is present. Read Supported States reports
+ * legacy advertising states and is absent from a build that only enables the
+ * extended advertiser. Read Transmit Power belongs to LE Power Control.
+ */
+#if HCI_SDC_HAS_READ_SUPPORTED_STATES
+HCI_SDC_CMD_NR(HciSdcCmdLeReadSupportedStates,
+               sdc_hci_cmd_le_read_supported_states,
+               sdc_hci_cmd_le_read_supported_states_return_t)
+#endif
+
+#if HCI_SDC_HAS_READ_TRANSMIT_POWER
+HCI_SDC_CMD_NR(HciSdcCmdLeReadTransmitPower,
+               sdc_hci_cmd_le_read_transmit_power,
+               sdc_hci_cmd_le_read_transmit_power_return_t)
+#endif
+
+/* Direct test mode. */
+HCI_SDC_CMD_P(HciSdcCmdLeReceiverTest, sdc_hci_cmd_le_receiver_test_v1,
+              sdc_hci_cmd_le_receiver_test_v1_t, HciSdcComplete)
+HCI_SDC_CMD_P(HciSdcCmdLeTransmitterTest, sdc_hci_cmd_le_transmitter_test_v1,
+              sdc_hci_cmd_le_transmitter_test_v1_t, HciSdcComplete)
+HCI_SDC_CMD_NR(HciSdcCmdLeTestEnd, sdc_hci_cmd_le_test_end,
+               sdc_hci_cmd_le_test_end_return_t)
+
+/* Data length. */
+HCI_SDC_CMD_PR(HciSdcCmdLeSetDataLength, sdc_hci_cmd_le_set_data_length,
+               sdc_hci_cmd_le_set_data_length_t,
+               sdc_hci_cmd_le_set_data_length_return_t)
+HCI_SDC_CMD_NR(HciSdcCmdLeReadSuggestedDataLength,
+               sdc_hci_cmd_le_read_suggested_default_data_length,
+               sdc_hci_cmd_le_read_suggested_default_data_length_return_t)
+HCI_SDC_CMD_P(HciSdcCmdLeWriteSuggestedDataLength,
+              sdc_hci_cmd_le_write_suggested_default_data_length,
+              sdc_hci_cmd_le_write_suggested_default_data_length_t,
+              HciSdcComplete)
+HCI_SDC_CMD_NR(HciSdcCmdLeReadMaxDataLength,
+               sdc_hci_cmd_le_read_max_data_length,
+               sdc_hci_cmd_le_read_max_data_length_return_t)
+
+/* PHY. */
+HCI_SDC_CMD_PR(HciSdcCmdLeReadPhy, sdc_hci_cmd_le_read_phy,
+               sdc_hci_cmd_le_read_phy_t, sdc_hci_cmd_le_read_phy_return_t)
+HCI_SDC_CMD_P(HciSdcCmdLeSetDefaultPhy, sdc_hci_cmd_le_set_default_phy,
+              sdc_hci_cmd_le_set_default_phy_t, HciSdcComplete)
+HCI_SDC_CMD_P(HciSdcCmdLeSetPhy, sdc_hci_cmd_le_set_phy,
+              sdc_hci_cmd_le_set_phy_t, HciSdcStatus)
+
+/* Extended advertising. */
+HCI_SDC_CMD_P(HciSdcCmdLeSetAdvSetRandomAddr,
+              sdc_hci_cmd_le_set_adv_set_random_address,
+              sdc_hci_cmd_le_set_adv_set_random_address_t, HciSdcComplete)
+HCI_SDC_CMD_PR(HciSdcCmdLeSetExtAdvParams, sdc_hci_cmd_le_set_ext_adv_params,
+               sdc_hci_cmd_le_set_ext_adv_params_t,
+               sdc_hci_cmd_le_set_ext_adv_params_return_t)
+HCI_SDC_CMD_VB(HciSdcCmdLeSetExtAdvData, sdc_hci_cmd_le_set_ext_adv_data,
+               sdc_hci_cmd_le_set_ext_adv_data_t, adv_data, adv_data_length,
+               HciSdcComplete)
+HCI_SDC_CMD_VB(HciSdcCmdLeSetExtScanRsp,
+               sdc_hci_cmd_le_set_ext_scan_response_data,
+               sdc_hci_cmd_le_set_ext_scan_response_data_t,
+               scan_response_data, scan_response_data_length, HciSdcComplete)
+HCI_SDC_CMD_VN(HciSdcCmdLeSetExtAdvEnable, sdc_hci_cmd_le_set_ext_adv_enable,
+               sdc_hci_cmd_le_set_ext_adv_enable_t, array_params, num_sets,
+               HciSdcComplete)
+HCI_SDC_CMD_NR(HciSdcCmdLeReadMaxAdvDataLength,
+               sdc_hci_cmd_le_read_max_adv_data_length,
+               sdc_hci_cmd_le_read_max_adv_data_length_return_t)
+HCI_SDC_CMD_NR(HciSdcCmdLeReadNumAdvSets,
+               sdc_hci_cmd_le_read_number_of_supported_adv_sets,
+               sdc_hci_cmd_le_read_number_of_supported_adv_sets_return_t)
+HCI_SDC_CMD_P(HciSdcCmdLeRemoveAdvSet, sdc_hci_cmd_le_remove_adv_set,
+              sdc_hci_cmd_le_remove_adv_set_t, HciSdcComplete)
+HCI_SDC_CMD_N(HciSdcCmdLeClearAdvSets, sdc_hci_cmd_le_clear_adv_sets)
+
+/* Extended scanning and initiating. */
+HCI_SDC_CMD_VP(HciSdcCmdLeSetExtScanParams, sdc_hci_cmd_le_set_ext_scan_params,
+               sdc_hci_cmd_le_set_ext_scan_params_t, array_params,
+               scanning_phys, HciSdcComplete)
+HCI_SDC_CMD_P(HciSdcCmdLeSetExtScanEnable, sdc_hci_cmd_le_set_ext_scan_enable,
+              sdc_hci_cmd_le_set_ext_scan_enable_t, HciSdcComplete)
+HCI_SDC_CMD_VP(HciSdcCmdLeExtCreateConn, sdc_hci_cmd_le_ext_create_conn,
+               sdc_hci_cmd_le_ext_create_conn_t, array_params,
+               initiating_phys, HciSdcStatus)
+
+
+/*
+ * Table entry helpers. Each names the response kind and the return parameter
+ * length that a successful call produces, so the dispatcher can shape an error
+ * the same way. The suffix follows the handler macros: C is Command Complete
+ * with no return parameters, CR is Command Complete carrying a return
+ * structure, S is Command Status.
+ */
+#define HCI_SDC_ENTRY_C(Opcode, ParamLen, Name)                               \
+    {Opcode, (uint16_t)(ParamLen), 0U, HCI_CMD_RESPONSE_COMPLETE, Name}
+
+#define HCI_SDC_ENTRY_CR(Opcode, ParamLen, Name, SdcReturn)                   \
+    {Opcode, (uint16_t)(ParamLen), (uint16_t)sizeof(SdcReturn),               \
+     HCI_CMD_RESPONSE_COMPLETE, Name}
+
+#define HCI_SDC_ENTRY_S(Opcode, ParamLen, Name)                               \
+    {Opcode, (uint16_t)(ParamLen), 0U, HCI_CMD_RESPONSE_STATUS, Name}
+
+static const HciCmdEntry_t s_HciSdcCommands[] = {
+    /* Controller and baseband. */
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_CB_SET_EVENT_MASK, 8U,
+                    HciSdcCmdSetEventMask),
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_CB_RESET, 0U, HciSdcCmdReset),
+
+    /* Informational parameters. */
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_IP_READ_LOCAL_VERSION_INFORMATION, 0U,
+                     HciSdcCmdReadLocalVersion,
+                     sdc_hci_cmd_ip_read_local_version_information_return_t),
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_IP_READ_LOCAL_SUPPORTED_COMMANDS, 0U,
+                     HciSdcCmdReadSupportedCommands,
+                     sdc_hci_cmd_ip_read_local_supported_commands_return_t),
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_IP_READ_LOCAL_SUPPORTED_FEATURES, 0U,
+                     HciSdcCmdReadLocalFeatures,
+                     sdc_hci_cmd_ip_read_local_supported_features_return_t),
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_IP_READ_BD_ADDR, 0U,
+                     HciSdcCmdReadBdAddr,
+                     sdc_hci_cmd_ip_read_bd_addr_return_t),
+
+    /* LE basics. */
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_EVENT_MASK, 8U,
+                    HciSdcCmdLeSetEventMask),
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_READ_BUFFER_SIZE, 0U,
+                     HciSdcCmdLeReadBufferSize,
+                     sdc_hci_cmd_le_read_buffer_size_return_t),
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_READ_LOCAL_SUPPORTED_FEATURES, 0U,
+                     HciSdcCmdLeReadLocalFeatures,
+                     sdc_hci_cmd_le_read_local_supported_features_return_t),
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_RANDOM_ADDRESS, 6U,
+                    HciSdcCmdLeSetRandomAddress),
+
+    /* Legacy advertising and scanning. */
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_ADV_PARAMS, 15U,
+                    HciSdcCmdLeSetAdvParams),
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_READ_ADV_PHYSICAL_CHANNEL_TX_POWER,
+                     0U, HciSdcCmdLeReadAdvTxPower,
+                     sdc_hci_cmd_le_read_adv_physical_channel_tx_power_return_t),
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_ADV_DATA, 32U,
+                    HciSdcCmdLeSetAdvData),
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_SCAN_RESPONSE_DATA, 32U,
+                    HciSdcCmdLeSetScanResponse),
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_ADV_ENABLE, 1U,
+                    HciSdcCmdLeSetAdvEnable),
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_SCAN_PARAMS, 7U,
+                    HciSdcCmdLeSetScanParams),
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_SCAN_ENABLE, 2U,
+                    HciSdcCmdLeSetScanEnable),
+
+    /* Link control. */
+    HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LC_DISCONNECT,
+                    sizeof(sdc_hci_cmd_lc_disconnect_t), HciSdcCmdDisconnect),
+
+    /* Connection management. */
+    HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_CREATE_CONN,
+                    sizeof(sdc_hci_cmd_le_create_conn_t),
+                    HciSdcCmdLeCreateConn),
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_CREATE_CONN_CANCEL, 0U,
+                    HciSdcCmdLeCreateConnCancel),
+    HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_CONN_UPDATE,
+                    sizeof(sdc_hci_cmd_le_conn_update_t),
+                    HciSdcCmdLeConnUpdate),
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_READ_CHANNEL_MAP,
+                     sizeof(sdc_hci_cmd_le_read_channel_map_t),
+                     HciSdcCmdLeReadChannelMap,
+                     sdc_hci_cmd_le_read_channel_map_return_t),
+    HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_READ_REMOTE_FEATURES,
+                    sizeof(sdc_hci_cmd_le_read_remote_features_t),
+                    HciSdcCmdLeReadRemoteFeatures),
+
+    /* Filter accept list. */
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_READ_FILTER_ACCEPT_LIST_SIZE, 0U,
+                     HciSdcCmdLeReadAcceptListSize,
+                     sdc_hci_cmd_le_read_filter_accept_list_size_return_t),
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_CLEAR_FILTER_ACCEPT_LIST, 0U,
+                    HciSdcCmdLeClearAcceptList),
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_ADD_DEVICE_TO_FILTER_ACCEPT_LIST,
+                    sizeof(sdc_hci_cmd_le_add_device_to_filter_accept_list_t),
+                    HciSdcCmdLeAddToAcceptList),
+    HCI_SDC_ENTRY_C(
+        SDC_HCI_OPCODE_CMD_LE_REMOVE_DEVICE_FROM_FILTER_ACCEPT_LIST,
+        sizeof(sdc_hci_cmd_le_remove_device_from_filter_accept_list_t),
+        HciSdcCmdLeRemoveFromAcceptList),
+
+    /* Security. */
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_ENCRYPT,
+                     sizeof(sdc_hci_cmd_le_encrypt_t), HciSdcCmdLeEncrypt,
+                     sdc_hci_cmd_le_encrypt_return_t),
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_RAND, 0U, HciSdcCmdLeRand,
+                     sdc_hci_cmd_le_rand_return_t),
+    HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_ENABLE_ENCRYPTION,
+                    sizeof(sdc_hci_cmd_le_enable_encryption_t),
+                    HciSdcCmdLeEnableEncryption),
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_LONG_TERM_KEY_REQUEST_REPLY,
+                     sizeof(sdc_hci_cmd_le_long_term_key_request_reply_t),
+                     HciSdcCmdLeLtkReply,
+                     sdc_hci_cmd_le_long_term_key_request_reply_return_t),
+    HCI_SDC_ENTRY_CR(
+        SDC_HCI_OPCODE_CMD_LE_LONG_TERM_KEY_REQUEST_NEGATIVE_REPLY,
+        sizeof(sdc_hci_cmd_le_long_term_key_request_negative_reply_t),
+        HciSdcCmdLeLtkNegativeReply,
+        sdc_hci_cmd_le_long_term_key_request_negative_reply_return_t),
+
+#if HCI_SDC_HAS_READ_SUPPORTED_STATES
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_READ_SUPPORTED_STATES, 0U,
+                     HciSdcCmdLeReadSupportedStates,
+                     sdc_hci_cmd_le_read_supported_states_return_t),
+#endif
+#if HCI_SDC_HAS_READ_TRANSMIT_POWER
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_READ_TRANSMIT_POWER, 0U,
+                     HciSdcCmdLeReadTransmitPower,
+                     sdc_hci_cmd_le_read_transmit_power_return_t),
+#endif
+
+    /* Direct test mode. */
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_RECEIVER_TEST_V1,
+                    sizeof(sdc_hci_cmd_le_receiver_test_v1_t),
+                    HciSdcCmdLeReceiverTest),
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_TRANSMITTER_TEST_V1,
+                    sizeof(sdc_hci_cmd_le_transmitter_test_v1_t),
+                    HciSdcCmdLeTransmitterTest),
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_TEST_END, 0U, HciSdcCmdLeTestEnd,
+                     sdc_hci_cmd_le_test_end_return_t),
+
+    /* Data length. */
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_SET_DATA_LENGTH,
+                     sizeof(sdc_hci_cmd_le_set_data_length_t),
+                     HciSdcCmdLeSetDataLength,
+                     sdc_hci_cmd_le_set_data_length_return_t),
+    HCI_SDC_ENTRY_CR(
+        SDC_HCI_OPCODE_CMD_LE_READ_SUGGESTED_DEFAULT_DATA_LENGTH, 0U,
+        HciSdcCmdLeReadSuggestedDataLength,
+        sdc_hci_cmd_le_read_suggested_default_data_length_return_t),
+    HCI_SDC_ENTRY_C(
+        SDC_HCI_OPCODE_CMD_LE_WRITE_SUGGESTED_DEFAULT_DATA_LENGTH,
+        sizeof(sdc_hci_cmd_le_write_suggested_default_data_length_t),
+        HciSdcCmdLeWriteSuggestedDataLength),
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_READ_MAX_DATA_LENGTH, 0U,
+                     HciSdcCmdLeReadMaxDataLength,
+                     sdc_hci_cmd_le_read_max_data_length_return_t),
+
+    /* PHY. */
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_READ_PHY,
+                     sizeof(sdc_hci_cmd_le_read_phy_t), HciSdcCmdLeReadPhy,
+                     sdc_hci_cmd_le_read_phy_return_t),
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_DEFAULT_PHY,
+                    sizeof(sdc_hci_cmd_le_set_default_phy_t),
+                    HciSdcCmdLeSetDefaultPhy),
+    HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_SET_PHY,
+                    sizeof(sdc_hci_cmd_le_set_phy_t), HciSdcCmdLeSetPhy),
+
+    /* Extended advertising. */
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_ADV_SET_RANDOM_ADDRESS,
+                    sizeof(sdc_hci_cmd_le_set_adv_set_random_address_t),
+                    HciSdcCmdLeSetAdvSetRandomAddr),
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_SET_EXT_ADV_PARAMS,
+                     sizeof(sdc_hci_cmd_le_set_ext_adv_params_t),
+                     HciSdcCmdLeSetExtAdvParams,
+                     sdc_hci_cmd_le_set_ext_adv_params_return_t),
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_EXT_ADV_DATA,
+                    HCI_CMD_VARIABLE_PARAM_LEN, HciSdcCmdLeSetExtAdvData),
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_EXT_SCAN_RESPONSE_DATA,
+                    HCI_CMD_VARIABLE_PARAM_LEN, HciSdcCmdLeSetExtScanRsp),
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_EXT_ADV_ENABLE,
+                    HCI_CMD_VARIABLE_PARAM_LEN, HciSdcCmdLeSetExtAdvEnable),
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_READ_MAX_ADV_DATA_LENGTH, 0U,
+                     HciSdcCmdLeReadMaxAdvDataLength,
+                     sdc_hci_cmd_le_read_max_adv_data_length_return_t),
+    HCI_SDC_ENTRY_CR(
+        SDC_HCI_OPCODE_CMD_LE_READ_NUMBER_OF_SUPPORTED_ADV_SETS, 0U,
+        HciSdcCmdLeReadNumAdvSets,
+        sdc_hci_cmd_le_read_number_of_supported_adv_sets_return_t),
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_REMOVE_ADV_SET,
+                    sizeof(sdc_hci_cmd_le_remove_adv_set_t),
+                    HciSdcCmdLeRemoveAdvSet),
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_CLEAR_ADV_SETS, 0U,
+                    HciSdcCmdLeClearAdvSets),
+
+    /* Extended scanning and initiating. */
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_EXT_SCAN_PARAMS,
+                    HCI_CMD_VARIABLE_PARAM_LEN, HciSdcCmdLeSetExtScanParams),
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_EXT_SCAN_ENABLE,
+                    sizeof(sdc_hci_cmd_le_set_ext_scan_enable_t),
+                    HciSdcCmdLeSetExtScanEnable),
+    HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_EXT_CREATE_CONN,
+                    HCI_CMD_VARIABLE_PARAM_LEN, HciSdcCmdLeExtCreateConn),
+};
+
+static int32_t HciSdcNrfxlibAclPut(void *, const uint8_t *pPacket)
+{
+    return sdc_hci_data_put(pPacket);
+}
+
+static int32_t HciSdcNrfxlibIsoPut(void *, const uint8_t *pPacket)
+{
+    return sdc_hci_iso_data_put(pPacket);
+}
+
+static int32_t HciSdcNrfxlibGet(void *, uint8_t *pPacket, uint8_t *pType)
+{
+    uint8_t type = SDC_HCI_MSG_TYPE_NONE;
+    int32_t result = sdc_hci_get(pPacket, &type);
+    *pType = type;
+    return result;
+}
+
+bool HciSdcNrfxlibInit(HciSdc_t *pSdc,
+                       uint8_t *pCommandEvent,
+                       size_t CommandEventCapacity)
+{
+    HciSdcOps_t ops = {
+        HciSdcNrfxlibAclPut,
+        HciSdcNrfxlibIsoPut,
+        HciSdcNrfxlibGet,
+        NULL,
+        NULL,
+        -NRF_EAGAIN,
+    };
+
+    return HciSdcInit(pSdc,
+                      &ops,
+                      s_HciSdcCommands,
+                      sizeof(s_HciSdcCommands) / sizeof(s_HciSdcCommands[0]),
+                      NULL,
+                      pCommandEvent,
+                      CommandEventCapacity);
+}

@@ -1,0 +1,78 @@
+/*
+ * Copyright (c) 2026 I-SYST inc.
+ *
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ *
+ * SPDX-License-Identifier: MPL-2.0
+ */
+
+#ifndef HCI_APP_H
+#define HCI_APP_H
+
+#include <stdbool.h>
+#include <stdint.h>
+
+#include "cfifo.h"
+#include "coredev/uart.h"
+#include "hci_controller.h"
+#include "hci_nrf52840.h"
+#include "hci_sdc_nrfxlib.h"
+#include "hci_taktos.h"
+#include "hci_tinyusb.h"
+#include "usb/usbd_cdc_intrf.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#define HCI_APP_PACKET_SIZE         1024U
+#define HCI_APP_COMMAND_EVENT_SIZE  260U
+#define HCI_APP_CDC_INTERFACE       0U
+#define HCI_APP_FIFO_DATA_SIZE      4096U
+#define HCI_APP_FIFO_MEM_SIZE       CFIFO_MEMSIZE(HCI_APP_FIFO_DATA_SIZE)
+
+typedef enum {
+    HCI_APP_HOST_UART = 0,
+    HCI_APP_HOST_USB  = 1,
+} HciAppHost_t;
+
+typedef struct {
+    HciController_t Controller;
+    HciSdc_t Sdc;
+
+    UARTDev_t Uart;
+    UsbdCdcDevIntrf_t UsbIntrf;
+    HciTinyUsb_t Usb;
+    DevIntrf_t *pHostIntrf;
+    HciAppHost_t HostType;
+    bool HostOpen;
+
+    HciTaktOs_t Runtime;
+    HciNrf52840_t Target;
+
+    uint8_t HostPacket[HCI_APP_PACKET_SIZE];
+    uint8_t ControllerPacket[HCI_APP_PACKET_SIZE];
+    uint8_t CommandEvent[HCI_APP_COMMAND_EVENT_SIZE];
+    uint64_t SdcMem[(HCI_NRF52840_DEFAULT_SDC_MEM_SIZE + 7U) / 8U];
+
+    alignas(4) uint8_t UartRxFifoMem[HCI_APP_FIFO_MEM_SIZE];
+    alignas(4) uint8_t UartTxFifoMem[HCI_APP_FIFO_MEM_SIZE];
+    alignas(4) uint8_t UsbRxFifoMem[HCI_APP_FIFO_MEM_SIZE];
+    alignas(4) uint8_t UsbTxFifoMem[HCI_APP_FIFO_MEM_SIZE];
+
+    int LastError;
+    bool Initialized;
+} HciApp_t;
+
+bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType);
+void HciAppStop(HciApp_t *pApp);
+void HciAppThread(void *pContext);
+bool HciAppHostIsOpen(const HciApp_t *pApp);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* HCI_APP_H */
