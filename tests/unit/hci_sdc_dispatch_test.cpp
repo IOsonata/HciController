@@ -42,6 +42,10 @@
 #define HCI_SDC_HAS_VS_READ_STATIC_ADDRESSES 1
 #endif
 
+#ifndef HCI_SDC_HAS_VS_READ_COUNTERS
+#define HCI_SDC_HAS_VS_READ_COUNTERS 1
+#endif
+
 #define EVENT_COMMAND_COMPLETE 0x0E
 #define EVENT_COMMAND_STATUS   0x0F
 
@@ -135,6 +139,50 @@ static void ExpectComplete(const char *label, uint16_t opcode,
     printf("[ok] %-38s complete, %zu byte return, %s\n",
            label, expectedReturn, g_SdcStub.LastCall);
 }
+
+/*
+ * A command the routing layer answers out of its own state. SDC must not be
+ * reached at all, which is the difference that matters: a counter readout that
+ * went to the radio would be reporting the wrong thing.
+ */
+static void ExpectCompleteLocal(const char *label, uint16_t opcode,
+                                const uint8_t *pParams, size_t len,
+                                size_t expectedReturn)
+{
+    g_SdcStub.NextStatus = 0x00;
+    g_SdcStub.LastCall = NULL;
+    Response rsp = Exchange(opcode, pParams, len);
+
+    assert(rsp.code == EVENT_COMMAND_COMPLETE);
+    assert(rsp.opcode == opcode);
+    assert(rsp.status == 0x00);
+    assert(rsp.return_len == expectedReturn);
+    assert(g_SdcStub.LastCall == NULL);
+    printf("[ok] %-38s complete, %zu byte return, no SDC call\n",
+           label, expectedReturn);
+}
+
+#if HCI_SDC_HAS_VS_READ_COUNTERS
+/* Positions in the counter block, fixed by hci_sdc.h. */
+enum {
+    COUNTER_COMMAND = 0,
+    COUNTER_UNKNOWN_COMMAND = 1,
+    COUNTER_INVALID_PARAM_LEN = 3,
+    COUNTER_ACL_PUT_ERROR = 6,
+    COUNTER_PUT_RETRY = 8,
+};
+
+/* Unpacks the block left in gLastReturn by the most recent readout. */
+static void ReadCounters(uint32_t *pCounters)
+{
+    for (size_t i = 0U; i < HCI_SDC_COUNTERS_COUNT; i++)
+    {
+        const uint8_t *p = &gLastReturn[1U + (i * 4U)];
+        pCounters[i] = (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+                       ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+    }
+}
+#endif
 
 static void ExpectStatus(const char *label, uint16_t opcode,
                          const uint8_t *pParams, size_t len)
@@ -252,6 +300,13 @@ int main(void)
      */
     ExpectComplete("VS Read Static Addresses", 0xFC09, zeros, 0U,
                    1U + sizeof(sdc_hci_vs_zephyr_static_address_t));
+#endif
+#if HCI_SDC_HAS_VS_READ_COUNTERS
+    ExpectCompleteLocal("VS Read Counters", HCI_SDC_OPCODE_VS_READ_COUNTERS,
+                        zeros, 0U, HCI_SDC_COUNTERS_RETURN_LEN);
+    assert(gLastReturn[0] == HCI_SDC_COUNTERS_VERSION);
+    printf("[ok] %-38s version %u\n", "counter block names its version",
+           (unsigned)gLastReturn[0]);
 #endif
     ExpectComplete("LE Create Connection Cancel", 0x200E, zeros, 0U, 0U);
     ExpectComplete("LE Read Filter Accept List Size", 0x200F, zeros, 0U,
@@ -599,6 +654,9 @@ int main(void)
             {SDC_HCI_OPCODE_CMD_VS_ZEPHYR_READ_STATIC_ADDRESSES, NULL,
              "vs_zephyr_read_static_addresses"},
 #endif
+#if HCI_SDC_HAS_VS_READ_COUNTERS
+            {HCI_SDC_OPCODE_VS_READ_COUNTERS, NULL, "vs_read_counters"},
+#endif
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_IP_READ_LOCAL_SUPPORTED_FEATURES,
                          hci_read_local_supported_features),
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_IP_READ_BD_ADDR, hci_read_bd_addr),
@@ -793,6 +851,52 @@ int main(void)
         printf("[ok] %-38s %zu opcodes both ways\n",
                "bitmap agrees with the table", count);
     }
+
+#if HCI_SDC_HAS_VS_READ_COUNTERS
+    /*
+     * The readout is only worth having if the numbers move, and a block of
+     * zeros passes every length and shape check there is. Read it, provoke two
+     * specific refusals, read it again, and require exactly those two counters
+     * to have advanced by one. Deltas rather than absolutes, since everything
+     * above this point has already been counted.
+     */
+    {
+        static uint32_t before[HCI_SDC_COUNTERS_COUNT];
+        static uint32_t after[HCI_SDC_COUNTERS_COUNT];
+
+        g_SdcStub.NextStatus = 0x00;
+        Exchange(HCI_SDC_OPCODE_VS_READ_COUNTERS, zeros, 0U);
+        ReadCounters(before);
+
+        /* No entry for this opcode, so it lands on UnknownCommandCount. */
+        Exchange(0x0CFF, zeros, 0U);
+        /* A known opcode with a length its entry does not accept. */
+        Exchange(0x2017, zeros, 3U);
+
+        g_SdcStub.NextStatus = 0x00;
+        Exchange(HCI_SDC_OPCODE_VS_READ_COUNTERS, zeros, 0U);
+        ReadCounters(after);
+
+        assert(after[COUNTER_UNKNOWN_COMMAND] -
+               before[COUNTER_UNKNOWN_COMMAND] == 1U);
+        assert(after[COUNTER_INVALID_PARAM_LEN] -
+               before[COUNTER_INVALID_PARAM_LEN] == 1U);
+
+        /*
+         * Three commands went by between the two readings, the two refusals
+         * and the second reading itself. The first reading is already counted
+         * in before[].
+         */
+        assert(after[COUNTER_COMMAND] - before[COUNTER_COMMAND] == 3U);
+
+        /* Nothing here touches the radio, so no ACL counter may have moved. */
+        assert(after[COUNTER_ACL_PUT_ERROR] == before[COUNTER_ACL_PUT_ERROR]);
+        assert(after[COUNTER_PUT_RETRY] == before[COUNTER_PUT_RETRY]);
+
+        printf("[ok] %-38s unknown +1, bad length +1, commands +3\n",
+               "counters follow what the layer refused");
+    }
+#endif
 
     printf("All SDC dispatch tests passed.\n");
     return 0;

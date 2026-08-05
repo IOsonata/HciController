@@ -1,6 +1,6 @@
 # HCI command coverage
 
-The dispatch table in `src/hci_sdc_nrfxlib.cpp` carries 58 commands. Anything
+The dispatch table in `src/hci_sdc_nrfxlib.cpp` carries 59 commands. Anything
 not listed there is answered with Unknown HCI Command, so the table is the
 controller's actual capability, and `HCI_Read_Local_Supported_Commands` reports
 exactly the same set. A host test checks the two against each other in both
@@ -107,6 +107,7 @@ Extended scanning and initiating
 Vendor specific
 
     0xFC09  VS Read Static Addresses                variable return
+    0xFFF0  VS Read Counters
 
 The board carries no public address, so `HCI_Read_BD_ADDR` answers all zeros
 and a host that asks for Own_Address_Type 0x00 is refused with 0x12. 0xFC09 is
@@ -117,6 +118,15 @@ Its return is a count byte followed by 22 octets per address, so the length
 depends on the answer; the table declares the count byte alone, which is the
 minimum the command always carries and what an error is padded out to.
 
+0xFFF0 is this firmware's own, and the routing layer answers it without going
+near the radio. It reports the counters the dispatch table and the routing
+layer keep of everything they refused: unknown opcodes, wrong lengths, ACL the
+controller would not take, packets it asked to have offered again. Until it
+existed those numbers only lived in RAM, so a board could be questioned only
+with a debugger on it, which is no use on a sealed dongle. One version byte
+then sixteen counters, four octets each little endian, laid out in `hci_sdc.h`;
+counters are appended and the version raised, never renumbered.
+
 The eight marked status answer with a Command Status rather than a Command
 Complete, as Vol 4 Part E 7.7.15 requires. Getting that wrong leaves a host
 stack waiting for an event that never arrives.
@@ -125,7 +135,8 @@ stack waiting for an event that never arrives.
 
 A SoftDevice Controller header declares the whole HCI API, but a library
 variant only contains the commands it was built with, so a declaration is not
-a guarantee that the symbol links. Six commands therefore sit behind a macro in
+a guarantee that the symbol links. Seven commands therefore sit behind a macro
+in
 `src/hci_sdc_nrfxlib.cpp`, each covering the handler, the table row and the
 supported commands bit together, so the three stay consistent whichever way the
 macro goes.
@@ -135,13 +146,15 @@ macro goes.
     HCI_SDC_HAS_READ_REMOTE_VERSION     1     0x041D  Read Remote Version Info
     HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT    1     0x0C7B and 0x0C7C
     HCI_SDC_HAS_VS_READ_STATIC_ADDRESSES  1   0xFC09  VS Read Static Addresses
+    HCI_SDC_HAS_VS_READ_COUNTERS          1   0xFFF0  VS Read Counters
 
 The first two default to off because a link against the multirole library
 proved the symbols absent. Read Supported States reports legacy advertising
 states and is left out of a build that only enables the extended advertiser.
 Read Transmit Power belongs to LE Power Control. The next two default to on
 because the specification makes them mandatory, and the vendor specific one
-because a board with no public address is unusable to a host without it.
+because a board with no public address is unusable to a host without it. The
+counter readout needs no SDC symbol at all and is on for the same reason.
 
 List what a library really defines with
 
@@ -184,7 +197,7 @@ for that opcode reads to the host as no answer at all.
 
     make -C tests run NRFXLIB_DIR=/path/to/sdk-nrfxlib
 
-91 checks across nine binaries. `hci_sdc_dispatch_test` compiles the real
+94 checks across nine binaries. `hci_sdc_dispatch_test` compiles the real
 dispatch table against the real nrfxlib headers with only the SDC entry points
 stubbed, then checks that every opcode reaches the intended SDC function, that
 Command Status and Command Complete are used where the specification says,

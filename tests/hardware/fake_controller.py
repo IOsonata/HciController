@@ -65,6 +65,7 @@ OP_LE_SET_ADV_ENABLE = 0x200A
 OP_LE_SET_SCAN_PARAMS = 0x200B
 OP_LE_SET_SCAN_ENABLE = 0x200C
 OP_VS_READ_STATIC_ADDRESSES = 0xFC09
+OP_VS_READ_COUNTERS = 0xFFF0
 
 # Exactly the dispatch table in src/hci_sdc_nrfxlib.cpp on main. With --subset
 # the simulator answers only these, which is what the firmware does today.
@@ -75,7 +76,7 @@ SUBSET_OPCODES = (
     OP_LE_READ_LOCAL_FEATURES, OP_LE_SET_RANDOM_ADDRESS,
     OP_LE_SET_ADV_PARAMS, OP_LE_READ_ADV_TX_POWER, OP_LE_SET_ADV_DATA,
     OP_LE_SET_SCAN_RSP_DATA, OP_LE_SET_ADV_ENABLE,
-    OP_LE_SET_SCAN_PARAMS, OP_LE_SET_SCAN_ENABLE,
+    OP_LE_SET_SCAN_PARAMS, OP_LE_SET_SCAN_ENABLE, OP_VS_READ_COUNTERS,
 )
 
 CID_ATT = 0x0004
@@ -154,6 +155,7 @@ class Controller:
         self.subset = subset
         self.connected = False
         self.connect_at = None
+        self.command_count = 0
         self.test_packets = 0
         self.scanning = False
         self.next_report = None
@@ -206,6 +208,16 @@ class Controller:
         if opcode == OP_VS_READ_STATIC_ADDRESSES:
             return self.emit(command_complete(
                 opcode, 0x00, bytes([1]) + STATIC_ADDR + IDENTITY_ROOT))
+
+        if opcode == OP_VS_READ_COUNTERS:
+            # Version byte then sixteen counters, little endian, as hci_sdc.h
+            # lays them out. The command count is the only one that moves here,
+            # which is enough for the script's decoder to be exercised.
+            self.command_count += 1
+            counters = [self.command_count] + [0] * 15
+            body = bytes([1]) + b"".join(
+                struct.pack("<I", v) for v in counters)
+            return self.emit(command_complete(opcode, 0x00, body))
 
         if opcode == OP_READ_BUFFER_SIZE:
             return self.emit(command_complete(opcode, 0x01))

@@ -78,7 +78,15 @@ python3 tests/hardware/hci_ble_test.py /dev/ttyACM0 advertise
 python3 tests/hardware/hci_ble_test.py /dev/ttyACM0 scan
 python3 tests/hardware/hci_ble_test.py /dev/ttyACM0 connect
 python3 tests/hardware/hci_ble_test.py /dev/ttyACM0 dtm-tx
+python3 tests/hardware/hci_ble_test.py /dev/ttyACM0 counters
 ```
+
+`counters` reads the controller's own tallies of what it refused, over the
+vendor specific opcode in `hci_sdc.h`. Nothing else puts those numbers on the
+wire, so without it a running board can only be questioned with a debugger.
+`connect --flood N` sends N ACL packets while ignoring flow control and reports
+which counters moved, which is how the `sdc_hci_data_put` retry path can be
+shown to be live or dead.
 
 `fake_controller.py` is a controller simulator on a pty. It answers the same
 opcodes the firmware does and can simulate a connection, so the two tools above

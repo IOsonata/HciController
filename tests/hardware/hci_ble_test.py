@@ -10,6 +10,7 @@ the ACL data path are all exercised without a Bluetooth stack on the machine.
     python3 hci_ble_test.py connect AA:BB:CC:DD:EE:FF
     python3 hci_ble_test.py dtm-tx                radio transmit test
     python3 hci_ble_test.py dtm-rx                radio receive test, gives PER
+    python3 hci_ble_test.py counters             what the firmware refused
 
 advertise is the decisive one. It proves advertising, connection setup,
 bidirectional ACL, controller to host flow control and disconnection in a
@@ -76,6 +77,27 @@ OP_LE_SET_EXT_SCAN_ENABLE = 0x2042
 OP_LE_EXT_CREATE_CONNECTION = 0x2043
 
 OP_VS_READ_STATIC_ADDRESSES = 0xFC09
+
+# Vendor specific counter readout, HciController's own. See hci_sdc.h.
+OP_VS_READ_COUNTERS = 0xFFF0
+COUNTER_NAMES = [
+    "commands accepted",
+    "unknown opcodes",
+    "malformed packets",
+    "wrong parameter length",
+    "handler errors",
+    "event backpressure",
+    "ACL refused by controller",
+    "ISO refused by controller",
+    "controller asked for retry",
+    "controller queue errors",
+    "unknown output types",
+    "bad output lengths",
+    "command responses deferred",
+    "oversize ACL from host",
+    "ISO dropped",
+    "credit table overflow",
+]
 
 CID_ATT = 0x0004
 CID_SIGNALING = 0x0005
@@ -280,6 +302,27 @@ class Hci:
         header = struct.pack("<HH", handle | (flags << 12), len(l2cap))
         self.write_packet(bytes([H4_ACL]) + header + l2cap)
         self.acl_credits -= 1
+
+    def read_counters(self):
+        """
+        Vendor specific readout. Returns a list matching COUNTER_NAMES, or None
+        if the controller does not carry the command.
+        """
+        status, data = self.command(OP_VS_READ_COUNTERS, allow_fail=True)
+        if status != 0 or not data:
+            return None
+        version = data[0]
+        if version != 1:
+            print("Counter block version %d, this script reads version 1."
+                  % version)
+            return None
+        values = []
+        for i in range(len(COUNTER_NAMES)):
+            start = 1 + i * 4
+            if start + 4 > len(data):
+                break
+            values.append(struct.unpack("<I", data[start:start + 4])[0])
+        return values
 
     def setup(self):
         self.command(OP_RESET)
@@ -974,6 +1017,9 @@ def cmd_connect(hci, args):
             print("Peer agreed MTU %d." % mtu)
             got_response = True
 
+    if args.flood:
+        flood_acl(hci, conn_handle, args.flood)
+
     hci.command(OP_DISCONNECT, struct.pack("<HB", conn_handle, 0x13),
                 allow_fail=True)
     time.sleep(0.3)
@@ -983,6 +1029,93 @@ def cmd_connect(hci, args):
         return 1
 
     print("Connection and bidirectional ACL both work.")
+    return 0
+
+
+def flood_acl(hci, conn_handle, count):
+    """
+    Send more ACL packets than the controller has buffers, without waiting for
+    the Number Of Completed Packets events that hand the credits back. A host
+    is not supposed to do this, which is the point: it is the only way to reach
+    the path that treats a controller refusal as a retry.
+
+    ATT Write Command to a handle no peer implements, because it draws no
+    response, so nothing comes back to muddy the counters and the controller's
+    buffers stay full for as long as possible.
+    """
+    before = hci.read_counters()
+    if before is None:
+        print("No counter readout, so a flood would prove nothing. Skipped.")
+        return
+
+    payload = struct.pack("<BH", ATT_WRITE_CMD, 0xFFFF) + b"\xA5" * 180
+    print()
+    print("Sending %d ACL packets against %d controller buffers, ignoring "
+          "flow control." % (count, hci.acl_credits))
+
+    for _ in range(count):
+        hci.send_acl(conn_handle, CID_ATT, payload)
+
+    # Let the controller drain and report before reading the counters.
+    deadline = time.time() + 3
+    while time.time() < deadline:
+        if hci.read_packet(0.2) is None:
+            continue
+
+    after = hci.read_counters()
+    if after is None:
+        return
+
+    print("Counters that moved:")
+    print_counters(after, before)
+
+    retries = after[8] - before[8]
+    refused = after[6] - before[6]
+    oversize = after[13] - before[13]
+    print()
+    if retries:
+        print("sdc_hci_data_put asked for a retry %d times, so the retry path "
+              "is live and the header's list of return codes is incomplete."
+              % retries)
+    elif refused:
+        print("The controller refused %d packets with an error that is not a "
+              "retry. The retry path did not fire." % refused)
+    else:
+        print("The controller took every packet. Either the buffers never "
+              "filled, in which case send more than %d, or sdc_hci_data_put "
+              "never refuses and the retry path is dead code." % count)
+    if oversize:
+        print("%d packets were refused here as oversize before reaching the "
+              "controller." % oversize)
+
+
+def print_counters(values, baseline=None):
+    if values is None:
+        print("This controller does not carry the counter readout.")
+        return
+    width = max(len(n) for n in COUNTER_NAMES)
+    for i, name in enumerate(COUNTER_NAMES):
+        if i >= len(values):
+            break
+        if baseline is not None:
+            delta = values[i] - baseline[i]
+            if delta == 0:
+                continue
+            print("   %-*s %10d  (+%d)" % (width, name, values[i], delta))
+        elif values[i]:
+            print("   %-*s %10d" % (width, name, values[i]))
+    if baseline is None and not any(values):
+        print("   all zero")
+
+
+def cmd_counters(hci, args):
+    values = hci.read_counters()
+    if values is None:
+        hci.unsupported.append(("0xFFF0", "VS Read Counters"))
+        print("This controller does not carry the counter readout.")
+        return 1
+    print("Controller counters, anything not listed is zero:")
+    print_counters(values)
     return 0
 
 
@@ -1051,7 +1184,13 @@ def main():
     p.add_argument("--random", action="store_true",
                    help="the peer uses a random address")
     p.add_argument("--seconds", type=int, default=20)
+    p.add_argument("--flood", type=int, default=0, metavar="N",
+                   help="after connecting, send N ACL packets ignoring flow "
+                        "control and report which counters moved")
     p.set_defaults(func=cmd_connect)
+
+    p = sub.add_parser("counters", help="read the controller's own counters")
+    p.set_defaults(func=cmd_counters)
 
     p = sub.add_parser("dtm-tx", help="direct test mode transmitter")
     p.add_argument("--channel", type=int, default=19)

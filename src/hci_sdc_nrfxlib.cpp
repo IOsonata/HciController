@@ -68,6 +68,14 @@
 #define HCI_SDC_HAS_VS_READ_STATIC_ADDRESSES 1
 #endif
 
+/*
+ * Vendor specific counter readout. Costs one table row and no SDC symbol, so
+ * it is on unless a build wants the opcode back.
+ */
+#ifndef HCI_SDC_HAS_VS_READ_COUNTERS
+#define HCI_SDC_HAS_VS_READ_COUNTERS 1
+#endif
+
 static HciCmdResult_t HciSdcComplete(uint8_t Status, size_t ReturnLen)
 {
     HciCmdResult_t result = {Status, HCI_CMD_RESPONSE_COMPLETE, ReturnLen};
@@ -1037,6 +1045,17 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
                      HciSdcCmdVsReadStaticAddresses,
                      sdc_hci_cmd_vs_zephyr_read_static_addresses_return_t),
 #endif
+#if HCI_SDC_HAS_VS_READ_COUNTERS
+    /*
+     * Answered by the routing layer rather than by SDC, so it reports what
+     * this firmware refused rather than what the radio did. The length is a
+     * constant from the header instead of a sizeof(), because the wire format
+     * is written out field by field and owes nothing to a struct layout.
+     */
+    {HCI_SDC_OPCODE_VS_READ_COUNTERS, 0U,
+     (uint16_t)HCI_SDC_COUNTERS_RETURN_LEN, HCI_CMD_RESPONSE_COMPLETE,
+     HciSdcCmdReadCounters},
+#endif
 };
 
 /*
@@ -1171,11 +1190,16 @@ bool HciSdcNrfxlibInit(HciSdc_t *pSdc,
         -NRF_EAGAIN,
     };
 
+    /*
+     * The HciSdc_t is the command context because the counter readout reads it.
+     * Every other handler in the table ignores the context and talks to SDC
+     * through file scope entry points.
+     */
     return HciSdcInit(pSdc,
                       &ops,
                       s_HciSdcCommands,
                       sizeof(s_HciSdcCommands) / sizeof(s_HciSdcCommands[0]),
-                      NULL,
+                      pSdc,
                       pCommandEvent,
                       CommandEventCapacity);
 }
