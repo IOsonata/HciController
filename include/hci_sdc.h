@@ -63,6 +63,34 @@ typedef struct {
 /* Vol 4 Part E 7.7.19. */
 #define HCI_SDC_EVENT_NUM_COMPLETED_PACKETS 0x13U
 
+/* Vol 4 Part E 7.7.5. */
+#define HCI_SDC_EVENT_DISCONNECTION_COMPLETE 0x05U
+
+/* Links whose outstanding ACL packets are tracked at once. */
+#define HCI_SDC_ACL_TRACK_HANDLES 4U
+
+/*
+ * Hold the host to the buffer count the controller advertised in LE Read
+ * Buffer Size.
+ *
+ * Measured on an nRF52840 with the SoftDevice Controller: send one packet more
+ * than the advertised count and sdc_hci_data_put answers 0 for it, the packet
+ * never goes out, and no Number Of Completed Packets event ever names it. The
+ * packet and the host's buffer both vanish. Four buffers, five packets, four
+ * transmitted, every error code zero.
+ *
+ * Vol 4 Part E 4.1.1 puts the obligation on the host not to exceed what it was
+ * told, so the controller is within its rights. But losing the credit as well
+ * as the packet means a host that slips once loses that buffer for the life of
+ * the connection. Refusing here loses the same packet and hands the buffer
+ * back, and counts it, which a host can at least see.
+ *
+ * Set to 0 to keep the counter and let the packets through to SDC.
+ */
+#ifndef HCI_SDC_ENFORCE_ACL_CREDITS
+#define HCI_SDC_ENFORCE_ACL_CREDITS 1
+#endif
+
 typedef struct {
     HciCmdDispatch_t Commands;
     HciSdcOps_t Ops;
@@ -108,7 +136,29 @@ typedef struct {
      */
     uint32_t AclPutCount;
     uint32_t IsoPutCount;
+
+    /*
+     * What the host was told in LE Read Buffer Size, and how many packets it
+     * has in flight per link against that. Zero means the host has not asked
+     * yet, and nothing is enforced until it has, so the limit can never be a
+     * guess. Enforcement also stands down for a link the table has no room
+     * for: refusing traffic a host is entitled to send would be worse than the
+     * loss this guards against.
+     */
+    uint16_t AclLimit;
+    uint16_t AclTrackHandle[HCI_SDC_ACL_TRACK_HANDLES];
+    uint16_t AclOutstanding[HCI_SDC_ACL_TRACK_HANDLES];
+    uint8_t AclTrackEntries;
+    uint32_t AclCreditOverrunCount;
+    uint32_t AclTrackOverflowCount;
 } HciSdc_t;
+
+/*
+ * The buffer count the controller answers with. The backend records what SDC
+ * actually reported rather than what the build configured, so the two cannot
+ * drift.
+ */
+void HciSdcSetAclLimit(HciSdc_t *pSdc, uint16_t Limit);
 
 bool HciSdcInit(HciSdc_t *pSdc,
                 const HciSdcOps_t *pOps,

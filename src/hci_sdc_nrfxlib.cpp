@@ -302,7 +302,7 @@ static HciCmdResult_t HciSdcCmdLeSetEventMask(void *,
     return HciSdcComplete(sdc_hci_cmd_le_set_event_mask(&params), 0U);
 }
 
-static HciCmdResult_t HciSdcCmdLeReadBufferSize(void *,
+static HciCmdResult_t HciSdcCmdLeReadBufferSize(void *pContext,
                                                 const uint8_t *,
                                                 size_t,
                                                 uint8_t *pReturn,
@@ -317,6 +317,18 @@ static HciCmdResult_t HciSdcCmdLeReadBufferSize(void *,
     uint8_t status = sdc_hci_cmd_le_read_buffer_size(&result);
     if (status == HCI_STATUS_SUCCESS)
     {
+        /*
+         * The number the host is told is the number it is entitled to use, so
+         * the routing layer takes it from the answer rather than from the
+         * build configuration, where the two could drift apart.
+         */
+        HciCounters_t *pCounters = static_cast<HciCounters_t *>(pContext);
+        if (pCounters != NULL)
+        {
+            HciSdcSetAclLimit(pCounters->pSdc,
+                              result.total_num_le_acl_data_packets);
+        }
+
         memcpy(pReturn, &result, sizeof(result));
         return HciSdcComplete(status, sizeof(result));
     }

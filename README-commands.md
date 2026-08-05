@@ -136,6 +136,23 @@ One version byte then the counters, four octets each little endian, laid out in
 `hci_counters.h`. Counters are appended and the version raised, never
 renumbered, so an older host keeps reading the fields it knows.
 
+Two of them record a controller behaviour worth knowing about. Measured on an
+nRF52840: send one ACL packet more than the count `LE_Read_Buffer_Size`
+advertised and `sdc_hci_data_put` answers 0 for it, the packet never goes out,
+and no `Number_Of_Completed_Packets` event ever names it. Four buffers, five
+packets, four transmitted, every error code zero. The packet and the host's
+buffer both vanish, so a host that slips once loses that buffer for the life of
+the connection. The routing layer now holds the host to the advertised count
+and refuses anything past it, returning the credit and counting it, which is
+the same treatment an oversize packet already gets. Set
+`HCI_SDC_ENFORCE_ACL_CREDITS` to 0 to keep the counter and let the packets
+through.
+
+The guard only refuses what it can prove is over. It stands down entirely
+until the host has asked `LE_Read_Buffer_Size`, so the limit is never a guess,
+and it stands down for a link the tracking table has no room for. Refusing
+traffic a host is entitled to send would be worse than the loss it prevents.
+
 The eight marked status answer with a Command Status rather than a Command
 Complete, as Vol 4 Part E 7.7.15 requires. Getting that wrong leaves a host
 stack waiting for an event that never arrives.
@@ -205,7 +222,7 @@ for that opcode reads to the host as no answer at all.
 
     make -C tests run NRFXLIB_DIR=/path/to/sdk-nrfxlib
 
-94 checks across nine binaries. `hci_sdc_dispatch_test` compiles the real
+99 checks across nine binaries. `hci_sdc_dispatch_test` compiles the real
 dispatch table against the real nrfxlib headers with only the SDC entry points
 stubbed, then checks that every opcode reaches the intended SDC function, that
 Command Status and Command Complete are used where the specification says,

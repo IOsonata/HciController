@@ -46,7 +46,8 @@ extern "C" {
  * appended and the version raised; renumbering would make an older host read
  * the wrong field and report a fault that is not there.
  *
- * Version 1 carried indices 0 to 15. Version 2 appends 16 to 29.
+ * Version 1 carried indices 0 to 15, version 2 appends 16 to 29, and version 3
+ * appends 30 and 31.
  *
  *   0  CommandCount                     commands the dispatch table accepted
  *   1  UnknownCommandCount              opcodes with no entry
@@ -78,9 +79,11 @@ extern "C" {
  *  27  ControllerGetErrorCount          controller queue error seen by the bridge
  *  28  InvalidControllerPacketCount     controller packet the bridge rejected
  *  29  UnsendableControllerPacketCount  controller packet the host would not take
+ *  30  AclCreditOverrunCount            host exceeded the buffers it was told
+ *  31  AclTrackOverflowCount            more links in flight than tracked
  */
-#define HCI_COUNTERS_VERSION    2U
-#define HCI_COUNTERS_COUNT      30U
+#define HCI_COUNTERS_VERSION    3U
+#define HCI_COUNTERS_COUNT      32U
 #define HCI_COUNTERS_RETURN_LEN (1U + (HCI_COUNTERS_COUNT * 4U))
 
 /*
@@ -89,12 +92,16 @@ extern "C" {
  * questioned. The transport and the parser are reached through the bridge.
  */
 typedef struct {
-    const HciSdc_t *pSdc;
+    /*
+     * Not const: the LE Read Buffer Size handler reaches the routing layer
+     * through here to record the buffer count the controller answered with.
+     */
+    HciSdc_t *pSdc;
     const HciController_t *pController;
 } HciCounters_t;
 
 void HciCountersInit(HciCounters_t *pCounters,
-                     const HciSdc_t *pSdc,
+                     HciSdc_t *pSdc,
                      const HciController_t *pController);
 
 /*

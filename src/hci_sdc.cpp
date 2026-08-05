@@ -132,6 +132,154 @@ static bool HciSdcBuildCreditEvent(HciSdc_t *pSdc,
     return true;
 }
 
+void HciSdcSetAclLimit(HciSdc_t *pSdc, uint16_t Limit)
+{
+    if (pSdc != NULL)
+    {
+        pSdc->AclLimit = Limit;
+    }
+}
+
+static uint16_t HciSdcHandleOf(const uint8_t *pPacket)
+{
+    return (uint16_t)(((uint16_t)pPacket[0] |
+                       ((uint16_t)pPacket[1] << 8)) & 0x0FFFU);
+}
+
+/* Index of the link, or -1 when it is not tracked and cannot be. */
+static int HciSdcAclSlot(HciSdc_t *pSdc, uint16_t Handle, bool Create)
+{
+    for (uint8_t i = 0U; i < pSdc->AclTrackEntries; i++)
+    {
+        if (pSdc->AclTrackHandle[i] == Handle)
+        {
+            return (int)i;
+        }
+    }
+
+    if (!Create)
+    {
+        return -1;
+    }
+
+    if (pSdc->AclTrackEntries >= HCI_SDC_ACL_TRACK_HANDLES)
+    {
+        pSdc->AclTrackOverflowCount++;
+        return -1;
+    }
+
+    pSdc->AclTrackHandle[pSdc->AclTrackEntries] = Handle;
+    pSdc->AclOutstanding[pSdc->AclTrackEntries] = 0U;
+    pSdc->AclTrackEntries++;
+    return (int)(pSdc->AclTrackEntries - 1U);
+}
+
+#if HCI_SDC_ENFORCE_ACL_CREDITS
+/*
+ * True when the host already has as many packets in flight on this link as it
+ * was told it could. Unknown limit or an untracked link answers false, so the
+ * packet goes through: this refuses only what it can prove is over.
+ */
+static bool HciSdcAclAtLimit(HciSdc_t *pSdc, const uint8_t *pPacket)
+{
+    if (pSdc->AclLimit == 0U)
+    {
+        return false;
+    }
+
+    const int slot = HciSdcAclSlot(pSdc, HciSdcHandleOf(pPacket), true);
+    if (slot < 0)
+    {
+        return false;
+    }
+
+    return pSdc->AclOutstanding[slot] >= pSdc->AclLimit;
+}
+#endif
+
+static void HciSdcAclPutTracked(HciSdc_t *pSdc, const uint8_t *pPacket)
+{
+    const int slot = HciSdcAclSlot(pSdc, HciSdcHandleOf(pPacket), true);
+    if (slot >= 0)
+    {
+        pSdc->AclOutstanding[slot]++;
+    }
+}
+
+static void HciSdcAclForget(HciSdc_t *pSdc, uint16_t Handle)
+{
+    const int slot = HciSdcAclSlot(pSdc, Handle, false);
+    if (slot < 0)
+    {
+        return;
+    }
+
+    const uint8_t last = (uint8_t)(pSdc->AclTrackEntries - 1U);
+    pSdc->AclTrackHandle[slot] = pSdc->AclTrackHandle[last];
+    pSdc->AclOutstanding[slot] = pSdc->AclOutstanding[last];
+    pSdc->AclTrackEntries--;
+}
+
+/*
+ * Watches what goes out to the host for the two events that change how many
+ * packets a link has in flight. Number Of Completed Packets frees them, and a
+ * disconnection discards whatever the controller still held for that link
+ * without ever counting those back, so the entry goes with the link.
+ */
+static void HciSdcAclTrackEvent(HciSdc_t *pSdc,
+                                const uint8_t *pEvent,
+                                size_t EventLen)
+{
+    if (EventLen < 2U)
+    {
+        return;
+    }
+
+    if (pEvent[0] == HCI_SDC_EVENT_NUM_COMPLETED_PACKETS && EventLen >= 3U)
+    {
+        const size_t handles = pEvent[2];
+        for (size_t i = 0U; i < handles; i++)
+        {
+            const size_t off = 3U + (i * 4U);
+            if (off + 4U > EventLen)
+            {
+                return;
+            }
+
+            const uint16_t handle =
+                (uint16_t)(((uint16_t)pEvent[off] |
+                            ((uint16_t)pEvent[off + 1U] << 8)) & 0x0FFFU);
+            const uint16_t done = (uint16_t)((uint16_t)pEvent[off + 2U] |
+                                             ((uint16_t)pEvent[off + 3U] << 8));
+
+            const int slot = HciSdcAclSlot(pSdc, handle, false);
+            if (slot < 0)
+            {
+                continue;
+            }
+
+            if (pSdc->AclOutstanding[slot] > done)
+            {
+                pSdc->AclOutstanding[slot] =
+                    (uint16_t)(pSdc->AclOutstanding[slot] - done);
+            }
+            else
+            {
+                pSdc->AclOutstanding[slot] = 0U;
+            }
+        }
+        return;
+    }
+
+    if (pEvent[0] == HCI_SDC_EVENT_DISCONNECTION_COMPLETE && EventLen >= 5U)
+    {
+        const uint16_t handle =
+            (uint16_t)(((uint16_t)pEvent[3] |
+                        ((uint16_t)pEvent[4] << 8)) & 0x0FFFU);
+        HciSdcAclForget(pSdc, handle);
+    }
+}
+
 static bool HciSdcPutPacket(void *pContext,
                             HciH4PacketType_t Type,
                             const uint8_t *pPacket,
@@ -178,6 +326,20 @@ static bool HciSdcPutPacket(void *pContext,
                 return true;
             }
 
+#if HCI_SDC_ENFORCE_ACL_CREDITS
+            if (HciSdcAclAtLimit(pSdc, pPacket))
+            {
+                /*
+                 * Over the advertised count. Handing this to the controller
+                 * loses the packet and the host's buffer with it, so it is
+                 * refused here and the credit owed back instead.
+                 */
+                pSdc->AclCreditOverrunCount++;
+                HciSdcOweCredit(pSdc, pPacket);
+                return true;
+            }
+#endif
+
             int32_t result = pSdc->Ops.AclPut(pSdc->Ops.pContext, pPacket);
             if (result == pSdc->Ops.RetryError)
             {
@@ -198,6 +360,7 @@ static bool HciSdcPutPacket(void *pContext,
             else
             {
                 pSdc->AclPutCount++;
+                HciSdcAclPutTracked(pSdc, pPacket);
             }
             return true;
         }
@@ -330,6 +493,11 @@ static HciControllerGetResult_t HciSdcGetPacket(void *pContext,
     {
         pSdc->InvalidOutputLengthCount++;
         return HCI_CONTROLLER_GET_ERROR;
+    }
+
+    if (*pType == HCI_H4_PACKET_EVENT)
+    {
+        HciSdcAclTrackEvent(pSdc, pPacket, *pPacketLen);
     }
 
     return HCI_CONTROLLER_GET_PACKET;

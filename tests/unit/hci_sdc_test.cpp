@@ -370,6 +370,125 @@ int main()
                "its credit\n");
     }
 
+    /*
+     * The host is held to the buffer count the controller advertised. SDC
+     * answers 0 for a packet past that count and then discards it, taking the
+     * host's buffer with it, so the packet is refused here and the credit
+     * handed back instead.
+     *
+     * The two properties that matter are opposite ones: everything inside the
+     * limit goes through untouched, and only what is provably over is refused.
+     * A guard that refuses traffic a host is entitled to send would be worse
+     * than the loss it exists to prevent.
+     */
+    {
+        HciSdc_t limit;
+        FakeSdc backend = {};
+        uint8_t limitEvent[80];
+
+        HciSdcOps_t limitOps = {
+            AclPut, IsoPut, Get, Process, &backend, HCI_SDC_RETRY_ERROR,
+        };
+        backend.GetResult = HCI_SDC_RETRY_ERROR;
+        backend.AclResult = 0;
+
+        assert(HciSdcInit(&limit, &limitOps, commands,
+                          sizeof(commands) / sizeof(commands[0]), NULL,
+                          limitEvent, sizeof(limitEvent)));
+
+        const HciControllerOps_t *ops5 = HciSdcGetControllerOps(&limit);
+        const uint8_t aclFive[] = {0x05U, 0x00U, 0x01U, 0x00U, 0xCCU};
+
+        /* Nothing is enforced until the host has been told a number. */
+        for (unsigned i = 0U; i < 8U; i++)
+        {
+            assert(ops5->Put(ops5->pContext, HCI_H4_PACKET_ACL, aclFive,
+                             sizeof(aclFive)));
+        }
+        assert(limit.AclPutCount == 8U);
+        assert(limit.AclCreditOverrunCount == 0U);
+        printf("[ok] no limit is enforced before the host is told one\n");
+
+#if HCI_SDC_ENFORCE_ACL_CREDITS
+        /* Now it has. Four more fit, the fifth does not. */
+        HciSdcSetAclLimit(&limit, 4U);
+        limit.AclOutstanding[0] = 0U;
+
+        for (unsigned i = 0U; i < 4U; i++)
+        {
+            assert(ops5->Put(ops5->pContext, HCI_H4_PACKET_ACL, aclFive,
+                             sizeof(aclFive)));
+        }
+        assert(limit.AclPutCount == 12U);
+        assert(limit.AclCreditOverrunCount == 0U);
+
+        assert(ops5->Put(ops5->pContext, HCI_H4_PACKET_ACL, aclFive,
+                         sizeof(aclFive)));
+        assert(limit.AclPutCount == 12U);
+        assert(limit.AclCreditOverrunCount == 1U);
+        printf("[ok] the packet past the advertised count is refused\n");
+
+        /* Refused, so the credit comes back rather than being lost. */
+        HciH4PacketType_t limitType = HCI_H4_PACKET_NONE;
+        uint8_t limitOut[64];
+        size_t limitLen = 0U;
+        assert(ops5->Get(ops5->pContext, &limitType, limitOut,
+                         sizeof(limitOut), &limitLen) ==
+               HCI_CONTROLLER_GET_PACKET);
+        assert(limitType == HCI_H4_PACKET_EVENT);
+        assert(limitOut[0] == HCI_SDC_EVENT_NUM_COMPLETED_PACKETS);
+        assert(limitOut[2] == 1U);
+        assert(limitOut[3] == 0x05U && limitOut[4] == 0x00U);
+        assert(limitOut[5] == 1U && limitOut[6] == 0U);
+        printf("[ok] the refused packet gets its credit back\n");
+
+        /*
+         * A completion frees the link again, which is what stops the guard
+         * from being a one way ratchet that wedges a busy connection.
+         */
+        const uint8_t completed[] = {HCI_SDC_EVENT_NUM_COMPLETED_PACKETS, 5U,
+                                     1U, 0x05U, 0x00U, 0x04U, 0x00U};
+        backend.GetResult = 0;
+        backend.GetType = HCI_SDC_MSG_TYPE_EVENT;
+        memcpy(backend.GetPacket, completed, sizeof(completed));
+        assert(ops5->Get(ops5->pContext, &limitType, limitOut,
+                         sizeof(limitOut), &limitLen) ==
+               HCI_CONTROLLER_GET_PACKET);
+        backend.GetResult = HCI_SDC_RETRY_ERROR;
+
+        for (unsigned i = 0U; i < 4U; i++)
+        {
+            assert(ops5->Put(ops5->pContext, HCI_H4_PACKET_ACL, aclFive,
+                             sizeof(aclFive)));
+        }
+        assert(limit.AclPutCount == 16U);
+        assert(limit.AclCreditOverrunCount == 1U);
+        printf("[ok] a completion lets the link send again\n");
+
+        /* A disconnection discards what the controller held, so it resets. */
+        const uint8_t gone[] = {HCI_SDC_EVENT_DISCONNECTION_COMPLETE, 4U,
+                                0x00U, 0x05U, 0x00U, 0x13U};
+        backend.GetResult = 0;
+        backend.GetType = HCI_SDC_MSG_TYPE_EVENT;
+        memcpy(backend.GetPacket, gone, sizeof(gone));
+        assert(ops5->Get(ops5->pContext, &limitType, limitOut,
+                         sizeof(limitOut), &limitLen) ==
+               HCI_CONTROLLER_GET_PACKET);
+        backend.GetResult = HCI_SDC_RETRY_ERROR;
+
+        for (unsigned i = 0U; i < 4U; i++)
+        {
+            assert(ops5->Put(ops5->pContext, HCI_H4_PACKET_ACL, aclFive,
+                             sizeof(aclFive)));
+        }
+        assert(limit.AclPutCount == 20U);
+        assert(limit.AclCreditOverrunCount == 1U);
+        printf("[ok] a disconnection clears what the link had in flight\n");
+#else
+        printf("[ok] credit enforcement is built out, nothing to check\n");
+#endif
+    }
+
     printf("All SDC routing tests passed.\n");
     return 0;
 }

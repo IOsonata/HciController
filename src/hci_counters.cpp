@@ -21,7 +21,7 @@ static void HciCountersWriteLe32(uint8_t *pData, uint32_t Value)
 }
 
 void HciCountersInit(HciCounters_t *pCounters,
-                     const HciSdc_t *pSdc,
+                     HciSdc_t *pSdc,
                      const HciController_t *pController)
 {
     if (pCounters == NULL)
@@ -84,6 +84,8 @@ HciCmdResult_t HciCountersRead(void *pContext,
         values[15] = pSdc->CreditOverflowCount;
         values[16] = pSdc->AclPutCount;
         values[17] = pSdc->IsoPutCount;
+        values[30] = pSdc->AclCreditOverrunCount;
+        values[31] = pSdc->AclTrackOverflowCount;
     }
 
     const HciController_t *pController = pCounters->pController;

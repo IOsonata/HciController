@@ -12,6 +12,12 @@ the ACL data path are all exercised without a Bluetooth stack on the machine.
     python3 hci_ble_test.py dtm-rx                radio receive test, gives PER
     python3 hci_ble_test.py counters             what the firmware refused
 
+connect --flood N sends N ACL packets while ignoring flow control, which a host
+is not supposed to do. On an nRF52840 the SoftDevice Controller answers 0 to a
+packet past the count it advertised and then discards it, credit included, so
+the routing layer refuses those itself and hands the credit back. Send more
+than the advertised count to see that happen.
+
 advertise is the decisive one. It proves advertising, connection setup,
 bidirectional ACL, controller to host flow control and disconnection in a
 single run. Connect with nRF Connect and browse the attribute table.
@@ -81,7 +87,7 @@ OP_VS_READ_STATIC_ADDRESSES = 0xFC09
 # Vendor specific counter readout, HciController's own. See hci_counters.h.
 # Order is fixed there; names are appended, never renumbered.
 OP_VS_READ_COUNTERS = 0xFFF0
-COUNTER_VERSION = 2
+COUNTER_VERSION = 3
 COUNTER_NAMES = [
     "commands accepted",
     "unknown opcodes",
@@ -113,6 +119,8 @@ COUNTER_NAMES = [
     "controller get errors",
     "controller packet rejected",
     "controller packet unsendable",
+    "host over its ACL credits",
+    "link table overflow",
 ]
 
 CID_ATT = 0x0004
@@ -215,6 +223,9 @@ class Hci:
         self.ser.reset_input_buffer()
         self.pending = []
         self.acl_credits = 0
+        self.acl_advertised = 0
+        self.acl_completed = 0
+        self.link_down = None
         self.acl_size = 27
         self.unsupported = []
 
@@ -272,12 +283,25 @@ class Hci:
                        % kind)
 
     def on_event(self, code, body):
+        if code == EVT_DISCONNECTION_COMPLETE and len(body) >= 4:
+            # Recorded here rather than in one command's loop, because a link
+            # that drops mid test changes what every later measurement means.
+            # On disconnection the controller discards whatever it still held
+            # for that handle and never counts those packets back, so an
+            # unnoticed drop reads as the controller losing data.
+            self.link_down = (body[0], struct.unpack("<H", body[1:3])[0],
+                              body[3])
+
         if code == EVT_NUM_COMPLETED_PACKETS and len(body) >= 1:
             count = body[0]
             for i in range(count):
                 off = 1 + i * 4
                 done = struct.unpack("<H", body[off + 2:off + 4])[0]
                 self.acl_credits += done
+                # Cumulative, unlike the credit count, which the flood drives
+                # negative. This is the controller saying a packet actually
+                # went out on air, Vol 4 Part E 7.7.19.
+                self.acl_completed += done
 
     def command(self, opcode, payload=b"", timeout=3.0, allow_fail=False):
         self.write_packet(
@@ -361,6 +385,7 @@ class Hci:
         if size:
             self.acl_size = size
             self.acl_credits = count
+            self.acl_advertised = count
         print("Controller ACL buffers: %d bytes x %d" % (self.acl_size,
                                                          self.acl_credits))
 
@@ -1019,6 +1044,7 @@ def cmd_connect(hci, args):
                 return 1
             print("Connected as central, handle 0x%04X" % conn_handle)
             print("   %s" % describe_interval(interval, latency, timeout))
+            link_timeout = timeout
 
     if conn_handle is None:
         hci.command(OP_LE_CREATE_CONNECTION_CANCEL, allow_fail=True)
@@ -1030,6 +1056,8 @@ def cmd_connect(hci, args):
     print("Sent ATT Exchange MTU Request.")
 
     got_response = False
+    peer_mtu = 23
+    link_timeout = 400
     deadline = time.time() + 5
     while time.time() < deadline and not got_response:
         packet = hci.read_packet(0.2)
@@ -1046,10 +1074,11 @@ def cmd_connect(hci, args):
         if cid == CID_ATT and l2cap[4] == ATT_EXCHANGE_MTU_RSP:
             mtu = struct.unpack("<H", l2cap[5:7])[0]
             print("Peer agreed MTU %d." % mtu)
+            peer_mtu = mtu
             got_response = True
 
     if args.flood:
-        flood_acl(hci, conn_handle, args.flood)
+        flood_acl(hci, conn_handle, args.flood, peer_mtu, link_timeout)
 
     hci.command(OP_DISCONNECT, struct.pack("<HB", conn_handle, 0x13),
                 allow_fail=True)
@@ -1059,11 +1088,18 @@ def cmd_connect(hci, args):
         print("No ATT response. The link came up but data did not flow.")
         return 1
 
+    if hci.link_down is not None:
+        _, _, reason = hci.link_down
+        print("The link dropped during the run, reason 0x%02X %s, so this run "
+              "proves connection setup and ACL but nothing after that point."
+              % (reason, ERROR_NAMES.get(reason, "")))
+        return 1
+
     print("Connection and bidirectional ACL both work.")
     return 0
 
 
-def flood_acl(hci, conn_handle, count):
+def flood_acl(hci, conn_handle, count, peer_mtu=23, link_timeout=400):
     """
     Send more ACL packets than the controller has buffers, without waiting for
     the Number Of Completed Packets events that hand the credits back. A host
@@ -1073,25 +1109,64 @@ def flood_acl(hci, conn_handle, count):
     ATT Write Command to a handle no peer implements, because it draws no
     response, so nothing comes back to muddy the counters and the controller's
     buffers stay full for as long as possible.
+
+    Sized to the MTU the peer agreed. An ATT PDU longer than the agreed MTU is
+    a protocol violation and a peer is entitled to drop the link over it, which
+    would end the flood early and look exactly like the controller losing the
+    packets it had queued.
     """
     before = hci.read_counters()
     if before is None:
         print("No counter readout, so a flood would prove nothing. Skipped.")
         return
 
-    payload = struct.pack("<BH", ATT_WRITE_CMD, 0xFFFF) + b"\xA5" * 180
+    # Opcode and handle are three octets of the ATT PDU.
+    value_len = max(1, min(peer_mtu, 247) - 3)
+    payload = struct.pack("<BH", ATT_WRITE_CMD, 0xFFFF) + b"\xA5" * value_len
     print()
-    print("Sending %d ACL packets against %d controller buffers, ignoring "
-          "flow control." % (count, hci.acl_credits))
+    print("Sending %d ACL packets of %d octets against %d controller buffers, "
+          "ignoring flow control."
+          % (count, len(payload) + 4, hci.acl_credits))
 
+    print("Waiting up to %.0f s of quiet, past the %.0f s supervision "
+          "timeout, so a peer that stopped acknowledging shows up as a "
+          "disconnection rather than as missing packets."
+          % (max(6.0, link_timeout * 0.015), link_timeout * 0.01))
+
+    completed_before = hci.acl_completed
     for _ in range(count):
         hci.send_acl(conn_handle, CID_ATT, payload)
 
-    # Let the controller drain and report before reading the counters.
-    deadline = time.time() + 3
-    while time.time() < deadline:
-        if hci.read_packet(0.2) is None:
-            continue
+    # Drain until the controller has been quiet for a while, rather than for a
+    # fixed time, since a slow link needs longer than a fast one to report
+    # everything it sent. Capped so a controller that never finishes still ends
+    # the run.
+    #
+    # The clock is read rather than assumed. read_packet's timeout argument
+    # does not govern the wait for the first byte, which uses the port timeout,
+    # so counting an assumed interval per iteration ends the drain in a
+    # fraction of the intended time and reports packets as lost that simply had
+    # not been sent yet.
+    # The quiet period has to outlast the supervision timeout. A peer that
+    # stops acknowledging leaves packets queued in the controller until the
+    # link times out, and only then are they discarded and a Disconnection
+    # Complete sent. Give up sooner than that and the run ends in the gap: the
+    # packets are neither completed nor explained, which reads as the
+    # controller losing them when the peer is the one that went away.
+    supervision = link_timeout * 0.01
+    QUIET_SECONDS = max(6.0, supervision * 1.5)
+    DRAIN_LIMIT = max(60.0, supervision * 6.0)
+    started = time.time()
+    last_progress = started
+    while (time.time() - last_progress < QUIET_SECONDS
+           and time.time() - started < DRAIN_LIMIT):
+        seen = hci.acl_completed
+        hci.read_packet(0.2)
+        if hci.acl_completed != seen:
+            last_progress = time.time()
+
+    drained_for = time.time() - started
+    completed = hci.acl_completed - completed_before
 
     after = hci.read_counters()
     if after is None:
@@ -1102,13 +1177,48 @@ def flood_acl(hci, conn_handle, count):
 
     taken = after[16] - before[16]
     refused = after[6] - before[6]
+    overrun = after[30] - before[30] if len(after) > 30 else 0
     retries = after[8] - before[8]
     oversize = after[13] - before[13]
-    reached = taken + refused + oversize
+    reached = taken + refused + oversize + overrun
     lost = count - reached
 
+    stopped_here = refused + oversize + overrun
     print()
-    print("%d of %d packets reached sdc_hci_data_put." % (reached, count))
+    print("%d of %d packets reached the routing layer. %d went on to "
+          "sdc_hci_data_put and %d were refused before it. %d credits came "
+          "back in %.1f s."
+          % (reached, count, taken, stopped_here, completed, drained_for))
+
+    # The invariant is the host's, not the controller's: every packet it sent
+    # spent a buffer, and every one of those has to come back whether the
+    # packet was transmitted or refused on the way. Counting credits rather
+    # than transmissions is also what makes a refusal here look the same to the
+    # host as a success, which is the point of returning them.
+    if hci.link_down is not None:
+        _, _, reason = hci.link_down
+        print("The link dropped during the flood, reason 0x%02X %s."
+              % (reason, ERROR_NAMES.get(reason, "")))
+        print("On disconnection the controller discards whatever it still held "
+              "for that handle and never counts those packets back, so the "
+              "shortfall below is explained by the drop and says nothing about "
+              "sdc_hci_data_put. Find why the peer hung up before reading it.")
+    elif count > completed:
+        missing = count - completed
+        print("%d buffers never came back within the drain. Vol 4 Part E 4.1.1 "
+              "says every packet the controller takes is eventually counted "
+              "back, so either they are still queued or they are lost."
+              % missing)
+        if drained_for >= DRAIN_LIMIT - 1.0:
+            print("The drain hit its %g s limit, so the link is most likely "
+                  "still working through them. Raise DRAIN_LIMIT before "
+                  "reading anything into this." % DRAIN_LIMIT)
+        else:
+            print("The controller went quiet for %g s with those outstanding, "
+                  "which points at loss rather than backlog."
+                  % QUIET_SECONDS)
+    elif count > 0:
+        print("Every buffer the host spent came back, so nothing was lost.")
     if lost > 0:
         # Without this the whole run is unreadable: a block of refusal counters
         # reading zero looks the same whether the controller accepted
@@ -1125,16 +1235,23 @@ def flood_acl(hci, conn_handle, count):
             print("   nothing upstream moved either, which points at the host "
                   "or the cable rather than the firmware.")
     elif retries:
+        # Never seen on an nRF52840. If it ever fires, sdc_hci.h is incomplete.
         print("sdc_hci_data_put asked for a retry %d times, so the retry path "
-              "is live and the header's list of return codes is incomplete."
-              % retries)
+              "is live after all and the header's list of return codes is "
+              "incomplete." % retries)
     elif refused:
         print("The controller refused %d packets with an error that is not a "
-              "retry, so the retry path did not fire." % refused)
+              "retry." % refused)
+    elif overrun:
+        print("%d were refused here for exceeding the %d buffers the "
+              "controller advertised, so they were never handed to SDC, whose "
+              "answer to one of those is 0 followed by silently discarding it. "
+              "Their credits came back in a Number Of Completed Packets event."
+              % (overrun, hci.acl_advertised))
     else:
-        print("The controller took all %d. Either its buffers never filled, in "
-              "which case send more than %d, or sdc_hci_data_put does not "
-              "refuse and the retry path is dead code." % (taken, count))
+        print("Nothing was refused, so the host stayed inside the %d buffers "
+              "the controller advertised. Send more than that to exercise the "
+              "guard." % hci.acl_advertised)
     if oversize:
         print("%d were refused as oversize before reaching the controller."
               % oversize)

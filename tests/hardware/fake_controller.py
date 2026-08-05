@@ -211,15 +211,15 @@ class Controller:
                 opcode, 0x00, bytes([1]) + STATIC_ADDR + IDENTITY_ROOT))
 
         if opcode == OP_VS_READ_COUNTERS:
-            # Version byte then thirty counters, little endian, as
+            # Version byte then thirty two counters, little endian, as
             # hci_counters.h lays them out. The command count and the ACL
             # success count are the only ones that move here, which is enough
             # to exercise the script's decoder and its flood arithmetic.
             self.command_count += 1
-            counters = [0] * 30
+            counters = [0] * 32
             counters[0] = self.command_count
             counters[16] = self.acl_taken
-            body = bytes([2]) + b"".join(
+            body = bytes([3]) + b"".join(
                 struct.pack("<I", v) for v in counters)
             return self.emit(command_complete(opcode, 0x00, body))
 
