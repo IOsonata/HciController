@@ -137,6 +137,18 @@ static bool HciAppInitUsb(HciApp_t *pApp)
     return true;
 }
 
+/*
+ * Hardware flow control is a property of the link, not of this layer, so the
+ * board says. Where RTS and CTS go nowhere, none is right and asserting flow
+ * control on unconnected pins would stop the link. Where the peer drives them,
+ * as the nRF9160 on a Thingy:91 does, ignoring them loses data.
+ */
+#ifndef UART_FLOWCTRL
+#define HCI_APP_UART_FLOWCTRL UART_FLWCTRL_NONE
+#else
+#define HCI_APP_UART_FLOWCTRL UART_FLOWCTRL
+#endif
+
 static bool HciAppInitUart(HciApp_t *pApp)
 {
 #ifdef UART_PINS
@@ -148,7 +160,7 @@ static bool HciAppInitUart(HciApp_t *pApp)
     cfg.DataBits = 8;
     cfg.Parity = UART_PARITY_NONE;
     cfg.StopBits = 1;
-    cfg.FlowControl = UART_FLWCTRL_NONE;
+    cfg.FlowControl = HCI_APP_UART_FLOWCTRL;
     cfg.bIntMode = true;
     cfg.IntPrio = HCI_APP_UART_IRQ_PRIORITY;
     cfg.EvtCallback = HciAppUartEvent;

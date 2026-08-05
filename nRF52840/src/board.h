@@ -31,8 +31,15 @@
 //   (UART/SPI/I2C). Choose the correct AF/PINOP for your selected pins.
 
 
+/*
+ * Board ids 1 to 6 belong to IOsonata blyst840_boards.h. This one is local, so
+ * it sits well clear of anything that header may add.
+ */
+#define THINGY91_NRF52840		100
+
 #define BOARD			UDG_NRF52840
 //#define BOARD			IBK_NRF52840
+//#define BOARD			THINGY91_NRF52840
 
 #if BOARD == UDG_NRF52840
 
@@ -154,6 +161,80 @@
 	{UART_CTS_PORT, UART_CTS_PIN, UART_CTS_PINOP, IOPINDIR_INPUT, IOPINRES_NONE, IOPINTYPE_NORMAL},\
 	{UART_RTS_PORT, UART_RTS_PIN, UART_RTS_PINOP, IOPINDIR_OUTPUT, IOPINRES_NONE, IOPINTYPE_NORMAL},}
 
+
+#elif BOARD == THINGY91_NRF52840
+
+#define BOARD_NAME                      "Nordic Thingy:91"
+#define BOARD_MODULE_NAME               "nRF52840"
+
+/*
+ * The nRF52840 on a Thingy:91 is the Bluetooth side of a pair. The nRF9160 is
+ * the host and reaches it over the MCU_IF lines. Replacing the stock firmware
+ * with this one takes the USB serial bridge away with it, since that is what
+ * the stock firmware was doing.
+ */
+
+/*
+ * No status LED. The RGB LED on a Thingy:91 hangs off the nRF9160, not this
+ * part, so there is nothing here to drive and the pins the other boards use
+ * are wired to something else entirely.
+ */
+#define HCI_STATUS_LEDS                 0
+
+/*
+ * The host is the nRF9160, always, and it is reached over UART. VBUS says
+ * nothing about that here: the USB socket on a Thingy:91 goes to this part, so
+ * leaving the choice to VBUS means a board on a charger comes up talking USB
+ * to nobody while the nRF9160 waits for an answer that never comes.
+ */
+#define HCI_APP_FORCE_HOST              HCI_APP_HOST_UART
+
+//=============================================================================
+// UART Pin Definitions
+//=============================================================================
+
+/*
+ * The nRF9160 side of these is its UART1: TX P0.22, RX P0.23, RTS P0.24 and
+ * CTS P0.25. Crossed over, so this part's TX meets the nRF9160's RX.
+ */
+#define UART_TX_PORT            0
+#define UART_TX_PIN             25
+#define UART_TX_PINOP           0
+
+#define UART_RX_PORT            1
+#define UART_RX_PIN             0
+#define UART_RX_PINOP           0
+
+#define UART_RTS_PORT           0
+#define UART_RTS_PIN            22
+#define UART_RTS_PINOP          0
+
+#define UART_CTS_PORT           0
+#define UART_CTS_PIN            19
+#define UART_CTS_PINOP          0
+
+#define UART_DEVNO			0
+
+#define UART_RATE			1000000
+
+/* The nRF9160 side drives RTS and CTS, so this side has to honour them. */
+#define UART_FLOWCTRL		UART_FLWCTRL_HW
+
+#define UART_PINS			{ \
+	{UART_RX_PORT, UART_RX_PIN, UART_RX_PINOP, IOPINDIR_INPUT, IOPINRES_NONE, IOPINTYPE_NORMAL},\
+	{UART_TX_PORT, UART_TX_PIN, UART_TX_PINOP, IOPINDIR_OUTPUT, IOPINRES_NONE, IOPINTYPE_NORMAL},\
+	{UART_CTS_PORT, UART_CTS_PIN, UART_CTS_PINOP, IOPINDIR_INPUT, IOPINRES_NONE, IOPINTYPE_NORMAL},\
+	{UART_RTS_PORT, UART_RTS_PIN, UART_RTS_PINOP, IOPINDIR_OUTPUT, IOPINRES_NONE, IOPINTYPE_NORMAL},}
+
+/*
+ * Low frequency clock. MPSL is told XTAL or RC from this, and it is the one
+ * setting that stops the controller before it ever answers a command: told
+ * XTAL on a board with no 32768 crystal, the clock never starts. RC always
+ * works, at the cost of accuracy and a little current. Check the Thingy:91
+ * hardware files, and if the crystal is there change the second entry to
+ * {OSC_TYPE_XTAL, 32768, 20, 0} for the better clock.
+ */
+#define MCU_OSC			{ {OSC_TYPE_XTAL, 32000000, 20, 100}, {OSC_TYPE_RC, 32768, 250, 0}, false }
 
 #else
 #error "No pins defined. Define the pins used by your board."

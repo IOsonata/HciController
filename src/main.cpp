@@ -39,12 +39,25 @@
 McuOsc_t g_McuOsc = MCU_OSC;
 #endif
 
+/*
+ * A board without a status LED reachable from this part, which is any board
+ * where the LED belongs to something else. Driving the pins another board uses
+ * would put a signal on whatever is actually wired there.
+ */
+#ifndef HCI_STATUS_LEDS
+#define HCI_STATUS_LEDS 1
+#endif
+
 static HciApp_t s_HciApp;
+
+#if HCI_STATUS_LEDS
 static const IOPinCfg_t s_LedPins[] = LED_PINS;
+#endif
 
 alignas(8) static uint8_t s_HciThreadMem[TAKTOS_THREAD_MEM_SIZE(HCI_THREAD_STACK_SIZE)];
 alignas(8) static uint8_t s_StatusThreadMem[TAKTOS_THREAD_MEM_SIZE(STATUS_THREAD_STACK_SIZE)];
 
+#if HCI_STATUS_LEDS
 static void HciLedWrite(uint8_t Port, uint8_t Pin, int Active, bool On)
 {
     bool high = Active == LED_LOGIC_HIGH ? On : !On;
@@ -64,6 +77,11 @@ static void HciStatusSet(bool Red, bool Green, bool Blue)
     HciLedWrite(HCI_LED_GREEN_PORT, HCI_LED_GREEN_PIN, HCI_LED_GREEN_ACTIVE, Green);
     HciLedWrite(HCI_LED_BLUE_PORT, HCI_LED_BLUE_PIN, HCI_LED_BLUE_ACTIVE, Blue);
 }
+#else
+static void HciStatusSet(bool, bool, bool)
+{
+}
+#endif
 
 static void HciStatusThread(void *)
 {
@@ -95,15 +113,28 @@ static void HciFatal(void)
     }
 }
 
+/*
+ * VBUS decides the host transport on a board whose USB socket is this part's
+ * own, which is what a dongle is. It decides nothing on a board where the
+ * socket is there to power or program something else: a Thingy:91 on a charger
+ * would come up talking USB CDC to nobody while its nRF9160 waited for an
+ * answer over the UART. Such a board names its host and VBUS is not consulted.
+ */
 static HciAppHost_t HciSelectHost(void)
 {
+#ifdef HCI_APP_FORCE_HOST
+    return HCI_APP_FORCE_HOST;
+#else
     return (NRF_POWER->USBREGSTATUS & POWER_USBREGSTATUS_VBUSDETECT_Msk) != 0U ?
            HCI_APP_HOST_USB : HCI_APP_HOST_UART;
+#endif
 }
 
 int main(void)
 {
+#if HCI_STATUS_LEDS
     IOPinCfg(s_LedPins, sizeof(s_LedPins) / sizeof(s_LedPins[0]));
+#endif
     HciStatusSet(false, false, false);
 
     HciTraceInit();

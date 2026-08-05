@@ -55,6 +55,22 @@ nRF52840/src/       board.h, the pin and clock configuration
 tests/              host tests and hardware tools
 ```
 
+## Boards
+
+`nRF52840/src/board.h` selects the board with `BOARD`. It carries the I-SYST
+UDG-NRF52840x dongle, the IBK-NRF52840 breakout, and the Nordic Thingy:91,
+whose nRF52840 is the Bluetooth side of a pair with an nRF9160 host over UART.
+
+A board says three things beyond its pins. `HCI_STATUS_LEDS 0` where no status
+LED is reachable from this part, so nothing drives pins that belong to
+something else. `HCI_APP_FORCE_HOST` where the host transport is not the one
+VBUS would imply, which is any board whose USB socket is there for something
+other than this part. And `UART_FLOWCTRL`, since RTS and CTS matter only where
+the peer drives them.
+
+Replacing the stock firmware on a Thingy:91 takes its USB serial bridge with
+it, because that is what the stock firmware was doing.
+
 ## Prerequisites
 
 The firmware is built with IOcomposer, which supplies the ARM toolchain,
