@@ -136,15 +136,14 @@ stack waiting for an event that never arrives.
 A SoftDevice Controller header declares the whole HCI API, but a library
 variant only contains the commands it was built with, so a declaration is not
 a guarantee that the symbol links. Seven commands therefore sit behind a macro
-in
-`src/hci_sdc_nrfxlib.cpp`, each covering the handler, the table row and the
+in `src/hci_sdc_nrfxlib.cpp`, each covering the handler, the table row and the
 supported commands bit together, so the three stay consistent whichever way the
 macro goes.
 
-    HCI_SDC_HAS_READ_SUPPORTED_STATES   0     0x201C  LE Read Supported States
-    HCI_SDC_HAS_READ_TRANSMIT_POWER     0     0x204B  LE Read Transmit Power
-    HCI_SDC_HAS_READ_REMOTE_VERSION     1     0x041D  Read Remote Version Info
-    HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT    1     0x0C7B and 0x0C7C
+    HCI_SDC_HAS_READ_SUPPORTED_STATES     0   0x201C  LE Read Supported States
+    HCI_SDC_HAS_READ_TRANSMIT_POWER       0   0x204B  LE Read Transmit Power
+    HCI_SDC_HAS_READ_REMOTE_VERSION       1   0x041D  Read Remote Version Info
+    HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT      1   0x0C7B and 0x0C7C
     HCI_SDC_HAS_VS_READ_STATIC_ADDRESSES  1   0xFC09  VS Read Static Addresses
     HCI_SDC_HAS_VS_READ_COUNTERS          1   0xFFF0  VS Read Counters
 

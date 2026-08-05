@@ -168,10 +168,22 @@ def addr_str(raw):
 
 
 def addr_bytes(text):
-    parts = text.replace("-", ":").split(":")
-    if len(parts) != 6:
-        raise ValueError("address must be six hex octets")
-    return bytes(int(p, 16) for p in reversed(parts))
+    """
+    Address text to the little endian order HCI puts on the wire. Takes
+    AA:BB:CC:DD:EE:FF, AA-BB-CC-DD-EE-FF or aabbccddeeff, since a scanner app
+    or a log will give it in any of those and retyping the colons is a good way
+    to mistype the address.
+    """
+    cleaned = text.replace(":", "").replace("-", "").replace(" ", "")
+    if len(cleaned) != 12:
+        raise ValueError(
+            "%r is not a six octet address. Give it as AA:BB:CC:DD:EE:FF, "
+            "AA-BB-CC-DD-EE-FF or aabbccddeeff." % text)
+    try:
+        raw = bytes.fromhex(cleaned)
+    except ValueError:
+        raise ValueError("%r has a character that is not a hex digit" % text)
+    return bytes(reversed(raw))
 
 
 class Hci:
@@ -968,7 +980,10 @@ def cmd_connect(hci, args):
         raise HciError("LE Create Connection returned 0x%02X %s"
                        % (status, ERROR_NAMES.get(status, "")))
 
-    print("Connecting to %s, %d second limit." % (args.address, args.seconds))
+    # The canonical form, not what was typed, so a bare hex argument is echoed
+    # back the way every other line prints an address.
+    print("Connecting to %s, %d second limit."
+          % (addr_str(peer), args.seconds))
     deadline = time.time() + args.seconds
     conn_handle = None
 
