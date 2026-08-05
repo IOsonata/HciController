@@ -114,16 +114,35 @@ static void HciFatal(void)
 }
 
 /*
- * VBUS decides the host transport on a board whose USB socket is this part's
- * own, which is what a dongle is. It decides nothing on a board where the
- * socket is there to power or program something else: a Thingy:91 on a charger
- * would come up talking USB CDC to nobody while its nRF9160 waited for an
- * answer over the UART. Such a board names its host and VBUS is not consulted.
+ * board.h names the host port for the board it describes. A -D on the command
+ * line overrides it, which is how the same tree builds a dongle image and a
+ * replacement for Nordic hci_lpuart. hci_app.h documents the three values.
  */
+#ifndef HCI_HOST_SELECT
+#define HCI_HOST_SELECT HCI_HOST_SELECT_AUTO
+#endif
+
+#if HCI_HOST_SELECT != HCI_HOST_SELECT_AUTO && \
+    HCI_HOST_SELECT != HCI_HOST_SELECT_USB && \
+    HCI_HOST_SELECT != HCI_HOST_SELECT_UART
+#error "HCI_HOST_SELECT must be HCI_HOST_SELECT_AUTO, _USB or _UART"
+#endif
+
+/*
+ * A UART host with no pins to reach it on would fail at HciAppInit, well after
+ * the radio is up and with nothing on the wire to say why. Catching it here
+ * costs nothing and names the missing piece.
+ */
+#if HCI_HOST_SELECT != HCI_HOST_SELECT_USB && !defined(UART_PINS)
+#error "the selected host needs UART_PINS from board.h"
+#endif
+
 static HciAppHost_t HciSelectHost(void)
 {
-#ifdef HCI_APP_FORCE_HOST
-    return HCI_APP_FORCE_HOST;
+#if HCI_HOST_SELECT == HCI_HOST_SELECT_USB
+    return HCI_APP_HOST_USB;
+#elif HCI_HOST_SELECT == HCI_HOST_SELECT_UART
+    return HCI_APP_HOST_UART;
 #else
     return (NRF_POWER->USBREGSTATUS & POWER_USBREGSTATUS_VBUSDETECT_Msk) != 0U ?
            HCI_APP_HOST_USB : HCI_APP_HOST_UART;
@@ -141,10 +160,24 @@ int main(void)
 
     uint32_t usbReg = NRF_POWER->USBREGSTATUS;
     HciAppHost_t host = HciSelectHost();
-    HciTrace("boot: usbregstatus=0x%08lX vbus=%u outrdy=%u host=%s\r\n",
+
+    /*
+     * Naming the build option next to the port it produced separates a board
+     * built for the wrong host from one that read VBUS and got it wrong.
+     */
+#if HCI_HOST_SELECT == HCI_HOST_SELECT_USB
+    static const char *pSelect = "usb";
+#elif HCI_HOST_SELECT == HCI_HOST_SELECT_UART
+    static const char *pSelect = "uart";
+#else
+    static const char *pSelect = "auto";
+#endif
+
+    HciTrace("boot: usbregstatus=0x%08lX vbus=%u outrdy=%u select=%s host=%s\r\n",
              (unsigned long)usbReg,
              (unsigned)((usbReg & POWER_USBREGSTATUS_VBUSDETECT_Msk) != 0U),
              (unsigned)((usbReg & POWER_USBREGSTATUS_OUTPUTRDY_Msk) != 0U),
+             pSelect,
              host == HCI_APP_HOST_USB ? "usb" : "uart");
 
     TaktOSCfg_t kernelCfg = {};

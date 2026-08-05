@@ -55,7 +55,7 @@ McuOsc_t g_McuOsc = MCU_OSC;
 1. Open Eclipse **Eclipse IDE for Embedded C/C++ Developers**.
 2. Open the generated project.
 3. **Build**:
-   - `Project → Build Project`
+   - `Project -> Build Project`
 4. **Flash / debug**:
    - Use your normal debug launch configuration for your probe (J-Link, ST-LINK, etc.).
 
@@ -81,4 +81,4 @@ BtAppRun();
 
 - Add your application logic after `HardwareInit()`.
 - If you enabled UART, use it for logs/debug prints.
-- Add sensor/display drivers (C++ projects unlock IOsonata’s higher-level polymorphic drivers).
+- Add sensor/display drivers (C++ projects unlock IOsonata's higher-level polymorphic drivers).

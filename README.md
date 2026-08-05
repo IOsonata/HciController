@@ -16,14 +16,40 @@ supports two host connections:
 The HCI controller, the H:4 parser, the SDC binding and the TaktOS execution
 path are identical for both.
 
-## Runtime interface selection
+## Host interface selection
 
-The interface is selected once at reset:
+Which port the controller talks to its host on is a build option,
+`HCI_HOST_SELECT`:
 
 ```text
-USB VBUS present  -> USB CDC
-USB VBUS absent   -> UART
+HCI_HOST_SELECT_AUTO   read VBUS at reset, powered is USB CDC and otherwise UART
+HCI_HOST_SELECT_USB    always USB CDC
+HCI_HOST_SELECT_UART   always UART
 ```
+
+`nRF52840/src/board.h` picks a default for each board, and `-DHCI_HOST_SELECT=...`
+on the command line wins over it:
+
+```sh
+# a dongle image, VBUS decides
+arm-none-eabi-g++ ...
+
+# a UART controller to replace Nordic hci_lpuart on a Thingy:91
+arm-none-eabi-g++ -DBOARD=THINGY91_NRF52840 ...
+
+# force a dongle to come up on its UART
+arm-none-eabi-g++ -DHCI_HOST_SELECT=HCI_HOST_SELECT_UART ...
+```
+
+AUTO only means something where the USB socket belongs to the nRF52840, which
+is what a dongle is. Where the socket belongs to something else it reads as a
+host that is not there: a Thingy:91 on a charger would come up talking USB CDC
+to nobody while the nRF9160 waited for an answer over the UART. That board
+therefore defaults to UART.
+
+Selecting a UART host with no `UART_PINS` in `board.h` is refused at compile
+time rather than left to fail at startup, where nothing would be on the wire to
+say why.
 
 The selected concrete interface is passed to the HCI controller as a `DevIntrf_t *`, in the same way an IOsonata device driver can receive either an SPI or I2C interface.
 
@@ -61,12 +87,19 @@ tests/              host tests and hardware tools
 UDG-NRF52840x dongle, the IBK-NRF52840 breakout, and the Nordic Thingy:91,
 whose nRF52840 is the Bluetooth side of a pair with an nRF9160 host over UART.
 
-A board says three things beyond its pins. `HCI_STATUS_LEDS 0` where no status
-LED is reachable from this part, so nothing drives pins that belong to
-something else. `HCI_APP_FORCE_HOST` where the host transport is not the one
-VBUS would imply, which is any board whose USB socket is there for something
-other than this part. And `UART_FLOWCTRL`, since RTS and CTS matter only where
-the peer drives them.
+A board says three things beyond its pins. `HCI_HOST_SELECT`, the host port,
+described above. `HCI_STATUS_LEDS 0` where no status LED is reachable from this
+part, so nothing drives pins that belong to something else. And
+`UART_HW_FLOWCTRL 1` where the peer drives RTS and CTS.
+
+Flow control and the pin map are built together at the end of `board.h` rather
+than per board, because the two have to agree. Asking the peripheral for
+hardware flow control without RTS and CTS in the map gets a link that never
+sends; putting them in the map without asking for flow control drives two pins
+the peripheral never uses. On a Thingy:91 those two pins are the low power
+handshake, so the second mistake takes the link down rather than wasting a pin.
+That board defines no RTS or CTS names at all, and asking it for hardware flow
+control is refused at compile time.
 
 Replacing the stock firmware on a Thingy:91 takes its USB serial bridge with
 it, because that is what the stock firmware was doing.
