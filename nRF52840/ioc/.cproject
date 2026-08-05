@@ -177,7 +177,7 @@
 									<listOptionValue builtIn="false" value="&quot;../../../../external/sdk-nrfxlib/mpsl/fem/common/lib/nrf52/hard-float&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;../../../../IOsonata/ARM/ldscript&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${system_property:iocomposer_home}/IOsonata/ARM/ldscript&quot;"/>
-									<listOptionValue builtIn="false" value="&quot;${system_property:iosonata_loc}/IOsonata/ARM/Nordic/nRF52/nRF52840/lib/Eclipse/Debug&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${system_property:iocomposer_home}/IOsonata/ARM/Nordic/nRF52/nRF52840/lib/Eclipse/Debug_SDC&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${system_property:iocomposer_home}/TaktOS/ARM/cm4/Eclipse/DebugFPU&quot;"/>
 								</option>
 								<option id="ilg.gnuarmeclipse.managedbuild.cross.option.cpp.linker.usenewlibnano.731933557" name="Use newlib-nano (--specs=nano.specs)" superClass="ilg.gnuarmeclipse.managedbuild.cross.option.cpp.linker.usenewlibnano" value="true" valueType="boolean"/>
@@ -387,7 +387,7 @@
 									<listOptionValue builtIn="false" value="&quot;../../../../external/sdk-nrfxlib/mpsl/fem/common/lib/nrf52/hard-float&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;../../../../IOsonata/ARM/ldscript&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${system_property:iocomposer_home}/IOsonata/ARM/ldscript&quot;"/>
-									<listOptionValue builtIn="false" value="&quot;${system_property:iosonata_loc}/IOsonata/ARM/Nordic/nRF52/nRF52840/lib/Eclipse/Release&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${system_property:iocomposer_home}/IOsonata/ARM/Nordic/nRF52/nRF52840/lib/Eclipse/Release_SDC&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${system_property:iocomposer_home}/TaktOS/ARM/cm4/Eclipse/ReleaseFPU&quot;"/>
 								</option>
 								<option id="ilg.gnuarmeclipse.managedbuild.cross.option.cpp.linker.usenewlibnano.472287650" name="Use newlib-nano (--specs=nano.specs)" superClass="ilg.gnuarmeclipse.managedbuild.cross.option.cpp.linker.usenewlibnano" value="true" valueType="boolean"/>
@@ -598,7 +598,7 @@
 									<listOptionValue builtIn="false" value="&quot;../../../../IOsonata/ARM/ldscript&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;../../../../IOsonata/ARM/Nordic/nRF52/nRF52840/ldscript&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${system_property:iocomposer_home}/IOsonata/ARM/ldscript&quot;"/>
-									<listOptionValue builtIn="false" value="&quot;${system_property:iosonata_loc}/IOsonata/ARM/Nordic/nRF52/nRF52840/lib/Eclipse/Release&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${system_property:iocomposer_home}/IOsonata/ARM/Nordic/nRF52/nRF52840/lib/Eclipse/Release_SDC&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${system_property:iocomposer_home}/TaktOS/ARM/cm4/Eclipse/ReleaseFPU&quot;"/>
 								</option>
 								<option id="ilg.gnuarmeclipse.managedbuild.cross.option.cpp.linker.usenewlibnano.322762557" name="Use newlib-nano (--specs=nano.specs)" superClass="ilg.gnuarmeclipse.managedbuild.cross.option.cpp.linker.usenewlibnano" value="true" valueType="boolean"/>
@@ -808,7 +808,7 @@
 									<listOptionValue builtIn="false" value="&quot;../../../../external/sdk-nrfxlib/mpsl/fem/common/lib/nrf52/hard-float&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;../../../../IOsonata/ARM/ldscript&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${system_property:iocomposer_home}/IOsonata/ARM/ldscript&quot;"/>
-									<listOptionValue builtIn="false" value="&quot;${system_property:iosonata_loc}/IOsonata/ARM/Nordic/nRF52/nRF52840/lib/Eclipse/Release&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${system_property:iocomposer_home}/IOsonata/ARM/Nordic/nRF52/nRF52840/lib/Eclipse/Release_SDC&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${system_property:iocomposer_home}/TaktOS/ARM/cm4/Eclipse/ReleaseFPU&quot;"/>
 								</option>
 								<option id="ilg.gnuarmeclipse.managedbuild.cross.option.cpp.linker.usenewlibnano.991172064" name="Use newlib-nano (--specs=nano.specs)" superClass="ilg.gnuarmeclipse.managedbuild.cross.option.cpp.linker.usenewlibnano" value="true" valueType="boolean"/>
