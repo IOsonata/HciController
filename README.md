@@ -1,13 +1,20 @@
 # HciController
 
-Bluetooth LE HCI controller firmware for the I-SYST BLYST840/nRF52840 platform, built with IOsonata, TaktOS, TinyUSB, and Nordic Semiconductor's nrfxlib SoftDevice Controller.
+Bluetooth LE HCI controller firmware for the I-SYST UDG-NRF52840x dongle. It
+presents a standard Bluetooth HCI H:4 byte stream that any Bluetooth host
+stack can drive.
 
-The firmware exposes a standard Bluetooth HCI H:4 byte stream through an IOsonata `DeviceIntrf`. One firmware image supports two host connections:
+Built with IOsonata and TaktOS, with TinyUSB for the USB device stack and
+Nordic Semiconductor's nrfxlib SoftDevice Controller and MPSL for the radio.
 
-- USB CDC through IOsonata `UsbdCdcIntrf` with a TinyUSB backend;
+The H:4 stream is carried over an IOsonata `DeviceIntrf`. One firmware image
+supports two host connections:
+
+- USB CDC through IOsonata `UsbdCdcIntrf`;
 - UART to an nRF9151 or another host processor.
 
-The HCI controller, H:4 parser, SDC binding, and TaktOS execution path are identical for both interfaces.
+The HCI controller, the H:4 parser, the SDC binding and the TaktOS execution
+path are identical for both.
 
 ## Runtime interface selection
 
@@ -38,35 +45,106 @@ BLYST840 P0.24 TXD -> nRF9151 RXD
 BLYST840 P0.23 RXD <- nRF9151 TXD
 ```
 
-## Development layout
-
-Dependencies remain separate sibling repositories and external SDKs:
+## Repository layout
 
 ```text
-root_dev/
-├── external/
-│   ├── tinyusb/
-│   ├── nrfx/
-│   └── sdk-nrfxlib/
-├── IOsonata/
-├── HciController/
-└── TaktOS/
+include/            HCI headers
+src/                HCI sources
+nRF52840/ioc/       Eclipse Embedded CDT project
+nRF52840/src/       board.h, the pin and clock configuration
+tests/              host tests and hardware tools
 ```
 
-HciController does not compile IOsonata or TaktOS sources. Build these static libraries first:
+## Prerequisites
+
+The firmware is built with IOcomposer, which supplies the ARM toolchain,
+OpenOCD, the SDK integration and the Eclipse project support the
+`nRF52840/ioc` project depends on.
+
+### 1. Install IOcomposer
+
+[IOcomposer](https://iocomposer.io) installs into `~/IOcomposer`, or
+`%USERPROFILE%\IOcomposer` on Windows. That directory is the workspace root
+everything else sits under.
+
+**macOS**
+
+```bash
+curl -fsSL https://iocomposer.io/install_ioc_macos.sh -o /tmp/install_ioc_macos.sh && bash /tmp/install_ioc_macos.sh
+```
+
+**Linux**
+
+```bash
+curl -fsSL https://iocomposer.io/install_ioc_linux.sh -o /tmp/install_ioc_linux.sh && bash /tmp/install_ioc_linux.sh
+```
+
+**Windows, PowerShell as Administrator**
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://iocomposer.io/install_ioc_windows.ps1 | iex"
+```
+
+### 2. Lay out the workspace
+
+Dependencies stay separate sibling repositories and external SDKs. The Eclipse
+project reaches them by relative path, so the layout matters:
 
 ```text
-IOsonata_nRF52840 -> Debug_SDC
-TaktOS_M4         -> DebugFPU
+~/IOcomposer/
+    external/
+        tinyusb/
+        nrfx/
+        sdk-nrfxlib/
+    IOsonata/
+    HciController/
+    TaktOS/
 ```
 
-Then build the HciController `Debug` configuration.
+### 3. Build the libraries
+
+HciController does not compile IOsonata or TaktOS sources, it links them. Build
+them first with the IOsonata library builder and select nRF52840. TaktOS is
+built automatically when it is installed.
+
+**macOS**
+
+```bash
+bash ~/IOcomposer/IOsonata/Installer/build_iosonata_lib_macos.sh
+```
+
+**Linux**
+
+```bash
+bash ~/IOcomposer/IOsonata/Installer/build_iosonata_lib_linux.sh
+```
+
+**Windows, PowerShell**
+
+```powershell
+& "$env:USERPROFILE\IOcomposer\IOsonata\Installer\build_iosonata_lib_win.ps1"
+```
+
+That produces what the firmware links against:
+
+```text
+libIOsonata_nRF52840.a  from  IOsonata/ARM/Nordic/nRF52/nRF52840/lib/Eclipse/Debug_SDC
+libTaktOS_M4.a          from  TaktOS/ARM/cm4/Eclipse/DebugFPU
+```
+
+The host tests under `tests/` need none of this. They build with any C++14
+compiler, so the HCI layers can be read and exercised without a toolchain
+install or a board.
 
 ## Eclipse Embedded CDT
 
-Import `HciController/IOcomposer` as an existing project. It is a Managed CDT Arm Cross GCC project.
+Import `HciController/nRF52840/ioc` as an existing project. It is a Managed CDT
+Arm Cross GCC project, generated from the IOsonata Eclipse Embedded CDT
+template.
 
-After updating project metadata, remove the old workspace project without deleting its files, delete `IOcomposer/Debug`, and re-import it. Eclipse caches linked resources and generated makefiles.
+After updating project metadata, remove the old workspace project without
+deleting its files, delete `nRF52840/ioc/Debug`, and re-import it. Eclipse
+caches linked resources and generated makefiles.
 
 The application project compiles:
 
@@ -81,15 +159,7 @@ It links:
 - nrfxlib MPSL FEM common;
 - nrfxlib multirole SoftDevice Controller.
 
-## Command-line build
-
-The repository-root `Makefile` uses the same sibling layout and static libraries:
-
-```sh
-make
-```
-
-Outputs are written under `build/`:
+Build outputs are written under `nRF52840/ioc/Debug`:
 
 ```text
 HciController.elf
@@ -153,7 +223,8 @@ HCI_USB_PID=0x4070
 HCI_USB_DEVICE_RELEASE=0x0100
 ```
 
-Override these values in `local.mk` or on the make command line for production USB identity.
+They are defined in the Eclipse project, under C/C++ Build, Settings, Compiler,
+Preprocessor. Change them there for a production USB identity.
 
 ## Tests
 

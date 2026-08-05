@@ -1,10 +1,10 @@
 # HCI command coverage
 
-The dispatch table in `src/hci_sdc_nrfxlib.cpp` goes from 18 commands to 56.
-Everything not listed there is answered with Unknown HCI Command, so the table
-is the controller's actual capability.
+The dispatch table in `src/hci_sdc_nrfxlib.cpp` carries 56 commands. Everything
+not listed there is answered with Unknown HCI Command, so the table is the
+controller's actual capability.
 
-## Added
+## Supported
 
 Link control
     0x0406  Disconnect                              status
