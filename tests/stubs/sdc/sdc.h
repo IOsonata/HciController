@@ -46,4 +46,133 @@ void sdc_support_direct_test_mode(void);
 #ifdef __cplusplus
 }
 #endif
+
+/*
+ * Memory requirement macros, copied verbatim from the real
+ * softdevice_controller/include/sdc.h so the build time floor in
+ * hci_nrf52840.cpp is checked in the host build too. If these drift from the
+ * vendor header the dispatch test, which compiles against the real one, is
+ * what catches it.
+ */
+#define SDC_DEFAULT_TX_PACKET_SIZE 27
+#define SDC_DEFAULT_RX_PACKET_SIZE 27
+
+#define __MEM_MINIMAL_CENTRAL_LINK_SIZE    795
+#define __MEM_MINIMAL_PERIPHERAL_LINK_SIZE 891
+#define __MEM_TX_BUFFER_OVERHEAD_SIZE 15
+#define __MEM_RX_BUFFER_OVERHEAD_SIZE 15
+
+#define __MEM_ADDITIONAL_LINK_SIZE(tx_size, rx_size, tx_count, rx_count) \
+    ((tx_count) * ((tx_size) + __MEM_TX_BUFFER_OVERHEAD_SIZE) - \
+     (SDC_DEFAULT_TX_PACKET_SIZE + __MEM_TX_BUFFER_OVERHEAD_SIZE) + \
+     (rx_count) * ((rx_size) + __MEM_RX_BUFFER_OVERHEAD_SIZE) - \
+     (SDC_DEFAULT_RX_PACKET_SIZE + __MEM_RX_BUFFER_OVERHEAD_SIZE))
+
+/** @brief Maximum memory required per central link.
+ *
+ * @param[in] tx_size Link Layer TX packet size.
+ * @param[in] rx_size Link Layer RX packet size.
+ * @param[in] tx_count Link Layer TX packet count.
+ * @param[in] rx_count Link Layer RX packet count.
+ */
+#define SDC_MEM_PER_CENTRAL_LINK(tx_size, rx_size, tx_count, rx_count) \
+    (__MEM_MINIMAL_CENTRAL_LINK_SIZE + \
+     __MEM_ADDITIONAL_LINK_SIZE(tx_size, rx_size, tx_count, rx_count))
+
+/** @brief Maximum memory required per peripheral link.
+ *
+ * @param[in] tx_size Link Layer TX packet size.
+ * @param[in] rx_size Link Layer RX packet size.
+ * @param[in] tx_count Link Layer TX packet count.
+ * @param[in] rx_count Link Layer RX packet count.
+ */
+#define SDC_MEM_PER_PERIPHERAL_LINK(tx_size, rx_size, tx_count, rx_count) \
+    (__MEM_MINIMAL_PERIPHERAL_LINK_SIZE + \
+     __MEM_ADDITIONAL_LINK_SIZE(tx_size, rx_size, tx_count, rx_count))
+
+/** Maximum shared memory required for central links. */
+#define SDC_MEM_CENTRAL_LINKS_SHARED 21
+
+/** Maximum shared memory required for peripheral links. */
+#define SDC_MEM_PERIPHERAL_LINKS_SHARED  17
+
+/** @brief Maximum memory required when supporting LE Power Control.
+ *
+ * @param[in] num_links Total number of peripheral and central links supported.
+ */
+#define SDC_MEM_LE_POWER_CONTROL(num_links) ((num_links) > 0 ? (13 + (num_links) * 123) : 0)
+
+/** @brief Maximum memory required when supporting subrating.
+ *
+ * @param[in] num_links Total number of peripheral and central links supported.
+ */
+#define SDC_MEM_SUBRATING(num_links) ((num_links) > 0 ? (12 + (num_links) * 60) : 0)
+
+/** @brief Maximum memory required when supporting periodic advertising sync transfer.
+ *
+ * @param[in] num_links Total number of peripheral and central links supported.
+ */
+#define SDC_MEM_SYNC_TRANSFER(num_links) ((num_links) > 0 ? (13 + (num_links) * 139) : 0)
+
+/** @brief Auxiliary defines, not to be used outside of this file. */
+#define __MEM_PER_EXTENDED_FEATURE_PAGE 24
+
+/** @brief Maximum memory required when supporting extended feature set.
+ *
+ * @param[in] num_links Total number of peripheral and central links supported.
+ * @param[in] num_pages Total number of extended feature pages supported.
+ */
+#define SDC_MEM_EXTENDED_FEATURE_SET(num_links, num_pages) \
+     ((num_links) > 0 ? (11 + (num_links) * (19 + (num_pages) * __MEM_PER_EXTENDED_FEATURE_PAGE)) : 0)
+
+/** @brief Maximum memory required when supporting frame space update.
+ *
+ * @param[in] num_links Total number of peripheral and central links supported.
+ */
+#define SDC_MEM_FRAME_SPACE_UPDATE(num_links) ((num_links) > 0 ? (12 + (num_links) * 68) : 0)
+
+/** @brief Maximum memory required when supporting shorter connection intervals.
+ *
+ * @param[in] num_links Total number of peripheral and central links supported.
+ */
+#define SDC_MEM_SHORTER_CONNECTION_INTERVALS(num_links) ((num_links) > 0 ? (12 + (num_links) * 52) : 0)
+
+/** Memory required for Quality of Service (QoS) channel survey module. */
+#define SDC_MEM_QOS_CHANNEL_SURVEY (40)
+
+/** Memory required for the scanner when only supporting legacy scanning. */
+#define SDC_MEM_SCAN(buffer_count) (408 + (buffer_count) * 104)
+
+/** Memory required for the scanner when supporting extended scanning. */
+#define SDC_MEM_SCAN_EXT(buffer_count) (408 + (buffer_count) * 320)
+
+/** Additional memory required for the initiator when supporting scanning
+ *  and initiating at the same time.
+ */
+#define SDC_MEM_INITIATOR (384)
+
+/** Memory required for the Filter Accept List */
+#define SDC_MEM_FAL(max_num_entries) ((max_num_entries) > 0 ? (4 + (max_num_entries) * 8) : 0)
+
+/** @brief Auxiliary defines, not to be used outside of this file. */
+#define __MEM_PER_ADV_SET_LOW(max_adv_data) ((5184+(max_adv_data)*18)/10)
+#define __MEM_PER_ADV_SET_HIGH(max_adv_data) (706+(max_adv_data))
+#define __MEM_PER_PERIODIC_ADV_SET_LOW(max_adv_data) ((3104+(max_adv_data)*18)/10)
+#define __MEM_PER_PERIODIC_ADV_SET_HIGH(max_adv_data) (498+(max_adv_data))
+
+/** @brief Maximum required memory for a given advertising buffer size.
+ *
+ * @param[in] max_adv_data The desired advertising data size.
+ */
+#define SDC_MEM_PER_ADV_SET(max_adv_data) ((max_adv_data<255)?\
+    (__MEM_PER_ADV_SET_LOW(max_adv_data)):\
+    (__MEM_PER_ADV_SET_HIGH(max_adv_data)))
+
+/** @brief Additional memory required for periodic advertising.
+ *
+ * @note The max_adv_data must be the same as for advertising in @ref SDC_MEM_PER_ADV_SET.
+ *
+ * @param[in] max_adv_data The desired periodic advertising data size.
+ */
+
 #endif

@@ -45,6 +45,12 @@ typedef struct {
     volatile uint32_t UsbDetachCount;
 
     uint32_t RandRetryCount;
+
+    /* Last MPSL or controller assert, kept for a debugger to read. */
+    const char *AssertFile;
+    uint32_t AssertLine;
+    uint32_t AssertCount;
+    bool AssertFromSdc;
     volatile uint32_t UsbIrqCount;
     volatile uint32_t UsbIrqMark;
     volatile uint32_t UsbStuckCauseCount;

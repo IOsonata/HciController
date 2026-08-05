@@ -48,10 +48,6 @@
 #endif
 
 /* Set to 1 when the nrfxlib in use predates mpsl_clock_hfclk_src_request. */
-#ifndef HCI_NRF52840_MPSL_LEGACY_CLOCK
-#define HCI_NRF52840_MPSL_LEGACY_CLOCK 0
-#endif
-
 /* Bounded wait for the crystal. Worst case ramp-up is 1400 us. */
 #ifndef HCI_NRF52840_HFCLK_WAIT_LOOPS
 #define HCI_NRF52840_HFCLK_WAIT_LOOPS 1000000U
@@ -242,29 +238,11 @@ static void HciNrf52840UsbdErrataRevert(void)
  * MPSL owns NRF_CLOCK on this target, so the crystal is taken from MPSL and
  * held for as long as USB is up. Nothing here starts or stops it.
  */
-#if HCI_NRF52840_MPSL_LEGACY_CLOCK
-
-static void HciNrf52840HfclkStarted(void)
-{
-}
-
-static int32_t HciNrf52840HfclkRequest(void)
-{
-    return mpsl_clock_hfclk_request(HciNrf52840HfclkStarted);
-}
-
-static int32_t HciNrf52840HfclkIsRunning(uint32_t *pRunning)
-{
-    return mpsl_clock_hfclk_is_running(pRunning);
-}
-
-static int32_t HciNrf52840HfclkRelease(void)
-{
-    return mpsl_clock_hfclk_release();
-}
-
-#else
-
+/*
+ * mpsl_clock_hfclk_request, _is_running and _release carry
+ * __attribute__((deprecated)) and "This function will be removed in a future
+ * release", so only the _src_ API is used here.
+ */
 static void HciNrf52840HfclkStarted(mpsl_clock_evt_type_t EvtType)
 {
     (void)EvtType;
@@ -285,8 +263,6 @@ static int32_t HciNrf52840HfclkRelease(void)
 {
     return mpsl_clock_hfclk_src_release(MPSL_CLOCK_HF_SRC_XO);
 }
-
-#endif
 
 static bool HciNrf52840HfclkStart(HciNrf52840_t *pTarget)
 {
@@ -415,18 +391,43 @@ void HciNrf52840UsbPowerProcess(HciNrf52840_t *pTarget)
     }
 }
 
+/*
+ * mpsl.h and sdc.h both state that the library "will reset the chip if the
+ * application returns from this function", and that all interrupts are already
+ * disabled on entry. Returning is therefore the documented recovery, and
+ * spinning here forfeits it: the device hangs with interrupts off and nothing
+ * to show for it.
+ *
+ * The file and line identify the fault. mpsl_asserts.h and sdc_asserts.h
+ * decode the line value, so it is kept where a debugger or a later read of the
+ * target state can find it rather than discarded.
+ */
+static void HciNrf52840RecordAssert(HciNrf52840_t *pTarget,
+                                    const char *pFile,
+                                    uint32_t Line,
+                                    bool FromSdc)
+{
+    if (pTarget == nullptr)
+    {
+        return;
+    }
+
+    pTarget->AssertFile = pFile;
+    pTarget->AssertLine = Line;
+    pTarget->AssertFromSdc = FromSdc;
+    pTarget->AssertCount++;
+}
+
 static void HciNrf52840MpslAssert(const char *file, uint32_t line)
 {
-    (void)file;
-    (void)line;
-    for (;;) { }
+    HciNrf52840RecordAssert(s_pTarget, file, line, false);
+    /* Return, so MPSL resets the chip. */
 }
 
 static void HciNrf52840SdcAssert(const char *file, uint32_t line)
 {
-    (void)file;
-    (void)line;
-    for (;;) { }
+    HciNrf52840RecordAssert(s_pTarget, file, line, true);
+    /* Return, so the controller resets the chip. */
 }
 
 /*
@@ -572,6 +573,33 @@ static bool HciNrf52840CfgSet(HciNrf52840_t *pTarget,
     pTarget->RequiredSdcMem = required;
     return true;
 }
+
+/*
+ * A build time floor for the memory pool, computed from the SDC_MEM_* macros
+ * for the resources configured below. sdc.h notes that "The values of the
+ * memory requirement defines may change between minor releases", so this is a
+ * check that the pool still fits after an nrfxlib update, not a substitute for
+ * the runtime query. Getting it wrong at run time means the controller refuses
+ * to start, which is the one failure the application cannot work around.
+ */
+#define HCI_NRF52840_SDC_MEM_REQUIRED                                         \
+    (SDC_MEM_PER_PERIPHERAL_LINK(HCI_NRF52840_ACL_PACKET_SIZE,                \
+                                 HCI_NRF52840_ACL_PACKET_SIZE,                \
+                                 HCI_NRF52840_ACL_PACKET_COUNT,               \
+                                 HCI_NRF52840_ACL_PACKET_COUNT) *             \
+         HCI_NRF52840_LINK_COUNT +                                            \
+     SDC_MEM_PER_CENTRAL_LINK(HCI_NRF52840_ACL_PACKET_SIZE,                   \
+                              HCI_NRF52840_ACL_PACKET_SIZE,                   \
+                              HCI_NRF52840_ACL_PACKET_COUNT,                  \
+                              HCI_NRF52840_ACL_PACKET_COUNT) *                \
+         HCI_NRF52840_LINK_COUNT +                                            \
+     SDC_MEM_PERIPHERAL_LINKS_SHARED + SDC_MEM_CENTRAL_LINKS_SHARED +         \
+     SDC_MEM_SCAN_EXT(HCI_NRF52840_SCAN_BUFFER_COUNT) +                       \
+     SDC_MEM_PER_ADV_SET(HCI_NRF52840_MAX_ADV_DATA))
+
+static_assert(HCI_NRF52840_DEFAULT_SDC_MEM_SIZE >=
+                  HCI_NRF52840_SDC_MEM_REQUIRED,
+              "SDC memory pool is smaller than the configured resources need");
 
 static bool HciNrf52840SdcInit(HciNrf52840_t *pTarget)
 {
