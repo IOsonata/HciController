@@ -278,6 +278,68 @@ int main()
                "response\n");
     }
 
+    /*
+     * The host spends a buffer when it sends an ACL packet and only gets it
+     * back in a Number Of Completed Packets event. A packet the controller
+     * refuses must still return the credit, or the host runs out of buffers
+     * on that link and never recovers. Vol 4 Part E 4.1.1 and 7.7.19.
+     */
+    {
+        HciSdc_t credit;
+        FakeSdc backend = {};
+        uint8_t creditEvent[80];
+
+        HciSdcOps_t creditOps = {
+            AclPut, IsoPut, Get, Process, &backend, HCI_SDC_RETRY_ERROR,
+        };
+        backend.GetResult = HCI_SDC_RETRY_ERROR;
+        backend.AclResult = -1;          /* the controller refuses every one */
+
+        assert(HciSdcInit(&credit, &creditOps, commands,
+                          sizeof(commands) / sizeof(commands[0]), NULL,
+                          creditEvent, sizeof(creditEvent)));
+
+        const HciControllerOps_t *ops4 = HciSdcGetControllerOps(&credit);
+
+        /* Three packets on handle 0x0001, two on handle 0x0002. */
+        const uint8_t aclOne[] = {0x01U, 0x00U, 0x01U, 0x00U, 0xAAU};
+        const uint8_t aclTwo[] = {0x02U, 0x20U, 0x01U, 0x00U, 0xBBU};
+        for (unsigned i = 0U; i < 3U; i++)
+        {
+            assert(ops4->Put(ops4->pContext, HCI_H4_PACKET_ACL, aclOne,
+                             sizeof(aclOne)));
+        }
+        for (unsigned i = 0U; i < 2U; i++)
+        {
+            assert(ops4->Put(ops4->pContext, HCI_H4_PACKET_ACL, aclTwo,
+                             sizeof(aclTwo)));
+        }
+        assert(credit.AclPutErrorCount == 5U);
+
+        HciH4PacketType_t creditType = HCI_H4_PACKET_NONE;
+        uint8_t out[64];
+        size_t outLen = 0U;
+        assert(ops4->Get(ops4->pContext, &creditType, out, sizeof(out),
+                         &outLen) == HCI_CONTROLLER_GET_PACKET);
+
+        assert(creditType == HCI_H4_PACKET_EVENT);
+        assert(out[0] == 0x13U);          /* Number Of Completed Packets */
+        assert(out[1] == 9U);             /* 1 + 2 handles * 4 */
+        assert(outLen == 11U);
+        assert(out[2] == 2U);             /* Num_Handles */
+        assert(out[3] == 0x01U && out[4] == 0x00U);   /* handle 0x0001 */
+        assert(out[5] == 3U && out[6] == 0U);         /* three packets */
+        /* The upper nibble of the ACL header is flags, not the handle. */
+        assert(out[7] == 0x02U && out[8] == 0x00U);   /* handle 0x0002 */
+        assert(out[9] == 2U && out[10] == 0U);        /* two packets */
+
+        /* Emptied by the one event, so it does not repeat. */
+        assert(ops4->Get(ops4->pContext, &creditType, out, sizeof(out),
+                         &outLen) == HCI_CONTROLLER_GET_EMPTY);
+
+        printf("[ok] a refused ACL packet returns its flow control credit\n");
+    }
+
     printf("All SDC routing tests passed.\n");
     return 0;
 }

@@ -15,7 +15,10 @@
 #include "blyst840_boards.h"
 
 // Uncomment and set the MCU oscillator used if different from default SystemInit
-// #define MCU_OSC			{ {OSC_TYPE_XTAL, 16000000, 20, 100}, {OSC_TYPE_RC,	32000, 20, 0}, false }
+// The nRF52840 high frequency crystal is 32 MHz. SystemCoreClockGet feeds the
+// TaktOS tick rate, so a wrong value here scales every timeout.
+// Uncomment only on a board with no 32768 Hz crystal.
+// #define MCU_OSC			{ {OSC_TYPE_XTAL, 32000000, 20, 100}, {OSC_TYPE_RC,	32768, 250, 0}, false }
 
 // Each IO pin has three associated macros:
 //   <DEV_PIN_NAME>_PORT   : GPIO port number

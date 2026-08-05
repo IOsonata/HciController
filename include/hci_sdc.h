@@ -42,6 +42,15 @@ typedef struct {
     int32_t RetryError;
 } HciSdcOps_t;
 
+/*
+ * Connection handles that can owe a flow control credit at the same time. The
+ * controller supports far fewer links than this.
+ */
+#define HCI_SDC_CREDIT_HANDLES 4U
+
+/* Vol 4 Part E 7.7.19. */
+#define HCI_SDC_EVENT_NUM_COMPLETED_PACKETS 0x13U
+
 typedef struct {
     HciCmdDispatch_t Commands;
     HciSdcOps_t Ops;
@@ -56,6 +65,18 @@ typedef struct {
      * response of the command that produced it.
      */
     bool CommandEventLast;
+
+    /*
+     * Host flow control credits owed back for ACL packets the controller
+     * refused. The host spends a credit when it sends a packet and only gets
+     * it back in a Number Of Completed Packets event, so a packet dropped
+     * without one costs the host a buffer permanently, Vol 4 Part E 4.1.1.
+     * One entry per connection handle, counts aggregated.
+     */
+    uint16_t CreditHandle[HCI_SDC_CREDIT_HANDLES];
+    uint16_t CreditCount[HCI_SDC_CREDIT_HANDLES];
+    uint8_t CreditEntries;
+    uint32_t CreditOverflowCount;
 
     uint32_t AclPutErrorCount;
     uint32_t IsoPutErrorCount;

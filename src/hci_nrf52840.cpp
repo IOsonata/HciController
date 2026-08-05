@@ -94,10 +94,20 @@
 #define HCI_NRF52840_USB_STORM_LIMIT 2000U
 #endif
 
+/*
+ * Attempts at the random source before giving up. It is polled from low
+ * priority processing, so this bounds a stall rather than a busy wait.
+ */
+#ifndef HCI_NRF52840_RAND_POLL_LOOPS
+#define HCI_NRF52840_RAND_POLL_LOOPS 1000U
+#endif
+
 #define HCI_NRF52840_ERR_HFCLK_TIMEOUT      (-1000)
 #define HCI_NRF52840_ERR_USBREG_TIMEOUT     (-1001)
 #define HCI_NRF52840_ERR_USBD_READY_TIMEOUT (-1002)
 #define HCI_NRF52840_ERR_HFXO_NOT_XTAL      (-1003)
+/* Cable absent is not the same fault as a regulator that never came up. */
+#define HCI_NRF52840_ERR_NO_VBUS            (-1004)
 
 /*
  * The crystal check the TinyUSB nRF5x port spins on. MPSL reporting the clock
@@ -347,15 +357,38 @@ static void HciNrf52840SdcAssert(const char *file, uint32_t line)
     for (;;) { }
 }
 
+/*
+ * SDC calls this from the same context as mpsl_low_priority_process, which is
+ * the runtime thread. Spinning here stops MPSL low priority processing for
+ * good, with no fault count and no trace, so both waits are bounded and a
+ * failure leaves zeros behind rather than hanging the device.
+ *
+ * Zero filled randomness is not acceptable for pairing, which is why the
+ * failure is counted where the application can see it.
+ */
 static void HciNrf52840RandPoll(uint8_t *pBuffer, uint8_t Length)
 {
     CryptoRngNrf *rng = CryptoRngNrfInstance();
-    if (rng == nullptr)
+
+    if (rng != nullptr)
     {
-        for (;;) { }
+        for (uint32_t loop = 0U; loop < HCI_NRF52840_RAND_POLL_LOOPS; loop++)
+        {
+            if (rng->Random(pBuffer, Length) == CRYPTO_STATUS_OK)
+            {
+                return;
+            }
+        }
     }
 
-    while (rng->Random(pBuffer, Length) != CRYPTO_STATUS_OK) { }
+    if (s_pTarget != nullptr)
+    {
+        s_pTarget->RandFailCount++;
+    }
+
+    HciTrace("rand: source unavailable, %u bytes zero filled\r\n",
+             (unsigned)Length);
+    memset(pBuffer, 0, Length);
 }
 
 static void HciNrf52840SdcCallback(void)
@@ -574,6 +607,42 @@ static void HciNrf52840Fault(void *pContext, int Error)
     }
 }
 
+/*
+ * Undo everything HciNrf52840UsbStart put in place, for a failure between the
+ * crystal request and the point where the port is live. Every step is
+ * conditional on having been taken, so this is safe from any failure point.
+ */
+static bool HciNrf52840UsbStartFailed(HciNrf52840_t *pTarget,
+                                      int32_t Error,
+                                      bool ErrataApplied)
+{
+    if (ErrataApplied)
+    {
+        HciNrf52840UsbdErrataRevert();
+    }
+
+    NRF_USBD->INTEN = 0U;
+    NRF_USBD->USBPULLUP = 0U;
+    NRF_USBD->ENABLE = 0U;
+    __ISB();
+    __DSB();
+
+    NVIC_DisableIRQ(USBD_IRQn);
+    NRF_POWER->INTENCLR = HCI_NRF52840_USB_INT_MASK;
+
+    /*
+     * The crystal was requested for USB alone. Holding it after a failed bring
+     * up keeps MPSL from ever dropping to the internal oscillator between
+     * radio events, for the rest of the boot.
+     */
+    (void)HciNrf52840HfclkRelease();
+
+    pTarget->UsbStarted = false;
+    pTarget->UsbReadyDone = false;
+    pTarget->LastError = Error;
+    return false;
+}
+
 bool HciNrf52840UsbStart(HciNrf52840_t *pTarget)
 {
     if (pTarget == nullptr || pTarget != s_pTarget || !pTarget->UsbEnabled ||
@@ -599,8 +668,6 @@ bool HciNrf52840UsbStart(HciNrf52840_t *pTarget)
 
     NVIC_SetPriority(USBD_IRQn, HCI_NRF52840_USB_IRQ_PRIORITY);
 
-    pTarget->UsbStarted = true;
-
     uint32_t status = NRF_POWER->USBREGSTATUS;
     HciTrace("usb: start usbregstatus=0x%08lX inten=0x%08lX\r\n",
              (unsigned long)status, (unsigned long)NRF_POWER->INTENSET);
@@ -608,8 +675,8 @@ bool HciNrf52840UsbStart(HciNrf52840_t *pTarget)
     if ((status & POWER_USBREGSTATUS_VBUSDETECT_Msk) == 0U)
     {
         HciTrace("usb: no vbus\r\n");
-        pTarget->LastError = HCI_NRF52840_ERR_USBREG_TIMEOUT;
-        return false;
+        return HciNrf52840UsbStartFailed(pTarget, HCI_NRF52840_ERR_NO_VBUS,
+                                         false);
     }
 
     /*
@@ -633,6 +700,13 @@ bool HciNrf52840UsbStart(HciNrf52840_t *pTarget)
     while ((NRF_USBD->EVENTCAUSE & USBD_EVENTCAUSE_READY_Msk) == 0U &&
            loop < HCI_NRF52840_USBREG_WAIT_LOOPS)
     {
+        /*
+         * MPSL and the radio are already running by this point, and this wait
+         * can take its full budget on a bad supply. Low priority processing
+         * has a deadline of a few hundred milliseconds, so it is pumped here
+         * exactly as in the crystal wait above.
+         */
+        mpsl_low_priority_process();
         loop++;
     }
 
@@ -640,8 +714,9 @@ bool HciNrf52840UsbStart(HciNrf52840_t *pTarget)
     {
         HciTrace("usb: controller ready timeout eventcause=0x%08lX\r\n",
                  (unsigned long)NRF_USBD->EVENTCAUSE);
-        pTarget->LastError = HCI_NRF52840_ERR_USBD_READY_TIMEOUT;
-        return false;
+        return HciNrf52840UsbStartFailed(pTarget,
+                                         HCI_NRF52840_ERR_USBD_READY_TIMEOUT,
+                                         true);
     }
 
     NRF_USBD->EVENTCAUSE = USBD_EVENTCAUSE_READY_Msk;
@@ -677,6 +752,7 @@ bool HciNrf52840UsbStart(HciNrf52840_t *pTarget)
     while ((status & POWER_USBREGSTATUS_OUTPUTRDY_Msk) == 0U &&
            loop < HCI_NRF52840_USBREG_WAIT_LOOPS)
     {
+        mpsl_low_priority_process();
         status = NRF_POWER->USBREGSTATUS;
         loop++;
     }
@@ -685,8 +761,9 @@ bool HciNrf52840UsbStart(HciNrf52840_t *pTarget)
     {
         HciTrace("usb: regulator timeout usbregstatus=0x%08lX\r\n",
                  (unsigned long)status);
-        pTarget->LastError = HCI_NRF52840_ERR_USBREG_TIMEOUT;
-        return false;
+        return HciNrf52840UsbStartFailed(pTarget,
+                                         HCI_NRF52840_ERR_USBREG_TIMEOUT,
+                                         false);
     }
 
     HciTrace("usb: outrdy after %lu polls\r\n", (unsigned long)loop);
@@ -699,14 +776,21 @@ bool HciNrf52840UsbStart(HciNrf52840_t *pTarget)
     {
         HciTrace("usb: hfxo not on crystal hfclkstat=0x%08lX\r\n",
                  (unsigned long)NRF_CLOCK->HFCLKSTAT);
-        pTarget->LastError = HCI_NRF52840_ERR_HFXO_NOT_XTAL;
-        return false;
+        return HciNrf52840UsbStartFailed(pTarget,
+                                         HCI_NRF52840_ERR_HFXO_NOT_XTAL,
+                                         false);
     }
 
     NRF_USBD->USBPULLUP = 1U;
     __ISB();
     __DSB();
 
+    /*
+     * Set only now that the port is genuinely up. Anything earlier makes a
+     * failed bring up look like a success to the interrupt handler, to
+     * HciNrf52840Stop and to a caller that retries.
+     */
+    pTarget->UsbStarted = true;
     pTarget->UsbReadyDone = true;
 
     /* MPSL shares the enable register, so put the USB bits back. */

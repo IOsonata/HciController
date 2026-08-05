@@ -63,6 +63,75 @@ static bool HciSdcPacketLength(HciH4PacketType_t Type,
     return true;
 }
 
+/*
+ * Remember a flow control credit owed back for an ACL packet the controller
+ * would not take. The connection handle is the low 12 bits of the first two
+ * octets of the ACL header, Vol 4 Part E 5.4.2.
+ */
+static void HciSdcOweCredit(HciSdc_t *pSdc, const uint8_t *pPacket)
+{
+    const uint16_t handle = (uint16_t)(((uint16_t)pPacket[0] |
+                                        ((uint16_t)pPacket[1] << 8)) & 0x0FFFU);
+
+    for (uint8_t i = 0U; i < pSdc->CreditEntries; i++)
+    {
+        if (pSdc->CreditHandle[i] == handle)
+        {
+            pSdc->CreditCount[i]++;
+            return;
+        }
+    }
+
+    if (pSdc->CreditEntries >= HCI_SDC_CREDIT_HANDLES)
+    {
+        /*
+         * More links owing credits than the table holds. Dropping the credit
+         * costs the host one buffer on that link, which is the same failure
+         * this function exists to avoid, so it is counted rather than hidden.
+         */
+        pSdc->CreditOverflowCount++;
+        return;
+    }
+
+    pSdc->CreditHandle[pSdc->CreditEntries] = handle;
+    pSdc->CreditCount[pSdc->CreditEntries] = 1U;
+    pSdc->CreditEntries++;
+}
+
+/*
+ * Build the Number Of Completed Packets event for everything owed, Vol 4 Part
+ * E 7.7.19. One event covers every handle, so the table empties in one go.
+ */
+static bool HciSdcBuildCreditEvent(HciSdc_t *pSdc,
+                                   uint8_t *pPacket,
+                                   size_t PacketCapacity,
+                                   size_t *pPacketLen)
+{
+    const size_t len = 3U + ((size_t)pSdc->CreditEntries * 4U);
+
+    if (pSdc->CreditEntries == 0U || len > PacketCapacity)
+    {
+        return false;
+    }
+
+    pPacket[0] = HCI_SDC_EVENT_NUM_COMPLETED_PACKETS;
+    pPacket[1] = (uint8_t)(1U + ((size_t)pSdc->CreditEntries * 4U));
+    pPacket[2] = pSdc->CreditEntries;
+
+    size_t at = 3U;
+    for (uint8_t i = 0U; i < pSdc->CreditEntries; i++)
+    {
+        pPacket[at++] = (uint8_t)pSdc->CreditHandle[i];
+        pPacket[at++] = (uint8_t)(pSdc->CreditHandle[i] >> 8);
+        pPacket[at++] = (uint8_t)pSdc->CreditCount[i];
+        pPacket[at++] = (uint8_t)(pSdc->CreditCount[i] >> 8);
+    }
+
+    pSdc->CreditEntries = 0U;
+    *pPacketLen = len;
+    return true;
+}
+
 static bool HciSdcPutPacket(void *pContext,
                             HciH4PacketType_t Type,
                             const uint8_t *pPacket,
@@ -99,7 +168,14 @@ static bool HciSdcPutPacket(void *pContext,
             }
             if (result != 0)
             {
+                /*
+                 * The packet is gone but the host still spent a buffer on it,
+                 * and nothing else will ever hand that buffer back. Owe the
+                 * credit here so it is returned in the next Number Of
+                 * Completed Packets event.
+                 */
                 pSdc->AclPutErrorCount++;
+                HciSdcOweCredit(pSdc, pPacket);
             }
             return true;
         }
@@ -168,6 +244,17 @@ static HciControllerGetResult_t HciSdcGetPacket(void *pContext,
     {
         return HciSdcGetCommandEvent(pSdc, pType, pPacket, PacketCapacity,
                                      pPacketLen);
+    }
+
+    /*
+     * Credits owed for refused ACL packets go out before the controller queue
+     * is asked. They are bounded by the number of packets the host had in
+     * flight, so this cannot starve the queue.
+     */
+    if (HciSdcBuildCreditEvent(pSdc, pPacket, PacketCapacity, pPacketLen))
+    {
+        *pType = HCI_H4_PACKET_EVENT;
+        return HCI_CONTROLLER_GET_PACKET;
     }
 
     uint8_t sdcType = HCI_SDC_MSG_TYPE_NONE;

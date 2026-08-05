@@ -38,6 +38,7 @@ typedef struct {
     bool HfclkRequested;
     volatile bool UsbStarted;
     volatile bool UsbReadyDone;
+    uint32_t RandFailCount;
     volatile uint32_t UsbIrqCount;
     volatile uint32_t UsbIrqMark;
     volatile uint32_t UsbStuckCauseCount;

@@ -28,8 +28,15 @@
 #define STATUS_THREAD_STACK_SIZE 512U
 #define STATUS_UPDATE_MS         100U
 
-#ifdef MCU_OSC_CONFIG
-McuOsc_t g_McuOsc = MCU_OSC_CONFIG;
+/*
+ * board.h names this MCU_OSC. Defining it overrides the __WEAK default in
+ * IOsonata, which is HFXO 32 MHz and LFXO 32768 at 20 ppm. Leave it undefined
+ * and that default is used, which is what the dongle has. It matters because
+ * HciNrf52840MpslInit chooses MPSL_CLOCK_LF_SRC_XTAL or _RC from this, and
+ * SystemCoreClockGet feeds the TaktOS tick rate below.
+ */
+#ifdef MCU_OSC
+McuOsc_t g_McuOsc = MCU_OSC;
 #endif
 
 static HciApp_t s_HciApp;

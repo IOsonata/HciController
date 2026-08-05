@@ -209,11 +209,29 @@ static bool HciAppHostStart(void *pContext)
          */
         for (uint32_t pass = 0U; pass < HCI_APP_USB_SETTLE_PASSES; pass++)
         {
+            /*
+             * MPSL and the radio are already up. This loop runs at the highest
+             * thread priority and can take its whole budget on a port that
+             * supplies VBUS without enumerating, so low priority processing is
+             * pumped here to stay inside its deadline.
+             */
+            if (pApp->Runtime.Ops.ProcessMpsl != nullptr)
+            {
+                pApp->Runtime.Ops.ProcessMpsl(pApp->Runtime.Ops.pContext);
+            }
+
             HciNrf52840UsbPassMark(&pApp->Target);
             HciTinyUsbProcess(&pApp->Usb);
 
             if (HciTinyUsbIsMounted(&pApp->Usb))
             {
+                break;
+            }
+
+            /* A stop asked for during enumeration must not wait it out. */
+            if (pApp->Runtime.StopRequested)
+            {
+                HciTrace("host: settle abandoned, stop requested\r\n");
                 break;
             }
 

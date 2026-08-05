@@ -331,10 +331,22 @@ static void TestUsbRegulatorTimeout(void)
     assert(target.LastError == -1001);
     assert(!target.UsbReadyDone);
 
-    /* The controller came up but the pull up must stay down. */
-    assert(gUsbd.ENABLE == 1U);
+    /*
+     * A failed bring up unwinds. The controller goes back off, the pull up
+     * never goes up, the flag does not claim success, and the crystal that was
+     * requested for USB alone is handed back so MPSL can drop to the internal
+     * oscillator between radio events.
+     */
+    assert(!target.UsbStarted);
+    assert(gUsbd.ENABLE == 0U);
     assert(gUsbd.USBPULLUP == 0U);
+    assert(gUsbd.INTEN == 0U);
+    assert(gHfclkReleases == 1U);
     assert(gUsbPowerEvents[0] == 0U);
+
+    /* A retry after a failure must not claim the port is already up. */
+    gPower.USBREGSTATUS = 0U;
+    assert(!HciNrf52840UsbStart(&target));
 
     HciNrf52840Stop(&target);
     printf("[ok] regulator wait is bounded and reports its own code\n");
