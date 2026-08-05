@@ -19,6 +19,7 @@
 #include "sdc_hci_cmd_info_params.h"
 #include "sdc_hci_cmd_le.h"
 #include "sdc_hci_cmd_link_control.h"
+#include "sdc_hci_vs.h"
 #include "sdc_stub.h"
 
 #ifndef HCI_SDC_HAS_READ_SUPPORTED_STATES
@@ -35,6 +36,10 @@
 
 #ifndef HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT
 #define HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT 1
+#endif
+
+#ifndef HCI_SDC_HAS_VS_READ_STATIC_ADDRESSES
+#define HCI_SDC_HAS_VS_READ_STATIC_ADDRESSES 1
 #endif
 
 #define EVENT_COMMAND_COMPLETE 0x0E
@@ -238,6 +243,15 @@ int main(void)
     ExpectComplete("Write Authenticated Payload Timeout", 0x0C7C, zeros,
                    sizeof(sdc_hci_cmd_cb_write_authenticated_payload_timeout_t),
         sizeof(sdc_hci_cmd_cb_write_authenticated_payload_timeout_return_t));
+#endif
+#if HCI_SDC_HAS_VS_READ_STATIC_ADDRESSES
+    /*
+     * Variable return: the count byte plus one 22 byte address, which is what
+     * the stub reports. This is what a host asks when the board has no public
+     * address, so a wrong length here sends it back to inventing one.
+     */
+    ExpectComplete("VS Read Static Addresses", 0xFC09, zeros, 0U,
+                   1U + sizeof(sdc_hci_vs_zephyr_static_address_t));
 #endif
     ExpectComplete("LE Create Connection Cancel", 0x200E, zeros, 0U, 0U);
     ExpectComplete("LE Read Filter Accept List Size", 0x200F, zeros, 0U,
@@ -487,6 +501,15 @@ int main(void)
                 pEntry->Response == HCI_CMD_RESPONSE_STATUS ?
                 EVENT_COMMAND_STATUS : EVENT_COMMAND_COMPLETE;
 
+            /*
+             * One command carries a variable tail, so its declared length is
+             * the minimum rather than the whole answer. Every other entry
+             * emits exactly what it declares.
+             */
+            const bool variableReturn =
+                pEntry->Opcode ==
+                SDC_HCI_OPCODE_CMD_VS_ZEPHYR_READ_STATIC_ADDRESSES;
+
             /* Success: the declared return length is what comes out. */
             g_SdcStub.NextStatus = 0x00;
             Response ok = Exchange(pEntry->Opcode, zeros, pEntry->ParamLen);
@@ -495,7 +518,14 @@ int main(void)
             assert(ok.status == 0x00);
             if (expectedCode == EVENT_COMMAND_COMPLETE)
             {
-                assert(ok.return_len == pEntry->ReturnLen);
+                if (variableReturn)
+                {
+                    assert(ok.return_len >= pEntry->ReturnLen);
+                }
+                else
+                {
+                    assert(ok.return_len == pEntry->ReturnLen);
+                }
             }
 
             /* Rejection: same shape, same length, different status. */
@@ -560,6 +590,15 @@ int main(void)
              */
             {SDC_HCI_OPCODE_CMD_IP_READ_LOCAL_SUPPORTED_COMMANDS, NULL,
              "hci_read_local_supported_commands"},
+#if HCI_SDC_HAS_VS_READ_STATIC_ADDRESSES
+            /*
+             * Vendor specific. Vol 4 Part E 6.27 covers the opcodes the
+             * specification assigns and has no bit for anything in the 0x3F
+             * opcode group, so this row carries no bit either.
+             */
+            {SDC_HCI_OPCODE_CMD_VS_ZEPHYR_READ_STATIC_ADDRESSES, NULL,
+             "vs_zephyr_read_static_addresses"},
+#endif
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_IP_READ_LOCAL_SUPPORTED_FEATURES,
                          hci_read_local_supported_features),
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_IP_READ_BD_ADDR, hci_read_bd_addr),

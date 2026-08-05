@@ -18,6 +18,7 @@
 #include "sdc_hci_cmd_link_control.h"
 #include "sdc_hci_cmd_info_params.h"
 #include "sdc_hci_cmd_le.h"
+#include "sdc_hci_vs.h"
 
 /*
  * The SoftDevice Controller headers declare the whole HCI API, but a library
@@ -56,6 +57,15 @@
 
 #ifndef HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT
 #define HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT 1
+#endif
+
+/*
+ * Vendor specific, and the one thing a host can ask when the board carries no
+ * public address. A dongle with a blank BD_ADDR that answers nothing here
+ * leaves the host to invent an address, so two runs are two different devices.
+ */
+#ifndef HCI_SDC_HAS_VS_READ_STATIC_ADDRESSES
+#define HCI_SDC_HAS_VS_READ_STATIC_ADDRESSES 1
 #endif
 
 static HciCmdResult_t HciSdcComplete(uint8_t Status, size_t ReturnLen)
@@ -586,6 +596,60 @@ static HciCmdResult_t HciSdcCmdLeSetScanEnable(void *,
         return Reply(SdcFunc(pCmd), 0U);                                      \
     }
 
+#if HCI_SDC_HAS_VS_READ_STATIC_ADDRESSES
+/*
+ * The address SDC reports here comes from FICR->DEVICEADDR with the two top
+ * bits set, which is the same value IOsonata nrf_get_mac_address() produces,
+ * so a board answers with the same identity whatever firmware it runs. BlueZ
+ * and Zephyr ask for this before falling back to an address of their own.
+ *
+ * The return is one count byte followed by 22 bytes per address, so its length
+ * depends on the answer rather than the opcode. Two things follow from that.
+ *
+ * The table row declares 1, which is what an error is padded out to and reads
+ * as no addresses, and the handler declares the real length on success.
+ *
+ * And the call takes no capacity argument, so the buffer has to be able to
+ * hold the answer before it is made. Requiring room for the largest return a
+ * Command Complete can carry means anything SDC can legally encode fits. That
+ * is a bound on the encoding, not a promise from SDC, which documents no
+ * maximum for the count.
+ */
+static HciCmdResult_t HciSdcCmdVsReadStaticAddresses(void *,
+                                                     const uint8_t *,
+                                                     size_t,
+                                                     uint8_t *pReturn,
+                                                     size_t ReturnCapacity)
+{
+    if (!HciSdcReturnFits(HCI_CMD_MAX_RETURN_LEN, ReturnCapacity))
+    {
+        return HciSdcComplete(HCI_STATUS_MEMORY_CAPACITY_EXCEEDED, 0U);
+    }
+
+    sdc_hci_cmd_vs_zephyr_read_static_addresses_return_t *pResult =
+        reinterpret_cast<sdc_hci_cmd_vs_zephyr_read_static_addresses_return_t *>(
+            pReturn);
+
+    uint8_t status = sdc_hci_cmd_vs_zephyr_read_static_addresses(pResult);
+    if (status != HCI_STATUS_SUCCESS)
+    {
+        return HciSdcComplete(status, 0U);
+    }
+
+    const size_t length =
+        sizeof(*pResult) +
+        (size_t)pResult->num_addresses *
+            sizeof(sdc_hci_vs_zephyr_static_address_t);
+
+    if (length > HCI_CMD_MAX_RETURN_LEN)
+    {
+        return HciSdcComplete(HCI_STATUS_MEMORY_CAPACITY_EXCEEDED, 0U);
+    }
+
+    return HciSdcComplete(status, length);
+}
+#endif
+
 /* Controller and baseband. */
 #if HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT
 HCI_SDC_CMD_PR(HciSdcCmdReadAuthPayloadTimeout,
@@ -962,6 +1026,17 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
                     HciSdcCmdLeSetExtScanEnable),
     HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_EXT_CREATE_CONN,
                     HCI_CMD_VARIABLE_PARAM_LEN, HciSdcCmdLeExtCreateConn),
+
+    /*
+     * Vendor specific. The return type ends in a flexible array, so sizeof()
+     * on it is the count byte alone, which is exactly the minimum this command
+     * always carries and what an error is padded out to.
+     */
+#if HCI_SDC_HAS_VS_READ_STATIC_ADDRESSES
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_VS_ZEPHYR_READ_STATIC_ADDRESSES, 0U,
+                     HciSdcCmdVsReadStaticAddresses,
+                     sdc_hci_cmd_vs_zephyr_read_static_addresses_return_t),
+#endif
 };
 
 /*
@@ -1053,6 +1128,11 @@ HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_ext_adv_params_return_t, 1U);     /* 7.8.53 
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_max_adv_data_length_return_t, 2U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_number_of_supported_adv_sets_return_t, 1U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_ip_read_local_supported_commands_return_t, 64U);
+#if HCI_SDC_HAS_VS_READ_STATIC_ADDRESSES
+/* Six octets of address and sixteen of identity root, per the Zephyr command. */
+HCI_SDC_SPEC_LEN(sdc_hci_vs_zephyr_static_address_t, 22U);
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_vs_zephyr_read_static_addresses_return_t, 1U);
+#endif
 #if HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_cb_read_authenticated_payload_timeout_return_t, 4U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_cb_write_authenticated_payload_timeout_return_t, 2U);

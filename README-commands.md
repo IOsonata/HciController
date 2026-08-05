@@ -1,6 +1,6 @@
 # HCI command coverage
 
-The dispatch table in `src/hci_sdc_nrfxlib.cpp` carries 57 commands. Anything
+The dispatch table in `src/hci_sdc_nrfxlib.cpp` carries 58 commands. Anything
 not listed there is answered with Unknown HCI Command, so the table is the
 controller's actual capability, and `HCI_Read_Local_Supported_Commands` reports
 exactly the same set. A host test checks the two against each other in both
@@ -104,6 +104,19 @@ Extended scanning and initiating
     0x2042  LE Set Extended Scan Enable
     0x2043  LE Extended Create Connection           variable, status
 
+Vendor specific
+
+    0xFC09  VS Read Static Addresses                variable return
+
+The board carries no public address, so `HCI_Read_BD_ADDR` answers all zeros
+and a host that asks for Own_Address_Type 0x00 is refused with 0x12. 0xFC09 is
+what BlueZ and Zephyr ask instead: it reports the static random address SDC
+derives from FICR, which is the value IOsonata `nrf_get_mac_address()` also
+produces, so the board keeps one identity across runs and across firmware.
+Its return is a count byte followed by 22 octets per address, so the length
+depends on the answer; the table declares the count byte alone, which is the
+minimum the command always carries and what an error is padded out to.
+
 The eight marked status answer with a Command Status rather than a Command
 Complete, as Vol 4 Part E 7.7.15 requires. Getting that wrong leaves a host
 stack waiting for an event that never arrives.
@@ -112,21 +125,23 @@ stack waiting for an event that never arrives.
 
 A SoftDevice Controller header declares the whole HCI API, but a library
 variant only contains the commands it was built with, so a declaration is not
-a guarantee that the symbol links. Four commands therefore sit behind a macro
-in `src/hci_sdc_nrfxlib.cpp`, each covering the handler, the table row and the
-supported commands bit together, so the three stay consistent whichever way
-the macro goes.
+a guarantee that the symbol links. Six commands therefore sit behind a macro in
+`src/hci_sdc_nrfxlib.cpp`, each covering the handler, the table row and the
+supported commands bit together, so the three stay consistent whichever way the
+macro goes.
 
     HCI_SDC_HAS_READ_SUPPORTED_STATES   0     0x201C  LE Read Supported States
     HCI_SDC_HAS_READ_TRANSMIT_POWER     0     0x204B  LE Read Transmit Power
     HCI_SDC_HAS_READ_REMOTE_VERSION     1     0x041D  Read Remote Version Info
     HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT    1     0x0C7B and 0x0C7C
+    HCI_SDC_HAS_VS_READ_STATIC_ADDRESSES  1   0xFC09  VS Read Static Addresses
 
 The first two default to off because a link against the multirole library
 proved the symbols absent. Read Supported States reports legacy advertising
 states and is left out of a build that only enables the extended advertiser.
-Read Transmit Power belongs to LE Power Control. The last two default to on
-because the specification makes them mandatory.
+Read Transmit Power belongs to LE Power Control. The next two default to on
+because the specification makes them mandatory, and the vendor specific one
+because a board with no public address is unusable to a host without it.
 
 List what a library really defines with
 
@@ -153,8 +168,12 @@ fixes Parameter_Total_Length. A mismatch is refused with 0x12. Without that
 check a short packet with a large count makes SDC read past the end of the
 receive buffer, which holds the previous packet.
 
-Parameter lengths come from `sizeof()` on the SDC type rather than hand
-counted numbers.
+Parameter lengths come from `sizeof()` on the SDC type rather than hand counted
+numbers, and static assertions pin each of those types to the length Vol 4 Part
+E gives. Without them nothing compares an SDC type against the wire: the host
+test sends the same `sizeof()` the table declares, so the two agree by
+construction whatever either is worth, and a type that did not match would show
+up only as a board refusing a correctly formed command with 0x12.
 
 Every table row also declares the response kind and the return parameter
 length that a successful call produces, so a rejection is shaped the same way
@@ -165,7 +184,7 @@ for that opcode reads to the host as no answer at all.
 
     make -C tests run NRFXLIB_DIR=/path/to/sdk-nrfxlib
 
-90 checks across nine binaries. `hci_sdc_dispatch_test` compiles the real
+91 checks across nine binaries. `hci_sdc_dispatch_test` compiles the real
 dispatch table against the real nrfxlib headers with only the SDC entry points
 stubbed, then checks that every opcode reaches the intended SDC function, that
 Command Status and Command Complete are used where the specification says,

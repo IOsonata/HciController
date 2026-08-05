@@ -7,6 +7,7 @@
 #include "sdc_hci_cmd_link_control.h"
 #include "sdc_hci_cmd_info_params.h"
 #include "sdc_hci_cmd_le.h"
+#include "sdc_hci_vs.h"
 #include "sdc_stub.h"
 
 SdcStubState_t g_SdcStub;
@@ -493,6 +494,24 @@ int32_t sdc_hci_iso_data_put(uint8_t const *p_data_in)
     (void)p_data_in;
     g_SdcStub.LastCall = "sdc_hci_iso_data_put";
     return 0;
+}
+
+/*
+ * Writes one address, the way a board with a single factory value does. The
+ * count is what the handler measures the return length with, so a stub that
+ * filled it with the usual 0x5A would claim ninety addresses.
+ */
+uint8_t sdc_hci_cmd_vs_zephyr_read_static_addresses(sdc_hci_cmd_vs_zephyr_read_static_addresses_return_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_vs_zephyr_read_static_addresses";
+    g_SdcStub.Calls++;
+    if (a0 != NULL)
+    {
+        a0->num_addresses = 1;
+        memset(&a0->addresses[0], 0x5A, sizeof(sdc_hci_vs_zephyr_static_address_t));
+        a0->addresses[0].address[5] = 0xC0 | 0x1A;
+    }
+    return g_SdcStub.NextStatus;
 }
 
 int32_t sdc_hci_get(uint8_t *p_packet_out, uint8_t *p_msg_type_out)
