@@ -10,6 +10,8 @@
 
 #include "hci_sdc_nrfxlib.h"
 
+#include "hci_counters.h"
+
 #include <string.h>
 
 #include "nrf_errno.h"
@@ -1052,9 +1054,8 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
      * constant from the header instead of a sizeof(), because the wire format
      * is written out field by field and owes nothing to a struct layout.
      */
-    {HCI_SDC_OPCODE_VS_READ_COUNTERS, 0U,
-     (uint16_t)HCI_SDC_COUNTERS_RETURN_LEN, HCI_CMD_RESPONSE_COMPLETE,
-     HciSdcCmdReadCounters},
+    {HCI_COUNTERS_OPCODE, 0U, (uint16_t)HCI_COUNTERS_RETURN_LEN,
+     HCI_CMD_RESPONSE_COMPLETE, HciCountersRead},
 #endif
 };
 
@@ -1179,7 +1180,8 @@ static int32_t HciSdcNrfxlibGet(void *, uint8_t *pPacket, uint8_t *pType)
 
 bool HciSdcNrfxlibInit(HciSdc_t *pSdc,
                        uint8_t *pCommandEvent,
-                       size_t CommandEventCapacity)
+                       size_t CommandEventCapacity,
+                       HciCounters_t *pCounters)
 {
     HciSdcOps_t ops = {
         HciSdcNrfxlibAclPut,
@@ -1191,15 +1193,15 @@ bool HciSdcNrfxlibInit(HciSdc_t *pSdc,
     };
 
     /*
-     * The HciSdc_t is the command context because the counter readout reads it.
-     * Every other handler in the table ignores the context and talks to SDC
-     * through file scope entry points.
+     * The command context is the counter readout's view of the stack. Every
+     * other handler in the table ignores it and talks to SDC through file
+     * scope entry points.
      */
     return HciSdcInit(pSdc,
                       &ops,
                       s_HciSdcCommands,
                       sizeof(s_HciSdcCommands) / sizeof(s_HciSdcCommands[0]),
-                      pSdc,
+                      pCounters,
                       pCommandEvent,
                       CommandEventCapacity);
 }

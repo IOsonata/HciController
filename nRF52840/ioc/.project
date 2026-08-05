@@ -56,6 +56,11 @@
 			<locationURI>PARENT-2-PROJECT_LOC/include/hci_controller.h</locationURI>
 		</link>
 		<link>
+			<name>include/hci_counters.h</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/include/hci_counters.h</locationURI>
+		</link>
+		<link>
 			<name>include/hci_h4.h</name>
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/include/hci_h4.h</locationURI>
@@ -101,11 +106,6 @@
 			<locationURI>PARENT-2-PROJECT_LOC/include/tusb_config.h</locationURI>
 		</link>
 		<link>
-			<name>src/.DS_Store</name>
-			<type>1</type>
-			<locationURI>PARENT-2-PROJECT_LOC/src/.DS_Store</locationURI>
-		</link>
-		<link>
 			<name>src/TinyUSB</name>
 			<type>2</type>
 			<locationURI>virtual:/virtual</locationURI>
@@ -124,6 +124,11 @@
 			<name>src/hci_controller.cpp</name>
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/src/hci_controller.cpp</locationURI>
+		</link>
+		<link>
+			<name>src/hci_counters.cpp</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/src/hci_counters.cpp</locationURI>
 		</link>
 		<link>
 			<name>src/hci_h4.cpp</name>

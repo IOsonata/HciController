@@ -42,6 +42,9 @@ typedef struct {
     HciController_t Controller;
     HciSdc_t Sdc;
 
+    /* Which layers the vendor specific counter readout reports. */
+    HciCounters_t Counters;
+
     UARTDev_t Uart;
     UsbdCdcDevIntrf_t UsbIntrf;
     HciTinyUsb_t Usb;

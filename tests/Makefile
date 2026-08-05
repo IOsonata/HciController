@@ -69,6 +69,7 @@ SDC_TARGET := $(BUILD_DIR)/hci_sdc_dispatch_test
 SDC_SOURCES := $(UNIT)/hci_sdc_dispatch_test.cpp \
                $(SRC)/hci_sdc_nrfxlib.cpp \
                $(SRC)/hci_sdc.cpp \
+               $(SRC)/hci_counters.cpp \
                $(SRC)/hci_cmd_dispatch.cpp \
                $(STUBS)/sdclink/sdc_stub.cpp
 TARGETS += $(SDC_TARGET)

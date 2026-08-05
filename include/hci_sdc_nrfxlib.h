@@ -15,15 +15,22 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "hci_counters.h"
 #include "hci_sdc.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+/*
+ * pCounters becomes the command context, which only the counter readout uses.
+ * NULL is allowed and makes that one command answer Command Disallowed; every
+ * other row in the table is unaffected.
+ */
 bool HciSdcNrfxlibInit(HciSdc_t *pSdc,
                        uint8_t *pCommandEvent,
-                       size_t CommandEventCapacity);
+                       size_t CommandEventCapacity,
+                       HciCounters_t *pCounters);
 
 #ifdef __cplusplus
 }

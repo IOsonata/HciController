@@ -81,12 +81,17 @@ python3 tests/hardware/hci_ble_test.py /dev/ttyACM0 dtm-tx
 python3 tests/hardware/hci_ble_test.py /dev/ttyACM0 counters
 ```
 
-`counters` reads the controller's own tallies of what it refused, over the
-vendor specific opcode in `hci_sdc.h`. Nothing else puts those numbers on the
-wire, so without it a running board can only be questioned with a debugger.
+`counters` reads the firmware's own tallies over the vendor specific opcode in
+`hci_counters.h`. Nothing else puts those numbers on the wire, so without it a
+running board can only be questioned with a debugger.
+
 `connect --flood N` sends N ACL packets while ignoring flow control and reports
-which counters moved, which is how the `sdc_hci_data_put` retry path can be
-shown to be live or dead.
+which counters moved. It first says how many of the N reached
+`sdc_hci_data_put` at all, because a block of refusal counters reading zero
+looks the same whether the controller accepted everything or nothing ever
+arrived. Once that is established it distinguishes the retry path firing, the
+controller refusing with some other error, and the controller taking every
+packet.
 
 `fake_controller.py` is a controller simulator on a pty. It answers the same
 opcodes the firmware does and can simulate a connection, so the two tools above

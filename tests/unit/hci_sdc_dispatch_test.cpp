@@ -50,6 +50,12 @@
 #define EVENT_COMMAND_STATUS   0x0F
 
 static HciSdc_t gSdc;
+
+/*
+ * No bridge in this test, so the upper layers read zero. That is the documented
+ * behaviour for a layer that is absent rather than a reason to refuse.
+ */
+static HciCounters_t gCounters;
 static uint8_t gEventBuffer[300];
 static const HciControllerOps_t *gOps;
 
@@ -163,19 +169,20 @@ static void ExpectCompleteLocal(const char *label, uint16_t opcode,
 }
 
 #if HCI_SDC_HAS_VS_READ_COUNTERS
-/* Positions in the counter block, fixed by hci_sdc.h. */
+/* Positions in the counter block, fixed by hci_counters.h. */
 enum {
     COUNTER_COMMAND = 0,
     COUNTER_UNKNOWN_COMMAND = 1,
     COUNTER_INVALID_PARAM_LEN = 3,
     COUNTER_ACL_PUT_ERROR = 6,
     COUNTER_PUT_RETRY = 8,
+    COUNTER_ACL_PUT = 16,
 };
 
 /* Unpacks the block left in gLastReturn by the most recent readout. */
 static void ReadCounters(uint32_t *pCounters)
 {
-    for (size_t i = 0U; i < HCI_SDC_COUNTERS_COUNT; i++)
+    for (size_t i = 0U; i < HCI_COUNTERS_COUNT; i++)
     {
         const uint8_t *p = &gLastReturn[1U + (i * 4U)];
         pCounters[i] = (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
@@ -258,7 +265,9 @@ int main(void)
 
     static uint8_t zeros[300];
 
-    assert(HciSdcNrfxlibInit(&gSdc, gEventBuffer, sizeof(gEventBuffer)));
+    HciCountersInit(&gCounters, &gSdc, NULL);
+    assert(HciSdcNrfxlibInit(&gSdc, gEventBuffer, sizeof(gEventBuffer),
+                             &gCounters));
     gOps = HciSdcGetControllerOps(&gSdc);
     assert(gOps != NULL);
 
@@ -302,9 +311,9 @@ int main(void)
                    1U + sizeof(sdc_hci_vs_zephyr_static_address_t));
 #endif
 #if HCI_SDC_HAS_VS_READ_COUNTERS
-    ExpectCompleteLocal("VS Read Counters", HCI_SDC_OPCODE_VS_READ_COUNTERS,
-                        zeros, 0U, HCI_SDC_COUNTERS_RETURN_LEN);
-    assert(gLastReturn[0] == HCI_SDC_COUNTERS_VERSION);
+    ExpectCompleteLocal("VS Read Counters", HCI_COUNTERS_OPCODE,
+                        zeros, 0U, HCI_COUNTERS_RETURN_LEN);
+    assert(gLastReturn[0] == HCI_COUNTERS_VERSION);
     printf("[ok] %-38s version %u\n", "counter block names its version",
            (unsigned)gLastReturn[0]);
 #endif
@@ -655,7 +664,7 @@ int main(void)
              "vs_zephyr_read_static_addresses"},
 #endif
 #if HCI_SDC_HAS_VS_READ_COUNTERS
-            {HCI_SDC_OPCODE_VS_READ_COUNTERS, NULL, "vs_read_counters"},
+            {HCI_COUNTERS_OPCODE, NULL, "vs_read_counters"},
 #endif
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_IP_READ_LOCAL_SUPPORTED_FEATURES,
                          hci_read_local_supported_features),
@@ -861,11 +870,11 @@ int main(void)
      * above this point has already been counted.
      */
     {
-        static uint32_t before[HCI_SDC_COUNTERS_COUNT];
-        static uint32_t after[HCI_SDC_COUNTERS_COUNT];
+        static uint32_t before[HCI_COUNTERS_COUNT];
+        static uint32_t after[HCI_COUNTERS_COUNT];
 
         g_SdcStub.NextStatus = 0x00;
-        Exchange(HCI_SDC_OPCODE_VS_READ_COUNTERS, zeros, 0U);
+        Exchange(HCI_COUNTERS_OPCODE, zeros, 0U);
         ReadCounters(before);
 
         /* No entry for this opcode, so it lands on UnknownCommandCount. */
@@ -874,7 +883,7 @@ int main(void)
         Exchange(0x2017, zeros, 3U);
 
         g_SdcStub.NextStatus = 0x00;
-        Exchange(HCI_SDC_OPCODE_VS_READ_COUNTERS, zeros, 0U);
+        Exchange(HCI_COUNTERS_OPCODE, zeros, 0U);
         ReadCounters(after);
 
         assert(after[COUNTER_UNKNOWN_COMMAND] -
@@ -889,9 +898,10 @@ int main(void)
          */
         assert(after[COUNTER_COMMAND] - before[COUNTER_COMMAND] == 3U);
 
-        /* Nothing here touches the radio, so no ACL counter may have moved. */
+        /* Nothing here sends ACL, so none of its counters may have moved. */
         assert(after[COUNTER_ACL_PUT_ERROR] == before[COUNTER_ACL_PUT_ERROR]);
         assert(after[COUNTER_PUT_RETRY] == before[COUNTER_PUT_RETRY]);
+        assert(after[COUNTER_ACL_PUT] == before[COUNTER_ACL_PUT]);
 
         printf("[ok] %-38s unknown +1, bad length +1, commands +3\n",
                "counters follow what the layer refused");

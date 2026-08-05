@@ -78,8 +78,10 @@ OP_LE_EXT_CREATE_CONNECTION = 0x2043
 
 OP_VS_READ_STATIC_ADDRESSES = 0xFC09
 
-# Vendor specific counter readout, HciController's own. See hci_sdc.h.
+# Vendor specific counter readout, HciController's own. See hci_counters.h.
+# Order is fixed there; names are appended, never renumbered.
 OP_VS_READ_COUNTERS = 0xFFF0
+COUNTER_VERSION = 2
 COUNTER_NAMES = [
     "commands accepted",
     "unknown opcodes",
@@ -97,6 +99,20 @@ COUNTER_NAMES = [
     "oversize ACL from host",
     "ISO dropped",
     "credit table overflow",
+    "ACL taken by controller",
+    "ISO taken by controller",
+    "H4 bad packet indicator",
+    "H4 oversize packet",
+    "H4 delivery retried",
+    "transport read errors",
+    "transport write errors",
+    "transport write deferred",
+    "transport tx oversize",
+    "host packet retried",
+    "host packet rejected",
+    "controller get errors",
+    "controller packet rejected",
+    "controller packet unsendable",
 ]
 
 CID_ATT = 0x0004
@@ -324,10 +340,10 @@ class Hci:
         if status != 0 or not data:
             return None
         version = data[0]
-        if version != 1:
-            print("Counter block version %d, this script reads version 1."
-                  % version)
-            return None
+        if version > COUNTER_VERSION:
+            print("Counter block version %d, this script reads up to %d. The "
+                  "counters it knows are still in the same places."
+                  % (version, COUNTER_VERSION))
         values = []
         for i in range(len(COUNTER_NAMES)):
             start = 1 + i * 4
@@ -1084,24 +1100,44 @@ def flood_acl(hci, conn_handle, count):
     print("Counters that moved:")
     print_counters(after, before)
 
-    retries = after[8] - before[8]
+    taken = after[16] - before[16]
     refused = after[6] - before[6]
+    retries = after[8] - before[8]
     oversize = after[13] - before[13]
+    reached = taken + refused + oversize
+    lost = count - reached
+
     print()
-    if retries:
+    print("%d of %d packets reached sdc_hci_data_put." % (reached, count))
+    if lost > 0:
+        # Without this the whole run is unreadable: a block of refusal counters
+        # reading zero looks the same whether the controller accepted
+        # everything or nothing ever arrived.
+        print("%d never got that far, so they were dropped above the routing "
+              "layer. Any counter above that moved says where." % lost)
+        upstream = [(COUNTER_NAMES[i], after[i] - before[i])
+                    for i in range(18, min(30, len(after)))
+                    if after[i] != before[i]]
+        if upstream:
+            for name, delta in upstream:
+                print("   %s +%d" % (name, delta))
+        else:
+            print("   nothing upstream moved either, which points at the host "
+                  "or the cable rather than the firmware.")
+    elif retries:
         print("sdc_hci_data_put asked for a retry %d times, so the retry path "
               "is live and the header's list of return codes is incomplete."
               % retries)
     elif refused:
         print("The controller refused %d packets with an error that is not a "
-              "retry. The retry path did not fire." % refused)
+              "retry, so the retry path did not fire." % refused)
     else:
-        print("The controller took every packet. Either the buffers never "
-              "filled, in which case send more than %d, or sdc_hci_data_put "
-              "never refuses and the retry path is dead code." % count)
+        print("The controller took all %d. Either its buffers never filled, in "
+              "which case send more than %d, or sdc_hci_data_put does not "
+              "refuse and the retry path is dead code." % (taken, count))
     if oversize:
-        print("%d packets were refused here as oversize before reaching the "
-              "controller." % oversize)
+        print("%d were refused as oversize before reaching the controller."
+              % oversize)
 
 
 def print_counters(values, baseline=None):

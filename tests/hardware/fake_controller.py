@@ -156,6 +156,7 @@ class Controller:
         self.connected = False
         self.connect_at = None
         self.command_count = 0
+        self.acl_taken = 0
         self.test_packets = 0
         self.scanning = False
         self.next_report = None
@@ -210,12 +211,15 @@ class Controller:
                 opcode, 0x00, bytes([1]) + STATIC_ADDR + IDENTITY_ROOT))
 
         if opcode == OP_VS_READ_COUNTERS:
-            # Version byte then sixteen counters, little endian, as hci_sdc.h
-            # lays them out. The command count is the only one that moves here,
-            # which is enough for the script's decoder to be exercised.
+            # Version byte then thirty counters, little endian, as
+            # hci_counters.h lays them out. The command count and the ACL
+            # success count are the only ones that move here, which is enough
+            # to exercise the script's decoder and its flood arithmetic.
             self.command_count += 1
-            counters = [self.command_count] + [0] * 15
-            body = bytes([1]) + b"".join(
+            counters = [0] * 30
+            counters[0] = self.command_count
+            counters[16] = self.acl_taken
+            body = bytes([2]) + b"".join(
                 struct.pack("<I", v) for v in counters)
             return self.emit(command_complete(opcode, 0x00, body))
 
@@ -280,6 +284,9 @@ class Controller:
         self.emit(command_complete(opcode, 0x01))
 
     def on_acl(self, handle, cid, payload):
+        # Every ACL packet that arrives is one the routing layer handed on, so
+        # this stands in for the firmware's AclPutCount.
+        self.acl_taken += 1
         # Acknowledge the buffer, which is what returns the host credits.
         self.emit(num_completed(handle, 1))
 

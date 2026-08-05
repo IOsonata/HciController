@@ -118,14 +118,23 @@ Its return is a count byte followed by 22 octets per address, so the length
 depends on the answer; the table declares the count byte alone, which is the
 minimum the command always carries and what an error is padded out to.
 
-0xFFF0 is this firmware's own, and the routing layer answers it without going
-near the radio. It reports the counters the dispatch table and the routing
-layer keep of everything they refused: unknown opcodes, wrong lengths, ACL the
-controller would not take, packets it asked to have offered again. Until it
-existed those numbers only lived in RAM, so a board could be questioned only
-with a debugger on it, which is no use on a sealed dongle. One version byte
-then sixteen counters, four octets each little endian, laid out in `hci_sdc.h`;
-counters are appended and the version raised, never renumbered.
+0xFFF0 is this firmware's own, answered without going near the radio. It
+reports thirty counters spanning all four layers, the H:4 parser, the
+transport, the bridge and the SDC routing layer, of what each accepted and what
+each refused. Until it existed those numbers only lived in RAM, so a board
+could be questioned only with a debugger on it, which is no use on a sealed
+dongle.
+
+The first version of it reported the SDC layer alone, and every counter there
+records a refusal. That made it misleading rather than merely incomplete: a
+flood of ACL that moved no counter could not be told apart from a flood that
+never reached the SDC layer at all, which is exactly the reading it gave on
+hardware. It now counts what the controller took as well as what it refused,
+and reaches up through the stack, so silence means what it appears to mean.
+
+One version byte then the counters, four octets each little endian, laid out in
+`hci_counters.h`. Counters are appended and the version raised, never
+renumbered, so an older host keeps reading the fields it knows.
 
 The eight marked status answer with a Command Status rather than a Command
 Complete, as Vol 4 Part E 7.7.15 requires. Getting that wrong leaves a host

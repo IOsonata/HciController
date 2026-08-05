@@ -195,6 +195,10 @@ static bool HciSdcPutPacket(void *pContext,
                 pSdc->AclPutErrorCount++;
                 HciSdcOweCredit(pSdc, pPacket);
             }
+            else
+            {
+                pSdc->AclPutCount++;
+            }
             return true;
         }
 
@@ -222,6 +226,10 @@ static bool HciSdcPutPacket(void *pContext,
             if (result != 0)
             {
                 pSdc->IsoPutErrorCount++;
+            }
+            else
+            {
+                pSdc->IsoPutCount++;
             }
             return true;
         }
@@ -372,71 +380,6 @@ bool HciSdcInit(HciSdc_t *pSdc,
     pSdc->ControllerOps.pContext = pSdc;
 
     return true;
-}
-
-static void HciSdcWriteLe32(uint8_t *pData, uint32_t Value)
-{
-    pData[0] = (uint8_t)Value;
-    pData[1] = (uint8_t)(Value >> 8);
-    pData[2] = (uint8_t)(Value >> 16);
-    pData[3] = (uint8_t)(Value >> 24);
-}
-
-HciCmdResult_t HciSdcCmdReadCounters(void *pContext,
-                                     const uint8_t *,
-                                     size_t,
-                                     uint8_t *pReturn,
-                                     size_t ReturnCapacity)
-{
-    /*
-     * Command Disallowed is the answer when the table carrying this row was
-     * given some other command context, since the alternative is to read
-     * whatever that context happens to point at and report it as counters.
-     */
-    HciCmdResult_t result = {HCI_STATUS_COMMAND_DISALLOWED,
-                             HCI_CMD_RESPONSE_COMPLETE, 0U};
-
-    const HciSdc_t *pSdc = static_cast<const HciSdc_t *>(pContext);
-    if (pSdc == NULL || pReturn == NULL)
-    {
-        return result;
-    }
-
-    if (ReturnCapacity < HCI_SDC_COUNTERS_RETURN_LEN)
-    {
-        result.Status = HCI_STATUS_MEMORY_CAPACITY_EXCEEDED;
-        return result;
-    }
-
-    /* Order fixed by the header. Appending is safe, renumbering is not. */
-    const uint32_t counters[HCI_SDC_COUNTERS_COUNT] = {
-        pSdc->Commands.CommandCount,
-        pSdc->Commands.UnknownCommandCount,
-        pSdc->Commands.InvalidPacketCount,
-        pSdc->Commands.InvalidParamLenCount,
-        pSdc->Commands.HandlerErrorCount,
-        pSdc->Commands.EventBackpressureCount,
-        pSdc->AclPutErrorCount,
-        pSdc->IsoPutErrorCount,
-        pSdc->PutRetryCount,
-        pSdc->GetErrorCount,
-        pSdc->InvalidOutputTypeCount,
-        pSdc->InvalidOutputLengthCount,
-        pSdc->CommandDeferredCount,
-        pSdc->AclOversizeCount,
-        pSdc->IsoDropCount,
-        pSdc->CreditOverflowCount,
-    };
-
-    pReturn[0] = (uint8_t)HCI_SDC_COUNTERS_VERSION;
-    for (size_t i = 0U; i < HCI_SDC_COUNTERS_COUNT; i++)
-    {
-        HciSdcWriteLe32(&pReturn[1U + (i * 4U)], counters[i]);
-    }
-
-    result.Status = HCI_STATUS_SUCCESS;
-    result.ReturnLen = HCI_SDC_COUNTERS_RETURN_LEN;
-    return result;
 }
 
 const HciControllerOps_t *HciSdcGetControllerOps(HciSdc_t *pSdc)

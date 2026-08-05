@@ -334,9 +334,17 @@ bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType)
     pApp->HostType = HostType;
     s_pApp = pApp;
 
+    /*
+     * The counter readout spans four layers, and the pointers stay valid
+     * whatever order those layers are brought up in, so it is wired here
+     * before anything else needs it.
+     */
+    HciCountersInit(&pApp->Counters, &pApp->Sdc, &pApp->Controller);
+
     if (!HciSdcNrfxlibInit(&pApp->Sdc,
                            pApp->CommandEvent,
-                           sizeof(pApp->CommandEvent)))
+                           sizeof(pApp->CommandEvent),
+                           &pApp->Counters))
     {
         HciTrace("init: HciSdcNrfxlibInit failed\r\n");
         pApp->LastError = -1;
