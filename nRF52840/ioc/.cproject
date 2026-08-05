@@ -116,10 +116,6 @@
 									<listOptionValue builtIn="false" value="&quot;../../../../external/tinyusb/src&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;../../../../external/sdk-nrfxlib/mpsl/include&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;../../../../external/sdk-nrfxlib/softdevice_controller/include&quot;"/>
-									<listOptionValue builtIn="false" value="&quot;../../../TaktOS/include&quot;"/>
-									<listOptionValue builtIn="false" value="&quot;../../../../external/tinyusb/src&quot;"/>
-									<listOptionValue builtIn="false" value="&quot;../../../../external/sdk-nrfxlib/mpsl/include&quot;"/>
-									<listOptionValue builtIn="false" value="&quot;../../../../external/sdk-nrfxlib/softdevice_controller/include&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/src}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/include}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${system_property:iosonata_loc}/IOsonata/include&quot;"/>
@@ -327,10 +323,6 @@
 									<listOptionValue builtIn="false" value="&quot;../../../../IOsonata/ARM/Nordic/nRF52/nRF52840/include&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;../../../../IOsonata/ARM/CMSIS/Core/Include&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;../../../../TaktOS/include&quot;"/>
-									<listOptionValue builtIn="false" value="&quot;../../../../external/tinyusb/src&quot;"/>
-									<listOptionValue builtIn="false" value="&quot;../../../../external/sdk-nrfxlib/mpsl/include&quot;"/>
-									<listOptionValue builtIn="false" value="&quot;../../../../external/sdk-nrfxlib/softdevice_controller/include&quot;"/>
-									<listOptionValue builtIn="false" value="&quot;../../../TaktOS/include&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;../../../../external/tinyusb/src&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;../../../../external/sdk-nrfxlib/mpsl/include&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;../../../../external/sdk-nrfxlib/softdevice_controller/include&quot;"/>
@@ -544,10 +536,6 @@
 									<listOptionValue builtIn="false" value="&quot;../../../../external/tinyusb/src&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;../../../../external/sdk-nrfxlib/mpsl/include&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;../../../../external/sdk-nrfxlib/softdevice_controller/include&quot;"/>
-									<listOptionValue builtIn="false" value="&quot;../../../TaktOS/include&quot;"/>
-									<listOptionValue builtIn="false" value="&quot;../../../../external/tinyusb/src&quot;"/>
-									<listOptionValue builtIn="false" value="&quot;../../../../external/sdk-nrfxlib/mpsl/include&quot;"/>
-									<listOptionValue builtIn="false" value="&quot;../../../../external/sdk-nrfxlib/softdevice_controller/include&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/src}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/include}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${system_property:iosonata_loc}/IOsonata/include&quot;"/>
@@ -756,10 +744,6 @@
 									<listOptionValue builtIn="false" value="&quot;../../../../IOsonata/ARM/Nordic/nRF52/nRF52840/include&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;../../../../IOsonata/ARM/CMSIS/Core/Include&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;../../../../TaktOS/include&quot;"/>
-									<listOptionValue builtIn="false" value="&quot;../../../../external/tinyusb/src&quot;"/>
-									<listOptionValue builtIn="false" value="&quot;../../../../external/sdk-nrfxlib/mpsl/include&quot;"/>
-									<listOptionValue builtIn="false" value="&quot;../../../../external/sdk-nrfxlib/softdevice_controller/include&quot;"/>
-									<listOptionValue builtIn="false" value="&quot;../../../TaktOS/include&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;../../../../external/tinyusb/src&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;../../../../external/sdk-nrfxlib/mpsl/include&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;../../../../external/sdk-nrfxlib/softdevice_controller/include&quot;"/>

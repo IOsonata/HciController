@@ -63,9 +63,9 @@
 // frequency crystal pin. Nothing read them, and driving XL1 would stop the
 // crystal, so they are gone rather than left as a trap.
 
-#define BUTTON1_PORT			UDG_NRF52840_BUT1_PORT
-#define BUTTON1_PIN				UDG_NRF52840_BUT1_PIN
-#define BUTTON1_PINOP			UDG_NRF52840_BUT1_PINOP
+#define BUTTON1_PORT					UDG_NRF52840_BUT1_PORT
+#define BUTTON1_PIN						UDG_NRF52840_BUT1_PIN
+#define BUTTON1_PINOP					UDG_NRF52840_BUT1_PINOP
 
 #define BUTTON_PINS						UDG_NRF52840_BUT_PINS_CFG
 
@@ -156,7 +156,7 @@
 
 
 #else
-#error "No board selected. Define BOARD to a supported board above."
+#error "No pins defined. Define the pins used by your board."
 #endif
 
 //=============================================================================
