@@ -821,7 +821,16 @@ def local_name(data):
 def cmd_scan(hci, args):
     hci.setup()
 
-    params = bytes([0x00, 0x00, 0x01])
+    # Own_Address_Type 0x00 names the public address, and a controller with
+    # none rejects the enable with 0x12 rather than the parameters, so the
+    # failure lands on the command after the one that is wrong. Resolve the
+    # identity the way advertising does and scan with what the board has.
+    identity, addr_type, source = hci.identity()
+    if addr_type == 0x01:
+        hci.command(OP_LE_SET_RANDOM_ADDRESS, identity)
+    print("Scanning as %s (%s)" % (addr_str(identity), source))
+
+    params = bytes([addr_type, 0x00, 0x01])
     params += bytes([0x01 if args.active else 0x00])
     params += struct.pack("<H", 0x0060)
     params += struct.pack("<H", 0x0030)
@@ -838,7 +847,7 @@ def cmd_scan(hci, args):
         hci.unsupported.append(("0x2041", "LE Set Extended Scan Parameters"))
         legacy = bytes([0x01 if args.active else 0x00])
         legacy += struct.pack("<HH", 0x0060, 0x0030)
-        legacy += bytes([0x00, 0x00])
+        legacy += bytes([addr_type, 0x00])
         hci.command(OP_LE_SET_SCAN_PARAMS, legacy)
         hci.command(OP_LE_SET_SCAN_ENABLE, bytes([0x01, 0x00]))
         print("Using legacy scanning, the controller has no extended set.")
@@ -891,11 +900,18 @@ def cmd_connect(hci, args):
     hci.setup()
     peer = addr_bytes(args.address)
 
+    # Same reason as the scanner: a board with no public address rejects an
+    # initiator that names one.
+    identity, addr_type, source = hci.identity()
+    if addr_type == 0x01:
+        hci.command(OP_LE_SET_RANDOM_ADDRESS, identity)
+    print("Connecting as %s (%s)" % (addr_str(identity), source))
+
     params = struct.pack("<HH", 0x0060, 0x0030)   # scan interval, window
     params += bytes([0x00])                        # no filter list
     params += bytes([0x01 if args.random else 0x00])
     params += peer
-    params += bytes([0x00])                        # own address type public
+    params += bytes([addr_type])                   # own address type
     params += struct.pack("<HH", 0x0018, 0x0028)   # conn interval min, max
     params += struct.pack("<HH", 0, 400)           # latency, timeout
     params += struct.pack("<HH", 0, 0)             # ce length

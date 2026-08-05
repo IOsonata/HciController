@@ -964,6 +964,102 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
                     HCI_CMD_VARIABLE_PARAM_LEN, HciSdcCmdLeExtCreateConn),
 };
 
+/*
+ * Every fixed length row above takes its parameter length from sizeof() on an
+ * SDC type, and the host test sends that same sizeof(), so the two agree by
+ * construction whatever either one is worth. Nothing in the tests compares
+ * either against the wire format the host actually sends.
+ *
+ * These do. The numbers are the ones Vol 4 Part E gives, written out rather
+ * than derived, so an SDC type that does not match the wire is a build failure
+ * instead of a controller that answers 0x12 to a correctly formed command. The
+ * return lengths matter for the same reason in the other direction: a host
+ * discards a Command Complete shorter than the minimum it holds for the
+ * opcode, which reads as no answer at all.
+ */
+#define HCI_SDC_SPEC_LEN(SdcType, SpecLen)                                    \
+    static_assert(sizeof(SdcType) == (SpecLen),                               \
+                  #SdcType " is not the length Vol 4 Part E gives")
+
+/* Command parameters. */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_cb_set_event_mask_t, 8U);                /* 7.3.1  */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_lc_disconnect_t, 3U);                    /* 7.1.6  */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_event_mask_t, 8U);                /* 7.8.1  */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_random_address_t, 6U);            /* 7.8.4  */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_adv_params_t, 15U);               /* 7.8.5  */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_adv_data_t, 32U);                 /* 7.8.7  */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_scan_response_data_t, 32U);       /* 7.8.8  */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_adv_enable_t, 1U);                /* 7.8.9  */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_scan_params_t, 7U);               /* 7.8.10 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_scan_enable_t, 2U);               /* 7.8.11 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_create_conn_t, 25U);                  /* 7.8.12 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_add_device_to_filter_accept_list_t, 7U);
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_remove_device_from_filter_accept_list_t, 7U);
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_conn_update_t, 14U);                  /* 7.8.18 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_channel_map_t, 2U);              /* 7.8.20 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_remote_features_t, 2U);          /* 7.8.21 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_encrypt_t, 32U);                      /* 7.8.22 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_enable_encryption_t, 28U);            /* 7.8.24 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_long_term_key_request_reply_t, 18U);  /* 7.8.25 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_long_term_key_request_negative_reply_t, 2U);
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_receiver_test_v1_t, 1U);              /* 7.8.28 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_transmitter_test_v1_t, 3U);           /* 7.8.29 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_data_length_t, 6U);               /* 7.8.33 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_write_suggested_default_data_length_t, 4U);
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_phy_t, 2U);                      /* 7.8.47 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_default_phy_t, 3U);               /* 7.8.48 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_phy_t, 7U);                       /* 7.8.49 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_adv_set_random_address_t, 7U);    /* 7.8.52 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_ext_adv_params_t, 25U);           /* 7.8.53 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_remove_adv_set_t, 1U);                /* 7.8.59 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_ext_scan_enable_t, 6U);           /* 7.8.65 */
+#if HCI_SDC_HAS_READ_REMOTE_VERSION
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_lc_read_remote_version_information_t, 2U);
+#endif
+#if HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_cb_read_authenticated_payload_timeout_t, 2U);
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_cb_write_authenticated_payload_timeout_t, 4U);
+#endif
+
+/*
+ * The fixed part of a variable length command, which is what the length check
+ * measures the trailing array against, and the array element itself.
+ */
+HCI_SDC_SPEC_LEN(sdc_hci_le_set_ext_scan_params_array_params_t, 5U);  /* 7.8.64 */
+HCI_SDC_SPEC_LEN(sdc_hci_le_ext_create_conn_array_params_t, 16U);     /* 7.8.66 */
+static_assert(offsetof(sdc_hci_cmd_le_set_ext_scan_params_t, array_params) == 3U,
+              "LE Set Extended Scan Parameters fixed part is not 3 octets");
+static_assert(offsetof(sdc_hci_cmd_le_ext_create_conn_t, array_params) == 10U,
+              "LE Extended Create Connection fixed part is not 10 octets");
+
+/* Return parameters, status excluded since the event carries it separately. */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_ip_read_local_version_information_return_t, 8U);
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_ip_read_local_supported_features_return_t, 8U);
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_ip_read_bd_addr_return_t, 6U);
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_buffer_size_return_t, 3U);       /* 7.8.2  */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_local_supported_features_return_t, 8U);
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_adv_physical_channel_tx_power_return_t, 1U);
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_filter_accept_list_size_return_t, 1U);
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_channel_map_return_t, 7U);       /* 7.8.20 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_encrypt_return_t, 16U);               /* 7.8.22 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_rand_return_t, 8U);                   /* 7.8.23 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_long_term_key_request_reply_return_t, 2U);
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_test_end_return_t, 2U);               /* 7.8.30 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_data_length_return_t, 2U);        /* 7.8.33 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_suggested_default_data_length_return_t, 4U);
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_max_data_length_return_t, 8U);   /* 7.8.46 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_phy_return_t, 4U);               /* 7.8.47 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_ext_adv_params_return_t, 1U);     /* 7.8.53 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_max_adv_data_length_return_t, 2U);
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_number_of_supported_adv_sets_return_t, 1U);
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_ip_read_local_supported_commands_return_t, 64U);
+#if HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_cb_read_authenticated_payload_timeout_return_t, 4U);
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_cb_write_authenticated_payload_timeout_return_t, 2U);
+#endif
+
+#undef HCI_SDC_SPEC_LEN
+
 static int32_t HciSdcNrfxlibAclPut(void *, const uint8_t *pPacket)
 {
     return sdc_hci_data_put(pPacket);
