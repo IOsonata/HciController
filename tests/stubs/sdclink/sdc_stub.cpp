@@ -11,6 +11,15 @@
 
 SdcStubState_t g_SdcStub;
 
+uint8_t sdc_hci_cmd_cb_read_authenticated_payload_timeout(const sdc_hci_cmd_cb_read_authenticated_payload_timeout_t * a0, sdc_hci_cmd_cb_read_authenticated_payload_timeout_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_cb_read_authenticated_payload_timeout";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_cb_read_authenticated_payload_timeout_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
 uint8_t sdc_hci_cmd_cb_reset(void)
 {
     g_SdcStub.LastCall = "sdc_hci_cmd_cb_reset";
@@ -23,6 +32,15 @@ uint8_t sdc_hci_cmd_cb_set_event_mask(const sdc_hci_cmd_cb_set_event_mask_t * a0
     g_SdcStub.LastCall = "sdc_hci_cmd_cb_set_event_mask";
     g_SdcStub.Calls++;
     (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_cb_write_authenticated_payload_timeout(const sdc_hci_cmd_cb_write_authenticated_payload_timeout_t * a0, sdc_hci_cmd_cb_write_authenticated_payload_timeout_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_cb_write_authenticated_payload_timeout";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_cb_write_authenticated_payload_timeout_return_t)); }
     return g_SdcStub.NextStatus;
 }
 
@@ -53,6 +71,14 @@ uint8_t sdc_hci_cmd_ip_read_local_version_information(sdc_hci_cmd_ip_read_local_
 uint8_t sdc_hci_cmd_lc_disconnect(const sdc_hci_cmd_lc_disconnect_t * a0)
 {
     g_SdcStub.LastCall = "sdc_hci_cmd_lc_disconnect";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_lc_read_remote_version_information(const sdc_hci_cmd_lc_read_remote_version_information_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_lc_read_remote_version_information";
     g_SdcStub.Calls++;
     (void)a0;
     return g_SdcStub.NextStatus;

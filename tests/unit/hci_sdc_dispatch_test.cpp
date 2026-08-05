@@ -15,6 +15,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "sdc_hci_cmd_controller_baseband.h"
+#include "sdc_hci_cmd_info_params.h"
 #include "sdc_hci_cmd_le.h"
 #include "sdc_hci_cmd_link_control.h"
 #include "sdc_stub.h"
@@ -27,12 +29,23 @@
 #define HCI_SDC_HAS_READ_TRANSMIT_POWER 0
 #endif
 
+#ifndef HCI_SDC_HAS_READ_REMOTE_VERSION
+#define HCI_SDC_HAS_READ_REMOTE_VERSION 1
+#endif
+
+#ifndef HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT
+#define HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT 1
+#endif
+
 #define EVENT_COMMAND_COMPLETE 0x0E
 #define EVENT_COMMAND_STATUS   0x0F
 
 static HciSdc_t gSdc;
 static uint8_t gEventBuffer[300];
 static const HciControllerOps_t *gOps;
+
+/* Return parameters of the last exchange, for tests that read them back. */
+static uint8_t gLastReturn[300];
 
 struct Response {
     uint8_t code;
@@ -87,6 +100,10 @@ static Response Exchange(uint16_t opcode, const uint8_t *pParams, size_t len)
         rsp.opcode = (uint16_t)(out[3] | (out[4] << 8));
         rsp.status = out[5];
         rsp.return_len = outLen - 6U;
+        if (rsp.return_len > 0U)
+        {
+            memcpy(gLastReturn, &out[6], rsp.return_len);
+        }
     }
     else
     {
@@ -195,6 +212,10 @@ int main(void)
     /* Commands the specification answers with Command Status. */
     ExpectStatus("Disconnect", 0x0406, zeros,
                  sizeof(sdc_hci_cmd_lc_disconnect_t));
+#if HCI_SDC_HAS_READ_REMOTE_VERSION
+    ExpectStatus("Read Remote Version Information", 0x041D, zeros,
+                 sizeof(sdc_hci_cmd_lc_read_remote_version_information_t));
+#endif
     ExpectStatus("LE Create Connection", 0x200D, zeros,
                  sizeof(sdc_hci_cmd_le_create_conn_t));
     ExpectStatus("LE Connection Update", 0x2013, zeros,
@@ -210,6 +231,14 @@ int main(void)
                  offsetof(sdc_hci_cmd_le_ext_create_conn_t, array_params));
 
     /* Commands answered with Command Complete, some carrying return data. */
+#if HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT
+    ExpectComplete("Read Authenticated Payload Timeout", 0x0C7B, zeros,
+                   sizeof(sdc_hci_cmd_cb_read_authenticated_payload_timeout_t),
+        sizeof(sdc_hci_cmd_cb_read_authenticated_payload_timeout_return_t));
+    ExpectComplete("Write Authenticated Payload Timeout", 0x0C7C, zeros,
+                   sizeof(sdc_hci_cmd_cb_write_authenticated_payload_timeout_t),
+        sizeof(sdc_hci_cmd_cb_write_authenticated_payload_timeout_return_t));
+#endif
     ExpectComplete("LE Create Connection Cancel", 0x200E, zeros, 0U, 0U);
     ExpectComplete("LE Read Filter Accept List Size", 0x200F, zeros, 0U,
                    sizeof(sdc_hci_cmd_le_read_filter_accept_list_size_return_t));
@@ -485,6 +514,245 @@ int main(void)
 
         printf("[ok] %-38s %zu entries, %zu variable skipped\n",
                "table declares what it emits", checked, skipped);
+    }
+
+    /*
+     * The dispatch table and the supported commands bitmap are both written by
+     * hand, and Vol 4 Part E 6.27 says the bitmap names what the controller
+     * will actually accept. A host reads the bitmap and never tries an opcode
+     * whose bit is clear, so a table entry with no bit is dead, and a bit with
+     * no table entry is a promise the controller breaks with Unknown HCI
+     * Command. The two are checked against each other in both directions here,
+     * so adding one without the other fails the build rather than the host.
+     */
+    {
+        typedef uint8_t (*BitReader)(const sdc_hci_ip_supported_commands_t *);
+
+        struct BitMap {
+            uint16_t Opcode;
+            BitReader Bit;      /* NULL where the specification assigns none */
+            const char *Name;
+        };
+
+#define BITMAP_ENTRY(Opcode, Field)                                           \
+    {Opcode,                                                                  \
+     [](const sdc_hci_ip_supported_commands_t *p) -> uint8_t                  \
+     { return (uint8_t)p->Field; },                                           \
+     #Field}
+
+        const BitMap map[] = {
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_CB_SET_EVENT_MASK,
+                         hci_set_event_mask),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_CB_RESET, hci_reset),
+#if HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT
+            BITMAP_ENTRY(
+                SDC_HCI_OPCODE_CMD_CB_READ_AUTHENTICATED_PAYLOAD_TIMEOUT,
+                hci_read_authenticated_payload_timeout),
+            BITMAP_ENTRY(
+                SDC_HCI_OPCODE_CMD_CB_WRITE_AUTHENTICATED_PAYLOAD_TIMEOUT,
+                hci_write_authenticated_payload_timeout),
+#endif
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_IP_READ_LOCAL_VERSION_INFORMATION,
+                         hci_read_local_version_information),
+            /*
+             * Read Local Supported Commands has no bit of its own. Octet 14
+             * bit 4, where one would sit by position, is reserved.
+             */
+            {SDC_HCI_OPCODE_CMD_IP_READ_LOCAL_SUPPORTED_COMMANDS, NULL,
+             "hci_read_local_supported_commands"},
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_IP_READ_LOCAL_SUPPORTED_FEATURES,
+                         hci_read_local_supported_features),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_IP_READ_BD_ADDR, hci_read_bd_addr),
+
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_EVENT_MASK,
+                         hci_le_set_event_mask),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_READ_BUFFER_SIZE,
+                         hci_le_read_buffer_size_v1),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_READ_LOCAL_SUPPORTED_FEATURES,
+                         hci_le_read_local_supported_features),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_RANDOM_ADDRESS,
+                         hci_le_set_random_address),
+
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_ADV_PARAMS,
+                         hci_le_set_advertising_parameters),
+            BITMAP_ENTRY(
+                SDC_HCI_OPCODE_CMD_LE_READ_ADV_PHYSICAL_CHANNEL_TX_POWER,
+                hci_le_read_advertising_physical_channel_tx_power),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_ADV_DATA,
+                         hci_le_set_advertising_data),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_SCAN_RESPONSE_DATA,
+                         hci_le_set_scan_response_data),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_ADV_ENABLE,
+                         hci_le_set_advertising_enable),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_SCAN_PARAMS,
+                         hci_le_set_scan_parameters),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_SCAN_ENABLE,
+                         hci_le_set_scan_enable),
+
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LC_DISCONNECT, hci_disconnect),
+#if HCI_SDC_HAS_READ_REMOTE_VERSION
+            BITMAP_ENTRY(
+                SDC_HCI_OPCODE_CMD_LC_READ_REMOTE_VERSION_INFORMATION,
+                hci_read_remote_version_information),
+#endif
+
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_CREATE_CONN,
+                         hci_le_create_connection),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_CREATE_CONN_CANCEL,
+                         hci_le_create_connection_cancel),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_CONN_UPDATE,
+                         hci_le_connection_update),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_READ_CHANNEL_MAP,
+                         hci_le_read_channel_map),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_READ_REMOTE_FEATURES,
+                         hci_le_read_remote_features),
+
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_READ_FILTER_ACCEPT_LIST_SIZE,
+                         hci_le_read_filter_accept_list_size),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_CLEAR_FILTER_ACCEPT_LIST,
+                         hci_le_clear_filter_accept_list),
+            BITMAP_ENTRY(
+                SDC_HCI_OPCODE_CMD_LE_ADD_DEVICE_TO_FILTER_ACCEPT_LIST,
+                hci_le_add_device_to_filter_accept_list),
+            BITMAP_ENTRY(
+                SDC_HCI_OPCODE_CMD_LE_REMOVE_DEVICE_FROM_FILTER_ACCEPT_LIST,
+                hci_le_remove_device_from_filter_accept_list),
+
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_ENCRYPT, hci_le_encrypt),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_RAND, hci_le_rand),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_ENABLE_ENCRYPTION,
+                         hci_le_enable_encryption),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_LONG_TERM_KEY_REQUEST_REPLY,
+                         hci_le_long_term_key_request_reply),
+            BITMAP_ENTRY(
+                SDC_HCI_OPCODE_CMD_LE_LONG_TERM_KEY_REQUEST_NEGATIVE_REPLY,
+                hci_le_long_term_key_request_negative_reply),
+
+#if HCI_SDC_HAS_READ_SUPPORTED_STATES
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_READ_SUPPORTED_STATES,
+                         hci_le_read_supported_states),
+#endif
+#if HCI_SDC_HAS_READ_TRANSMIT_POWER
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_READ_TRANSMIT_POWER,
+                         hci_le_read_transmit_power),
+#endif
+
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_RECEIVER_TEST_V1,
+                         hci_le_receiver_test_v1),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_TRANSMITTER_TEST_V1,
+                         hci_le_transmitter_test_v1),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_TEST_END, hci_le_test_end),
+
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_DATA_LENGTH,
+                         hci_le_set_data_length),
+            BITMAP_ENTRY(
+                SDC_HCI_OPCODE_CMD_LE_READ_SUGGESTED_DEFAULT_DATA_LENGTH,
+                hci_le_read_suggested_default_data_length),
+            BITMAP_ENTRY(
+                SDC_HCI_OPCODE_CMD_LE_WRITE_SUGGESTED_DEFAULT_DATA_LENGTH,
+                hci_le_write_suggested_default_data_length),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_READ_MAX_DATA_LENGTH,
+                         hci_le_read_maximum_data_length),
+
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_READ_PHY, hci_le_read_phy),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_DEFAULT_PHY,
+                         hci_le_set_default_phy),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_PHY, hci_le_set_phy),
+
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_ADV_SET_RANDOM_ADDRESS,
+                         hci_le_set_advertising_set_random_address),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_EXT_ADV_PARAMS,
+                         hci_le_set_extended_advertising_parameters),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_EXT_ADV_DATA,
+                         hci_le_set_extended_advertising_data),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_EXT_SCAN_RESPONSE_DATA,
+                         hci_le_set_extended_scan_response_data),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_EXT_ADV_ENABLE,
+                         hci_le_set_extended_advertising_enable),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_READ_MAX_ADV_DATA_LENGTH,
+                         hci_le_read_maximum_advertising_data_length),
+            BITMAP_ENTRY(
+                SDC_HCI_OPCODE_CMD_LE_READ_NUMBER_OF_SUPPORTED_ADV_SETS,
+                hci_le_read_number_of_supported_advertising_sets),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_REMOVE_ADV_SET,
+                         hci_le_remove_advertising_set),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_CLEAR_ADV_SETS,
+                         hci_le_clear_advertising_sets),
+
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_EXT_SCAN_PARAMS,
+                         hci_le_set_extended_scan_parameters),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_EXT_SCAN_ENABLE,
+                         hci_le_set_extended_scan_enable),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_EXT_CREATE_CONN,
+                         hci_le_extended_create_connection),
+        };
+
+#undef BITMAP_ENTRY
+
+        const size_t mapCount = sizeof(map) / sizeof(map[0]);
+
+        g_SdcStub.NextStatus = 0x00;
+        Response bitmap = Exchange(
+            SDC_HCI_OPCODE_CMD_IP_READ_LOCAL_SUPPORTED_COMMANDS, zeros, 0U);
+        assert(bitmap.code == EVENT_COMMAND_COMPLETE);
+        assert(bitmap.status == 0x00);
+        assert(bitmap.return_len ==
+               sizeof(sdc_hci_cmd_ip_read_local_supported_commands_return_t));
+
+        sdc_hci_cmd_ip_read_local_supported_commands_return_t reported;
+        memcpy(&reported, gLastReturn, sizeof(reported));
+
+        const HciCmdEntry_t *pEntries = gSdc.Commands.pEntries;
+        const size_t count = gSdc.Commands.EntryCount;
+
+        /* Every opcode the table accepts is named in the bitmap. */
+        for (size_t i = 0U; i < count; i++)
+        {
+            bool found = false;
+            for (size_t j = 0U; j < mapCount && !found; j++)
+            {
+                if (map[j].Opcode != pEntries[i].Opcode)
+                {
+                    continue;
+                }
+                found = true;
+                if (map[j].Bit != NULL && map[j].Bit(&reported.params) == 0U)
+                {
+                    printf("opcode 0x%04X is dispatched but %s is clear\n",
+                           pEntries[i].Opcode, map[j].Name);
+                    assert(false);
+                }
+            }
+            if (!found)
+            {
+                printf("opcode 0x%04X is dispatched but has no bitmap row\n",
+                       pEntries[i].Opcode);
+                assert(false);
+            }
+        }
+
+        /* And every bit the bitmap sets has an opcode the table accepts. */
+        for (size_t j = 0U; j < mapCount; j++)
+        {
+            if (map[j].Bit == NULL || map[j].Bit(&reported.params) == 0U)
+            {
+                continue;
+            }
+            bool found = false;
+            for (size_t i = 0U; i < count && !found; i++)
+            {
+                found = pEntries[i].Opcode == map[j].Opcode;
+            }
+            if (!found)
+            {
+                printf("%s is set but opcode 0x%04X is not dispatched\n",
+                       map[j].Name, map[j].Opcode);
+                assert(false);
+            }
+        }
+
+        printf("[ok] %-38s %zu opcodes both ways\n",
+               "bitmap agrees with the table", count);
     }
 
     printf("All SDC dispatch tests passed.\n");

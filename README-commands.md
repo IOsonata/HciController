@@ -1,15 +1,51 @@
 # HCI command coverage
 
-The dispatch table in `src/hci_sdc_nrfxlib.cpp` carries 56 commands. Everything
+The dispatch table in `src/hci_sdc_nrfxlib.cpp` carries 57 commands. Anything
 not listed there is answered with Unknown HCI Command, so the table is the
-controller's actual capability.
+controller's actual capability, and `HCI_Read_Local_Supported_Commands` reports
+exactly the same set. A host test checks the two against each other in both
+directions, so a command cannot be added to one and forgotten in the other.
 
 ## Supported
 
+Controller and baseband
+
+    0x0C01  Set Event Mask
+    0x0C03  Reset
+    0x0C7B  Read Authenticated Payload Timeout
+    0x0C7C  Write Authenticated Payload Timeout
+
+Informational parameters
+
+    0x1001  Read Local Version Information
+    0x1002  Read Local Supported Commands
+    0x1003  Read Local Supported Features
+    0x1009  Read BD_ADDR
+
 Link control
+
     0x0406  Disconnect                              status
+    0x041D  Read Remote Version Information         status
+
+LE basics
+
+    0x2001  LE Set Event Mask
+    0x2002  LE Read Buffer Size
+    0x2003  LE Read Local Supported Features
+    0x2005  LE Set Random Address
+
+Legacy advertising and scanning
+
+    0x2006  LE Set Advertising Parameters
+    0x2007  LE Read Adv Physical Channel Tx Power
+    0x2008  LE Set Advertising Data
+    0x2009  LE Set Scan Response Data
+    0x200A  LE Set Advertising Enable
+    0x200B  LE Set Scan Parameters
+    0x200C  LE Set Scan Enable
 
 Connection management
+
     0x200D  LE Create Connection                    status
     0x200E  LE Create Connection Cancel
     0x2013  LE Connection Update                    status
@@ -17,39 +53,41 @@ Connection management
     0x2016  LE Read Remote Features                 status
 
 Filter accept list
+
     0x200F  LE Read Filter Accept List Size
     0x2010  LE Clear Filter Accept List
     0x2011  LE Add Device To Filter Accept List
     0x2012  LE Remove Device From Filter Accept List
 
 Security
+
     0x2017  LE Encrypt
     0x2018  LE Rand
     0x2019  LE Enable Encryption                    status
     0x201A  LE Long Term Key Request Reply
     0x201B  LE Long Term Key Request Negative Reply
 
-Capability
-    0x201C  LE Read Supported States
-    0x204B  LE Read Transmit Power
-
 Direct test mode
+
     0x201D  LE Receiver Test v1
     0x201E  LE Transmitter Test v1
     0x201F  LE Test End
 
 Data length
+
     0x2022  LE Set Data Length
     0x2023  LE Read Suggested Default Data Length
     0x2024  LE Write Suggested Default Data Length
     0x202F  LE Read Maximum Data Length
 
 PHY
+
     0x2030  LE Read PHY
     0x2031  LE Set Default PHY
     0x2032  LE Set PHY                              status
 
 Extended advertising
+
     0x2035  LE Set Advertising Set Random Address
     0x2036  LE Set Extended Advertising Parameters
     0x2037  LE Set Extended Advertising Data        variable
@@ -61,59 +99,91 @@ Extended advertising
     0x203D  LE Clear Advertising Sets
 
 Extended scanning and initiating
+
     0x2041  LE Set Extended Scan Parameters         variable
     0x2042  LE Set Extended Scan Enable
     0x2043  LE Extended Create Connection           variable, status
 
-The seven marked status return a Command Status rather than a Command
-Complete, as Vol 4 Part E requires. Getting that wrong hangs a host stack
-waiting for the wrong event.
+The eight marked status answer with a Command Status rather than a Command
+Complete, as Vol 4 Part E 7.7.15 requires. Getting that wrong leaves a host
+stack waiting for an event that never arrives.
+
+## Built out, and how to build them back in
+
+A SoftDevice Controller header declares the whole HCI API, but a library
+variant only contains the commands it was built with, so a declaration is not
+a guarantee that the symbol links. Four commands therefore sit behind a macro
+in `src/hci_sdc_nrfxlib.cpp`, each covering the handler, the table row and the
+supported commands bit together, so the three stay consistent whichever way
+the macro goes.
+
+    HCI_SDC_HAS_READ_SUPPORTED_STATES   0     0x201C  LE Read Supported States
+    HCI_SDC_HAS_READ_TRANSMIT_POWER     0     0x204B  LE Read Transmit Power
+    HCI_SDC_HAS_READ_REMOTE_VERSION     1     0x041D  Read Remote Version Info
+    HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT    1     0x0C7B and 0x0C7C
+
+The first two default to off because a link against the multirole library
+proved the symbols absent. Read Supported States reports legacy advertising
+states and is left out of a build that only enables the extended advertiser.
+Read Transmit Power belongs to LE Power Control. The last two default to on
+because the specification makes them mandatory.
+
+List what a library really defines with
+
+    arm-none-eabi-nm --defined-only libsoftdevice_controller_multirole.a \
+        | grep " T sdc_hci_cmd_"
+
+and set the macro to match. That way a missing symbol is an undefined
+reference at link time and a one line change here, rather than a controller
+that advertises a command it cannot run.
 
 ## How the handlers are written
 
-The handlers are all one of five shapes, so they are generated by macro rather
-than copied forty times: parameters only, parameters with a return, no
-parameters, no parameters with a return, and the variable length form. The
-variable length commands carry a trailing array, so the packet is passed
-straight to SDC after the fixed part is length checked. The SDC types are
-packed and byte aligned, so that is safe.
+The handlers are all one of seven shapes, so they are generated by macro
+rather than copied fifty times: parameters only, parameters with a return, no
+parameters, no parameters with a return, and three variable length forms that
+differ only in how the trailing array is measured, by byte count, by element
+count, or by the number of PHYs named in a bitmap.
+
+A variable length command carries a trailing array whose size comes from a
+field inside the fixed part, and SDC trusts that field. Each variable length
+macro therefore requires the parameter length the host sent to match what the
+count field declares, exactly rather than at least, since Vol 4 Part E 5.4.1
+fixes Parameter_Total_Length. A mismatch is refused with 0x12. Without that
+check a short packet with a large count makes SDC read past the end of the
+receive buffer, which holds the previous packet.
 
 Parameter lengths come from `sizeof()` on the SDC type rather than hand
-counted numbers, which is what caught nothing this time but would have.
+counted numbers.
 
-`sdc_support_direct_test_mode()` is now called during setup. Everything else
-the new commands need was already enabled by `sdc_support_ext_adv()` and
-`sdc_support_ext_central()`.
-
-`HciSdcCmdReadSupportedCommands` reports the new commands, so a host stack
-sees the real capability. SDC does not expose a bit for Read Local Supported
-Commands itself, so that one stays unreported.
+Every table row also declares the response kind and the return parameter
+length that a successful call produces, so a rejection is shaped the same way
+as a success. A Command Complete that is short of the length the host holds
+for that opcode reads to the host as no answer at all.
 
 ## Tests
 
-    cd tests/nrf52840 && make NRFXLIB_DIR=/path/to/sdk-nrfxlib run
+    make -C tests run NRFXLIB_DIR=/path/to/sdk-nrfxlib
 
-The new `hci_sdc_dispatch_test` compiles the real dispatch against the real
-nrfxlib headers with the SDC entry points stubbed, then drives 33 checks:
-every opcode reaches the intended SDC function, Command Status and Command
-Complete are used where the specification says, return payload lengths match
-the SDC return types, a truncated variable length command is rejected with
-0x12, a wrong fixed length is rejected before the handler runs, an unassigned
-opcode is still 0x01, and a controller error is passed through rather than
-masked.
+90 checks across nine binaries. `hci_sdc_dispatch_test` compiles the real
+dispatch table against the real nrfxlib headers with only the SDC entry points
+stubbed, then checks that every opcode reaches the intended SDC function, that
+Command Status and Command Complete are used where the specification says,
+that return payload lengths match the SDC return types, that a variable length
+command whose count field disagrees with the packet is rejected with 0x12,
+that a wrong fixed length is rejected before the handler runs, that an
+unassigned opcode is answered with 0x01, and that a controller error is passed
+through rather than masked.
 
-The stubs under `tests/nrf52840/sdcstub` are generated from the nrfxlib
-headers, so they cannot drift from the real signatures.
+Two of those checks walk the whole table rather than a hand picked list. One
+drives every fixed length entry twice, once accepted and once rejected, and
+compares what comes out against what the row declares. The other reads the
+supported commands bitmap back off the wire and matches it against the table
+in both directions.
 
-If NRFXLIB_DIR does not resolve, that test is skipped and the rest still run.
+The stubs under `tests/stubs/sdclink` follow the nrfxlib signatures, so a
+change in the real headers shows up as a compile error rather than as wrong
+behaviour.
 
-46 checks across four binaries. Clean with gcc and clang on the host, and with
-arm-none-eabi-g++ for cortex-m4 hard float at -Wall -Wextra -Werror -Wshadow
--Wundef.
-
-## One thing to look at
-
-`include/hci_trace.h` on main now defaults HCI_TRACE to 1. Semihosting halts
-the core when no debugger is attached, so a production image built without
--DHCI_TRACE=0 will stop at the first trace call. Consider putting the default
-back to 0.
+If NRFXLIB_DIR does not resolve, that one test is skipped and the other eight
+still run against the fakes under `tests/stubs`.

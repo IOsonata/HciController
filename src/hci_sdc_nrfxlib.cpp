@@ -21,15 +21,19 @@
 
 /*
  * The SoftDevice Controller headers declare the whole HCI API, but a library
- * variant only contains the commands it was built with. These two are opt in.
- * List what the library really defines with
+ * variant only contains the commands it was built with, so a header alone does
+ * not mean the symbol links. List what the library really defines with
  *
  *   arm-none-eabi-nm --defined-only libsoftdevice_controller_multirole.a \
- *       | grep sdc_hci_cmd_le_
+ *       | grep " T sdc_hci_cmd_"
  *
- * and set the macro when the symbol is there. Read Supported States reports
- * legacy advertising states and is absent from a build that only enables the
- * extended advertiser. Read Transmit Power belongs to LE Power Control.
+ * and set the matching macro to 0 when a symbol is missing, which turns an
+ * undefined reference at link time into a one line change here.
+ *
+ * The two below default to 0 because a link against the multirole library
+ * proved them absent. Read Supported States reports legacy advertising states
+ * and is left out of a build that only enables the extended advertiser. Read
+ * Transmit Power belongs to LE Power Control.
  */
 #ifndef HCI_SDC_HAS_READ_SUPPORTED_STATES
 #define HCI_SDC_HAS_READ_SUPPORTED_STATES 0
@@ -37,6 +41,21 @@
 
 #ifndef HCI_SDC_HAS_READ_TRANSMIT_POWER
 #define HCI_SDC_HAS_READ_TRANSMIT_POWER 0
+#endif
+
+/*
+ * The two below default to 1 because the spec makes them mandatory for a BR or
+ * LE controller and the library is expected to carry them. Read Remote Version
+ * Information is Vol 4 Part E 7.1.23. The Authenticated Payload Timeout pair,
+ * Vol 4 Part E 7.3.93 and 7.3.94, comes with LE Ping and is read and write
+ * together, so one macro covers both.
+ */
+#ifndef HCI_SDC_HAS_READ_REMOTE_VERSION
+#define HCI_SDC_HAS_READ_REMOTE_VERSION 1
+#endif
+
+#ifndef HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT
+#define HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT 1
 #endif
 
 static HciCmdResult_t HciSdcComplete(uint8_t Status, size_t ReturnLen)
@@ -146,6 +165,13 @@ static HciCmdResult_t HciSdcCmdReadSupportedCommands(void *,
     supported.params.hci_le_set_scan_enable = 1U;
 
     supported.params.hci_disconnect = 1U;
+#if HCI_SDC_HAS_READ_REMOTE_VERSION
+    supported.params.hci_read_remote_version_information = 1U;
+#endif
+#if HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT
+    supported.params.hci_read_authenticated_payload_timeout = 1U;
+    supported.params.hci_write_authenticated_payload_timeout = 1U;
+#endif
     supported.params.hci_le_create_connection = 1U;
     supported.params.hci_le_create_connection_cancel = 1U;
     supported.params.hci_le_connection_update = 1U;
@@ -560,9 +586,26 @@ static HciCmdResult_t HciSdcCmdLeSetScanEnable(void *,
         return Reply(SdcFunc(pCmd), 0U);                                      \
     }
 
+/* Controller and baseband. */
+#if HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT
+HCI_SDC_CMD_PR(HciSdcCmdReadAuthPayloadTimeout,
+               sdc_hci_cmd_cb_read_authenticated_payload_timeout,
+               sdc_hci_cmd_cb_read_authenticated_payload_timeout_t,
+               sdc_hci_cmd_cb_read_authenticated_payload_timeout_return_t)
+HCI_SDC_CMD_PR(HciSdcCmdWriteAuthPayloadTimeout,
+               sdc_hci_cmd_cb_write_authenticated_payload_timeout,
+               sdc_hci_cmd_cb_write_authenticated_payload_timeout_t,
+               sdc_hci_cmd_cb_write_authenticated_payload_timeout_return_t)
+#endif
+
 /* Link control. */
 HCI_SDC_CMD_P(HciSdcCmdDisconnect, sdc_hci_cmd_lc_disconnect,
               sdc_hci_cmd_lc_disconnect_t, HciSdcStatus)
+#if HCI_SDC_HAS_READ_REMOTE_VERSION
+HCI_SDC_CMD_P(HciSdcCmdReadRemoteVersion,
+              sdc_hci_cmd_lc_read_remote_version_information,
+              sdc_hci_cmd_lc_read_remote_version_information_t, HciSdcStatus)
+#endif
 
 /* Connection management. */
 HCI_SDC_CMD_P(HciSdcCmdLeCreateConn, sdc_hci_cmd_le_create_conn,
@@ -720,6 +763,18 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
     HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_CB_SET_EVENT_MASK, 8U,
                     HciSdcCmdSetEventMask),
     HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_CB_RESET, 0U, HciSdcCmdReset),
+#if HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT
+    HCI_SDC_ENTRY_CR(
+        SDC_HCI_OPCODE_CMD_CB_READ_AUTHENTICATED_PAYLOAD_TIMEOUT,
+        sizeof(sdc_hci_cmd_cb_read_authenticated_payload_timeout_t),
+        HciSdcCmdReadAuthPayloadTimeout,
+        sdc_hci_cmd_cb_read_authenticated_payload_timeout_return_t),
+    HCI_SDC_ENTRY_CR(
+        SDC_HCI_OPCODE_CMD_CB_WRITE_AUTHENTICATED_PAYLOAD_TIMEOUT,
+        sizeof(sdc_hci_cmd_cb_write_authenticated_payload_timeout_t),
+        HciSdcCmdWriteAuthPayloadTimeout,
+        sdc_hci_cmd_cb_write_authenticated_payload_timeout_return_t),
+#endif
 
     /* Informational parameters. */
     HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_IP_READ_LOCAL_VERSION_INFORMATION, 0U,
@@ -767,6 +822,12 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
     /* Link control. */
     HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LC_DISCONNECT,
                     sizeof(sdc_hci_cmd_lc_disconnect_t), HciSdcCmdDisconnect),
+#if HCI_SDC_HAS_READ_REMOTE_VERSION
+    HCI_SDC_ENTRY_S(
+        SDC_HCI_OPCODE_CMD_LC_READ_REMOTE_VERSION_INFORMATION,
+        sizeof(sdc_hci_cmd_lc_read_remote_version_information_t),
+        HciSdcCmdReadRemoteVersion),
+#endif
 
     /* Connection management. */
     HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_CREATE_CONN,
