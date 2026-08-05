@@ -52,15 +52,30 @@ static Response Exchange(uint16_t opcode, const uint8_t *pParams, size_t len)
         memcpy(&packet[3], pParams, len);
     }
 
-    bool put = gOps->Put(gOps->pContext, HCI_H4_PACKET_COMMAND, packet,
-                         3U + len);
-    assert(put);
-
+    /*
+     * The routing layer holds the next command until the controller queue has
+     * had the outgoing slot, so a command can be refused once and has to be
+     * offered again, exactly as the H:4 parser does. Model that here rather
+     * than assuming the first offer is taken.
+     */
     HciH4PacketType_t type = HCI_H4_PACKET_NONE;
     uint8_t out[300];
     size_t outLen = 0U;
-    HciControllerGetResult_t result = gOps->Get(gOps->pContext, &type, out,
-                                                sizeof(out), &outLen);
+    HciControllerGetResult_t result = HCI_CONTROLLER_GET_EMPTY;
+    bool put = false;
+
+    for (unsigned pass = 0U; pass < 4U && result != HCI_CONTROLLER_GET_PACKET;
+         pass++)
+    {
+        if (!put)
+        {
+            put = gOps->Put(gOps->pContext, HCI_H4_PACKET_COMMAND, packet,
+                            3U + len);
+        }
+        result = gOps->Get(gOps->pContext, &type, out, sizeof(out), &outLen);
+    }
+
+    assert(put);
     assert(result == HCI_CONTROLLER_GET_PACKET);
     assert(type == HCI_H4_PACKET_EVENT);
     assert(outLen >= 6U);

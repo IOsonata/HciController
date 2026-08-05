@@ -206,6 +206,78 @@ int main()
                "%u events %u acl\n", events, aclOut);
     }
 
+    /*
+     * A command handler runs while the command is accepted, so anything it
+     * queues in the controller was queued after the response was built. The
+     * response must still reach the host first, Vol 4 Part E 4.4 and 7.8.13.
+     * Sharing the outgoing slot must not reorder that.
+     */
+    {
+        HciSdc_t ordered;
+        FakeSdc backend = {};
+        uint8_t orderedEvent[80];
+
+        HciSdcOps_t orderedOps = {
+            AclPut, IsoPut, Get, Process, &backend, HCI_SDC_RETRY_ERROR,
+        };
+        backend.GetResult = HCI_SDC_RETRY_ERROR;
+
+        assert(HciSdcInit(&ordered, &orderedOps, commands,
+                          sizeof(commands) / sizeof(commands[0]), NULL,
+                          orderedEvent, sizeof(orderedEvent)));
+
+        const HciControllerOps_t *ops3 = HciSdcGetControllerOps(&ordered);
+        uint8_t seen[8];
+        unsigned seenCount = 0U;
+        bool accepted[2] = {false, false};
+
+        for (unsigned pass = 0U; pass < 8U; pass++)
+        {
+            /* Two commands back to back, the second queues a controller event. */
+            if (!accepted[0])
+            {
+                accepted[0] = ops3->Put(ops3->pContext, HCI_H4_PACKET_COMMAND,
+                                        reset, sizeof(reset));
+            }
+            else if (!accepted[1])
+            {
+                accepted[1] = ops3->Put(ops3->pContext, HCI_H4_PACKET_COMMAND,
+                                        reset, sizeof(reset));
+                if (accepted[1])
+                {
+                    /* The controller now has an event waiting. */
+                    backend.GetResult = 0;
+                    backend.GetType = HCI_SDC_MSG_TYPE_EVENT;
+                    backend.GetPacket[0] = 0x3EU;
+                    backend.GetPacket[1] = 0x01U;
+                    backend.GetPacket[2] = 0x01U;
+                }
+            }
+
+            HciH4PacketType_t outType = HCI_H4_PACKET_NONE;
+            uint8_t out[64];
+            size_t outLen = 0U;
+            if (ops3->Get(ops3->pContext, &outType, out, sizeof(out),
+                          &outLen) == HCI_CONTROLLER_GET_PACKET)
+            {
+                assert(seenCount < sizeof(seen));
+                seen[seenCount++] = out[0];
+                if (out[0] == 0x3EU)
+                {
+                    backend.GetResult = HCI_SDC_RETRY_ERROR;
+                }
+            }
+        }
+
+        /* Both Command Completes must precede the controller event. */
+        assert(seenCount >= 3U);
+        assert(seen[0] == HCI_EVENT_COMMAND_COMPLETE);
+        assert(seen[1] == HCI_EVENT_COMMAND_COMPLETE);
+        assert(seen[2] == 0x3EU);
+        printf("[ok] a queued controller event cannot overtake a command "
+               "response\n");
+    }
+
     printf("All SDC routing tests passed.\n");
     return 0;
 }

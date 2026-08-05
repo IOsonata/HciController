@@ -50,8 +50,10 @@ typedef struct {
     /*
      * Two sources share one outgoing packet slot: command events from the
      * dispatch table, and everything the controller queues. Set after a
-     * command event goes out so the controller queue is asked first on the
-     * next call, which stops a busy command stream from starving it.
+     * command event goes out, and cleared once the controller queue has been
+     * asked. While set, a new command is refused, so a busy command stream
+     * cannot starve the controller queue and no queued event can overtake the
+     * response of the command that produced it.
      */
     bool CommandEventLast;
 
@@ -61,7 +63,7 @@ typedef struct {
     uint32_t GetErrorCount;
     uint32_t InvalidOutputTypeCount;
     uint32_t InvalidOutputLengthCount;
-    uint32_t CommandEventDeferredCount;
+    uint32_t CommandDeferredCount;
 } HciSdc_t;
 
 bool HciSdcInit(HciSdc_t *pSdc,

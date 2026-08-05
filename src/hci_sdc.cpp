@@ -73,6 +73,20 @@ static bool HciSdcPutPacket(void *pContext,
     switch (Type)
     {
         case HCI_H4_PACKET_COMMAND:
+            /*
+             * Hold the next command until the controller queue has had the
+             * outgoing slot. Without this a host that keeps a command in
+             * flight, which it is entitled to do because every Command
+             * Complete hands back a credit, produces a fresh command event on
+             * every pass and sdc_hci_get is never reached. Refusing here is
+             * ordinary backpressure: the parser keeps the packet and offers it
+             * again next pass.
+             */
+            if (pSdc->CommandEventLast)
+            {
+                pSdc->CommandDeferredCount++;
+                return false;
+            }
             return HciCmdDispatchPut(&pSdc->Commands, pPacket, PacketLen);
 
         case HCI_H4_PACKET_ACL:
@@ -142,17 +156,15 @@ static HciControllerGetResult_t HciSdcGetPacket(void *pContext,
 {
     HciSdc_t *pSdc = static_cast<HciSdc_t *>(pContext);
 
-    const bool commandPending = HciCmdDispatchEventPending(&pSdc->Commands);
-
     /*
-     * There is one outgoing slot per call and two sources wanting it. Taking
-     * the command event whenever one exists starves the controller queue for
-     * as long as the host keeps a command in flight, and a host is entitled to
-     * do exactly that, since every Command Complete hands back a credit. So a
-     * command event does not go twice in a row while the controller has
-     * something waiting.
+     * A pending command event always goes first. A command handler runs while
+     * the command is accepted, so anything it queues in the controller was
+     * queued after the response was built, and Vol 4 Part E 7.8.13 and the
+     * general rule in 4.4 require the response to reach the host first. Fair
+     * sharing of the outgoing slot is handled where the command is accepted,
+     * not here, so that nothing can overtake a response.
      */
-    if (commandPending && !pSdc->CommandEventLast)
+    if (HciCmdDispatchEventPending(&pSdc->Commands))
     {
         return HciSdcGetCommandEvent(pSdc, pType, pPacket, PacketCapacity,
                                      pPacketLen);
@@ -161,22 +173,12 @@ static HciControllerGetResult_t HciSdcGetPacket(void *pContext,
     uint8_t sdcType = HCI_SDC_MSG_TYPE_NONE;
     int32_t result = pSdc->Ops.Get(pSdc->Ops.pContext, pPacket, &sdcType);
 
+    /* The controller queue has had its turn, so the next command may come in. */
     pSdc->CommandEventLast = false;
 
     if (result == pSdc->Ops.RetryError)
     {
-        /* Nothing queued, so the command event takes the slot after all. */
-        if (commandPending)
-        {
-            return HciSdcGetCommandEvent(pSdc, pType, pPacket, PacketCapacity,
-                                         pPacketLen);
-        }
         return HCI_CONTROLLER_GET_EMPTY;
-    }
-
-    if (commandPending)
-    {
-        pSdc->CommandEventDeferredCount++;
     }
 
     if (result != 0)
