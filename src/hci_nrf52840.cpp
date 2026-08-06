@@ -129,7 +129,16 @@ static bool HciNrf52840HfxoOnXtal(void)
  * The radio resource configuration lives in hci_nrf52840.h, next to the pool
  * size that is computed from it, so that raising a count and sizing the memory
  * cannot be done separately.
+ *
+ * A periodic advertiser needs an advertising set to carry it, and one with
+ * responses needs another, so the two periodic counts together cannot exceed
+ * the advertising sets. sdc_cfg_set refuses that with an error naming neither
+ * number, so it is caught here instead.
  */
+static_assert((HCI_NRF52840_PERIODIC_ADV_COUNT +
+               HCI_NRF52840_PERIODIC_ADV_RSP_COUNT) <=
+                  HCI_NRF52840_ADV_SET_COUNT,
+              "periodic advertisers exceed the advertising sets");
 
 static HciNrf52840_t *s_pTarget;
 
@@ -603,16 +612,13 @@ static bool HciNrf52840SdcInit(HciNrf52840_t *pTarget)
      */
     sdc_support_le_privacy();
 
-#if HCI_NRF52840_QOS_CHANNEL_SURVEY
     /*
      * The channel survey module, which the vendor command at 0xFD0E turns on
      * and off. Without this call that command is rejected, so the two have to
      * agree, and the pool in hci_nrf52840.h carries the matching 40 octets.
      */
     sdc_support_qos_channel_survey();
-#endif
 
-#if HCI_NRF52840_LE_POWER_CONTROL
     /*
      * Both roles, because this image supports both and sdk-nrfxlib asks for a
      * call per role rather than one for the pair. Path loss monitoring has to
@@ -622,40 +628,26 @@ static bool HciNrf52840SdcInit(HciNrf52840_t *pTarget)
     sdc_support_le_power_control_central();
     sdc_support_le_power_control_peripheral();
     sdc_support_le_path_loss_monitoring();
-#endif
 
-#if HCI_NRF52840_SCA_UPDATE
     sdc_support_sca_central();
     sdc_support_sca_peripheral();
-#endif
 
-#if HCI_NRF52840_CONNECTION_SUBRATING
     sdc_support_connection_subrating_central();
     sdc_support_connection_subrating_peripheral();
-#endif
 
-#if HCI_NRF52840_EXTENDED_FEATURE_SET
     sdc_support_extended_feature_set_central();
     sdc_support_extended_feature_set_peripheral();
-#endif
 
-#if HCI_NRF52840_PARALLEL_SCAN_INIT
     /*
      * sdk-nrfxlib asks for a central role before this, which
      * sdc_support_ext_central() above provides.
      */
     sdc_support_parallel_scanning_and_initiating();
-#endif
 
-#if HCI_NRF52840_PERIODIC_ADV
     sdc_support_le_periodic_adv();
-#endif
 
-#if HCI_NRF52840_PERIODIC_SYNC
     sdc_support_le_periodic_sync();
-#endif
 
-#if HCI_NRF52840_PERIODIC_SYNC_TRANSFER
     /*
      * Four calls rather than two. Sending and receiving a sync are separate
      * capabilities and each is per role, so a build that only ever hands a
@@ -666,20 +658,15 @@ static bool HciNrf52840SdcInit(HciNrf52840_t *pTarget)
     sdc_support_periodic_adv_sync_transfer_sender_peripheral();
     sdc_support_periodic_adv_sync_transfer_receiver_central();
     sdc_support_periodic_adv_sync_transfer_receiver_peripheral();
-#endif
 
     /*
      * Periodic advertising with responses, last because sdk-nrfxlib requires
      * extended advertising, the matching plain periodic half, and a sync
      * transfer sender or receiver, all of which are above.
      */
-#if HCI_NRF52840_PERIODIC_ADV_RSP
     sdc_support_le_periodic_adv_with_rsp();
-#endif
 
-#if HCI_NRF52840_PERIODIC_SYNC_RSP
     sdc_support_le_periodic_sync_with_rsp();
-#endif
 
     sdc_cfg_t cfg = {};
     cfg.buffer_cfg.rx_packet_size = HCI_NRF52840_ACL_PACKET_SIZE;
@@ -717,7 +704,6 @@ static bool HciNrf52840SdcInit(HciNrf52840_t *pTarget)
     cfg.fal_size = HCI_NRF52840_FAL_SIZE;
     if (!HciNrf52840CfgSet(pTarget, SDC_CFG_TYPE_FAL_SIZE, &cfg)) return false;
 
-#if HCI_NRF52840_EXTENDED_FEATURE_SET
     /*
      * How many feature pages the controller keeps per link. The pool in
      * hci_nrf52840.h is computed from the same macro, so the two cannot
@@ -730,9 +716,7 @@ static bool HciNrf52840SdcInit(HciNrf52840_t *pTarget)
     {
         return false;
     }
-#endif
 
-#if HCI_NRF52840_PERIODIC_ADV
     /*
      * Periodic advertisers. Each takes one of the advertising sets configured
      * above, which is why hci_nrf52840.h refuses a count larger than that one
@@ -744,9 +728,7 @@ static bool HciNrf52840SdcInit(HciNrf52840_t *pTarget)
     {
         return false;
     }
-#endif
 
-#if HCI_NRF52840_PERIODIC_SYNC
     cfg = {};
     cfg.periodic_sync_count.count = HCI_NRF52840_PERIODIC_SYNC_COUNT;
     if (!HciNrf52840CfgSet(pTarget, SDC_CFG_TYPE_PERIODIC_SYNC_COUNT, &cfg))
@@ -774,9 +756,7 @@ static bool HciNrf52840SdcInit(HciNrf52840_t *pTarget)
     {
         return false;
     }
-#endif
 
-#if HCI_NRF52840_PERIODIC_ADV_RSP
     cfg = {};
     cfg.periodic_adv_rsp_count.count = HCI_NRF52840_PERIODIC_ADV_RSP_COUNT;
     if (!HciNrf52840CfgSet(pTarget, SDC_CFG_TYPE_PERIODIC_ADV_RSP_COUNT, &cfg))
@@ -812,9 +792,7 @@ static bool HciNrf52840SdcInit(HciNrf52840_t *pTarget)
     {
         return false;
     }
-#endif
 
-#if HCI_NRF52840_PERIODIC_SYNC_RSP
     cfg = {};
     cfg.periodic_sync_rsp_tx_buffer_cfg.count =
         HCI_NRF52840_PERIODIC_SYNC_RSP_TX_BUFFERS;
@@ -823,7 +801,6 @@ static bool HciNrf52840SdcInit(HciNrf52840_t *pTarget)
     {
         return false;
     }
-#endif
 
     result = sdc_cfg_set(SDC_DEFAULT_RESOURCE_CFG_TAG, SDC_CFG_TYPE_NONE, nullptr);
     if (result < 0)

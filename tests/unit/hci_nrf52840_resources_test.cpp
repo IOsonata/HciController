@@ -88,31 +88,18 @@ int main(void)
     Check("filter accept list", SDC_MEM_FAL(HCI_NRF52840_FAL_SIZE),
           EXPECT_ACCEPT_LIST);
 
-#if HCI_NRF52840_QOS_CHANNEL_SURVEY
     Check("channel survey", SDC_MEM_QOS_CHANNEL_SURVEY, EXPECT_CHANNEL_SURVEY);
-#endif
-#if HCI_NRF52840_LE_POWER_CONTROL
     Check("power control", SDC_MEM_LE_POWER_CONTROL(links),
           EXPECT_POWER_CONTROL);
-#endif
-#if HCI_NRF52840_CONNECTION_SUBRATING
     Check("subrating", SDC_MEM_SUBRATING(links), EXPECT_SUBRATING);
-#endif
-#if HCI_NRF52840_EXTENDED_FEATURE_SET
     Check("extended features",
           SDC_MEM_EXTENDED_FEATURE_SET(links,
                                        HCI_NRF52840_EXTENDED_FEATURE_PAGES),
           EXPECT_EXTENDED_FEAT);
-#endif
-#if HCI_NRF52840_PARALLEL_SCAN_INIT
     Check("scan and initiate together", SDC_MEM_INITIATOR, EXPECT_PARALLEL);
-#endif
-#if HCI_NRF52840_PERIODIC_ADV
     Check("periodic adv set",
           SDC_MEM_PER_PERIODIC_ADV_SET(HCI_NRF52840_MAX_ADV_DATA),
           EXPECT_PERIODIC_ADV_SET);
-#endif
-#if HCI_NRF52840_PERIODIC_SYNC
     /*
      * The per sync cost, which the responding scanner raises for every sync
      * rather than adding a term of its own. HCI_NRF52840_SDC_MEM_PER_SYNC is
@@ -123,12 +110,8 @@ int main(void)
     Check("periodic adv list",
           SDC_MEM_PERIODIC_ADV_LIST(HCI_NRF52840_PERIODIC_ADV_LIST_SIZE),
           EXPECT_PERIODIC_ADV_LIST);
-#endif
-#if HCI_NRF52840_PERIODIC_SYNC_TRANSFER
     Check("periodic sync transfer", SDC_MEM_SYNC_TRANSFER(links),
           EXPECT_SYNC_TRANSFER);
-#endif
-#if HCI_NRF52840_PERIODIC_ADV_RSP
     Check("periodic adv set with responses",
           SDC_MEM_PER_PERIODIC_ADV_RSP_SET(
               HCI_NRF52840_MAX_ADV_DATA,
@@ -137,7 +120,6 @@ int main(void)
               HCI_NRF52840_PERIODIC_ADV_RSP_MAX_TX_DATA,
               HCI_NRF52840_PERIODIC_ADV_RSP_FAILURE_REPORTING),
           EXPECT_PERIODIC_ADV_RSP);
-#endif
 
     Check("pool required", HCI_NRF52840_SDC_MEM_REQUIRED, EXPECT_REQUIRED);
     Check("pool allocated", HCI_NRF52840_DEFAULT_SDC_MEM_SIZE,
@@ -175,19 +157,12 @@ int main(void)
         /* A bare integer in the real header, not a role count. */
         cfg.fal_size = HCI_NRF52840_FAL_SIZE;
 
-#if HCI_NRF52840_EXTENDED_FEATURE_SET
         cfg.extended_feature_page_count = HCI_NRF52840_EXTENDED_FEATURE_PAGES;
-#endif
-#if HCI_NRF52840_PERIODIC_ADV
         cfg.periodic_adv_count.count = HCI_NRF52840_PERIODIC_ADV_COUNT;
-#endif
-#if HCI_NRF52840_PERIODIC_SYNC
         cfg.periodic_sync_count.count = HCI_NRF52840_PERIODIC_SYNC_COUNT;
         cfg.periodic_sync_buffer_cfg.count =
             HCI_NRF52840_PERIODIC_SYNC_BUFFER_COUNT;
         cfg.periodic_adv_list_size = HCI_NRF52840_PERIODIC_ADV_LIST_SIZE;
-#endif
-#if HCI_NRF52840_PERIODIC_ADV_RSP
         cfg.periodic_adv_rsp_count.count = HCI_NRF52840_PERIODIC_ADV_RSP_COUNT;
         cfg.periodic_adv_rsp_buffer_cfg.tx_buffer_count =
             HCI_NRF52840_PERIODIC_ADV_RSP_TX_BUFFERS;
@@ -197,11 +172,8 @@ int main(void)
             HCI_NRF52840_PERIODIC_ADV_RSP_MAX_TX_DATA;
         cfg.periodic_adv_rsp_failure_reporting_cfg =
             HCI_NRF52840_PERIODIC_ADV_RSP_FAILURE_REPORTING;
-#endif
-#if HCI_NRF52840_PERIODIC_SYNC_RSP
         cfg.periodic_sync_rsp_tx_buffer_cfg.count =
             HCI_NRF52840_PERIODIC_SYNC_RSP_TX_BUFFERS;
-#endif
 
         /*
          * The tags, in the same order hci_nrf52840.cpp uses them. Distinct
@@ -212,25 +184,15 @@ int main(void)
             SDC_CFG_TYPE_CENTRAL_COUNT,   SDC_CFG_TYPE_ADV_COUNT,
             SDC_CFG_TYPE_ADV_BUFFER_CFG,  SDC_CFG_TYPE_SCAN_BUFFER_CFG,
             SDC_CFG_TYPE_FAL_SIZE,
-#if HCI_NRF52840_EXTENDED_FEATURE_SET
             SDC_CFG_TYPE_EXTENDED_FEATURE_PAGE_COUNT,
-#endif
-#if HCI_NRF52840_PERIODIC_ADV
             SDC_CFG_TYPE_PERIODIC_ADV_COUNT,
-#endif
-#if HCI_NRF52840_PERIODIC_SYNC
             SDC_CFG_TYPE_PERIODIC_SYNC_COUNT,
             SDC_CFG_TYPE_PERIODIC_SYNC_BUFFER_CFG,
             SDC_CFG_TYPE_PERIODIC_ADV_LIST_SIZE,
-#endif
-#if HCI_NRF52840_PERIODIC_ADV_RSP
             SDC_CFG_TYPE_PERIODIC_ADV_RSP_COUNT,
             SDC_CFG_TYPE_PERIODIC_ADV_RSP_BUFFER_CFG,
             SDC_CFG_TYPE_PERIODIC_ADV_RSP_FAILURE_REPORTING_CFG,
-#endif
-#if HCI_NRF52840_PERIODIC_SYNC_RSP
             SDC_CFG_TYPE_PERIODIC_SYNC_RSP_TX_BUFFER_CFG,
-#endif
         };
         const size_t tagCount = sizeof(tags) / sizeof(tags[0]);
 
@@ -257,22 +219,18 @@ int main(void)
      * it will never fill. Ten is the sdk-nrfxlib default and the largest this
      * has been checked against.
      */
-#if HCI_NRF52840_EXTENDED_FEATURE_SET
     assert(HCI_NRF52840_EXTENDED_FEATURE_PAGES > 0U);
     assert(HCI_NRF52840_EXTENDED_FEATURE_PAGES <=
            SDC_DEFAULT_EXTENDED_FEATURE_PAGE_COUNT);
-#endif
 
     /*
      * A periodic advertiser needs an advertising set to carry it. The header
      * refuses this at build time; asserting it here as well means the rule is
      * stated where the numbers are, for anyone reading only this file.
      */
-#if HCI_NRF52840_PERIODIC_ADV
     assert((HCI_NRF52840_PERIODIC_ADV_COUNT +
             HCI_NRF52840_PERIODIC_ADV_RSP_COUNT) <=
            HCI_NRF52840_ADV_SET_COUNT);
-#endif
 
     printf("\n");
     if (gFailures != 0)

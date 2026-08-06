@@ -39,105 +39,6 @@ GATES = [
     ("HCI_SDC_HAS_VS_READ_STATIC_ADDRESSES",
      ["sdc_hci_cmd_vs_zephyr_read_static_addresses"]),
     ("HCI_SDC_HAS_VS_READ_COUNTERS", []),
-    ("HCI_SDC_HAS_VS_CARRIER_TEST",
-     ["sdc_hci_cmd_vs_transmitter_carrier_test"]),
-    ("HCI_SDC_HAS_VS_ZEPHYR_SET",
-     ["sdc_hci_cmd_vs_zephyr_read_version_info",
-      "sdc_hci_cmd_vs_zephyr_read_supported_commands",
-      "sdc_hci_cmd_vs_zephyr_write_bd_addr",
-      "sdc_hci_cmd_vs_zephyr_read_chip_temp",
-      "sdc_hci_cmd_vs_zephyr_write_tx_power",
-      "sdc_hci_cmd_vs_zephyr_read_tx_power"]),
-    ("HCI_SDC_HAS_VS_KEY_HIERARCHY_ROOTS",
-     ["sdc_hci_cmd_vs_zephyr_read_key_hierarchy_roots"]),
-    ("HCI_SDC_HAS_VS_QOS",
-     ["sdc_hci_cmd_vs_qos_conn_event_report_enable",
-      "sdc_hci_cmd_vs_qos_channel_survey_enable",
-      "sdc_hci_cmd_vs_read_average_rssi",
-      "sdc_hci_cmd_vs_get_next_conn_event_counter",
-      "sdc_hci_cmd_vs_conn_anchor_point_update_event_report_enable"]),
-    ("HCI_SDC_HAS_LE_POWER_CONTROL",
-     ["sdc_hci_cmd_cb_read_transmit_power_level",
-      "sdc_hci_cmd_le_read_rf_path_compensation",
-      "sdc_hci_cmd_le_write_rf_path_compensation",
-      "sdc_hci_cmd_le_enhanced_read_transmit_power_level",
-      "sdc_hci_cmd_le_read_remote_transmit_power_level",
-      "sdc_hci_cmd_le_set_path_loss_reporting_params",
-      "sdc_hci_cmd_le_set_path_loss_reporting_enable",
-      "sdc_hci_cmd_le_set_transmit_power_reporting_enable"]),
-    ("HCI_SDC_HAS_LE_REQUEST_PEER_SCA",
-     ["sdc_hci_cmd_le_request_peer_sca"]),
-    ("HCI_SDC_HAS_LE_SUBRATING",
-     ["sdc_hci_cmd_le_set_default_subrate",
-      "sdc_hci_cmd_le_subrate_request"]),
-    ("HCI_SDC_HAS_LE_READ_ALL_REMOTE_FEATURES",
-     ["sdc_hci_cmd_le_read_all_remote_features"]),
-    ("HCI_SDC_HAS_LE_SET_HOST_CHANNEL_CLASSIFICATION",
-     ["sdc_hci_cmd_le_set_host_channel_classification"]),
-    ("HCI_SDC_HAS_VS_SET_ADV_RANDOMNESS",
-     ["sdc_hci_cmd_vs_set_adv_randomness"]),
-    ("HCI_SDC_HAS_VS_LLPM",
-     ["sdc_hci_cmd_vs_llpm_mode_set",
-      "sdc_hci_cmd_vs_conn_update"]),
-    ("HCI_SDC_HAS_LE_PERIODIC_ADV",
-     ["sdc_hci_cmd_le_set_periodic_adv_params",
-      "sdc_hci_cmd_le_set_periodic_adv_data",
-      "sdc_hci_cmd_le_set_periodic_adv_enable"]),
-    ("HCI_SDC_HAS_LE_PERIODIC_SYNC",
-     ["sdc_hci_cmd_le_periodic_adv_create_sync",
-      "sdc_hci_cmd_le_periodic_adv_create_sync_cancel",
-      "sdc_hci_cmd_le_periodic_adv_terminate_sync",
-      "sdc_hci_cmd_le_add_device_to_periodic_adv_list",
-      "sdc_hci_cmd_le_remove_device_from_periodic_adv_list",
-      "sdc_hci_cmd_le_clear_periodic_adv_list",
-      "sdc_hci_cmd_le_read_periodic_adv_list_size"]),
-    ("HCI_SDC_HAS_LE_PERIODIC_SYNC_TRANSFER",
-     ["sdc_hci_cmd_le_set_periodic_adv_receive_enable",
-      "sdc_hci_cmd_le_periodic_adv_sync_transfer",
-      "sdc_hci_cmd_le_periodic_adv_set_info_transfer",
-      "sdc_hci_cmd_le_set_periodic_adv_sync_transfer_params",
-      "sdc_hci_cmd_le_set_default_periodic_adv_sync_transfer_params"]),
-    ("HCI_SDC_HAS_LE_PERIODIC_ADV_RSP",
-     ["sdc_hci_cmd_le_set_periodic_adv_params_v2",
-      "sdc_hci_cmd_le_set_periodic_adv_subevent_data"]),
-    ("HCI_SDC_HAS_LE_PERIODIC_SYNC_RSP",
-     ["sdc_hci_cmd_le_set_periodic_adv_response_data",
-      "sdc_hci_cmd_le_set_periodic_sync_subevent"]),
-]
-
-# Not a dispatch table gate. HCI_NRF52840_QOS_CHANNEL_SURVEY in
-# include/hci_nrf52840.h decides whether the module is configured in, and it
-# needs a support function rather than a command. Checked here because a build
-# that sets it without the symbol does not link.
-SUPPORT = [
-    ("HCI_NRF52840_QOS_CHANNEL_SURVEY", ["sdc_support_qos_channel_survey"]),
-    ("HCI_NRF52840_LE_POWER_CONTROL",
-     ["sdc_support_le_power_control_central",
-      "sdc_support_le_power_control_peripheral",
-      "sdc_support_le_path_loss_monitoring"]),
-    ("HCI_NRF52840_SCA_UPDATE",
-     ["sdc_support_sca_central", "sdc_support_sca_peripheral"]),
-    ("HCI_NRF52840_CONNECTION_SUBRATING",
-     ["sdc_support_connection_subrating_central",
-      "sdc_support_connection_subrating_peripheral"]),
-    # The unsuffixed sdc_support_extended_feature_set() is deprecated and is
-    # absent from the nRF52 libraries. Only the per role pair is checked.
-    ("HCI_NRF52840_EXTENDED_FEATURE_SET",
-     ["sdc_support_extended_feature_set_central",
-      "sdc_support_extended_feature_set_peripheral"]),
-    ("HCI_NRF52840_PARALLEL_SCAN_INIT",
-     ["sdc_support_parallel_scanning_and_initiating"]),
-    ("HCI_NRF52840_PERIODIC_ADV", ["sdc_support_le_periodic_adv"]),
-    ("HCI_NRF52840_PERIODIC_SYNC", ["sdc_support_le_periodic_sync"]),
-    ("HCI_NRF52840_PERIODIC_SYNC_TRANSFER",
-     ["sdc_support_periodic_adv_sync_transfer_sender_central",
-      "sdc_support_periodic_adv_sync_transfer_sender_peripheral",
-      "sdc_support_periodic_adv_sync_transfer_receiver_central",
-      "sdc_support_periodic_adv_sync_transfer_receiver_peripheral"]),
-    ("HCI_NRF52840_PERIODIC_ADV_RSP",
-     ["sdc_support_le_periodic_adv_with_rsp"]),
-    ("HCI_NRF52840_PERIODIC_SYNC_RSP",
-     ["sdc_support_le_periodic_sync_with_rsp"]),
 ]
 
 DEFAULT_LIB = ("../external/sdk-nrfxlib/softdevice_controller/lib/nrf52/"
@@ -217,14 +118,11 @@ def main():
     print("%d symbols, %d of them HCI commands" % (len(symbols), len(commands)))
     print()
 
-    sources = [os.path.join(root, "src", "hci_sdc_nrfxlib.cpp"),
-               os.path.join(root, "include", "hci_nrf52840.h")]
-    defaults = source_defaults(sources,
-                               [m for m, _ in GATES] +
-                               [m for m, _ in SUPPORT])
+    sources = [os.path.join(root, "src", "hci_sdc_nrfxlib.cpp")]
+    defaults = source_defaults(sources, [m for m, _ in GATES])
     disagreed = 0
 
-    for macro, needed in GATES + SUPPORT:
+    for macro, needed in GATES:
         if not needed:
             want = 1
             note = "needs no SDC symbol"

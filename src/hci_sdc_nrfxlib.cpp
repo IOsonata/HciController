@@ -93,9 +93,6 @@
  * defaults on, but it is vendor specific and a different library may not carry
  * it, which is what the macro is for.
  */
-#ifndef HCI_SDC_HAS_VS_CARRIER_TEST
-#define HCI_SDC_HAS_VS_CARRIER_TEST 1
-#endif
 
 /*
  * The Zephyr vendor set, opcodes 0xFC01 to 0xFC0F. Read Version Information,
@@ -111,9 +108,6 @@
  * One macro for the group rather than six, because they come and go together
  * with the library variant.
  */
-#ifndef HCI_SDC_HAS_VS_ZEPHYR_SET
-#define HCI_SDC_HAS_VS_ZEPHYR_SET 1
-#endif
 
 /*
  * Read Key Hierarchy Roots, 0xFC0A, gets a macro of its own rather than
@@ -128,155 +122,34 @@
  * a UART that leaves the enclosure, it is a key readable by whatever is on the
  * other end of that wire. Turn it off there.
  */
-#ifndef HCI_SDC_HAS_VS_KEY_HIERARCHY_ROOTS
-#define HCI_SDC_HAS_VS_KEY_HIERARCHY_ROOTS 1
-#endif
 
 /*
- * The quality of service commands, 0xFD04 to 0xFD1F. What the controller can
- * say about the radio that a host stack cannot see: energy on each channel,
- * CRC errors and RSSI per connection event, and where the next anchor point
- * falls.
+ * Notes on groups of commands below whose behaviour is not obvious from the
+ * table, kept here rather than repeated at each row.
  *
- * Four of the five need nothing but a table row. Channel survey needs
- * sdc_support_qos_channel_survey() and 40 octets of pool, which is
- * HCI_NRF52840_QOS_CHANNEL_SURVEY in hci_nrf52840.h. That macro and this one
- * are separate on purpose: this one says the symbol is in the library, that
- * one says the module is configured in. A build that clears that one and
- * leaves this set gets a command that dispatches and is refused by SDC, which
- * is the honest answer.
+ * The quality of service commands, 0xFD04 to 0xFD1F, and the periodic
+ * advertising reports all come back as events rather than command returns:
+ * vendor subevents 0x80 to 0x82 for the former, LE meta subevents 0x0E to 0x10
+ * and 0x18 for the latter. Those arrive from sdc_hci_get like any other event
+ * and the bridge forwards them unchanged, so nothing here is taught about them.
  *
- * These four commands report through vendor events, subevents 0x80 to 0x82.
- * Those arrive from sdc_hci_get like any other event and the bridge forwards
- * them unchanged, so nothing here has to be taught about them.
- */
-#ifndef HCI_SDC_HAS_VS_QOS
-#define HCI_SDC_HAS_VS_QOS 1
-#endif
-
-/*
- * LE Power Control and path loss monitoring, Vol 4 Part E 7.8.117 to 7.8.121,
- * plus Read Transmit Power Level at 7.3.35 and the RF path compensation pair
- * at 7.8.75 and 7.8.76.
+ * Channel survey, power control, sleep clock accuracy, subrating, the extended
+ * feature set and every periodic advertising role need a matching
+ * sdc_support_ call before sdc_cfg_set. Those are made in hci_nrf52840.cpp,
+ * and the pool they need is computed in hci_nrf52840.h. A row here with no
+ * support call there dispatches and is refused by SDC with a status.
  *
- * Same split as the channel survey: this macro says the symbols are in the
- * library, HCI_NRF52840_LE_POWER_CONTROL in hci_nrf52840.h says the feature is
- * configured in and carries the 997 octets of pool it needs. A build that
- * clears that one and leaves this set answers with a status from SDC rather
- * than Unknown HCI Command, which is what a host can act on.
- *
- * The RF path compensation pair and Read Transmit Power Level are grouped here
- * because that is where a host looks for them, not because they need the
- * support call. They do not.
- */
-#ifndef HCI_SDC_HAS_LE_POWER_CONTROL
-#define HCI_SDC_HAS_LE_POWER_CONTROL 1
-#endif
-
-/*
- * Sleep clock accuracy, Vol 4 Part E 7.8.108. Asks a peer how good its clock
- * is, which decides how early a receiver has to wake. The matching
- * HCI_NRF52840_SCA_UPDATE turns on the procedure and costs no pool.
- */
-#ifndef HCI_SDC_HAS_LE_REQUEST_PEER_SCA
-#define HCI_SDC_HAS_LE_REQUEST_PEER_SCA 1
-#endif
-
-/* Connection subrating, Vol 4 Part E 7.8.123 and 7.8.124. */
-#ifndef HCI_SDC_HAS_LE_SUBRATING
-#define HCI_SDC_HAS_LE_SUBRATING 1
-#endif
-
-/* The extended feature set, Vol 4 Part E 7.8.150. */
-#ifndef HCI_SDC_HAS_LE_READ_ALL_REMOTE_FEATURES
-#define HCI_SDC_HAS_LE_READ_ALL_REMOTE_FEATURES 1
-#endif
-
-/*
- * Vol 4 Part E 7.8.19. The host names which channels it believes are usable
- * and the controller keeps to them. A test tool should be able to force a link
- * onto chosen channels, and now that the channel survey is here the two go
- * together: survey says which channels are busy, this says which to avoid.
- */
-#ifndef HCI_SDC_HAS_LE_SET_HOST_CHANNEL_CLASSIFICATION
-#define HCI_SDC_HAS_LE_SET_HOST_CHANNEL_CLASSIFICATION 1
-#endif
-
-/*
- * Nordic vendor. Advertising randomness makes the interval jitter chosen
- * rather than left to the controller, which is what makes a timing test
- * repeatable.
- */
-#ifndef HCI_SDC_HAS_VS_SET_ADV_RANDOMNESS
-#define HCI_SDC_HAS_VS_SET_ADV_RANDOMNESS 1
-#endif
-
-/*
- * Low Latency Packet Mode, Nordic to Nordic only, and the vendor Connection
- * Update that reaches the intervals it unlocks.
- *
- * The two are one macro because either alone is useless. LLPM Mode Set permits
+ * VS LLPM Mode Set and VS Connection Update belong together. LLPM permits
  * connection intervals of 1 to 7 ms, and the standard LE Connection Update
  * cannot ask for one: its interval is in units of 1.25 ms with a floor of six
- * units, so 7.5 ms is the shortest it can express. VS Connection Update takes
- * microseconds, which is the only way to reach the range LLPM opens. Shipping
- * LLPM without it would give a host a command that enables something it then
- * has no way to use.
+ * units, so 7.5 ms is the shortest it can express. The vendor command takes
+ * microseconds, which is the only way to reach the range LLPM opens. LLPM is
+ * also Nordic to Nordic, so it is a bench and demo feature rather than an
+ * interoperable one.
  *
- * A peer that is not a Nordic controller will not follow, so this is a bench
- * and demo feature rather than an interoperable one.
+ * LE Set Host Channel Classification pairs with the channel survey: the survey
+ * says which channels are busy, this says which to avoid.
  */
-#ifndef HCI_SDC_HAS_VS_LLPM
-#define HCI_SDC_HAS_VS_LLPM 1
-#endif
-
-/*
- * Periodic advertising, Vol 4 Part E 7.8.61 to 7.8.73 and 7.8.88 to 7.8.92.
- *
- * Three gates rather than one, matching the three the platform side has, since
- * the three halves are independently useful: transmitting a train, following
- * one, and handing a sync to a peer over a connection.
- *
- * As everywhere else here, these say the symbols are in the library.
- * HCI_NRF52840_PERIODIC_ADV, _PERIODIC_SYNC and _PERIODIC_SYNC_TRANSFER in
- * hci_nrf52840.h say the feature is configured in and carry the pool. Clearing
- * one of those and leaving the matching one here gives commands that dispatch
- * and are refused by SDC with a status, which is what a host can act on.
- *
- * The reports come back as LE meta events, subevents 0x0E to 0x10 and 0x18.
- * Those arrive from sdc_hci_get like any other event and the bridge forwards
- * them, so nothing here has to be taught about them.
- */
-#ifndef HCI_SDC_HAS_LE_PERIODIC_ADV
-#define HCI_SDC_HAS_LE_PERIODIC_ADV 1
-#endif
-
-#ifndef HCI_SDC_HAS_LE_PERIODIC_SYNC
-#define HCI_SDC_HAS_LE_PERIODIC_SYNC 1
-#endif
-
-#ifndef HCI_SDC_HAS_LE_PERIODIC_SYNC_TRANSFER
-#define HCI_SDC_HAS_LE_PERIODIC_SYNC_TRANSFER 1
-#endif
-
-/*
- * Periodic Advertising with Responses, Vol 4 Part E 7.8.125 to 7.8.128 and
- * 7.8.61 v2. The advertiser divides the period into subevents and offers
- * response slots; a device that heard the broadcast answers in one, without
- * ever forming a connection. Electronic shelf labels are the case that makes
- * it worth having.
- *
- * Split by role like the plain periodic pair. The advertiser sets subevent
- * data and takes the v2 parameters that describe the subevent structure; the
- * scanner picks which subevents to follow and puts data in a response slot.
- */
-#ifndef HCI_SDC_HAS_LE_PERIODIC_ADV_RSP
-#define HCI_SDC_HAS_LE_PERIODIC_ADV_RSP 1
-#endif
-
-#ifndef HCI_SDC_HAS_LE_PERIODIC_SYNC_RSP
-#define HCI_SDC_HAS_LE_PERIODIC_SYNC_RSP 1
-#endif
 
 static HciCmdResult_t HciSdcComplete(uint8_t Status, size_t ReturnLen)
 {
@@ -474,7 +347,6 @@ static HciCmdResult_t HciSdcCmdReadSupportedCommands(void *,
 
     supported.params.hci_le_set_host_feature = 1U;
 
-#if HCI_SDC_HAS_LE_POWER_CONTROL
     supported.params.hci_read_transmit_power_level = 1U;
     supported.params.hci_le_read_rf_path_compensation = 1U;
     supported.params.hci_le_write_rf_path_compensation = 1U;
@@ -483,28 +355,16 @@ static HciCmdResult_t HciSdcCmdReadSupportedCommands(void *,
     supported.params.hci_le_set_path_loss_reporting_parameters = 1U;
     supported.params.hci_le_set_path_loss_reporting_enable = 1U;
     supported.params.hci_le_set_transmit_power_reporting_enable = 1U;
-#endif
 
-#if HCI_SDC_HAS_LE_SET_HOST_CHANNEL_CLASSIFICATION
     supported.params.hci_le_set_host_channel_classification = 1U;
-#endif
-#if HCI_SDC_HAS_LE_REQUEST_PEER_SCA
     supported.params.hci_le_request_peer_sca = 1U;
-#endif
-#if HCI_SDC_HAS_LE_SUBRATING
     supported.params.hci_le_set_default_subrate_command = 1U;
     supported.params.hci_le_subrate_request_command = 1U;
-#endif
-#if HCI_SDC_HAS_LE_READ_ALL_REMOTE_FEATURES
     supported.params.hci_le_read_all_remote_features = 1U;
-#endif
 
-#if HCI_SDC_HAS_LE_PERIODIC_ADV
     supported.params.hci_le_set_periodic_advertising_parameters = 1U;
     supported.params.hci_le_set_periodic_advertising_data = 1U;
     supported.params.hci_le_set_periodic_advertising_enable = 1U;
-#endif
-#if HCI_SDC_HAS_LE_PERIODIC_SYNC
     supported.params.hci_le_periodic_advertising_create_sync = 1U;
     supported.params.hci_le_periodic_advertising_create_sync_cancel = 1U;
     supported.params.hci_le_periodic_advertising_terminate_sync = 1U;
@@ -512,8 +372,6 @@ static HciCmdResult_t HciSdcCmdReadSupportedCommands(void *,
     supported.params.hci_le_remove_device_from_periodic_advertiser_list = 1U;
     supported.params.hci_le_clear_periodic_advertiser_list = 1U;
     supported.params.hci_le_read_periodic_advertiser_list_size = 1U;
-#endif
-#if HCI_SDC_HAS_LE_PERIODIC_SYNC_TRANSFER
     supported.params.hci_le_set_periodic_advertising_receive_enable = 1U;
     supported.params.hci_le_periodic_advertising_sync_transfer = 1U;
     supported.params.hci_le_periodic_advertising_set_info_transfer = 1U;
@@ -521,15 +379,10 @@ static HciCmdResult_t HciSdcCmdReadSupportedCommands(void *,
         1U;
     supported.params
         .hci_le_set_default_periodic_advertising_sync_transfer_parameters = 1U;
-#endif
-#if HCI_SDC_HAS_LE_PERIODIC_ADV_RSP
     supported.params.hci_le_set_periodic_advertising_parameters_v2 = 1U;
     supported.params.hci_le_set_periodic_advertising_subevent_data = 1U;
-#endif
-#if HCI_SDC_HAS_LE_PERIODIC_SYNC_RSP
     supported.params.hci_le_set_periodic_advertising_response_data = 1U;
     supported.params.hci_le_set_periodic_sync_subevent = 1U;
-#endif
 
     supported.params.hci_le_set_data_length = 1U;
     supported.params.hci_le_read_suggested_default_data_length = 1U;
@@ -1030,7 +883,6 @@ static HciCmdResult_t HciSdcCmdVsReadStaticAddresses(void *,
 }
 #endif
 
-#if HCI_SDC_HAS_VS_ZEPHYR_SET
 HCI_SDC_CMD_NR(HciSdcCmdVsZephyrReadVersionInfo,
                sdc_hci_cmd_vs_zephyr_read_version_info,
                sdc_hci_cmd_vs_zephyr_read_version_info_return_t)
@@ -1100,22 +952,15 @@ static HciCmdResult_t HciSdcCmdVsZephyrReadSupportedCommands(void *,
 #if !HCI_SDC_HAS_VS_READ_STATIC_ADDRESSES
     result.params.read_static_addresses = 0U;
 #endif
-#if !HCI_SDC_HAS_VS_KEY_HIERARCHY_ROOTS
-    result.params.read_key_hierarchy_roots = 0U;
-#endif
 
     memcpy(pReturn, result.raw, sizeof(result.raw));
     return HciSdcComplete(status, sizeof(result.raw));
 }
-#endif
 
-#if HCI_SDC_HAS_VS_KEY_HIERARCHY_ROOTS
 HCI_SDC_CMD_NR(HciSdcCmdVsZephyrReadKeyHierarchyRoots,
                sdc_hci_cmd_vs_zephyr_read_key_hierarchy_roots,
                sdc_hci_cmd_vs_zephyr_read_key_hierarchy_roots_return_t)
-#endif
 
-#if HCI_SDC_HAS_VS_QOS
 HCI_SDC_CMD_P(HciSdcCmdVsQosConnEventReportEnable,
               sdc_hci_cmd_vs_qos_conn_event_report_enable,
               sdc_hci_cmd_vs_qos_conn_event_report_enable_t, HciSdcComplete)
@@ -1133,9 +978,7 @@ HCI_SDC_CMD_P(HciSdcCmdVsConnAnchorPointUpdateEnable,
               sdc_hci_cmd_vs_conn_anchor_point_update_event_report_enable,
               sdc_hci_cmd_vs_conn_anchor_point_update_event_report_enable_t,
               HciSdcComplete)
-#endif
 
-#if HCI_SDC_HAS_LE_POWER_CONTROL
 HCI_SDC_CMD_PR(HciSdcCmdReadTransmitPowerLevel,
                sdc_hci_cmd_cb_read_transmit_power_level,
                sdc_hci_cmd_cb_read_transmit_power_level_t,
@@ -1175,14 +1018,11 @@ HCI_SDC_CMD_PR(HciSdcCmdLeSetTransmitPowerReportingEnable,
                sdc_hci_cmd_le_set_transmit_power_reporting_enable,
                sdc_hci_cmd_le_set_transmit_power_reporting_enable_t,
                sdc_hci_cmd_le_set_transmit_power_reporting_enable_return_t)
-#endif
 
-#if HCI_SDC_HAS_LE_SET_HOST_CHANNEL_CLASSIFICATION
 HCI_SDC_CMD_P(HciSdcCmdLeSetHostChannelClassification,
               sdc_hci_cmd_le_set_host_channel_classification,
               sdc_hci_cmd_le_set_host_channel_classification_t,
               HciSdcComplete)
-#endif
 
 /*
  * The three below answer with a Command Status and finish in an LE meta event
@@ -1191,40 +1031,29 @@ HCI_SDC_CMD_P(HciSdcCmdLeSetHostChannelClassification,
  * in LE Subrate Change, Read All Remote Features in LE Read All Remote
  * Features Complete. Vol 4 Part E 7.8.108, 7.8.124 and 7.8.150.
  */
-#if HCI_SDC_HAS_LE_REQUEST_PEER_SCA
 HCI_SDC_CMD_P(HciSdcCmdLeRequestPeerSca, sdc_hci_cmd_le_request_peer_sca,
               sdc_hci_cmd_le_request_peer_sca_t, HciSdcStatus)
-#endif
 
-#if HCI_SDC_HAS_LE_SUBRATING
 HCI_SDC_CMD_P(HciSdcCmdLeSetDefaultSubrate,
               sdc_hci_cmd_le_set_default_subrate,
               sdc_hci_cmd_le_set_default_subrate_t, HciSdcComplete)
 HCI_SDC_CMD_P(HciSdcCmdLeSubrateRequest, sdc_hci_cmd_le_subrate_request,
               sdc_hci_cmd_le_subrate_request_t, HciSdcStatus)
-#endif
 
-#if HCI_SDC_HAS_LE_READ_ALL_REMOTE_FEATURES
 HCI_SDC_CMD_P(HciSdcCmdLeReadAllRemoteFeatures,
               sdc_hci_cmd_le_read_all_remote_features,
               sdc_hci_cmd_le_read_all_remote_features_t, HciSdcStatus)
-#endif
 
-#if HCI_SDC_HAS_VS_SET_ADV_RANDOMNESS
 HCI_SDC_CMD_P(HciSdcCmdVsSetAdvRandomness, sdc_hci_cmd_vs_set_adv_randomness,
               sdc_hci_cmd_vs_set_adv_randomness_t, HciSdcComplete)
-#endif
 
-#if HCI_SDC_HAS_VS_LLPM
 HCI_SDC_CMD_P(HciSdcCmdVsLlpmModeSet, sdc_hci_cmd_vs_llpm_mode_set,
               sdc_hci_cmd_vs_llpm_mode_set_t, HciSdcComplete)
 /* Command Status, then a VS Connection Update Complete event. */
 HCI_SDC_CMD_P(HciSdcCmdVsConnUpdate, sdc_hci_cmd_vs_conn_update,
               sdc_hci_cmd_vs_conn_update_t, HciSdcStatus)
-#endif
 
 /* Periodic advertising, the transmitting half. */
-#if HCI_SDC_HAS_LE_PERIODIC_ADV
 HCI_SDC_CMD_P(HciSdcCmdLeSetPeriodicAdvParams,
               sdc_hci_cmd_le_set_periodic_adv_params,
               sdc_hci_cmd_le_set_periodic_adv_params_t, HciSdcComplete)
@@ -1239,10 +1068,8 @@ HCI_SDC_CMD_VB(HciSdcCmdLeSetPeriodicAdvData,
 HCI_SDC_CMD_P(HciSdcCmdLeSetPeriodicAdvEnable,
               sdc_hci_cmd_le_set_periodic_adv_enable,
               sdc_hci_cmd_le_set_periodic_adv_enable_t, HciSdcComplete)
-#endif
 
 /* Following a train. */
-#if HCI_SDC_HAS_LE_PERIODIC_SYNC
 /*
  * Command Status, then LE Periodic Advertising Sync Established once the
  * controller has actually found the train, or Sync Lost if it never does.
@@ -1270,10 +1097,8 @@ HCI_SDC_CMD_N(HciSdcCmdLeClearPeriodicAdvList,
 HCI_SDC_CMD_NR(HciSdcCmdLeReadPeriodicAdvListSize,
                sdc_hci_cmd_le_read_periodic_adv_list_size,
                sdc_hci_cmd_le_read_periodic_adv_list_size_return_t)
-#endif
 
 /* Handing a sync to a peer over a connection. */
-#if HCI_SDC_HAS_LE_PERIODIC_SYNC_TRANSFER
 HCI_SDC_CMD_P(HciSdcCmdLeSetPeriodicAdvReceiveEnable,
               sdc_hci_cmd_le_set_periodic_adv_receive_enable,
               sdc_hci_cmd_le_set_periodic_adv_receive_enable_t,
@@ -1294,9 +1119,7 @@ HCI_SDC_CMD_P(HciSdcCmdLeSetDefaultPeriodicAdvSyncTransferParams,
               sdc_hci_cmd_le_set_default_periodic_adv_sync_transfer_params,
               sdc_hci_cmd_le_set_default_periodic_adv_sync_transfer_params_t,
               HciSdcComplete)
-#endif
 
-#if HCI_SDC_HAS_LE_PERIODIC_ADV_RSP
 HCI_SDC_CMD_PR(HciSdcCmdLeSetPeriodicAdvParamsV2,
                sdc_hci_cmd_le_set_periodic_adv_params_v2,
                sdc_hci_cmd_le_set_periodic_adv_params_v2_t,
@@ -1377,9 +1200,7 @@ static HciCmdResult_t HciSdcCmdLeSetPeriodicAdvSubeventData(void *,
     memcpy(pReturn, &result, sizeof(result));
     return HciSdcComplete(status, sizeof(result));
 }
-#endif
 
-#if HCI_SDC_HAS_LE_PERIODIC_SYNC_RSP
 /* Byte counted, and answers with the sync handle. 7.8.126 and 7.8.127. */
 HCI_SDC_CMD_VBR(HciSdcCmdLeSetPeriodicAdvResponseData,
                 sdc_hci_cmd_le_set_periodic_adv_response_data,
@@ -1395,7 +1216,6 @@ HCI_SDC_CMD_VBR(HciSdcCmdLeSetPeriodicSyncSubevent,
                 sdc_hci_cmd_le_set_periodic_sync_subevent_t,
                 sdc_hci_cmd_le_set_periodic_sync_subevent_return_t,
                 subevents, num_subevents_to_sync)
-#endif
 
 /* Controller and baseband. */
 #if HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT
@@ -1621,11 +1441,9 @@ static HciCmdResult_t HciSdcCmdLeTransmitterTestV4(void *,
 HCI_SDC_CMD_NR(HciSdcCmdLeTestEnd, sdc_hci_cmd_le_test_end,
                sdc_hci_cmd_le_test_end_return_t)
 
-#if HCI_SDC_HAS_VS_CARRIER_TEST
 HCI_SDC_CMD_P(HciSdcCmdVsTransmitterCarrierTest,
               sdc_hci_cmd_vs_transmitter_carrier_test,
               sdc_hci_cmd_vs_transmitter_carrier_test_t, HciSdcComplete)
-#endif
 
 /*
  * Status parameters. Vol 4 Part E 7.5.4, the RSSI of the last packet received
@@ -1991,7 +1809,6 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
                     sizeof(sdc_hci_cmd_le_set_host_feature_t),
                     HciSdcCmdLeSetHostFeature),
 
-#if HCI_SDC_HAS_LE_POWER_CONTROL
     /* Transmit power, and the path loss the two ends work out from it. */
     HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_CB_READ_TRANSMIT_POWER_LEVEL,
                      sizeof(sdc_hci_cmd_cb_read_transmit_power_level_t),
@@ -2028,48 +1845,34 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
         sizeof(sdc_hci_cmd_le_set_transmit_power_reporting_enable_t),
         HciSdcCmdLeSetTransmitPowerReportingEnable,
         sdc_hci_cmd_le_set_transmit_power_reporting_enable_return_t),
-#endif
 
-#if HCI_SDC_HAS_LE_SET_HOST_CHANNEL_CLASSIFICATION
     /* Which channels the host believes are usable. Five octets of bitmap. */
     HCI_SDC_ENTRY_C(
         SDC_HCI_OPCODE_CMD_LE_SET_HOST_CHANNEL_CLASSIFICATION,
         sizeof(sdc_hci_cmd_le_set_host_channel_classification_t),
         HciSdcCmdLeSetHostChannelClassification),
-#endif
-#if HCI_SDC_HAS_LE_REQUEST_PEER_SCA
     HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_REQUEST_PEER_SCA,
                     sizeof(sdc_hci_cmd_le_request_peer_sca_t),
                     HciSdcCmdLeRequestPeerSca),
-#endif
-#if HCI_SDC_HAS_LE_SUBRATING
     HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_DEFAULT_SUBRATE,
                     sizeof(sdc_hci_cmd_le_set_default_subrate_t),
                     HciSdcCmdLeSetDefaultSubrate),
     HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_SUBRATE_REQUEST,
                     sizeof(sdc_hci_cmd_le_subrate_request_t),
                     HciSdcCmdLeSubrateRequest),
-#endif
-#if HCI_SDC_HAS_LE_READ_ALL_REMOTE_FEATURES
     HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_READ_ALL_REMOTE_FEATURES,
                     sizeof(sdc_hci_cmd_le_read_all_remote_features_t),
                     HciSdcCmdLeReadAllRemoteFeatures),
-#endif
-#if HCI_SDC_HAS_VS_SET_ADV_RANDOMNESS
     HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_VS_SET_ADV_RANDOMNESS,
                     sizeof(sdc_hci_cmd_vs_set_adv_randomness_t),
                     HciSdcCmdVsSetAdvRandomness),
-#endif
-#if HCI_SDC_HAS_VS_LLPM
     HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_VS_LLPM_MODE_SET,
                     sizeof(sdc_hci_cmd_vs_llpm_mode_set_t),
                     HciSdcCmdVsLlpmModeSet),
     HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_VS_CONN_UPDATE,
                     sizeof(sdc_hci_cmd_vs_conn_update_t),
                     HciSdcCmdVsConnUpdate),
-#endif
 
-#if HCI_SDC_HAS_LE_PERIODIC_ADV
     /* Periodic advertising, transmitting. */
     HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_PARAMS,
                     sizeof(sdc_hci_cmd_le_set_periodic_adv_params_t),
@@ -2080,8 +1883,6 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
     HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_ENABLE,
                     sizeof(sdc_hci_cmd_le_set_periodic_adv_enable_t),
                     HciSdcCmdLeSetPeriodicAdvEnable),
-#endif
-#if HCI_SDC_HAS_LE_PERIODIC_SYNC
     /* Following a train. Create Sync finishes in a Sync Established event. */
     HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_PERIODIC_ADV_CREATE_SYNC,
                     sizeof(sdc_hci_cmd_le_periodic_adv_create_sync_t),
@@ -2104,8 +1905,6 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
     HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_READ_PERIODIC_ADV_LIST_SIZE, 0U,
                      HciSdcCmdLeReadPeriodicAdvListSize,
                      sdc_hci_cmd_le_read_periodic_adv_list_size_return_t),
-#endif
-#if HCI_SDC_HAS_LE_PERIODIC_SYNC_TRANSFER
     /* Handing a sync to a peer over a connection. */
     HCI_SDC_ENTRY_C(
         SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_RECEIVE_ENABLE,
@@ -2129,8 +1928,6 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
         sizeof(
             sdc_hci_cmd_le_set_default_periodic_adv_sync_transfer_params_t),
         HciSdcCmdLeSetDefaultPeriodicAdvSyncTransferParams),
-#endif
-#if HCI_SDC_HAS_LE_PERIODIC_ADV_RSP
     /*
      * Periodic advertising with responses, the advertiser. Subevent Data
      * declares the return length it produces on success, which is the handle,
@@ -2144,8 +1941,6 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
      HCI_CMD_VARIABLE_PARAM_LEN,
      (uint16_t)sizeof(sdc_hci_cmd_le_set_periodic_adv_subevent_data_return_t),
      HCI_CMD_RESPONSE_COMPLETE, HciSdcCmdLeSetPeriodicAdvSubeventData},
-#endif
-#if HCI_SDC_HAS_LE_PERIODIC_SYNC_RSP
     /* And the scanner, which answers in a slot and picks what to follow. */
     {SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_RESPONSE_DATA,
      HCI_CMD_VARIABLE_PARAM_LEN,
@@ -2155,9 +1950,7 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
      HCI_CMD_VARIABLE_PARAM_LEN,
      (uint16_t)sizeof(sdc_hci_cmd_le_set_periodic_sync_subevent_return_t),
      HCI_CMD_RESPONSE_COMPLETE, HciSdcCmdLeSetPeriodicSyncSubevent},
-#endif
 
-#if HCI_SDC_HAS_VS_CARRIER_TEST
     /*
      * Vendor specific, and grouped with direct test mode rather than with the
      * vendor rows below because that is what it is for. LE Test End stops it,
@@ -2166,7 +1959,6 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
     HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_VS_TRANSMITTER_CARRIER_TEST,
                     sizeof(sdc_hci_cmd_vs_transmitter_carrier_test_t),
                     HciSdcCmdVsTransmitterCarrierTest),
-#endif
 
     /*
      * Vendor specific. The return type ends in a flexible array, so sizeof()
@@ -2178,7 +1970,6 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
                      HciSdcCmdVsReadStaticAddresses,
                      sdc_hci_cmd_vs_zephyr_read_static_addresses_return_t),
 #endif
-#if HCI_SDC_HAS_VS_ZEPHYR_SET
     /*
      * The rest of the Zephyr family. Read Supported Commands declares the full
      * 64 octet bitmap, which is what it always returns, masked or not.
@@ -2204,13 +1995,9 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
                      sizeof(sdc_hci_cmd_vs_zephyr_read_tx_power_t),
                      HciSdcCmdVsZephyrReadTxPower,
                      sdc_hci_cmd_vs_zephyr_read_tx_power_return_t),
-#endif
-#if HCI_SDC_HAS_VS_KEY_HIERARCHY_ROOTS
     HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_VS_ZEPHYR_READ_KEY_HIERARCHY_ROOTS, 0U,
                      HciSdcCmdVsZephyrReadKeyHierarchyRoots,
                      sdc_hci_cmd_vs_zephyr_read_key_hierarchy_roots_return_t),
-#endif
-#if HCI_SDC_HAS_VS_QOS
     /* Quality of service. What the radio saw, rather than what the link did. */
     HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_VS_QOS_CONN_EVENT_REPORT_ENABLE,
                     sizeof(sdc_hci_cmd_vs_qos_conn_event_report_enable_t),
@@ -2231,7 +2018,6 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
         sizeof(
             sdc_hci_cmd_vs_conn_anchor_point_update_event_report_enable_t),
         HciSdcCmdVsConnAnchorPointUpdateEnable),
-#endif
 #if HCI_SDC_HAS_VS_READ_COUNTERS
     /*
      * Answered by the routing layer rather than by SDC, so it reports what
@@ -2305,7 +2091,6 @@ HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_receiver_test_v2_t, 3U);              /* 7.8.50 
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_transmitter_test_v2_t, 4U);           /* 7.8.51 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_host_feature_t, 2U);             /* 7.8.115 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_sp_read_rssi_t, 2U);                      /* 7.5.4 */
-#if HCI_SDC_HAS_LE_POWER_CONTROL
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_cb_read_transmit_power_level_t, 3U);     /* 7.3.35 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_write_rf_path_compensation_t, 4U);    /* 7.8.76 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_enhanced_read_transmit_power_level_t,
@@ -2318,38 +2103,24 @@ HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_path_loss_reporting_enable_t,
                  3U);                                               /* 7.8.120 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_transmit_power_reporting_enable_t,
                  4U);                                               /* 7.8.121 */
-#endif
-#if HCI_SDC_HAS_LE_SET_HOST_CHANNEL_CLASSIFICATION
 /* Thirty seven data channels in a five octet bitmap. Vol 4 Part E 7.8.19. */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_host_channel_classification_t, 5U);
-#endif
-#if HCI_SDC_HAS_LE_REQUEST_PEER_SCA
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_request_peer_sca_t, 2U);            /* 7.8.108 */
-#endif
-#if HCI_SDC_HAS_LE_SUBRATING
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_default_subrate_t, 10U);        /* 7.8.123 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_subrate_request_t, 12U);            /* 7.8.124 */
-#endif
-#if HCI_SDC_HAS_LE_READ_ALL_REMOTE_FEATURES
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_all_remote_features_t,
                  3U);                                               /* 7.8.150 */
-#endif
-#if HCI_SDC_HAS_LE_PERIODIC_ADV
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_periodic_adv_params_t, 7U);       /* 7.8.61 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_periodic_adv_enable_t, 2U);       /* 7.8.63 */
 /* Variable, so the fixed head alone is pinned. 7.8.62. */
 static_assert(offsetof(sdc_hci_cmd_le_set_periodic_adv_data_t, adv_data) == 3U,
               "LE Set Periodic Advertising Data fixed part is not 3 octets");
-#endif
-#if HCI_SDC_HAS_LE_PERIODIC_SYNC
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_periodic_adv_create_sync_t, 14U);     /* 7.8.67 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_periodic_adv_terminate_sync_t, 2U);   /* 7.8.69 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_add_device_to_periodic_adv_list_t,
                  8U);                                                 /* 7.8.70 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_remove_device_from_periodic_adv_list_t,
                  8U);                                                 /* 7.8.71 */
-#endif
-#if HCI_SDC_HAS_LE_PERIODIC_SYNC_TRANSFER
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_periodic_adv_receive_enable_t,
                  3U);                                                 /* 7.8.88 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_periodic_adv_sync_transfer_t,
@@ -2361,8 +2132,6 @@ HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_periodic_adv_sync_transfer_params_t,
 HCI_SDC_SPEC_LEN(
     sdc_hci_cmd_le_set_default_periodic_adv_sync_transfer_params_t,
     6U);                                                              /* 7.8.92 */
-#endif
-#if HCI_SDC_HAS_LE_PERIODIC_ADV_RSP
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_periodic_adv_params_v2_t,
                  12U);                                             /* 7.8.61 v2 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_periodic_adv_params_v2_return_t, 1U);
@@ -2371,8 +2140,6 @@ static_assert(offsetof(sdc_hci_cmd_le_set_periodic_adv_subevent_data_t,
                        array_params) == 2U,
               "LE Set Periodic Adv Subevent Data fixed part is not 2 octets");
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_periodic_adv_subevent_data_return_t, 1U);
-#endif
-#if HCI_SDC_HAS_LE_PERIODIC_SYNC_RSP
 static_assert(offsetof(sdc_hci_cmd_le_set_periodic_adv_response_data_t,
                        response_data) == 8U,
               "LE Set Periodic Adv Response Data fixed part is not 8 octets");
@@ -2381,13 +2148,9 @@ static_assert(offsetof(sdc_hci_cmd_le_set_periodic_sync_subevent_t,
                        subevents) == 5U,
               "LE Set Periodic Sync Subevent fixed part is not 5 octets");
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_periodic_sync_subevent_return_t, 2U);
-#endif
-#if HCI_SDC_HAS_VS_SET_ADV_RANDOMNESS
 /* Vendor, so Nordic gives the length. Handle and a microsecond spread. */
 static_assert(sizeof(sdc_hci_cmd_vs_set_adv_randomness_t) == 3U,
               "VS Set Adv Randomness is not 3 octets");
-#endif
-#if HCI_SDC_HAS_VS_LLPM
 static_assert(sizeof(sdc_hci_cmd_vs_llpm_mode_set_t) == 1U,
               "VS LLPM Mode Set is not 1 octet");
 /*
@@ -2397,7 +2160,6 @@ static_assert(sizeof(sdc_hci_cmd_vs_llpm_mode_set_t) == 1U,
  */
 static_assert(sizeof(sdc_hci_cmd_vs_conn_update_t) == 10U,
               "VS Connection Update is not 10 octets");
-#endif
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_data_length_t, 6U);               /* 7.8.33 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_write_suggested_default_data_length_t, 4U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_phy_t, 2U);                      /* 7.8.47 */
@@ -2414,14 +2176,12 @@ HCI_SDC_SPEC_LEN(sdc_hci_cmd_lc_read_remote_version_information_t, 2U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_cb_read_authenticated_payload_timeout_t, 2U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_cb_write_authenticated_payload_timeout_t, 4U);
 #endif
-#if HCI_SDC_HAS_VS_CARRIER_TEST
 /*
  * Vendor specific, so the length comes from Nordic rather than from Vol 4
  * Part E. TX_Channel and TX_Power_Level, one octet each.
  */
 static_assert(sizeof(sdc_hci_cmd_vs_transmitter_carrier_test_t) == 2U,
               "VS Transmitter Carrier Test is not 2 octets");
-#endif
 
 /*
  * The fixed part of a variable length command, which is what the length check
@@ -2463,7 +2223,6 @@ HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_long_term_key_request_reply_return_t, 2U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_test_end_return_t, 2U);               /* 7.8.30 */
 /* Connection_Handle and RSSI, the handle echoed back. Vol 4 Part E 7.5.4. */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_sp_read_rssi_return_t, 3U);
-#if HCI_SDC_HAS_LE_POWER_CONTROL
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_cb_read_transmit_power_level_return_t, 3U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_rf_path_compensation_return_t, 4U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_enhanced_read_transmit_power_level_return_t,
@@ -2477,17 +2236,12 @@ HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_path_loss_reporting_params_return_t, 2U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_path_loss_reporting_enable_return_t, 2U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_transmit_power_reporting_enable_return_t,
                  2U);
-#endif
-#if HCI_SDC_HAS_LE_PERIODIC_SYNC
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_periodic_adv_list_size_return_t, 1U);
-#endif
-#if HCI_SDC_HAS_LE_PERIODIC_SYNC_TRANSFER
 /* Three more whose return is the connection handle alone. */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_periodic_adv_sync_transfer_return_t, 2U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_periodic_adv_set_info_transfer_return_t, 2U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_periodic_adv_sync_transfer_params_return_t,
                  2U);
-#endif
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_data_length_return_t, 2U);        /* 7.8.33 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_suggested_default_data_length_return_t, 4U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_max_data_length_return_t, 8U);   /* 7.8.46 */
@@ -2510,7 +2264,6 @@ HCI_SDC_SPEC_LEN(sdc_hci_cmd_vs_zephyr_read_static_addresses_return_t, 1U);
  * Nordic and from what Zephyr and BlueZ already send, not from Vol 4 Part E.
  * A mismatch here is a host that formats the command correctly and gets 0x12.
  */
-#if HCI_SDC_HAS_VS_ZEPHYR_SET
 static_assert(sizeof(sdc_hci_cmd_vs_zephyr_read_version_info_return_t) == 12U,
               "Zephyr Read Version Information is not 12 octets");
 static_assert(
@@ -2528,14 +2281,10 @@ static_assert(sizeof(sdc_hci_cmd_vs_zephyr_read_tx_power_t) == 3U,
               "Zephyr Read Tx Power is not 3 octets");
 static_assert(sizeof(sdc_hci_cmd_vs_zephyr_read_tx_power_return_t) == 4U,
               "Zephyr Read Tx Power return is not 4 octets");
-#endif
-#if HCI_SDC_HAS_VS_KEY_HIERARCHY_ROOTS
 /* IR and ER, sixteen octets each. */
 static_assert(
     sizeof(sdc_hci_cmd_vs_zephyr_read_key_hierarchy_roots_return_t) == 32U,
     "Zephyr Read Key Hierarchy Roots is not 32 octets");
-#endif
-#if HCI_SDC_HAS_VS_QOS
 static_assert(sizeof(sdc_hci_cmd_vs_qos_conn_event_report_enable_t) == 1U,
               "VS QoS Conn Event Report Enable is not 1 octet");
 /* One octet of enable and a four octet interval in microseconds. */
@@ -2553,7 +2302,6 @@ static_assert(
 static_assert(
     sizeof(sdc_hci_cmd_vs_conn_anchor_point_update_event_report_enable_t) == 1U,
     "VS Conn Anchor Point Update Report Enable is not 1 octet");
-#endif
 #if HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_cb_read_authenticated_payload_timeout_return_t, 4U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_cb_write_authenticated_payload_timeout_return_t, 2U);

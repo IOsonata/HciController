@@ -307,9 +307,10 @@ The UART path uses IOsonata's interrupt-driven FIFO/DMA UART implementation. Its
 ## Capacity
 
 What one image is configured for, and what it costs in the SoftDevice
-Controller memory pool. Every value is a `#define` in `include/hci_nrf52840.h`
-that a build can override, and the pool is computed from them, so raising a
-count grows the array that holds it rather than needing a second edit.
+Controller memory pool. Every value is a constant in `include/hci_nrf52840.h`,
+and the pool is computed from them, so changing a count grows the array that
+holds it rather than needing a second edit. There are no build options here:
+configuring the controller differently means editing the value.
 
 | | | Pool cost |
 | --- | ---: | ---: |

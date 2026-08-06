@@ -47,70 +47,6 @@
 #define HCI_SDC_HAS_VS_READ_COUNTERS 1
 #endif
 
-#ifndef HCI_SDC_HAS_VS_CARRIER_TEST
-#define HCI_SDC_HAS_VS_CARRIER_TEST 1
-#endif
-
-#ifndef HCI_SDC_HAS_VS_ZEPHYR_SET
-#define HCI_SDC_HAS_VS_ZEPHYR_SET 1
-#endif
-
-#ifndef HCI_SDC_HAS_VS_KEY_HIERARCHY_ROOTS
-#define HCI_SDC_HAS_VS_KEY_HIERARCHY_ROOTS 1
-#endif
-
-#ifndef HCI_SDC_HAS_VS_QOS
-#define HCI_SDC_HAS_VS_QOS 1
-#endif
-
-#ifndef HCI_SDC_HAS_LE_POWER_CONTROL
-#define HCI_SDC_HAS_LE_POWER_CONTROL 1
-#endif
-
-#ifndef HCI_SDC_HAS_LE_REQUEST_PEER_SCA
-#define HCI_SDC_HAS_LE_REQUEST_PEER_SCA 1
-#endif
-
-#ifndef HCI_SDC_HAS_LE_SUBRATING
-#define HCI_SDC_HAS_LE_SUBRATING 1
-#endif
-
-#ifndef HCI_SDC_HAS_LE_READ_ALL_REMOTE_FEATURES
-#define HCI_SDC_HAS_LE_READ_ALL_REMOTE_FEATURES 1
-#endif
-
-#ifndef HCI_SDC_HAS_LE_SET_HOST_CHANNEL_CLASSIFICATION
-#define HCI_SDC_HAS_LE_SET_HOST_CHANNEL_CLASSIFICATION 1
-#endif
-
-#ifndef HCI_SDC_HAS_VS_SET_ADV_RANDOMNESS
-#define HCI_SDC_HAS_VS_SET_ADV_RANDOMNESS 1
-#endif
-
-#ifndef HCI_SDC_HAS_VS_LLPM
-#define HCI_SDC_HAS_VS_LLPM 1
-#endif
-
-#ifndef HCI_SDC_HAS_LE_PERIODIC_ADV
-#define HCI_SDC_HAS_LE_PERIODIC_ADV 1
-#endif
-
-#ifndef HCI_SDC_HAS_LE_PERIODIC_SYNC
-#define HCI_SDC_HAS_LE_PERIODIC_SYNC 1
-#endif
-
-#ifndef HCI_SDC_HAS_LE_PERIODIC_SYNC_TRANSFER
-#define HCI_SDC_HAS_LE_PERIODIC_SYNC_TRANSFER 1
-#endif
-
-#ifndef HCI_SDC_HAS_LE_PERIODIC_ADV_RSP
-#define HCI_SDC_HAS_LE_PERIODIC_ADV_RSP 1
-#endif
-
-#ifndef HCI_SDC_HAS_LE_PERIODIC_SYNC_RSP
-#define HCI_SDC_HAS_LE_PERIODIC_SYNC_RSP 1
-#endif
-
 #define EVENT_COMMAND_COMPLETE 0x0E
 #define EVENT_COMMAND_STATUS   0x0F
 
@@ -462,7 +398,6 @@ int main(void)
     ExpectComplete("VS Read Static Addresses", 0xFC09, zeros, 0U,
                    1U + sizeof(sdc_hci_vs_zephyr_static_address_t));
 #endif
-#if HCI_SDC_HAS_VS_ZEPHYR_SET
     ExpectComplete("VS Zephyr Read Version Info", 0xFC01, zeros, 0U,
                    sizeof(sdc_hci_cmd_vs_zephyr_read_version_info_return_t));
     ExpectComplete("VS Zephyr Write BD_ADDR", 0xFC06, zeros,
@@ -504,22 +439,14 @@ int main(void)
 
         /* 0x5A sets these too, and the table does carry them. */
         assert(reported.params.read_tx_power_level == 1U);
-#if HCI_SDC_HAS_VS_KEY_HIERARCHY_ROOTS
         assert(reported.params.read_key_hierarchy_roots == 1U);
-#else
-        assert(reported.params.read_key_hierarchy_roots == 0U);
-#endif
 
         printf("[ok] %-38s %s\n", "vendor bitmap is masked to the table",
                "unreachable bits cleared, reachable kept");
     }
-#endif
-#if HCI_SDC_HAS_VS_KEY_HIERARCHY_ROOTS
     ExpectComplete(
         "VS Zephyr Read Key Hierarchy Roots", 0xFC0A, zeros, 0U,
         sizeof(sdc_hci_cmd_vs_zephyr_read_key_hierarchy_roots_return_t));
-#endif
-#if HCI_SDC_HAS_VS_QOS
     ExpectComplete("VS QoS Conn Event Report Enable", 0xFD04, zeros,
                    sizeof(sdc_hci_cmd_vs_qos_conn_event_report_enable_t), 0U);
     ExpectComplete("VS QoS Channel Survey Enable", 0xFD0E, zeros,
@@ -543,8 +470,6 @@ int main(void)
      */
     ExpectRejected("VS QoS Channel Survey Enable, enable byte only", 0xFD0E,
                    zeros, 1U, 0x12);
-#endif
-#if HCI_SDC_HAS_LE_POWER_CONTROL
     ExpectComplete("Read Transmit Power Level", 0x0C2D, zeros,
                    sizeof(sdc_hci_cmd_cb_read_transmit_power_level_t),
                    sizeof(sdc_hci_cmd_cb_read_transmit_power_level_return_t));
@@ -598,28 +523,19 @@ int main(void)
     ExpectRejectedStatus(
         "LE Read Remote Transmit Power, wrong length", 0x2077, zeros,
         sizeof(sdc_hci_cmd_le_read_remote_transmit_power_level_t) - 1U, 0x12);
-#endif
 
-#if HCI_SDC_HAS_LE_SET_HOST_CHANNEL_CLASSIFICATION
     ExpectComplete(
         "LE Set Host Channel Classification", 0x2014, zeros,
         sizeof(sdc_hci_cmd_le_set_host_channel_classification_t), 0U);
-#endif
-#if HCI_SDC_HAS_VS_SET_ADV_RANDOMNESS
     ExpectComplete("VS Set Adv Randomness", 0xFD0C, zeros,
                    sizeof(sdc_hci_cmd_vs_set_adv_randomness_t), 0U);
-#endif
-#if HCI_SDC_HAS_VS_LLPM
     ExpectComplete("VS LLPM Mode Set", 0xFD01, zeros,
                    sizeof(sdc_hci_cmd_vs_llpm_mode_set_t), 0U);
     /* Command Status, then a VS Connection Update Complete event. */
     ExpectStatus("VS Connection Update", 0xFD02, zeros,
                  sizeof(sdc_hci_cmd_vs_conn_update_t));
-#endif
-#if HCI_SDC_HAS_LE_SUBRATING
     ExpectComplete("LE Set Default Subrate", 0x207D, zeros,
                    sizeof(sdc_hci_cmd_le_set_default_subrate_t), 0U);
-#endif
 
     /*
      * Three commands that answer twice: a Command Status now and an LE meta
@@ -627,11 +543,8 @@ int main(void)
      * 7.8.150. A Command Complete here would be wrong at any length, so the
      * event kind is what these assert.
      */
-#if HCI_SDC_HAS_LE_REQUEST_PEER_SCA
     ExpectStatus("LE Request Peer SCA", 0x206D, zeros,
                  sizeof(sdc_hci_cmd_le_request_peer_sca_t));
-#endif
-#if HCI_SDC_HAS_LE_SUBRATING
     ExpectStatus("LE Subrate Request", 0x207E, zeros,
                  sizeof(sdc_hci_cmd_le_subrate_request_t));
 
@@ -644,13 +557,9 @@ int main(void)
     ExpectRejectedStatus("LE Subrate Request, missing the handle", 0x207E,
                          zeros,
                          sizeof(sdc_hci_cmd_le_set_default_subrate_t), 0x12);
-#endif
-#if HCI_SDC_HAS_LE_READ_ALL_REMOTE_FEATURES
     ExpectStatus("LE Read All Remote Features", 0x2088, zeros,
                  sizeof(sdc_hci_cmd_le_read_all_remote_features_t));
-#endif
 
-#if HCI_SDC_HAS_LE_PERIODIC_ADV
     ExpectComplete("LE Set Periodic Adv Params", 0x203E, zeros,
                    sizeof(sdc_hci_cmd_le_set_periodic_adv_params_t), 0U);
     ExpectComplete("LE Set Periodic Adv Enable", 0x2040, zeros,
@@ -678,9 +587,7 @@ int main(void)
         ExpectRejected("LE Set Periodic Adv Data, lying count", 0x203F, lying,
                        sizeof(lying), 0x12);
     }
-#endif
 
-#if HCI_SDC_HAS_LE_PERIODIC_SYNC
     /*
      * Create Sync answers a status now and a Sync Established event once the
      * controller has actually found the train, or Sync Lost if it never does.
@@ -710,9 +617,7 @@ int main(void)
     ExpectRejected("LE Add Device To Periodic Adv List, handle sized", 0x2047,
                    zeros,
                    sizeof(sdc_hci_cmd_le_periodic_adv_terminate_sync_t), 0x12);
-#endif
 
-#if HCI_SDC_HAS_LE_PERIODIC_SYNC_TRANSFER
     ExpectComplete(
         "LE Set Periodic Adv Receive Enable", 0x2059, zeros,
         sizeof(sdc_hci_cmd_le_set_periodic_adv_receive_enable_t), 0U);
@@ -743,9 +648,7 @@ int main(void)
         "LE Set Periodic Adv Sync Transfer Params, no handle", 0x205C, zeros,
         sizeof(sdc_hci_cmd_le_set_default_periodic_adv_sync_transfer_params_t),
         0x12);
-#endif
 
-#if HCI_SDC_HAS_LE_PERIODIC_ADV_RSP
     ExpectComplete(
         "LE Set Periodic Adv Params v2", 0x2086, zeros,
         sizeof(sdc_hci_cmd_le_set_periodic_adv_params_v2_t),
@@ -802,9 +705,7 @@ int main(void)
         ExpectRejected("LE Set Periodic Adv Subevent Data, count lies", 0x2082,
                        shortCount, sizeof(shortCount), 0x12);
     }
-#endif
 
-#if HCI_SDC_HAS_LE_PERIODIC_SYNC_RSP
     {
         /*
          * Both of these are byte counted and answer with a handle, which is a
@@ -840,7 +741,6 @@ int main(void)
         ExpectRejected("LE Set Periodic Sync Subevent, count lies", 0x2084,
                        three, sizeof(three) - 1U, 0x12);
     }
-#endif
 #if HCI_SDC_HAS_VS_READ_COUNTERS
     ExpectCompleteLocal("VS Read Counters", HCI_COUNTERS_OPCODE,
                         zeros, 0U, HCI_COUNTERS_RETURN_LEN);
@@ -1501,7 +1401,6 @@ int main(void)
                 hci_le_set_data_related_address_changes),
 
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_SP_READ_RSSI, hci_read_rssi),
-#if HCI_SDC_HAS_LE_POWER_CONTROL
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_CB_READ_TRANSMIT_POWER_LEVEL,
                          hci_read_transmit_power_level),
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_READ_RF_PATH_COMPENSATION,
@@ -1521,35 +1420,23 @@ int main(void)
             BITMAP_ENTRY(
                 SDC_HCI_OPCODE_CMD_LE_SET_TRANSMIT_POWER_REPORTING_ENABLE,
                 hci_le_set_transmit_power_reporting_enable),
-#endif
-#if HCI_SDC_HAS_LE_SET_HOST_CHANNEL_CLASSIFICATION
             BITMAP_ENTRY(
                 SDC_HCI_OPCODE_CMD_LE_SET_HOST_CHANNEL_CLASSIFICATION,
                 hci_le_set_host_channel_classification),
-#endif
-#if HCI_SDC_HAS_LE_REQUEST_PEER_SCA
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_REQUEST_PEER_SCA,
                          hci_le_request_peer_sca),
-#endif
-#if HCI_SDC_HAS_LE_SUBRATING
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_DEFAULT_SUBRATE,
                          hci_le_set_default_subrate_command),
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SUBRATE_REQUEST,
                          hci_le_subrate_request_command),
-#endif
-#if HCI_SDC_HAS_LE_READ_ALL_REMOTE_FEATURES
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_READ_ALL_REMOTE_FEATURES,
                          hci_le_read_all_remote_features),
-#endif
-#if HCI_SDC_HAS_LE_PERIODIC_ADV
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_PARAMS,
                          hci_le_set_periodic_advertising_parameters),
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_DATA,
                          hci_le_set_periodic_advertising_data),
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_ENABLE,
                          hci_le_set_periodic_advertising_enable),
-#endif
-#if HCI_SDC_HAS_LE_PERIODIC_SYNC
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_PERIODIC_ADV_CREATE_SYNC,
                          hci_le_periodic_advertising_create_sync),
             BITMAP_ENTRY(
@@ -1566,8 +1453,6 @@ int main(void)
                          hci_le_clear_periodic_advertiser_list),
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_READ_PERIODIC_ADV_LIST_SIZE,
                          hci_le_read_periodic_advertiser_list_size),
-#endif
-#if HCI_SDC_HAS_LE_PERIODIC_SYNC_TRANSFER
             BITMAP_ENTRY(
                 SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_RECEIVE_ENABLE,
                 hci_le_set_periodic_advertising_receive_enable),
@@ -1581,28 +1466,19 @@ int main(void)
             BITMAP_ENTRY(
                 SDC_HCI_OPCODE_CMD_LE_SET_DEFAULT_PERIODIC_ADV_SYNC_TRANSFER_PARAMS,
                 hci_le_set_default_periodic_advertising_sync_transfer_parameters),
-#endif
-#if HCI_SDC_HAS_LE_PERIODIC_ADV_RSP
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_PARAMS_V2,
                          hci_le_set_periodic_advertising_parameters_v2),
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_SUBEVENT_DATA,
                          hci_le_set_periodic_advertising_subevent_data),
-#endif
-#if HCI_SDC_HAS_LE_PERIODIC_SYNC_RSP
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_RESPONSE_DATA,
                          hci_le_set_periodic_advertising_response_data),
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_SYNC_SUBEVENT,
                          hci_le_set_periodic_sync_subevent),
-#endif
-#if HCI_SDC_HAS_VS_SET_ADV_RANDOMNESS
             /* Nordic vendor, so Vol 4 Part E 6.27 assigns no bit. */
             {SDC_HCI_OPCODE_CMD_VS_SET_ADV_RANDOMNESS, NULL,
              "vs_set_adv_randomness"},
-#endif
-#if HCI_SDC_HAS_VS_LLPM
             {SDC_HCI_OPCODE_CMD_VS_LLPM_MODE_SET, NULL, "vs_llpm_mode_set"},
             {SDC_HCI_OPCODE_CMD_VS_CONN_UPDATE, NULL, "vs_conn_update"},
-#endif
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_HOST_FEATURE,
                          hci_le_set_host_feature),
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_RECEIVER_TEST_V2,
@@ -1615,12 +1491,9 @@ int main(void)
                          hci_le_transmitter_test_v3),
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_TRANSMITTER_TEST_V4,
                          hci_le_transmitter_test_v4),
-#if HCI_SDC_HAS_VS_CARRIER_TEST
             /* Vendor specific, so Vol 4 Part E 6.27 assigns it no bit. */
             {SDC_HCI_OPCODE_CMD_VS_TRANSMITTER_CARRIER_TEST, NULL,
              "vs_transmitter_carrier_test"},
-#endif
-#if HCI_SDC_HAS_VS_ZEPHYR_SET
             /*
              * Same, and these have a bitmap of their own instead, the one
              * Read Supported Commands answers with. It is checked above.
@@ -1637,12 +1510,8 @@ int main(void)
              "vs_zephyr_write_tx_power"},
             {SDC_HCI_OPCODE_CMD_VS_ZEPHYR_READ_TX_POWER, NULL,
              "vs_zephyr_read_tx_power"},
-#endif
-#if HCI_SDC_HAS_VS_KEY_HIERARCHY_ROOTS
             {SDC_HCI_OPCODE_CMD_VS_ZEPHYR_READ_KEY_HIERARCHY_ROOTS, NULL,
              "vs_zephyr_read_key_hierarchy_roots"},
-#endif
-#if HCI_SDC_HAS_VS_QOS
             /*
              * Nordic vendor rather than Zephyr vendor, so they appear in
              * neither bitmap. A host finds them by opcode or not at all.
@@ -1657,7 +1526,6 @@ int main(void)
              "vs_get_next_conn_event_counter"},
             {SDC_HCI_OPCODE_CMD_VS_CONN_ANCHOR_POINT_UPDATE_EVENT_REPORT_ENABLE,
              NULL, "vs_conn_anchor_point_update_event_report_enable"},
-#endif
         };
 
 #undef BITMAP_ENTRY

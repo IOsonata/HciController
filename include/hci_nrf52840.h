@@ -37,8 +37,10 @@ extern "C" {
  * So the pool is computed from the configuration instead. Raising a count now
  * grows the array that holds it, and the assert has nothing left to catch.
  *
- * Override any of them from the build. The costs on an nRF52840 with a 251
- * octet payload and four packets each way, from the current sdk-nrfxlib:
+ * These are constants, not build options. Changing what the controller is
+ * configured for means editing the value here, and the pool follows. The costs
+ * on an nRF52840 with a 251 octet payload and four packets each way, from the
+ * current sdk-nrfxlib:
  *
  *   peripheral link  2935 octets      central link  2839 octets
  *   advertising set   961 octets      scan buffers  1688 for four
@@ -51,13 +53,8 @@ extern "C" {
  *   periodic adv list   8 each  sync transfer 1125 for eight links
  *   periodic set with responses 1575 each
  */
-#ifndef HCI_NRF52840_PERIPHERAL_COUNT
 #define HCI_NRF52840_PERIPHERAL_COUNT 4U
-#endif
-
-#ifndef HCI_NRF52840_CENTRAL_COUNT
-#define HCI_NRF52840_CENTRAL_COUNT 4U
-#endif
+#define HCI_NRF52840_CENTRAL_COUNT    4U
 
 /*
  * The payload the controller advertises in LE Read Buffer Size, and how many
@@ -65,328 +62,92 @@ extern "C" {
  * is told 251 can use it: the alternative is a controller that quietly caps
  * throughput at a ninth of what the radio does.
  */
-#ifndef HCI_NRF52840_ACL_PACKET_SIZE
-#define HCI_NRF52840_ACL_PACKET_SIZE 251U
-#endif
-
-#ifndef HCI_NRF52840_ACL_PACKET_COUNT
+#define HCI_NRF52840_ACL_PACKET_SIZE  251U
 #define HCI_NRF52840_ACL_PACKET_COUNT 4U
-#endif
 
-#ifndef HCI_NRF52840_ADV_SET_COUNT
-#define HCI_NRF52840_ADV_SET_COUNT 3U
-#endif
+/*
+ * Advertising sets. Three, because a periodic advertiser needs one of its own
+ * and a periodic advertiser with responses needs another, leaving one for
+ * ordinary extended advertising.
+ */
+#define HCI_NRF52840_ADV_SET_COUNT    3U
+#define HCI_NRF52840_MAX_ADV_DATA     255U
 
-#ifndef HCI_NRF52840_SCAN_BUFFER_COUNT
 #define HCI_NRF52840_SCAN_BUFFER_COUNT 4U
-#endif
-
-#ifndef HCI_NRF52840_MAX_ADV_DATA
-#define HCI_NRF52840_MAX_ADV_DATA 255U
-#endif
 
 /* Filter accept list entries. The SoftDevice Controller default is eight. */
-#ifndef HCI_NRF52840_FAL_SIZE
 #define HCI_NRF52840_FAL_SIZE 8U
-#endif
 
 /*
- * The Quality of Service channel survey module, which reports the measured
- * energy on each of the forty channels. 40 octets of pool and a support call,
- * and it is the one thing on this board that gives a view of the band without
- * a spectrum analyser, so it is on.
+ * Feature pages the controller keeps per link, which is what LE Read All
+ * Remote Features reads. Ten is the sdk-nrfxlib default and the most a peer
+ * may legally use. It is also the most expensive number here: 11 plus 19 per
+ * link plus 24 per page per link, so 2083 across eight links. Three pages
+ * would be 739, and the specification defines rather fewer than ten today.
  *
- * It costs radio time rather than only memory. sdk-nrfxlib schedules the
- * measurements at low priority, so they lose to connections and to scanning,
- * and a busy controller simply reports less often than the requested interval
- * asks for. Nothing else is delayed by it. A build that wants the 40 octets
- * back can set this to 0, and the command then answers Unknown HCI Command.
+ * The same value is given to sdc_cfg_set, so the pool and the controller
+ * cannot disagree about it.
  */
-#ifndef HCI_NRF52840_QOS_CHANNEL_SURVEY
-#define HCI_NRF52840_QOS_CHANNEL_SURVEY 1
-#endif
-
-#if HCI_NRF52840_QOS_CHANNEL_SURVEY
-#define HCI_NRF52840_SDC_MEM_QOS SDC_MEM_QOS_CHANNEL_SURVEY
-#else
-#define HCI_NRF52840_SDC_MEM_QOS 0
-#endif
-
-/*
- * LE Power Control, Bluetooth 5.2. The two ends negotiate transmit power
- * rather than each shouting at whatever it defaults to, and the controller
- * reports the changes. Plenty of devices now use it and few test tools
- * exercise it, which is the argument for having it here.
- *
- * Path loss monitoring rides on it: the controller subtracts the remote
- * transmit power from the RSSI and reports the zone crossings. sdk-nrfxlib
- * requires at least one power control role before it will accept path loss
- * monitoring, so the two are enabled together rather than separately, and the
- * macro says so by covering both.
- *
- * Costs 13 + 123 per link, so 997 across the eight links above. Enough to be
- * worth a macro rather than assumed.
- */
-#ifndef HCI_NRF52840_LE_POWER_CONTROL
-#define HCI_NRF52840_LE_POWER_CONTROL 1
-#endif
-
-#if HCI_NRF52840_LE_POWER_CONTROL
-#define HCI_NRF52840_SDC_MEM_POWER_CONTROL                                    \
-    SDC_MEM_LE_POWER_CONTROL(HCI_NRF52840_PERIPHERAL_COUNT +                  \
-                             HCI_NRF52840_CENTRAL_COUNT)
-#else
-#define HCI_NRF52840_SDC_MEM_POWER_CONTROL 0
-#endif
-
-/*
- * Connection subrating, Bluetooth 5.3. A peripheral skips connection events on
- * an agreed pattern, so a link can idle cheaply and still answer quickly when
- * it is used. LE Set Host Feature is the gate a host opens for it, and that is
- * already here. 12 plus 60 per link, so 492 across eight.
- */
-#ifndef HCI_NRF52840_CONNECTION_SUBRATING
-#define HCI_NRF52840_CONNECTION_SUBRATING 1
-#endif
-
-#if HCI_NRF52840_CONNECTION_SUBRATING
-#define HCI_NRF52840_SDC_MEM_SUBRATING                                        \
-    SDC_MEM_SUBRATING(HCI_NRF52840_PERIPHERAL_COUNT +                         \
-                      HCI_NRF52840_CENTRAL_COUNT)
-#else
-#define HCI_NRF52840_SDC_MEM_SUBRATING 0
-#endif
-
-/*
- * The extended feature set, which is what LE Read All Remote Features reads.
- * One command instead of paging a peer for what it supports, which is the
- * first thing a test run wants to know about a device under test.
- *
- * This is the expensive one in the group and the number to look at first if
- * the pool ever has to come down. The controller keeps a page cache per link,
- * so it is 11 plus 19 per link plus 24 per page per link: 2083 at the
- * sdk-nrfxlib default of ten pages across eight links.
- *
- * Ten is what sdk-nrfxlib picks and what a peer may legally use. The
- * specification defines rather fewer today, so a build that is short of RAM
- * can cut this and lose only the pages nothing is publishing yet. Three pages
- * would be 739. The page count is also given to sdc_cfg_set, so the pool and
- * the controller cannot disagree about it.
- */
-#ifndef HCI_NRF52840_EXTENDED_FEATURE_SET
-#define HCI_NRF52840_EXTENDED_FEATURE_SET 1
-#endif
-
-#ifndef HCI_NRF52840_EXTENDED_FEATURE_PAGES
 #define HCI_NRF52840_EXTENDED_FEATURE_PAGES                                   \
     SDC_DEFAULT_EXTENDED_FEATURE_PAGE_COUNT
-#endif
-
-#if HCI_NRF52840_EXTENDED_FEATURE_SET
-#define HCI_NRF52840_SDC_MEM_EXTENDED_FEATURES                                \
-    SDC_MEM_EXTENDED_FEATURE_SET(HCI_NRF52840_PERIPHERAL_COUNT +              \
-                                     HCI_NRF52840_CENTRAL_COUNT,              \
-                                 HCI_NRF52840_EXTENDED_FEATURE_PAGES)
-#else
-#define HCI_NRF52840_SDC_MEM_EXTENDED_FEATURES 0
-#endif
 
 /*
- * Scanning and initiating at the same time. Not a command, a capability: with
- * it a connection can be started while a scan is running, and a scan started
- * while a connection attempt is outstanding. A rig driving several devices
- * wants both at once, and without this the second request is refused.
+ * Periodic advertising. One train transmitted, two followed, and an eight
+ * entry advertiser list so a scanner can name trains rather than carry every
+ * address in the host. The controller defaults that list to zero entries, so
+ * a host reading the size would otherwise be told it does not work.
  *
- * 384 octets, and it needs a central role, which this image has.
+ * The syncs are the expensive part, 1787 each with responses enabled, and the
+ * first numbers to bring down if the pool has to shrink.
  */
-#ifndef HCI_NRF52840_PARALLEL_SCAN_INIT
-#define HCI_NRF52840_PARALLEL_SCAN_INIT 1
-#endif
-
-#if HCI_NRF52840_PARALLEL_SCAN_INIT
-#define HCI_NRF52840_SDC_MEM_PARALLEL_SCAN_INIT SDC_MEM_INITIATOR
-#else
-#define HCI_NRF52840_SDC_MEM_PARALLEL_SCAN_INIT 0
-#endif
-
-/*
- * The Sleep Clock Accuracy update procedure, which LE Request Peer SCA uses to
- * ask a peer how good its clock is. Costs no pool, only the two support calls.
- */
-#ifndef HCI_NRF52840_SCA_UPDATE
-#define HCI_NRF52840_SCA_UPDATE 1
-#endif
-
-/*
- * Periodic advertising: an advertiser that transmits on a fixed schedule and
- * scanners that lock to it, with no connection between them. This is what
- * Auracast and broadcast audio rest on, and what a receiver has to sync to
- * before any of it can be tested.
- *
- * Two halves, and either can be built without the other.
- *
- * The advertiser needs an advertising set of its own, so
- * HCI_NRF52840_PERIODIC_ADV_COUNT has to be no larger than
- * HCI_NRF52840_ADV_SET_COUNT above. sdc_cfg_set says so and this file has a
- * static assert for it, because the failure is a controller that will not
- * enable rather than anything the message names.
- *
- * The receiver keeps a sync per train it follows and a buffer pool per sync,
- * which is where most of the cost is. Two syncs at four buffers is 2736, well
- * over half the total, and the first number to bring down if a build only ever
- * follows one train.
- */
-#ifndef HCI_NRF52840_PERIODIC_ADV
-#define HCI_NRF52840_PERIODIC_ADV 1
-#endif
-
-#ifndef HCI_NRF52840_PERIODIC_SYNC
-#define HCI_NRF52840_PERIODIC_SYNC 1
-#endif
-
-#ifndef HCI_NRF52840_PERIODIC_ADV_COUNT
-#define HCI_NRF52840_PERIODIC_ADV_COUNT 1U
-#endif
-
-#ifndef HCI_NRF52840_PERIODIC_SYNC_COUNT
-#define HCI_NRF52840_PERIODIC_SYNC_COUNT 2U
-#endif
-
-#ifndef HCI_NRF52840_PERIODIC_SYNC_BUFFER_COUNT
+#define HCI_NRF52840_PERIODIC_ADV_COUNT         1U
+#define HCI_NRF52840_PERIODIC_SYNC_COUNT        2U
 #define HCI_NRF52840_PERIODIC_SYNC_BUFFER_COUNT 4U
-#endif
+#define HCI_NRF52840_PERIODIC_ADV_LIST_SIZE     8U
 
 /*
- * The periodic advertiser list, which lets a scanner name trains to accept
- * without carrying every address in the host. The SoftDevice Controller
- * default is zero, so a host that reads the size gets nothing usable unless
- * this is set. Eight entries at eight octets each.
- */
-#ifndef HCI_NRF52840_PERIODIC_ADV_LIST_SIZE
-#define HCI_NRF52840_PERIODIC_ADV_LIST_SIZE 8U
-#endif
-
-/*
- * Periodic Advertising Sync Transfer. One device that has already locked to a
- * train hands the sync to a peer over a connection, so the peer joins without
- * scanning for it. Per link rather than per sync, 13 plus 139 each.
+ * Periodic advertising with responses. The advertiser divides each period into
+ * subevents and offers response slots, so a device that heard the broadcast
+ * answers in one without forming a connection.
  *
- * Separate from the two above because it is the connection oriented half: it
- * needs a link, and a build with no periodic advertising at all has no use for
- * it.
- */
-#ifndef HCI_NRF52840_PERIODIC_SYNC_TRANSFER
-#define HCI_NRF52840_PERIODIC_SYNC_TRANSFER 1
-#endif
-
-#if HCI_NRF52840_PERIODIC_ADV
-#define HCI_NRF52840_SDC_MEM_PERIODIC_ADV                                     \
-    (SDC_MEM_PER_PERIODIC_ADV_SET(HCI_NRF52840_MAX_ADV_DATA) *                \
-     HCI_NRF52840_PERIODIC_ADV_COUNT)
-#else
-#define HCI_NRF52840_SDC_MEM_PERIODIC_ADV 0
-#endif
-
-/*
- * Periodic Advertising with Responses. The advertiser divides each period into
- * subevents and offers response slots, so a device that heard the broadcast can
- * answer in one without ever forming a connection. Electronic shelf labels run
- * on this: thousands of tags listening, each answering only in the slot it was
- * given.
+ * Transmit buffers are what the advertiser puts in a subevent, receive buffers
+ * what it collects from the response slots. The transmit size caps one
+ * subevent rather than the whole period, so it is smaller than it looks.
  *
- * Two halves again, advertiser and scanner, and both need the plain periodic
- * halves underneath. sdk-nrfxlib asks for extended advertising, periodic
- * advertising or sync, and a sync transfer sender or receiver, before it will
- * accept either of these, which this image already has.
- *
- * The advertiser needs its own advertising set on top of the plain periodic
- * one, so HCI_NRF52840_ADV_SET_COUNT goes to three.
+ * Failure reporting tells the advertiser about slots that were expected and
+ * stayed empty. Off, as it is in sdk-nrfxlib, because it costs 224 and the
+ * usual question is what answered rather than what did not.
  */
-#ifndef HCI_NRF52840_PERIODIC_ADV_RSP
-#define HCI_NRF52840_PERIODIC_ADV_RSP 1
-#endif
-
-#ifndef HCI_NRF52840_PERIODIC_SYNC_RSP
-#define HCI_NRF52840_PERIODIC_SYNC_RSP 1
-#endif
-
-#ifndef HCI_NRF52840_PERIODIC_ADV_RSP_COUNT
-#define HCI_NRF52840_PERIODIC_ADV_RSP_COUNT 1U
-#endif
-
-/*
- * Buffers on the advertiser. Transmit is what it puts in a subevent, receive is
- * what it collects from the response slots. Receive can be zero, which means
- * broadcasting into subevents and never listening, and saves the 283 per buffer
- * plus 300 of fixed cost.
- *
- * The transmit size is the sdk-nrfxlib default. It is the cap on one subevent
- * rather than on the whole period, so it is smaller than it looks.
- */
-#ifndef HCI_NRF52840_PERIODIC_ADV_RSP_TX_BUFFERS
+#define HCI_NRF52840_PERIODIC_ADV_RSP_COUNT      1U
 #define HCI_NRF52840_PERIODIC_ADV_RSP_TX_BUFFERS 1U
-#endif
-
-#ifndef HCI_NRF52840_PERIODIC_ADV_RSP_RX_BUFFERS
 #define HCI_NRF52840_PERIODIC_ADV_RSP_RX_BUFFERS 1U
-#endif
-
-#ifndef HCI_NRF52840_PERIODIC_ADV_RSP_MAX_TX_DATA
 #define HCI_NRF52840_PERIODIC_ADV_RSP_MAX_TX_DATA                             \
     SDC_DEFAULT_PERIODIC_ADV_RSP_MAX_TX_DATA
-#endif
-
-/*
- * Failure reporting tells the advertiser about response slots that were
- * expected and stayed empty. Off by default in sdk-nrfxlib and off here, since
- * it costs 224 and a shelf label rig cares about the answers rather than the
- * silences. Worth turning on when the question is how many tags stopped
- * answering.
- */
-#ifndef HCI_NRF52840_PERIODIC_ADV_RSP_FAILURE_REPORTING
 #define HCI_NRF52840_PERIODIC_ADV_RSP_FAILURE_REPORTING 0U
-#endif
 
 /* Responses the scanner can hold before the controller sends them. */
-#ifndef HCI_NRF52840_PERIODIC_SYNC_RSP_TX_BUFFERS
 #define HCI_NRF52840_PERIODIC_SYNC_RSP_TX_BUFFERS 1U
-#endif
 
-#if HCI_NRF52840_PERIODIC_SYNC
 /*
  * A sync costs more once the controller can answer in a response slot, and the
- * vendor macro is per sync rather than per feature, so enabling the scanner
- * half raises the price of every sync rather than adding a separate term.
+ * vendor macro is per sync rather than per feature, so this is the price of
+ * every sync rather than an extra term.
  */
-#if HCI_NRF52840_PERIODIC_SYNC_RSP
 #define HCI_NRF52840_SDC_MEM_PER_SYNC                                         \
     SDC_MEM_PER_PERIODIC_SYNC_RSP(HCI_NRF52840_PERIODIC_SYNC_RSP_TX_BUFFERS,  \
                                   HCI_NRF52840_PERIODIC_SYNC_BUFFER_COUNT)
-#else
-#define HCI_NRF52840_SDC_MEM_PER_SYNC                                         \
-    SDC_MEM_PER_PERIODIC_SYNC(HCI_NRF52840_PERIODIC_SYNC_BUFFER_COUNT)
-#endif
-
-#define HCI_NRF52840_SDC_MEM_PERIODIC_SYNC                                    \
-    (HCI_NRF52840_SDC_MEM_PER_SYNC * HCI_NRF52840_PERIODIC_SYNC_COUNT +       \
-     SDC_MEM_PERIODIC_ADV_LIST(HCI_NRF52840_PERIODIC_ADV_LIST_SIZE))
-#else
-#define HCI_NRF52840_SDC_MEM_PERIODIC_SYNC 0
-#endif
 
 /*
- * The advertiser side is a separate term. SDC_MEM_PER_PERIODIC_ADV_RSP_SET
- * already includes a plain periodic set inside itself, so this is a whole set
- * rather than an increment on one, and it is added to the plain sets rather
- * than replacing them.
+ * SDC_MEM_PER_PERIODIC_ADV_RSP_SET already includes a plain periodic set
+ * inside itself, so this is a whole set rather than an increment on one, and
+ * it adds to the plain sets rather than replacing them.
  *
  * Whether sdk-nrfxlib counts a responding set against periodic_adv_count as
  * well is not stated. Reserving for both is the safe direction: too much pool
  * wastes RAM, too little is a controller that will not enable. The figure
- * sdc_cfg_set answers at run time is what settles it, and that is now readable
- * over HCI through the counter block.
+ * sdc_cfg_set answers at run time is what settles it, and that is reported in
+ * the counter block.
  */
-#if HCI_NRF52840_PERIODIC_ADV_RSP
 #define HCI_NRF52840_SDC_MEM_PERIODIC_ADV_RSP                                 \
     (SDC_MEM_PER_PERIODIC_ADV_RSP_SET(                                        \
          HCI_NRF52840_MAX_ADV_DATA,                                           \
@@ -395,17 +156,6 @@ extern "C" {
          HCI_NRF52840_PERIODIC_ADV_RSP_MAX_TX_DATA,                           \
          HCI_NRF52840_PERIODIC_ADV_RSP_FAILURE_REPORTING) *                   \
      HCI_NRF52840_PERIODIC_ADV_RSP_COUNT)
-#else
-#define HCI_NRF52840_SDC_MEM_PERIODIC_ADV_RSP 0
-#endif
-
-#if HCI_NRF52840_PERIODIC_SYNC_TRANSFER
-#define HCI_NRF52840_SDC_MEM_SYNC_TRANSFER                                    \
-    SDC_MEM_SYNC_TRANSFER(HCI_NRF52840_PERIPHERAL_COUNT +                     \
-                          HCI_NRF52840_CENTRAL_COUNT)
-#else
-#define HCI_NRF52840_SDC_MEM_SYNC_TRANSFER 0
-#endif
 
 #define HCI_NRF52840_SDC_MEM_REQUIRED                                         \
     (SDC_MEM_PER_PERIPHERAL_LINK(HCI_NRF52840_ACL_PACKET_SIZE,                \
@@ -422,26 +172,23 @@ extern "C" {
      SDC_MEM_SCAN_EXT(HCI_NRF52840_SCAN_BUFFER_COUNT) +                       \
      SDC_MEM_PER_ADV_SET(HCI_NRF52840_MAX_ADV_DATA) *                         \
          HCI_NRF52840_ADV_SET_COUNT +                                         \
-     SDC_MEM_FAL(HCI_NRF52840_FAL_SIZE) + HCI_NRF52840_SDC_MEM_QOS +          \
-     HCI_NRF52840_SDC_MEM_POWER_CONTROL + HCI_NRF52840_SDC_MEM_SUBRATING +    \
-     HCI_NRF52840_SDC_MEM_EXTENDED_FEATURES +                                 \
-     HCI_NRF52840_SDC_MEM_PARALLEL_SCAN_INIT +                                \
-     HCI_NRF52840_SDC_MEM_PERIODIC_ADV +                                      \
-     HCI_NRF52840_SDC_MEM_PERIODIC_SYNC +                                     \
-     HCI_NRF52840_SDC_MEM_SYNC_TRANSFER +                                     \
+     SDC_MEM_FAL(HCI_NRF52840_FAL_SIZE) +                                     \
+     SDC_MEM_QOS_CHANNEL_SURVEY +                                             \
+     SDC_MEM_LE_POWER_CONTROL(HCI_NRF52840_PERIPHERAL_COUNT +                 \
+                              HCI_NRF52840_CENTRAL_COUNT) +                   \
+     SDC_MEM_SUBRATING(HCI_NRF52840_PERIPHERAL_COUNT +                        \
+                       HCI_NRF52840_CENTRAL_COUNT) +                          \
+     SDC_MEM_EXTENDED_FEATURE_SET(HCI_NRF52840_PERIPHERAL_COUNT +             \
+                                      HCI_NRF52840_CENTRAL_COUNT,             \
+                                  HCI_NRF52840_EXTENDED_FEATURE_PAGES) +      \
+     SDC_MEM_INITIATOR +                                                      \
+     SDC_MEM_PER_PERIODIC_ADV_SET(HCI_NRF52840_MAX_ADV_DATA) *                \
+         HCI_NRF52840_PERIODIC_ADV_COUNT +                                    \
+     HCI_NRF52840_SDC_MEM_PER_SYNC * HCI_NRF52840_PERIODIC_SYNC_COUNT +       \
+     SDC_MEM_PERIODIC_ADV_LIST(HCI_NRF52840_PERIODIC_ADV_LIST_SIZE) +         \
+     SDC_MEM_SYNC_TRANSFER(HCI_NRF52840_PERIPHERAL_COUNT +                    \
+                           HCI_NRF52840_CENTRAL_COUNT) +                      \
      HCI_NRF52840_SDC_MEM_PERIODIC_ADV_RSP)
-
-/*
- * A periodic advertiser needs an advertising set to carry it, so asking for
- * more periodic trains than advertising sets makes sdc_cfg_set refuse. The
- * error it gives names neither macro, so it is caught here instead.
- */
-#if HCI_NRF52840_PERIODIC_ADV
-#if (HCI_NRF52840_PERIODIC_ADV_COUNT + HCI_NRF52840_PERIODIC_ADV_RSP_COUNT) > \
-    HCI_NRF52840_ADV_SET_COUNT
-#error "periodic advertisers, with and without responses, exceed the advertising sets"
-#endif
-#endif
 
 /*
  * sdc.h says the memory requirement defines "may change between minor
@@ -450,14 +197,10 @@ extern "C" {
  * small rise on the next nrfxlib is absorbed rather than met with a controller
  * that will not enable.
  */
-#ifndef HCI_NRF52840_SDC_MEM_MARGIN
 #define HCI_NRF52840_SDC_MEM_MARGIN 512U
-#endif
 
-#ifndef HCI_NRF52840_DEFAULT_SDC_MEM_SIZE
 #define HCI_NRF52840_DEFAULT_SDC_MEM_SIZE                                     \
     (HCI_NRF52840_SDC_MEM_REQUIRED + HCI_NRF52840_SDC_MEM_MARGIN)
-#endif
 
 typedef struct {
     HciTaktOs_t *pRuntime;
