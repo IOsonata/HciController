@@ -67,10 +67,19 @@ void sdc_support_parallel_scanning_and_initiating(void);
 
 /*
  * Memory requirement macros, copied verbatim from the real
- * softdevice_controller/include/sdc.h so the build time floor in
- * hci_nrf52840.cpp is checked in the host build too. If these drift from the
- * vendor header the dispatch test, which compiles against the real one, is
- * what catches it.
+ * softdevice_controller/include/sdc.h so the pool in hci_nrf52840.h is
+ * computed in the host build too.
+ *
+ * These are copies, so they can drift. What catches that is the pair of
+ * hci_nrf52840_usb_test, which builds against this file, and
+ * hci_nrf52840_resources_test, which builds against the vendor one. Both are
+ * measured against unit/hci_nrf52840_expected_resources.h, so a copy that no
+ * longer matches fails here while the real header still passes, and which of
+ * the two failed says which side moved.
+ *
+ * An earlier version of this comment credited the dispatch test with that.
+ * It never did: the dispatch test does not include hci_nrf52840.h and has no
+ * opinion about memory.
  */
 #define SDC_DEFAULT_EXTENDED_FEATURE_PAGE_COUNT 10
 #define SDC_DEFAULT_TX_PACKET_SIZE 27

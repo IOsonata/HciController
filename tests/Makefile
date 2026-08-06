@@ -73,6 +73,14 @@ SDC_SOURCES := $(UNIT)/hci_sdc_dispatch_test.cpp \
                $(SRC)/hci_cmd_dispatch.cpp \
                $(STUBS)/sdclink/sdc_stub.cpp
 TARGETS += $(SDC_TARGET)
+
+# The resource configuration against the real headers. Everything else that
+# includes hci_nrf52840.h is built against the hand written fake sdc.h, so the
+# memory macros and the sdc_cfg_t members it copies have never been compared
+# with the vendor ones. This is the only thing that does that, and it needs no
+# firmware sources: the header and the real sdc.h are the whole subject.
+RESOURCES_TARGET := $(BUILD_DIR)/hci_nrf52840_resources_test
+TARGETS += $(RESOURCES_TARGET)
 endif
 
 .PHONY: all run clean check-root print-config
@@ -97,6 +105,14 @@ $(SDC_TARGET): $(SDC_SOURCES) | check-root
 	@mkdir -p $(dir $@)
 	$(CXX) -I$(STUBS)/sdclink -I$(STUBS) -I$(SDC_INCLUDE) -I$(ROOT)/include \
 	  -DNRF52840_XXAA -DHCI_TRACE=0 $(CXXFLAGS) $(SDC_SOURCES) -o $@
+
+# No stubs/sdc on the path, so the real sdc.h is the one that answers.
+$(RESOURCES_TARGET): $(UNIT)/hci_nrf52840_resources_test.cpp \
+                     $(ROOT)/include/hci_nrf52840.h | check-root
+	@mkdir -p $(dir $@)
+	$(CXX) -I$(STUBS) -I$(SDC_INCLUDE) -I$(ROOT)/include \
+	  -DNRF52840_XXAA -DHCI_TRACE=0 $(CXXFLAGS) \
+	  $(UNIT)/hci_nrf52840_resources_test.cpp -o $@
 endif
 
 run: all
@@ -105,7 +121,8 @@ run: all
 	@echo
 	@echo "All HciController host tests passed."
 	@test -n "$(strip $(SDC_INCLUDE))" || \
-	  echo "Skipped hci_sdc_dispatch_test, set NRFXLIB_DIR to a sdk-nrfxlib checkout."
+	  echo "Skipped hci_sdc_dispatch_test and hci_nrf52840_resources_test, \
+set NRFXLIB_DIR to a sdk-nrfxlib checkout."
 
 print-config:
 	@echo "ROOT=$(ROOT)"

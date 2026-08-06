@@ -14,6 +14,21 @@
 #include "coredev/system_core_clock.h"
 #include "crypto_rng_nrf.h"
 
+#include "hci_nrf52840_expected_resources.h"
+
+/*
+ * The fake sdc.h this file builds against carries hand written copies of the
+ * vendor SDC_MEM_ macros. hci_nrf52840_resources_test measures the real ones
+ * against the same expectations, so a copy that drifts from the vendor header
+ * fails here while the real one still passes, and the pair says which moved.
+ *
+ * Compile time rather than a printed check: a fake that disagrees about how
+ * much memory the controller wants makes every other number in this file a
+ * measurement of the wrong thing.
+ */
+static_assert(HCI_NRF52840_SDC_MEM_REQUIRED == EXPECT_REQUIRED,
+              "the fake sdc.h and the vendor one disagree about the pool");
+
 static NRF_POWER_Type gPower;
 NRF_POWER_Type *NRF_POWER = &gPower;
 static NRF_USBD_Type gUsbd;

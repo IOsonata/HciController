@@ -54,6 +54,18 @@ wrong.
 | `hci_taktos_poll_test` | `hci_taktos.cpp` | the poll interval, so a lost wake cannot stall the USB transport |
 | `hci_tinyusb_init_test` | `hci_tinyusb.cpp` | that bring up goes through `tusb_rhport_init` and records the device role, which is what makes the interrupt handler dispatch |
 | `hci_sdc_dispatch_test` | `hci_sdc_nrfxlib.cpp` | all 107 opcodes reach the intended SDC call with the right response type and parameter length, and the supported commands bitmap agrees with the table in both directions |
+| `hci_nrf52840_resources_test` | `hci_nrf52840.h` | every term of the SoftDevice Controller memory pool against the real nrfxlib macros, and every `sdc_cfg_t` member the firmware writes against the real union |
+
+The last two need `NRFXLIB_DIR` and are skipped without it. They are the only
+tests that see the vendor headers; everything else builds against the fakes
+under `stubs/`.
+
+That matters most for `hci_nrf52840_resources_test`. `stubs/sdc/sdc.h` carries
+hand written copies of the `SDC_MEM_*` macros, and the pool is computed from
+them in every other test. Both that test and `hci_nrf52840_usb_test` measure
+their headers against `unit/hci_nrf52840_expected_resources.h`, so a copy that
+drifts from the vendor header fails the stub build while the real one still
+passes, and which of the two failed says which header moved.
 
 ## Hardware tools
 
