@@ -49,6 +49,9 @@ void sdc_support_phy_update_central(void);
 void sdc_support_direct_test_mode(void);
 void sdc_support_le_privacy(void);
 void sdc_support_qos_channel_survey(void);
+void sdc_support_le_power_control_central(void);
+void sdc_support_le_power_control_peripheral(void);
+void sdc_support_le_path_loss_monitoring(void);
 #ifdef __cplusplus
 }
 #endif

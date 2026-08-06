@@ -612,6 +612,18 @@ static bool HciNrf52840SdcInit(HciNrf52840_t *pTarget)
     sdc_support_qos_channel_survey();
 #endif
 
+#if HCI_NRF52840_LE_POWER_CONTROL
+    /*
+     * Both roles, because this image supports both and sdk-nrfxlib asks for a
+     * call per role rather than one for the pair. Path loss monitoring has to
+     * come after at least one of them, which is why the order here is not
+     * alphabetical.
+     */
+    sdc_support_le_power_control_central();
+    sdc_support_le_power_control_peripheral();
+    sdc_support_le_path_loss_monitoring();
+#endif
+
     sdc_cfg_t cfg = {};
     cfg.buffer_cfg.rx_packet_size = HCI_NRF52840_ACL_PACKET_SIZE;
     cfg.buffer_cfg.tx_packet_size = HCI_NRF52840_ACL_PACKET_SIZE;

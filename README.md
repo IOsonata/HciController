@@ -322,7 +322,8 @@ count grows the array that holds it rather than needing a second edit.
 | Scan buffers | 4 | 1688 for four |
 | Filter accept list | 8 | 68 for eight |
 | Channel survey | on | 40 |
-| | | **26852 total** |
+| LE Power Control | on | 997 for eight links |
+| | | **27849 total** |
 
 The pool is that total plus a 512 octet margin, because sdk-nrfxlib says the
 memory macros may move between minor releases and the number that decides

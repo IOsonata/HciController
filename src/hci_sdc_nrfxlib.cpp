@@ -154,6 +154,25 @@
 #define HCI_SDC_HAS_VS_QOS 1
 #endif
 
+/*
+ * LE Power Control and path loss monitoring, Vol 4 Part E 7.8.117 to 7.8.121,
+ * plus Read Transmit Power Level at 7.3.35 and the RF path compensation pair
+ * at 7.8.75 and 7.8.76.
+ *
+ * Same split as the channel survey: this macro says the symbols are in the
+ * library, HCI_NRF52840_LE_POWER_CONTROL in hci_nrf52840.h says the feature is
+ * configured in and carries the 997 octets of pool it needs. A build that
+ * clears that one and leaves this set answers with a status from SDC rather
+ * than Unknown HCI Command, which is what a host can act on.
+ *
+ * The RF path compensation pair and Read Transmit Power Level are grouped here
+ * because that is where a host looks for them, not because they need the
+ * support call. They do not.
+ */
+#ifndef HCI_SDC_HAS_LE_POWER_CONTROL
+#define HCI_SDC_HAS_LE_POWER_CONTROL 1
+#endif
+
 static HciCmdResult_t HciSdcComplete(uint8_t Status, size_t ReturnLen)
 {
     HciCmdResult_t result = {Status, HCI_CMD_RESPONSE_COMPLETE, ReturnLen};
@@ -349,6 +368,17 @@ static HciCmdResult_t HciSdcCmdReadSupportedCommands(void *,
     supported.params.hci_le_test_end = 1U;
 
     supported.params.hci_le_set_host_feature = 1U;
+
+#if HCI_SDC_HAS_LE_POWER_CONTROL
+    supported.params.hci_read_transmit_power_level = 1U;
+    supported.params.hci_le_read_rf_path_compensation = 1U;
+    supported.params.hci_le_write_rf_path_compensation = 1U;
+    supported.params.hci_le_enhanced_read_transmit_power_level = 1U;
+    supported.params.hci_le_read_remote_transmit_power_level = 1U;
+    supported.params.hci_le_set_path_loss_reporting_parameters = 1U;
+    supported.params.hci_le_set_path_loss_reporting_enable = 1U;
+    supported.params.hci_le_set_transmit_power_reporting_enable = 1U;
+#endif
 
     supported.params.hci_le_set_data_length = 1U;
     supported.params.hci_le_read_suggested_default_data_length = 1U;
@@ -914,6 +944,48 @@ HCI_SDC_CMD_P(HciSdcCmdVsConnAnchorPointUpdateEnable,
               sdc_hci_cmd_vs_conn_anchor_point_update_event_report_enable,
               sdc_hci_cmd_vs_conn_anchor_point_update_event_report_enable_t,
               HciSdcComplete)
+#endif
+
+#if HCI_SDC_HAS_LE_POWER_CONTROL
+HCI_SDC_CMD_PR(HciSdcCmdReadTransmitPowerLevel,
+               sdc_hci_cmd_cb_read_transmit_power_level,
+               sdc_hci_cmd_cb_read_transmit_power_level_t,
+               sdc_hci_cmd_cb_read_transmit_power_level_return_t)
+HCI_SDC_CMD_NR(HciSdcCmdLeReadRfPathCompensation,
+               sdc_hci_cmd_le_read_rf_path_compensation,
+               sdc_hci_cmd_le_read_rf_path_compensation_return_t)
+HCI_SDC_CMD_P(HciSdcCmdLeWriteRfPathCompensation,
+              sdc_hci_cmd_le_write_rf_path_compensation,
+              sdc_hci_cmd_le_write_rf_path_compensation_t, HciSdcComplete)
+HCI_SDC_CMD_PR(HciSdcCmdLeEnhancedReadTransmitPower,
+               sdc_hci_cmd_le_enhanced_read_transmit_power_level,
+               sdc_hci_cmd_le_enhanced_read_transmit_power_level_t,
+               sdc_hci_cmd_le_enhanced_read_transmit_power_level_return_t)
+
+/*
+ * The odd one. Vol 4 Part E 7.8.118 answers this with a Command Status and
+ * then, once the controller has the remote power, an LE Transmit Power
+ * Reporting event carrying reason 0x02. It is the only command in this group
+ * whose answer arrives twice, and the reason it takes no return structure:
+ * there is nothing to put in a Command Complete that has not been asked for
+ * over the air yet.
+ */
+HCI_SDC_CMD_P(HciSdcCmdLeReadRemoteTransmitPower,
+              sdc_hci_cmd_le_read_remote_transmit_power_level,
+              sdc_hci_cmd_le_read_remote_transmit_power_level_t, HciSdcStatus)
+
+HCI_SDC_CMD_PR(HciSdcCmdLeSetPathLossReportingParams,
+               sdc_hci_cmd_le_set_path_loss_reporting_params,
+               sdc_hci_cmd_le_set_path_loss_reporting_params_t,
+               sdc_hci_cmd_le_set_path_loss_reporting_params_return_t)
+HCI_SDC_CMD_PR(HciSdcCmdLeSetPathLossReportingEnable,
+               sdc_hci_cmd_le_set_path_loss_reporting_enable,
+               sdc_hci_cmd_le_set_path_loss_reporting_enable_t,
+               sdc_hci_cmd_le_set_path_loss_reporting_enable_return_t)
+HCI_SDC_CMD_PR(HciSdcCmdLeSetTransmitPowerReportingEnable,
+               sdc_hci_cmd_le_set_transmit_power_reporting_enable,
+               sdc_hci_cmd_le_set_transmit_power_reporting_enable_t,
+               sdc_hci_cmd_le_set_transmit_power_reporting_enable_return_t)
 #endif
 
 /* Controller and baseband. */
@@ -1510,6 +1582,45 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
                     sizeof(sdc_hci_cmd_le_set_host_feature_t),
                     HciSdcCmdLeSetHostFeature),
 
+#if HCI_SDC_HAS_LE_POWER_CONTROL
+    /* Transmit power, and the path loss the two ends work out from it. */
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_CB_READ_TRANSMIT_POWER_LEVEL,
+                     sizeof(sdc_hci_cmd_cb_read_transmit_power_level_t),
+                     HciSdcCmdReadTransmitPowerLevel,
+                     sdc_hci_cmd_cb_read_transmit_power_level_return_t),
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_READ_RF_PATH_COMPENSATION, 0U,
+                     HciSdcCmdLeReadRfPathCompensation,
+                     sdc_hci_cmd_le_read_rf_path_compensation_return_t),
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_WRITE_RF_PATH_COMPENSATION,
+                    sizeof(sdc_hci_cmd_le_write_rf_path_compensation_t),
+                    HciSdcCmdLeWriteRfPathCompensation),
+    HCI_SDC_ENTRY_CR(
+        SDC_HCI_OPCODE_CMD_LE_ENHANCED_READ_TRANSMIT_POWER_LEVEL,
+        sizeof(sdc_hci_cmd_le_enhanced_read_transmit_power_level_t),
+        HciSdcCmdLeEnhancedReadTransmitPower,
+        sdc_hci_cmd_le_enhanced_read_transmit_power_level_return_t),
+    /* Command Status, then an LE Transmit Power Reporting event. 7.8.118. */
+    HCI_SDC_ENTRY_S(
+        SDC_HCI_OPCODE_CMD_LE_READ_REMOTE_TRANSMIT_POWER_LEVEL,
+        sizeof(sdc_hci_cmd_le_read_remote_transmit_power_level_t),
+        HciSdcCmdLeReadRemoteTransmitPower),
+    HCI_SDC_ENTRY_CR(
+        SDC_HCI_OPCODE_CMD_LE_SET_PATH_LOSS_REPORTING_PARAMS,
+        sizeof(sdc_hci_cmd_le_set_path_loss_reporting_params_t),
+        HciSdcCmdLeSetPathLossReportingParams,
+        sdc_hci_cmd_le_set_path_loss_reporting_params_return_t),
+    HCI_SDC_ENTRY_CR(
+        SDC_HCI_OPCODE_CMD_LE_SET_PATH_LOSS_REPORTING_ENABLE,
+        sizeof(sdc_hci_cmd_le_set_path_loss_reporting_enable_t),
+        HciSdcCmdLeSetPathLossReportingEnable,
+        sdc_hci_cmd_le_set_path_loss_reporting_enable_return_t),
+    HCI_SDC_ENTRY_CR(
+        SDC_HCI_OPCODE_CMD_LE_SET_TRANSMIT_POWER_REPORTING_ENABLE,
+        sizeof(sdc_hci_cmd_le_set_transmit_power_reporting_enable_t),
+        HciSdcCmdLeSetTransmitPowerReportingEnable,
+        sdc_hci_cmd_le_set_transmit_power_reporting_enable_return_t),
+#endif
+
 #if HCI_SDC_HAS_VS_CARRIER_TEST
     /*
      * Vendor specific, and grouped with direct test mode rather than with the
@@ -1658,6 +1769,20 @@ HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_receiver_test_v2_t, 3U);              /* 7.8.50 
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_transmitter_test_v2_t, 4U);           /* 7.8.51 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_host_feature_t, 2U);             /* 7.8.115 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_sp_read_rssi_t, 2U);                      /* 7.5.4 */
+#if HCI_SDC_HAS_LE_POWER_CONTROL
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_cb_read_transmit_power_level_t, 3U);     /* 7.3.35 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_write_rf_path_compensation_t, 4U);    /* 7.8.76 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_enhanced_read_transmit_power_level_t,
+                 3U);                                               /* 7.8.117 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_remote_transmit_power_level_t,
+                 3U);                                               /* 7.8.118 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_path_loss_reporting_params_t,
+                 8U);                                               /* 7.8.119 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_path_loss_reporting_enable_t,
+                 3U);                                               /* 7.8.120 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_transmit_power_reporting_enable_t,
+                 4U);                                               /* 7.8.121 */
+#endif
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_data_length_t, 6U);               /* 7.8.33 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_write_suggested_default_data_length_t, 4U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_phy_t, 2U);                      /* 7.8.47 */
@@ -1723,6 +1848,21 @@ HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_long_term_key_request_reply_return_t, 2U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_test_end_return_t, 2U);               /* 7.8.30 */
 /* Connection_Handle and RSSI, the handle echoed back. Vol 4 Part E 7.5.4. */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_sp_read_rssi_return_t, 3U);
+#if HCI_SDC_HAS_LE_POWER_CONTROL
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_cb_read_transmit_power_level_return_t, 3U);
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_rf_path_compensation_return_t, 4U);
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_enhanced_read_transmit_power_level_return_t,
+                 5U);
+/*
+ * Three commands whose return is the connection handle alone. Short, and a
+ * host that holds two octets for the opcode discards anything shorter, which
+ * reads to it as no answer at all.
+ */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_path_loss_reporting_params_return_t, 2U);
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_path_loss_reporting_enable_return_t, 2U);
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_transmit_power_reporting_enable_return_t,
+                 2U);
+#endif
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_data_length_return_t, 2U);        /* 7.8.33 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_suggested_default_data_length_return_t, 4U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_max_data_length_return_t, 8U);   /* 7.8.46 */

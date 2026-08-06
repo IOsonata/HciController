@@ -43,6 +43,7 @@ extern "C" {
  *   peripheral link  2935 octets      central link  2839 octets
  *   advertising set   961 octets      scan buffers  1688 for four
  *   accept list        68 for eight   channel survey  40
+ *   power control     997 for eight links
  */
 #ifndef HCI_NRF52840_PERIPHERAL_COUNT
 #define HCI_NRF52840_PERIPHERAL_COUNT 4U
@@ -105,6 +106,33 @@ extern "C" {
 #define HCI_NRF52840_SDC_MEM_QOS 0
 #endif
 
+/*
+ * LE Power Control, Bluetooth 5.2. The two ends negotiate transmit power
+ * rather than each shouting at whatever it defaults to, and the controller
+ * reports the changes. Plenty of devices now use it and few test tools
+ * exercise it, which is the argument for having it here.
+ *
+ * Path loss monitoring rides on it: the controller subtracts the remote
+ * transmit power from the RSSI and reports the zone crossings. sdk-nrfxlib
+ * requires at least one power control role before it will accept path loss
+ * monitoring, so the two are enabled together rather than separately, and the
+ * macro says so by covering both.
+ *
+ * Costs 13 + 123 per link, so 997 across the eight links above. Enough to be
+ * worth a macro rather than assumed.
+ */
+#ifndef HCI_NRF52840_LE_POWER_CONTROL
+#define HCI_NRF52840_LE_POWER_CONTROL 1
+#endif
+
+#if HCI_NRF52840_LE_POWER_CONTROL
+#define HCI_NRF52840_SDC_MEM_POWER_CONTROL                                    \
+    SDC_MEM_LE_POWER_CONTROL(HCI_NRF52840_PERIPHERAL_COUNT +                  \
+                             HCI_NRF52840_CENTRAL_COUNT)
+#else
+#define HCI_NRF52840_SDC_MEM_POWER_CONTROL 0
+#endif
+
 #define HCI_NRF52840_SDC_MEM_REQUIRED                                         \
     (SDC_MEM_PER_PERIPHERAL_LINK(HCI_NRF52840_ACL_PACKET_SIZE,                \
                                  HCI_NRF52840_ACL_PACKET_SIZE,                \
@@ -120,7 +148,8 @@ extern "C" {
      SDC_MEM_SCAN_EXT(HCI_NRF52840_SCAN_BUFFER_COUNT) +                       \
      SDC_MEM_PER_ADV_SET(HCI_NRF52840_MAX_ADV_DATA) *                         \
          HCI_NRF52840_ADV_SET_COUNT +                                         \
-     SDC_MEM_FAL(HCI_NRF52840_FAL_SIZE) + HCI_NRF52840_SDC_MEM_QOS)
+     SDC_MEM_FAL(HCI_NRF52840_FAL_SIZE) + HCI_NRF52840_SDC_MEM_QOS +          \
+     HCI_NRF52840_SDC_MEM_POWER_CONTROL)
 
 /*
  * sdc.h says the memory requirement defines "may change between minor

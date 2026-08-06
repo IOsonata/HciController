@@ -63,6 +63,10 @@
 #define HCI_SDC_HAS_VS_QOS 1
 #endif
 
+#ifndef HCI_SDC_HAS_LE_POWER_CONTROL
+#define HCI_SDC_HAS_LE_POWER_CONTROL 1
+#endif
+
 #define EVENT_COMMAND_COMPLETE 0x0E
 #define EVENT_COMMAND_STATUS   0x0F
 
@@ -487,6 +491,61 @@ int main(void)
      */
     ExpectRejected("VS QoS Channel Survey Enable, enable byte only", 0xFD0E,
                    zeros, 1U, 0x12);
+#endif
+#if HCI_SDC_HAS_LE_POWER_CONTROL
+    ExpectComplete("Read Transmit Power Level", 0x0C2D, zeros,
+                   sizeof(sdc_hci_cmd_cb_read_transmit_power_level_t),
+                   sizeof(sdc_hci_cmd_cb_read_transmit_power_level_return_t));
+    ExpectComplete("LE Read RF Path Compensation", 0x204C, zeros, 0U,
+                   sizeof(sdc_hci_cmd_le_read_rf_path_compensation_return_t));
+    ExpectComplete("LE Write RF Path Compensation", 0x204D, zeros,
+                   sizeof(sdc_hci_cmd_le_write_rf_path_compensation_t), 0U);
+    ExpectComplete(
+        "LE Enhanced Read Transmit Power", 0x2076, zeros,
+        sizeof(sdc_hci_cmd_le_enhanced_read_transmit_power_level_t),
+        sizeof(sdc_hci_cmd_le_enhanced_read_transmit_power_level_return_t));
+
+    /*
+     * The one whose answer arrives twice. Vol 4 Part E 7.8.118 gives a Command
+     * Status here and an LE Transmit Power Reporting event later, once the
+     * controller has asked the peer. A Command Complete would be wrong even
+     * with the right length, so this is the assertion that matters.
+     */
+    ExpectStatus("LE Read Remote Transmit Power", 0x2077, zeros,
+                 sizeof(sdc_hci_cmd_le_read_remote_transmit_power_level_t));
+
+    ExpectComplete(
+        "LE Set Path Loss Reporting Params", 0x2078, zeros,
+        sizeof(sdc_hci_cmd_le_set_path_loss_reporting_params_t),
+        sizeof(sdc_hci_cmd_le_set_path_loss_reporting_params_return_t));
+    ExpectComplete(
+        "LE Set Path Loss Reporting Enable", 0x2079, zeros,
+        sizeof(sdc_hci_cmd_le_set_path_loss_reporting_enable_t),
+        sizeof(sdc_hci_cmd_le_set_path_loss_reporting_enable_return_t));
+    ExpectComplete(
+        "LE Set Transmit Power Reporting Enable", 0x207A, zeros,
+        sizeof(sdc_hci_cmd_le_set_transmit_power_reporting_enable_t),
+        sizeof(sdc_hci_cmd_le_set_transmit_power_reporting_enable_return_t));
+
+    /*
+     * Three commands here take a handle and differ only in what follows it,
+     * and two of them are 3 octets while a third is 8. A host that sends the
+     * short one to the long opcode has confused them, and the length check is
+     * the only thing that catches it before SDC reads past the packet.
+     */
+    ExpectRejected("LE Set Path Loss Reporting Params, too short", 0x2078,
+                   zeros,
+                   sizeof(sdc_hci_cmd_le_set_path_loss_reporting_enable_t),
+                   0x12);
+
+    /*
+     * And the Command Status one still answers with a status when the length
+     * is wrong, rather than falling back to a Command Complete. Vol 4 Part E
+     * 4.5, the response kind belongs to the opcode and not to the outcome.
+     */
+    ExpectRejectedStatus(
+        "LE Read Remote Transmit Power, wrong length", 0x2077, zeros,
+        sizeof(sdc_hci_cmd_le_read_remote_transmit_power_level_t) - 1U, 0x12);
 #endif
 #if HCI_SDC_HAS_VS_READ_COUNTERS
     ExpectCompleteLocal("VS Read Counters", HCI_COUNTERS_OPCODE,
@@ -1126,6 +1185,27 @@ int main(void)
                 hci_le_set_data_related_address_changes),
 
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_SP_READ_RSSI, hci_read_rssi),
+#if HCI_SDC_HAS_LE_POWER_CONTROL
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_CB_READ_TRANSMIT_POWER_LEVEL,
+                         hci_read_transmit_power_level),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_READ_RF_PATH_COMPENSATION,
+                         hci_le_read_rf_path_compensation),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_WRITE_RF_PATH_COMPENSATION,
+                         hci_le_write_rf_path_compensation),
+            BITMAP_ENTRY(
+                SDC_HCI_OPCODE_CMD_LE_ENHANCED_READ_TRANSMIT_POWER_LEVEL,
+                hci_le_enhanced_read_transmit_power_level),
+            BITMAP_ENTRY(
+                SDC_HCI_OPCODE_CMD_LE_READ_REMOTE_TRANSMIT_POWER_LEVEL,
+                hci_le_read_remote_transmit_power_level),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_PATH_LOSS_REPORTING_PARAMS,
+                         hci_le_set_path_loss_reporting_parameters),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_PATH_LOSS_REPORTING_ENABLE,
+                         hci_le_set_path_loss_reporting_enable),
+            BITMAP_ENTRY(
+                SDC_HCI_OPCODE_CMD_LE_SET_TRANSMIT_POWER_REPORTING_ENABLE,
+                hci_le_set_transmit_power_reporting_enable),
+#endif
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_HOST_FEATURE,
                          hci_le_set_host_feature),
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_RECEIVER_TEST_V2,

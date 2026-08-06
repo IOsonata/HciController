@@ -56,6 +56,15 @@ GATES = [
       "sdc_hci_cmd_vs_read_average_rssi",
       "sdc_hci_cmd_vs_get_next_conn_event_counter",
       "sdc_hci_cmd_vs_conn_anchor_point_update_event_report_enable"]),
+    ("HCI_SDC_HAS_LE_POWER_CONTROL",
+     ["sdc_hci_cmd_cb_read_transmit_power_level",
+      "sdc_hci_cmd_le_read_rf_path_compensation",
+      "sdc_hci_cmd_le_write_rf_path_compensation",
+      "sdc_hci_cmd_le_enhanced_read_transmit_power_level",
+      "sdc_hci_cmd_le_read_remote_transmit_power_level",
+      "sdc_hci_cmd_le_set_path_loss_reporting_params",
+      "sdc_hci_cmd_le_set_path_loss_reporting_enable",
+      "sdc_hci_cmd_le_set_transmit_power_reporting_enable"]),
 ]
 
 # Not a dispatch table gate. HCI_NRF52840_QOS_CHANNEL_SURVEY in
@@ -64,6 +73,10 @@ GATES = [
 # that sets it without the symbol does not link.
 SUPPORT = [
     ("HCI_NRF52840_QOS_CHANNEL_SURVEY", ["sdc_support_qos_channel_survey"]),
+    ("HCI_NRF52840_LE_POWER_CONTROL",
+     ["sdc_support_le_power_control_central",
+      "sdc_support_le_power_control_peripheral",
+      "sdc_support_le_path_loss_monitoring"]),
 ]
 
 DEFAULT_LIB = ("../external/sdk-nrfxlib/softdevice_controller/lib/nrf52/"
