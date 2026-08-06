@@ -48,6 +48,17 @@ static_assert(HCI_APP_PACKET_SIZE >= HCI_MSG_BUFFER_ISO_MAX_SIZE,
 #endif
 
 /*
+ * Every link the controller can hold has to be trackable, or the ACL credit
+ * guard stands down for the ones that do not fit and the host can overrun the
+ * advertised buffer count on those without being refused. This is the one
+ * place both numbers are in scope, the routing layer's table size and the
+ * target's link counts.
+ */
+static_assert(HCI_SDC_ACL_TRACK_HANDLES >=
+                  HCI_NRF52840_PERIPHERAL_COUNT + HCI_NRF52840_CENTRAL_COUNT,
+              "HCI_SDC_ACL_TRACK_HANDLES is smaller than the link count");
+
+/*
  * Which UART instance the board's pins belong to. board.h says, since a board
  * that puts the host on UARTE1 would otherwise get UARTE0 configured with its
  * pin map and no diagnostic.

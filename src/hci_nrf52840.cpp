@@ -125,25 +125,11 @@ static bool HciNrf52840HfxoOnXtal(void)
                CLOCK_HFCLKSTAT_SRC_Xtal;
 }
 
-#ifndef HCI_NRF52840_LINK_COUNT
-#define HCI_NRF52840_LINK_COUNT 1U
-#endif
-
-#ifndef HCI_NRF52840_ACL_PACKET_SIZE
-#define HCI_NRF52840_ACL_PACKET_SIZE 251U
-#endif
-
-#ifndef HCI_NRF52840_ACL_PACKET_COUNT
-#define HCI_NRF52840_ACL_PACKET_COUNT 4U
-#endif
-
-#ifndef HCI_NRF52840_SCAN_BUFFER_COUNT
-#define HCI_NRF52840_SCAN_BUFFER_COUNT 4U
-#endif
-
-#ifndef HCI_NRF52840_MAX_ADV_DATA
-#define HCI_NRF52840_MAX_ADV_DATA 255U
-#endif
+/*
+ * The radio resource configuration lives in hci_nrf52840.h, next to the pool
+ * size that is computed from it, so that raising a count and sizing the memory
+ * cannot be done separately.
+ */
 
 static HciNrf52840_t *s_pTarget;
 
@@ -574,33 +560,6 @@ static bool HciNrf52840CfgSet(HciNrf52840_t *pTarget,
     return true;
 }
 
-/*
- * A build time floor for the memory pool, computed from the SDC_MEM_* macros
- * for the resources configured below. sdc.h notes that "The values of the
- * memory requirement defines may change between minor releases", so this is a
- * check that the pool still fits after an nrfxlib update, not a substitute for
- * the runtime query. Getting it wrong at run time means the controller refuses
- * to start, which is the one failure the application cannot work around.
- */
-#define HCI_NRF52840_SDC_MEM_REQUIRED                                         \
-    (SDC_MEM_PER_PERIPHERAL_LINK(HCI_NRF52840_ACL_PACKET_SIZE,                \
-                                 HCI_NRF52840_ACL_PACKET_SIZE,                \
-                                 HCI_NRF52840_ACL_PACKET_COUNT,               \
-                                 HCI_NRF52840_ACL_PACKET_COUNT) *             \
-         HCI_NRF52840_LINK_COUNT +                                            \
-     SDC_MEM_PER_CENTRAL_LINK(HCI_NRF52840_ACL_PACKET_SIZE,                   \
-                              HCI_NRF52840_ACL_PACKET_SIZE,                   \
-                              HCI_NRF52840_ACL_PACKET_COUNT,                  \
-                              HCI_NRF52840_ACL_PACKET_COUNT) *                \
-         HCI_NRF52840_LINK_COUNT +                                            \
-     SDC_MEM_PERIPHERAL_LINKS_SHARED + SDC_MEM_CENTRAL_LINKS_SHARED +         \
-     SDC_MEM_SCAN_EXT(HCI_NRF52840_SCAN_BUFFER_COUNT) +                       \
-     SDC_MEM_PER_ADV_SET(HCI_NRF52840_MAX_ADV_DATA))
-
-static_assert(HCI_NRF52840_DEFAULT_SDC_MEM_SIZE >=
-                  HCI_NRF52840_SDC_MEM_REQUIRED,
-              "SDC memory pool is smaller than the configured resources need");
-
 static bool HciNrf52840SdcInit(HciNrf52840_t *pTarget)
 {
     int32_t result = sdc_init(HciNrf52840SdcAssert);
@@ -643,15 +602,15 @@ static bool HciNrf52840SdcInit(HciNrf52840_t *pTarget)
     if (!HciNrf52840CfgSet(pTarget, SDC_CFG_TYPE_BUFFER_CFG, &cfg)) return false;
 
     cfg = {};
-    cfg.peripheral_count.count = HCI_NRF52840_LINK_COUNT;
+    cfg.peripheral_count.count = HCI_NRF52840_PERIPHERAL_COUNT;
     if (!HciNrf52840CfgSet(pTarget, SDC_CFG_TYPE_PERIPHERAL_COUNT, &cfg)) return false;
 
     cfg = {};
-    cfg.central_count.count = HCI_NRF52840_LINK_COUNT;
+    cfg.central_count.count = HCI_NRF52840_CENTRAL_COUNT;
     if (!HciNrf52840CfgSet(pTarget, SDC_CFG_TYPE_CENTRAL_COUNT, &cfg)) return false;
 
     cfg = {};
-    cfg.adv_count.count = 1U;
+    cfg.adv_count.count = HCI_NRF52840_ADV_SET_COUNT;
     if (!HciNrf52840CfgSet(pTarget, SDC_CFG_TYPE_ADV_COUNT, &cfg)) return false;
 
     cfg = {};
@@ -661,6 +620,15 @@ static bool HciNrf52840SdcInit(HciNrf52840_t *pTarget)
     cfg = {};
     cfg.scan_buffer_cfg.count = HCI_NRF52840_SCAN_BUFFER_COUNT;
     if (!HciNrf52840CfgSet(pTarget, SDC_CFG_TYPE_SCAN_BUFFER_CFG, &cfg)) return false;
+
+    /*
+     * The filter accept list. Left unset the controller takes its own default,
+     * which is eight, and a host that reads the size gets a number this build
+     * never chose.
+     */
+    cfg = {};
+    cfg.fal_size = HCI_NRF52840_FAL_SIZE;
+    if (!HciNrf52840CfgSet(pTarget, SDC_CFG_TYPE_FAL_SIZE, &cfg)) return false;
 
     result = sdc_cfg_set(SDC_DEFAULT_RESOURCE_CFG_TAG, SDC_CFG_TYPE_NONE, nullptr);
     if (result < 0)

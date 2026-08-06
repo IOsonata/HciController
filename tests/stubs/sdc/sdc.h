@@ -9,6 +9,8 @@
 #define SDC_CFG_TYPE_ADV_COUNT       4
 #define SDC_CFG_TYPE_ADV_BUFFER_CFG  5
 #define SDC_CFG_TYPE_SCAN_BUFFER_CFG 6
+/* Real sdc.h numbers these differently; only distinctness matters here. */
+#define SDC_CFG_TYPE_FAL_SIZE        7
 typedef struct { uint8_t count; } sdc_cfg_role_count_t;
 typedef struct { uint8_t rx_packet_size; uint8_t tx_packet_size;
                  uint8_t rx_packet_count; uint8_t tx_packet_count; } sdc_cfg_buffer_cfg_t;
@@ -21,6 +23,8 @@ typedef union {
     sdc_cfg_role_count_t adv_count;
     sdc_cfg_adv_buffer_cfg_t adv_buffer_cfg;
     sdc_cfg_scan_buffer_cfg_t scan_buffer_cfg;
+    /* A bare integer in the real header, not a role count. */
+    uint16_t fal_size;
 } sdc_cfg_t;
 typedef void (*sdc_fault_handler_t)(const char *, uint32_t);
 typedef void (*sdc_callback_t)(void);

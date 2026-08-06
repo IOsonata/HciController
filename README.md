@@ -304,6 +304,40 @@ The TinyUSB adapter services the IOsonata `UsbdCdcIntrf` FIFOs. When the RX FIFO
 
 The UART path uses IOsonata's interrupt-driven FIFO/DMA UART implementation. Its 4 KiB RX and TX FIFOs absorb complete HCI packets and host scheduling latency.
 
+## Capacity
+
+What one image is configured for, and what it costs in the SoftDevice
+Controller memory pool. Every value is a `#define` in `include/hci_nrf52840.h`
+that a build can override, and the pool is computed from them, so raising a
+count grows the array that holds it rather than needing a second edit.
+
+| | | Pool cost |
+| --- | ---: | ---: |
+| Peripheral links | 4 | 2935 each |
+| Central links | 4 | 2839 each |
+| ACL payload, each way | 251 octets | in the per-link cost |
+| ACL buffers, each way | 4 | in the per-link cost |
+| Advertising sets | 2 | 961 each |
+| Advertising data | 255 octets | in the per-set cost |
+| Scan buffers | 4 | 1688 for four |
+| Filter accept list | 8 | 68 for eight |
+| | | **26812 total** |
+
+The pool is that total plus a 512 octet margin, because sdk-nrfxlib says the
+memory macros may move between minor releases and the number that decides
+whether the controller starts is the one `sdc_cfg_set` answers at run time.
+
+The ACL payload is worth calling out. 251 octets is the data length extension
+maximum, and it is what the controller reports in LE Read Buffer Size, so a
+host is entitled to use it. The common alternative is 27, which caps
+throughput at about a ninth of what the radio can carry.
+
+The buffer count is a total across every link, not an allowance each. Vol 4
+Part E 4.1.1 gives the host one pool to spend, and the controller refuses a
+packet past it rather than letting the SoftDevice Controller take the packet
+and the host's buffer with it. `AclCreditOverrunCount`, counter 30, says how
+often that has happened.
+
 ## TaktOS execution model
 
 A high-priority HCI thread owns the low-priority path:
