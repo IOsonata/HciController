@@ -65,6 +65,20 @@ GATES = [
       "sdc_hci_cmd_le_set_path_loss_reporting_params",
       "sdc_hci_cmd_le_set_path_loss_reporting_enable",
       "sdc_hci_cmd_le_set_transmit_power_reporting_enable"]),
+    ("HCI_SDC_HAS_LE_REQUEST_PEER_SCA",
+     ["sdc_hci_cmd_le_request_peer_sca"]),
+    ("HCI_SDC_HAS_LE_SUBRATING",
+     ["sdc_hci_cmd_le_set_default_subrate",
+      "sdc_hci_cmd_le_subrate_request"]),
+    ("HCI_SDC_HAS_LE_READ_ALL_REMOTE_FEATURES",
+     ["sdc_hci_cmd_le_read_all_remote_features"]),
+    ("HCI_SDC_HAS_LE_SET_HOST_CHANNEL_CLASSIFICATION",
+     ["sdc_hci_cmd_le_set_host_channel_classification"]),
+    ("HCI_SDC_HAS_VS_SET_ADV_RANDOMNESS",
+     ["sdc_hci_cmd_vs_set_adv_randomness"]),
+    ("HCI_SDC_HAS_VS_LLPM",
+     ["sdc_hci_cmd_vs_llpm_mode_set",
+      "sdc_hci_cmd_vs_conn_update"]),
 ]
 
 # Not a dispatch table gate. HCI_NRF52840_QOS_CHANNEL_SURVEY in
@@ -77,6 +91,18 @@ SUPPORT = [
      ["sdc_support_le_power_control_central",
       "sdc_support_le_power_control_peripheral",
       "sdc_support_le_path_loss_monitoring"]),
+    ("HCI_NRF52840_SCA_UPDATE",
+     ["sdc_support_sca_central", "sdc_support_sca_peripheral"]),
+    ("HCI_NRF52840_CONNECTION_SUBRATING",
+     ["sdc_support_connection_subrating_central",
+      "sdc_support_connection_subrating_peripheral"]),
+    # The unsuffixed sdc_support_extended_feature_set() is deprecated and is
+    # absent from the nRF52 libraries. Only the per role pair is checked.
+    ("HCI_NRF52840_EXTENDED_FEATURE_SET",
+     ["sdc_support_extended_feature_set_central",
+      "sdc_support_extended_feature_set_peripheral"]),
+    ("HCI_NRF52840_PARALLEL_SCAN_INIT",
+     ["sdc_support_parallel_scanning_and_initiating"]),
 ]
 
 DEFAULT_LIB = ("../external/sdk-nrfxlib/softdevice_controller/lib/nrf52/"

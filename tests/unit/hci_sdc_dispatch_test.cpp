@@ -67,6 +67,30 @@
 #define HCI_SDC_HAS_LE_POWER_CONTROL 1
 #endif
 
+#ifndef HCI_SDC_HAS_LE_REQUEST_PEER_SCA
+#define HCI_SDC_HAS_LE_REQUEST_PEER_SCA 1
+#endif
+
+#ifndef HCI_SDC_HAS_LE_SUBRATING
+#define HCI_SDC_HAS_LE_SUBRATING 1
+#endif
+
+#ifndef HCI_SDC_HAS_LE_READ_ALL_REMOTE_FEATURES
+#define HCI_SDC_HAS_LE_READ_ALL_REMOTE_FEATURES 1
+#endif
+
+#ifndef HCI_SDC_HAS_LE_SET_HOST_CHANNEL_CLASSIFICATION
+#define HCI_SDC_HAS_LE_SET_HOST_CHANNEL_CLASSIFICATION 1
+#endif
+
+#ifndef HCI_SDC_HAS_VS_SET_ADV_RANDOMNESS
+#define HCI_SDC_HAS_VS_SET_ADV_RANDOMNESS 1
+#endif
+
+#ifndef HCI_SDC_HAS_VS_LLPM
+#define HCI_SDC_HAS_VS_LLPM 1
+#endif
+
 #define EVENT_COMMAND_COMPLETE 0x0E
 #define EVENT_COMMAND_STATUS   0x0F
 
@@ -546,6 +570,56 @@ int main(void)
     ExpectRejectedStatus(
         "LE Read Remote Transmit Power, wrong length", 0x2077, zeros,
         sizeof(sdc_hci_cmd_le_read_remote_transmit_power_level_t) - 1U, 0x12);
+#endif
+
+#if HCI_SDC_HAS_LE_SET_HOST_CHANNEL_CLASSIFICATION
+    ExpectComplete(
+        "LE Set Host Channel Classification", 0x2014, zeros,
+        sizeof(sdc_hci_cmd_le_set_host_channel_classification_t), 0U);
+#endif
+#if HCI_SDC_HAS_VS_SET_ADV_RANDOMNESS
+    ExpectComplete("VS Set Adv Randomness", 0xFD0C, zeros,
+                   sizeof(sdc_hci_cmd_vs_set_adv_randomness_t), 0U);
+#endif
+#if HCI_SDC_HAS_VS_LLPM
+    ExpectComplete("VS LLPM Mode Set", 0xFD01, zeros,
+                   sizeof(sdc_hci_cmd_vs_llpm_mode_set_t), 0U);
+    /* Command Status, then a VS Connection Update Complete event. */
+    ExpectStatus("VS Connection Update", 0xFD02, zeros,
+                 sizeof(sdc_hci_cmd_vs_conn_update_t));
+#endif
+#if HCI_SDC_HAS_LE_SUBRATING
+    ExpectComplete("LE Set Default Subrate", 0x207D, zeros,
+                   sizeof(sdc_hci_cmd_le_set_default_subrate_t), 0U);
+#endif
+
+    /*
+     * Three commands that answer twice: a Command Status now and an LE meta
+     * event once the peer has replied. Vol 4 Part E 7.8.108, 7.8.124 and
+     * 7.8.150. A Command Complete here would be wrong at any length, so the
+     * event kind is what these assert.
+     */
+#if HCI_SDC_HAS_LE_REQUEST_PEER_SCA
+    ExpectStatus("LE Request Peer SCA", 0x206D, zeros,
+                 sizeof(sdc_hci_cmd_le_request_peer_sca_t));
+#endif
+#if HCI_SDC_HAS_LE_SUBRATING
+    ExpectStatus("LE Subrate Request", 0x207E, zeros,
+                 sizeof(sdc_hci_cmd_le_subrate_request_t));
+
+    /*
+     * Set Default Subrate is 10 octets and Subrate Request is 12, the same
+     * five parameters with a handle in front. Sending the shorter one to the
+     * longer opcode is the mistake this pair invites, and it is refused with
+     * a status rather than a complete because the opcode decides that.
+     */
+    ExpectRejectedStatus("LE Subrate Request, missing the handle", 0x207E,
+                         zeros,
+                         sizeof(sdc_hci_cmd_le_set_default_subrate_t), 0x12);
+#endif
+#if HCI_SDC_HAS_LE_READ_ALL_REMOTE_FEATURES
+    ExpectStatus("LE Read All Remote Features", 0x2088, zeros,
+                 sizeof(sdc_hci_cmd_le_read_all_remote_features_t));
 #endif
 #if HCI_SDC_HAS_VS_READ_COUNTERS
     ExpectCompleteLocal("VS Read Counters", HCI_COUNTERS_OPCODE,
@@ -1205,6 +1279,34 @@ int main(void)
             BITMAP_ENTRY(
                 SDC_HCI_OPCODE_CMD_LE_SET_TRANSMIT_POWER_REPORTING_ENABLE,
                 hci_le_set_transmit_power_reporting_enable),
+#endif
+#if HCI_SDC_HAS_LE_SET_HOST_CHANNEL_CLASSIFICATION
+            BITMAP_ENTRY(
+                SDC_HCI_OPCODE_CMD_LE_SET_HOST_CHANNEL_CLASSIFICATION,
+                hci_le_set_host_channel_classification),
+#endif
+#if HCI_SDC_HAS_LE_REQUEST_PEER_SCA
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_REQUEST_PEER_SCA,
+                         hci_le_request_peer_sca),
+#endif
+#if HCI_SDC_HAS_LE_SUBRATING
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_DEFAULT_SUBRATE,
+                         hci_le_set_default_subrate_command),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SUBRATE_REQUEST,
+                         hci_le_subrate_request_command),
+#endif
+#if HCI_SDC_HAS_LE_READ_ALL_REMOTE_FEATURES
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_READ_ALL_REMOTE_FEATURES,
+                         hci_le_read_all_remote_features),
+#endif
+#if HCI_SDC_HAS_VS_SET_ADV_RANDOMNESS
+            /* Nordic vendor, so Vol 4 Part E 6.27 assigns no bit. */
+            {SDC_HCI_OPCODE_CMD_VS_SET_ADV_RANDOMNESS, NULL,
+             "vs_set_adv_randomness"},
+#endif
+#if HCI_SDC_HAS_VS_LLPM
+            {SDC_HCI_OPCODE_CMD_VS_LLPM_MODE_SET, NULL, "vs_llpm_mode_set"},
+            {SDC_HCI_OPCODE_CMD_VS_CONN_UPDATE, NULL, "vs_conn_update"},
 #endif
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_HOST_FEATURE,
                          hci_le_set_host_feature),

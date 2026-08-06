@@ -624,6 +624,29 @@ static bool HciNrf52840SdcInit(HciNrf52840_t *pTarget)
     sdc_support_le_path_loss_monitoring();
 #endif
 
+#if HCI_NRF52840_SCA_UPDATE
+    sdc_support_sca_central();
+    sdc_support_sca_peripheral();
+#endif
+
+#if HCI_NRF52840_CONNECTION_SUBRATING
+    sdc_support_connection_subrating_central();
+    sdc_support_connection_subrating_peripheral();
+#endif
+
+#if HCI_NRF52840_EXTENDED_FEATURE_SET
+    sdc_support_extended_feature_set_central();
+    sdc_support_extended_feature_set_peripheral();
+#endif
+
+#if HCI_NRF52840_PARALLEL_SCAN_INIT
+    /*
+     * sdk-nrfxlib asks for a central role before this, which
+     * sdc_support_ext_central() above provides.
+     */
+    sdc_support_parallel_scanning_and_initiating();
+#endif
+
     sdc_cfg_t cfg = {};
     cfg.buffer_cfg.rx_packet_size = HCI_NRF52840_ACL_PACKET_SIZE;
     cfg.buffer_cfg.tx_packet_size = HCI_NRF52840_ACL_PACKET_SIZE;
@@ -659,6 +682,21 @@ static bool HciNrf52840SdcInit(HciNrf52840_t *pTarget)
     cfg = {};
     cfg.fal_size = HCI_NRF52840_FAL_SIZE;
     if (!HciNrf52840CfgSet(pTarget, SDC_CFG_TYPE_FAL_SIZE, &cfg)) return false;
+
+#if HCI_NRF52840_EXTENDED_FEATURE_SET
+    /*
+     * How many feature pages the controller keeps per link. The pool in
+     * hci_nrf52840.h is computed from the same macro, so the two cannot
+     * disagree about what was reserved.
+     */
+    cfg = {};
+    cfg.extended_feature_page_count = HCI_NRF52840_EXTENDED_FEATURE_PAGES;
+    if (!HciNrf52840CfgSet(pTarget, SDC_CFG_TYPE_EXTENDED_FEATURE_PAGE_COUNT,
+                           &cfg))
+    {
+        return false;
+    }
+#endif
 
     result = sdc_cfg_set(SDC_DEFAULT_RESOURCE_CFG_TAG, SDC_CFG_TYPE_NONE, nullptr);
     if (result < 0)

@@ -11,6 +11,7 @@
 #define SDC_CFG_TYPE_SCAN_BUFFER_CFG 6
 /* Real sdc.h numbers these differently; only distinctness matters here. */
 #define SDC_CFG_TYPE_FAL_SIZE        7
+#define SDC_CFG_TYPE_EXTENDED_FEATURE_PAGE_COUNT 8
 typedef struct { uint8_t count; } sdc_cfg_role_count_t;
 typedef struct { uint8_t rx_packet_size; uint8_t tx_packet_size;
                  uint8_t rx_packet_count; uint8_t tx_packet_count; } sdc_cfg_buffer_cfg_t;
@@ -25,6 +26,7 @@ typedef union {
     sdc_cfg_scan_buffer_cfg_t scan_buffer_cfg;
     /* A bare integer in the real header, not a role count. */
     uint16_t fal_size;
+    uint8_t extended_feature_page_count;
 } sdc_cfg_t;
 typedef void (*sdc_fault_handler_t)(const char *, uint32_t);
 typedef void (*sdc_callback_t)(void);
@@ -52,6 +54,13 @@ void sdc_support_qos_channel_survey(void);
 void sdc_support_le_power_control_central(void);
 void sdc_support_le_power_control_peripheral(void);
 void sdc_support_le_path_loss_monitoring(void);
+void sdc_support_sca_central(void);
+void sdc_support_sca_peripheral(void);
+void sdc_support_connection_subrating_central(void);
+void sdc_support_connection_subrating_peripheral(void);
+void sdc_support_extended_feature_set_central(void);
+void sdc_support_extended_feature_set_peripheral(void);
+void sdc_support_parallel_scanning_and_initiating(void);
 #ifdef __cplusplus
 }
 #endif
@@ -63,6 +72,7 @@ void sdc_support_le_path_loss_monitoring(void);
  * vendor header the dispatch test, which compiles against the real one, is
  * what catches it.
  */
+#define SDC_DEFAULT_EXTENDED_FEATURE_PAGE_COUNT 10
 #define SDC_DEFAULT_TX_PACKET_SIZE 27
 #define SDC_DEFAULT_RX_PACKET_SIZE 27
 

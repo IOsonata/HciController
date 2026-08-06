@@ -247,6 +247,14 @@ uint8_t sdc_hci_cmd_le_read_adv_physical_channel_tx_power(sdc_hci_cmd_le_read_ad
     return g_SdcStub.NextStatus;
 }
 
+uint8_t sdc_hci_cmd_le_read_all_remote_features(const sdc_hci_cmd_le_read_all_remote_features_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_read_all_remote_features";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
 uint8_t sdc_hci_cmd_le_read_buffer_size(sdc_hci_cmd_le_read_buffer_size_return_t * a0)
 {
     g_SdcStub.LastCall = "sdc_hci_cmd_le_read_buffer_size";
@@ -417,6 +425,14 @@ uint8_t sdc_hci_cmd_le_remove_device_from_resolving_list(const sdc_hci_cmd_le_re
     return g_SdcStub.NextStatus;
 }
 
+uint8_t sdc_hci_cmd_le_request_peer_sca(const sdc_hci_cmd_le_request_peer_sca_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_request_peer_sca";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
 uint8_t sdc_hci_cmd_le_set_address_resolution_enable(const sdc_hci_cmd_le_set_address_resolution_enable_t * a0)
 {
     g_SdcStub.LastCall = "sdc_hci_cmd_le_set_address_resolution_enable";
@@ -482,6 +498,14 @@ uint8_t sdc_hci_cmd_le_set_default_phy(const sdc_hci_cmd_le_set_default_phy_t * 
     return g_SdcStub.NextStatus;
 }
 
+uint8_t sdc_hci_cmd_le_set_default_subrate(const sdc_hci_cmd_le_set_default_subrate_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_set_default_subrate";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
 uint8_t sdc_hci_cmd_le_set_event_mask(const sdc_hci_cmd_le_set_event_mask_t * a0)
 {
     g_SdcStub.LastCall = "sdc_hci_cmd_le_set_event_mask";
@@ -534,6 +558,14 @@ uint8_t sdc_hci_cmd_le_set_ext_scan_params(const sdc_hci_cmd_le_set_ext_scan_par
 uint8_t sdc_hci_cmd_le_set_ext_scan_response_data(const sdc_hci_cmd_le_set_ext_scan_response_data_t * a0)
 {
     g_SdcStub.LastCall = "sdc_hci_cmd_le_set_ext_scan_response_data";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_set_host_channel_classification(const sdc_hci_cmd_le_set_host_channel_classification_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_set_host_channel_classification";
     g_SdcStub.Calls++;
     (void)a0;
     return g_SdcStub.NextStatus;
@@ -630,6 +662,14 @@ uint8_t sdc_hci_cmd_le_set_transmit_power_reporting_enable(const sdc_hci_cmd_le_
     return g_SdcStub.NextStatus;
 }
 
+uint8_t sdc_hci_cmd_le_subrate_request(const sdc_hci_cmd_le_subrate_request_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_subrate_request";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
 uint8_t sdc_hci_cmd_le_test_end(sdc_hci_cmd_le_test_end_return_t * a0)
 {
     g_SdcStub.LastCall = "sdc_hci_cmd_le_test_end";
@@ -723,12 +763,28 @@ uint8_t sdc_hci_cmd_vs_conn_anchor_point_update_event_report_enable(const sdc_hc
     return g_SdcStub.NextStatus;
 }
 
+uint8_t sdc_hci_cmd_vs_conn_update(const sdc_hci_cmd_vs_conn_update_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_vs_conn_update";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
 uint8_t sdc_hci_cmd_vs_get_next_conn_event_counter(const sdc_hci_cmd_vs_get_next_conn_event_counter_t * a0, sdc_hci_cmd_vs_get_next_conn_event_counter_return_t * a1)
 {
     g_SdcStub.LastCall = "sdc_hci_cmd_vs_get_next_conn_event_counter";
     g_SdcStub.Calls++;
     (void)a0;
     if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_vs_get_next_conn_event_counter_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_vs_llpm_mode_set(const sdc_hci_cmd_vs_llpm_mode_set_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_vs_llpm_mode_set";
+    g_SdcStub.Calls++;
+    (void)a0;
     return g_SdcStub.NextStatus;
 }
 
@@ -754,6 +810,14 @@ uint8_t sdc_hci_cmd_vs_read_average_rssi(const sdc_hci_cmd_vs_read_average_rssi_
     g_SdcStub.Calls++;
     (void)a0;
     if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_vs_read_average_rssi_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_vs_set_adv_randomness(const sdc_hci_cmd_vs_set_adv_randomness_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_vs_set_adv_randomness";
+    g_SdcStub.Calls++;
+    (void)a0;
     return g_SdcStub.NextStatus;
 }
 

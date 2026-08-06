@@ -173,6 +173,63 @@
 #define HCI_SDC_HAS_LE_POWER_CONTROL 1
 #endif
 
+/*
+ * Sleep clock accuracy, Vol 4 Part E 7.8.108. Asks a peer how good its clock
+ * is, which decides how early a receiver has to wake. The matching
+ * HCI_NRF52840_SCA_UPDATE turns on the procedure and costs no pool.
+ */
+#ifndef HCI_SDC_HAS_LE_REQUEST_PEER_SCA
+#define HCI_SDC_HAS_LE_REQUEST_PEER_SCA 1
+#endif
+
+/* Connection subrating, Vol 4 Part E 7.8.123 and 7.8.124. */
+#ifndef HCI_SDC_HAS_LE_SUBRATING
+#define HCI_SDC_HAS_LE_SUBRATING 1
+#endif
+
+/* The extended feature set, Vol 4 Part E 7.8.150. */
+#ifndef HCI_SDC_HAS_LE_READ_ALL_REMOTE_FEATURES
+#define HCI_SDC_HAS_LE_READ_ALL_REMOTE_FEATURES 1
+#endif
+
+/*
+ * Vol 4 Part E 7.8.19. The host names which channels it believes are usable
+ * and the controller keeps to them. A test tool should be able to force a link
+ * onto chosen channels, and now that the channel survey is here the two go
+ * together: survey says which channels are busy, this says which to avoid.
+ */
+#ifndef HCI_SDC_HAS_LE_SET_HOST_CHANNEL_CLASSIFICATION
+#define HCI_SDC_HAS_LE_SET_HOST_CHANNEL_CLASSIFICATION 1
+#endif
+
+/*
+ * Nordic vendor. Advertising randomness makes the interval jitter chosen
+ * rather than left to the controller, which is what makes a timing test
+ * repeatable.
+ */
+#ifndef HCI_SDC_HAS_VS_SET_ADV_RANDOMNESS
+#define HCI_SDC_HAS_VS_SET_ADV_RANDOMNESS 1
+#endif
+
+/*
+ * Low Latency Packet Mode, Nordic to Nordic only, and the vendor Connection
+ * Update that reaches the intervals it unlocks.
+ *
+ * The two are one macro because either alone is useless. LLPM Mode Set permits
+ * connection intervals of 1 to 7 ms, and the standard LE Connection Update
+ * cannot ask for one: its interval is in units of 1.25 ms with a floor of six
+ * units, so 7.5 ms is the shortest it can express. VS Connection Update takes
+ * microseconds, which is the only way to reach the range LLPM opens. Shipping
+ * LLPM without it would give a host a command that enables something it then
+ * has no way to use.
+ *
+ * A peer that is not a Nordic controller will not follow, so this is a bench
+ * and demo feature rather than an interoperable one.
+ */
+#ifndef HCI_SDC_HAS_VS_LLPM
+#define HCI_SDC_HAS_VS_LLPM 1
+#endif
+
 static HciCmdResult_t HciSdcComplete(uint8_t Status, size_t ReturnLen)
 {
     HciCmdResult_t result = {Status, HCI_CMD_RESPONSE_COMPLETE, ReturnLen};
@@ -378,6 +435,20 @@ static HciCmdResult_t HciSdcCmdReadSupportedCommands(void *,
     supported.params.hci_le_set_path_loss_reporting_parameters = 1U;
     supported.params.hci_le_set_path_loss_reporting_enable = 1U;
     supported.params.hci_le_set_transmit_power_reporting_enable = 1U;
+#endif
+
+#if HCI_SDC_HAS_LE_SET_HOST_CHANNEL_CLASSIFICATION
+    supported.params.hci_le_set_host_channel_classification = 1U;
+#endif
+#if HCI_SDC_HAS_LE_REQUEST_PEER_SCA
+    supported.params.hci_le_request_peer_sca = 1U;
+#endif
+#if HCI_SDC_HAS_LE_SUBRATING
+    supported.params.hci_le_set_default_subrate_command = 1U;
+    supported.params.hci_le_subrate_request_command = 1U;
+#endif
+#if HCI_SDC_HAS_LE_READ_ALL_REMOTE_FEATURES
+    supported.params.hci_le_read_all_remote_features = 1U;
 #endif
 
     supported.params.hci_le_set_data_length = 1U;
@@ -986,6 +1057,52 @@ HCI_SDC_CMD_PR(HciSdcCmdLeSetTransmitPowerReportingEnable,
                sdc_hci_cmd_le_set_transmit_power_reporting_enable,
                sdc_hci_cmd_le_set_transmit_power_reporting_enable_t,
                sdc_hci_cmd_le_set_transmit_power_reporting_enable_return_t)
+#endif
+
+#if HCI_SDC_HAS_LE_SET_HOST_CHANNEL_CLASSIFICATION
+HCI_SDC_CMD_P(HciSdcCmdLeSetHostChannelClassification,
+              sdc_hci_cmd_le_set_host_channel_classification,
+              sdc_hci_cmd_le_set_host_channel_classification_t,
+              HciSdcComplete)
+#endif
+
+/*
+ * The three below answer with a Command Status and finish in an LE meta event
+ * later, because each of them has to talk to the peer before it knows
+ * anything: Request Peer SCA in LE Request Peer SCA Complete, Subrate Request
+ * in LE Subrate Change, Read All Remote Features in LE Read All Remote
+ * Features Complete. Vol 4 Part E 7.8.108, 7.8.124 and 7.8.150.
+ */
+#if HCI_SDC_HAS_LE_REQUEST_PEER_SCA
+HCI_SDC_CMD_P(HciSdcCmdLeRequestPeerSca, sdc_hci_cmd_le_request_peer_sca,
+              sdc_hci_cmd_le_request_peer_sca_t, HciSdcStatus)
+#endif
+
+#if HCI_SDC_HAS_LE_SUBRATING
+HCI_SDC_CMD_P(HciSdcCmdLeSetDefaultSubrate,
+              sdc_hci_cmd_le_set_default_subrate,
+              sdc_hci_cmd_le_set_default_subrate_t, HciSdcComplete)
+HCI_SDC_CMD_P(HciSdcCmdLeSubrateRequest, sdc_hci_cmd_le_subrate_request,
+              sdc_hci_cmd_le_subrate_request_t, HciSdcStatus)
+#endif
+
+#if HCI_SDC_HAS_LE_READ_ALL_REMOTE_FEATURES
+HCI_SDC_CMD_P(HciSdcCmdLeReadAllRemoteFeatures,
+              sdc_hci_cmd_le_read_all_remote_features,
+              sdc_hci_cmd_le_read_all_remote_features_t, HciSdcStatus)
+#endif
+
+#if HCI_SDC_HAS_VS_SET_ADV_RANDOMNESS
+HCI_SDC_CMD_P(HciSdcCmdVsSetAdvRandomness, sdc_hci_cmd_vs_set_adv_randomness,
+              sdc_hci_cmd_vs_set_adv_randomness_t, HciSdcComplete)
+#endif
+
+#if HCI_SDC_HAS_VS_LLPM
+HCI_SDC_CMD_P(HciSdcCmdVsLlpmModeSet, sdc_hci_cmd_vs_llpm_mode_set,
+              sdc_hci_cmd_vs_llpm_mode_set_t, HciSdcComplete)
+/* Command Status, then a VS Connection Update Complete event. */
+HCI_SDC_CMD_P(HciSdcCmdVsConnUpdate, sdc_hci_cmd_vs_conn_update,
+              sdc_hci_cmd_vs_conn_update_t, HciSdcStatus)
 #endif
 
 /* Controller and baseband. */
@@ -1621,6 +1738,45 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
         sdc_hci_cmd_le_set_transmit_power_reporting_enable_return_t),
 #endif
 
+#if HCI_SDC_HAS_LE_SET_HOST_CHANNEL_CLASSIFICATION
+    /* Which channels the host believes are usable. Five octets of bitmap. */
+    HCI_SDC_ENTRY_C(
+        SDC_HCI_OPCODE_CMD_LE_SET_HOST_CHANNEL_CLASSIFICATION,
+        sizeof(sdc_hci_cmd_le_set_host_channel_classification_t),
+        HciSdcCmdLeSetHostChannelClassification),
+#endif
+#if HCI_SDC_HAS_LE_REQUEST_PEER_SCA
+    HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_REQUEST_PEER_SCA,
+                    sizeof(sdc_hci_cmd_le_request_peer_sca_t),
+                    HciSdcCmdLeRequestPeerSca),
+#endif
+#if HCI_SDC_HAS_LE_SUBRATING
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_DEFAULT_SUBRATE,
+                    sizeof(sdc_hci_cmd_le_set_default_subrate_t),
+                    HciSdcCmdLeSetDefaultSubrate),
+    HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_SUBRATE_REQUEST,
+                    sizeof(sdc_hci_cmd_le_subrate_request_t),
+                    HciSdcCmdLeSubrateRequest),
+#endif
+#if HCI_SDC_HAS_LE_READ_ALL_REMOTE_FEATURES
+    HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_READ_ALL_REMOTE_FEATURES,
+                    sizeof(sdc_hci_cmd_le_read_all_remote_features_t),
+                    HciSdcCmdLeReadAllRemoteFeatures),
+#endif
+#if HCI_SDC_HAS_VS_SET_ADV_RANDOMNESS
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_VS_SET_ADV_RANDOMNESS,
+                    sizeof(sdc_hci_cmd_vs_set_adv_randomness_t),
+                    HciSdcCmdVsSetAdvRandomness),
+#endif
+#if HCI_SDC_HAS_VS_LLPM
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_VS_LLPM_MODE_SET,
+                    sizeof(sdc_hci_cmd_vs_llpm_mode_set_t),
+                    HciSdcCmdVsLlpmModeSet),
+    HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_VS_CONN_UPDATE,
+                    sizeof(sdc_hci_cmd_vs_conn_update_t),
+                    HciSdcCmdVsConnUpdate),
+#endif
+
 #if HCI_SDC_HAS_VS_CARRIER_TEST
     /*
      * Vendor specific, and grouped with direct test mode rather than with the
@@ -1782,6 +1938,37 @@ HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_path_loss_reporting_enable_t,
                  3U);                                               /* 7.8.120 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_transmit_power_reporting_enable_t,
                  4U);                                               /* 7.8.121 */
+#endif
+#if HCI_SDC_HAS_LE_SET_HOST_CHANNEL_CLASSIFICATION
+/* Thirty seven data channels in a five octet bitmap. Vol 4 Part E 7.8.19. */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_host_channel_classification_t, 5U);
+#endif
+#if HCI_SDC_HAS_LE_REQUEST_PEER_SCA
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_request_peer_sca_t, 2U);            /* 7.8.108 */
+#endif
+#if HCI_SDC_HAS_LE_SUBRATING
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_default_subrate_t, 10U);        /* 7.8.123 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_subrate_request_t, 12U);            /* 7.8.124 */
+#endif
+#if HCI_SDC_HAS_LE_READ_ALL_REMOTE_FEATURES
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_all_remote_features_t,
+                 3U);                                               /* 7.8.150 */
+#endif
+#if HCI_SDC_HAS_VS_SET_ADV_RANDOMNESS
+/* Vendor, so Nordic gives the length. Handle and a microsecond spread. */
+static_assert(sizeof(sdc_hci_cmd_vs_set_adv_randomness_t) == 3U,
+              "VS Set Adv Randomness is not 3 octets");
+#endif
+#if HCI_SDC_HAS_VS_LLPM
+static_assert(sizeof(sdc_hci_cmd_vs_llpm_mode_set_t) == 1U,
+              "VS LLPM Mode Set is not 1 octet");
+/*
+ * The interval is microseconds here rather than the 1.25 ms units the standard
+ * command uses, which is the whole point of it, and is why this is 10 octets
+ * where LE Connection Update is 14.
+ */
+static_assert(sizeof(sdc_hci_cmd_vs_conn_update_t) == 10U,
+              "VS Connection Update is not 10 octets");
 #endif
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_data_length_t, 6U);               /* 7.8.33 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_write_suggested_default_data_length_t, 4U);

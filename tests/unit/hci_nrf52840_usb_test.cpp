@@ -179,6 +179,13 @@ extern "C" void sdc_support_qos_channel_survey(void) {}
 extern "C" void sdc_support_le_power_control_central(void) {}
 extern "C" void sdc_support_le_power_control_peripheral(void) {}
 extern "C" void sdc_support_le_path_loss_monitoring(void) {}
+extern "C" void sdc_support_sca_central(void) {}
+extern "C" void sdc_support_sca_peripheral(void) {}
+extern "C" void sdc_support_connection_subrating_central(void) {}
+extern "C" void sdc_support_connection_subrating_peripheral(void) {}
+extern "C" void sdc_support_extended_feature_set_central(void) {}
+extern "C" void sdc_support_extended_feature_set_peripheral(void) {}
+extern "C" void sdc_support_parallel_scanning_and_initiating(void) {}
 
 extern "C" void HciTaktOsWake(HciTaktOs_t *, uint32_t) {}
 

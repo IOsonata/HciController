@@ -44,6 +44,9 @@ extern "C" {
  *   advertising set   961 octets      scan buffers  1688 for four
  *   accept list        68 for eight   channel survey  40
  *   power control     997 for eight links
+ *   subrating         492 for eight links
+ *   extended features 2083 for eight links at ten pages
+ *   parallel scan and initiate  384
  */
 #ifndef HCI_NRF52840_PERIPHERAL_COUNT
 #define HCI_NRF52840_PERIPHERAL_COUNT 4U
@@ -133,6 +136,84 @@ extern "C" {
 #define HCI_NRF52840_SDC_MEM_POWER_CONTROL 0
 #endif
 
+/*
+ * Connection subrating, Bluetooth 5.3. A peripheral skips connection events on
+ * an agreed pattern, so a link can idle cheaply and still answer quickly when
+ * it is used. LE Set Host Feature is the gate a host opens for it, and that is
+ * already here. 12 plus 60 per link, so 492 across eight.
+ */
+#ifndef HCI_NRF52840_CONNECTION_SUBRATING
+#define HCI_NRF52840_CONNECTION_SUBRATING 1
+#endif
+
+#if HCI_NRF52840_CONNECTION_SUBRATING
+#define HCI_NRF52840_SDC_MEM_SUBRATING                                        \
+    SDC_MEM_SUBRATING(HCI_NRF52840_PERIPHERAL_COUNT +                         \
+                      HCI_NRF52840_CENTRAL_COUNT)
+#else
+#define HCI_NRF52840_SDC_MEM_SUBRATING 0
+#endif
+
+/*
+ * The extended feature set, which is what LE Read All Remote Features reads.
+ * One command instead of paging a peer for what it supports, which is the
+ * first thing a test run wants to know about a device under test.
+ *
+ * This is the expensive one in the group and the number to look at first if
+ * the pool ever has to come down. The controller keeps a page cache per link,
+ * so it is 11 plus 19 per link plus 24 per page per link: 2083 at the
+ * sdk-nrfxlib default of ten pages across eight links.
+ *
+ * Ten is what sdk-nrfxlib picks and what a peer may legally use. The
+ * specification defines rather fewer today, so a build that is short of RAM
+ * can cut this and lose only the pages nothing is publishing yet. Three pages
+ * would be 739. The page count is also given to sdc_cfg_set, so the pool and
+ * the controller cannot disagree about it.
+ */
+#ifndef HCI_NRF52840_EXTENDED_FEATURE_SET
+#define HCI_NRF52840_EXTENDED_FEATURE_SET 1
+#endif
+
+#ifndef HCI_NRF52840_EXTENDED_FEATURE_PAGES
+#define HCI_NRF52840_EXTENDED_FEATURE_PAGES                                   \
+    SDC_DEFAULT_EXTENDED_FEATURE_PAGE_COUNT
+#endif
+
+#if HCI_NRF52840_EXTENDED_FEATURE_SET
+#define HCI_NRF52840_SDC_MEM_EXTENDED_FEATURES                                \
+    SDC_MEM_EXTENDED_FEATURE_SET(HCI_NRF52840_PERIPHERAL_COUNT +              \
+                                     HCI_NRF52840_CENTRAL_COUNT,              \
+                                 HCI_NRF52840_EXTENDED_FEATURE_PAGES)
+#else
+#define HCI_NRF52840_SDC_MEM_EXTENDED_FEATURES 0
+#endif
+
+/*
+ * Scanning and initiating at the same time. Not a command, a capability: with
+ * it a connection can be started while a scan is running, and a scan started
+ * while a connection attempt is outstanding. A rig driving several devices
+ * wants both at once, and without this the second request is refused.
+ *
+ * 384 octets, and it needs a central role, which this image has.
+ */
+#ifndef HCI_NRF52840_PARALLEL_SCAN_INIT
+#define HCI_NRF52840_PARALLEL_SCAN_INIT 1
+#endif
+
+#if HCI_NRF52840_PARALLEL_SCAN_INIT
+#define HCI_NRF52840_SDC_MEM_PARALLEL_SCAN_INIT SDC_MEM_INITIATOR
+#else
+#define HCI_NRF52840_SDC_MEM_PARALLEL_SCAN_INIT 0
+#endif
+
+/*
+ * The Sleep Clock Accuracy update procedure, which LE Request Peer SCA uses to
+ * ask a peer how good its clock is. Costs no pool, only the two support calls.
+ */
+#ifndef HCI_NRF52840_SCA_UPDATE
+#define HCI_NRF52840_SCA_UPDATE 1
+#endif
+
 #define HCI_NRF52840_SDC_MEM_REQUIRED                                         \
     (SDC_MEM_PER_PERIPHERAL_LINK(HCI_NRF52840_ACL_PACKET_SIZE,                \
                                  HCI_NRF52840_ACL_PACKET_SIZE,                \
@@ -149,7 +230,9 @@ extern "C" {
      SDC_MEM_PER_ADV_SET(HCI_NRF52840_MAX_ADV_DATA) *                         \
          HCI_NRF52840_ADV_SET_COUNT +                                         \
      SDC_MEM_FAL(HCI_NRF52840_FAL_SIZE) + HCI_NRF52840_SDC_MEM_QOS +          \
-     HCI_NRF52840_SDC_MEM_POWER_CONTROL)
+     HCI_NRF52840_SDC_MEM_POWER_CONTROL + HCI_NRF52840_SDC_MEM_SUBRATING +    \
+     HCI_NRF52840_SDC_MEM_EXTENDED_FEATURES +                                 \
+     HCI_NRF52840_SDC_MEM_PARALLEL_SCAN_INIT)
 
 /*
  * sdc.h says the memory requirement defines "may change between minor
