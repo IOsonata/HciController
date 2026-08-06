@@ -200,6 +200,10 @@ ERROR_NAMES = {
     0x13: "Remote User Terminated Connection",
     0x16: "Connection Terminated By Local Host",
     0x3E: "Connection Failed To Be Established",
+    0x41: "Unacceptable Connection Parameters",
+    0x42: "Unknown Advertising Identifier",
+    0x43: "Limit Reached",
+    0x44: "Operation Cancelled By Host",
 }
 
 
@@ -1389,10 +1393,13 @@ def cmd_dtm_rx(hci, args):
 class ProbeContext(object):
     """What a command entry needs resolved before it can be sent."""
 
-    def __init__(self, handle=None, sync_handle=None):
+    def __init__(self, handle=None, addr_type=0x01):
         self.handle = handle if handle is not None else \
             hci_commands.UNUSED_HANDLE
-        self.sync_handle = sync_handle
+        # Own_Address_Type. Naming the public address on a board that has
+        # none is accepted by the parameter commands and refused by the
+        # enables, so the whole run has to agree on what this board is.
+        self.addr_type = addr_type
 
 
 def probe_available(command, args):
@@ -1417,37 +1424,60 @@ def cmd_probe(hci, args):
     command with a real radio behind it, because there is no radio in a host
     build. This is that pass.
 
-    A command that is refused is not automatically a defect. A controller can
-    answer Command Disallowed to something that is correct but out of order,
-    and Unsupported Feature to something the library does not implement on
-    this part. What is a defect is Unknown HCI Command, which means the
-    dispatch table does not carry the opcode at all.
+    Three answers, and they do not mean the same thing. Accepted means the
+    command reached the link layer and it agreed. Refused means a status
+    other than success, which is often correct: a controller answers Command
+    Disallowed to something out of order and Unsupported Feature to something
+    the library does not do on this part. Unknown HCI Command means the
+    dispatch table does not carry the opcode at all, and that is the only one
+    that is always a defect.
+
+    Where a refusal is the right answer to a well formed parameter block, the
+    table says so and the run counts it as a pass. A refusal that the table
+    did not predict means one of the two is wrong, and usually it is the
+    table: the first run of this against a dongle produced eighteen, of which
+    every one was a mistake here.
     """
     print("Resetting the controller.")
     hci.command(OP_RESET)
     hci.command(OP_SET_EVENT_MASK, bytes.fromhex("ffffffffffffff3f"))
     hci.command(OP_LE_SET_EVENT_MASK, bytes.fromhex("ffff030000000000"))
+
+    # Own_Address_Type has to name an address the board has. Asking for the
+    # public address on a controller with none is accepted by the parameter
+    # commands and refused by the enables, so the failure lands on the
+    # command after the one that is wrong.
+    identity, addr_type, source = hci.identity()
+    if addr_type == 0x01:
+        hci.command(OP_LE_SET_RANDOM_ADDRESS, identity)
+    print("Identity %s (%s)" % (addr_str(identity), source))
     print()
 
-    ctx = ProbeContext(handle=args.handle)
+    ctx = ProbeContext(handle=args.handle, addr_type=addr_type)
     undo = []
-    counts = {"ok": 0, "refused": 0, "unknown": 0, "skipped": 0, "silent": 0}
+    counts = {"ok": 0, "expected": 0, "silent": 0, "refused": 0,
+              "unknown": 0, "skipped": 0}
 
-    for command in hci_commands.COMMANDS:
-        if command.opcode == 0x0C03:
-            # Sent above. Sending it again here would undo the event masks
-            # and every set the later rows depend on.
-            continue
+    def report(command, tag, text):
+        print("[%s] 0x%04X %-52s %s"
+              % (tag, command.opcode, command.name, text))
 
+    def refusal(command, status):
+        text = "refused 0x%02X %s" % (status, ERROR_NAMES.get(status, ""))
+        if status in command.expect:
+            counts["expected"] += 1
+            report(command, "ok", text + ", as the row expects")
+        else:
+            counts["refused"] += 1
+            report(command, "  ", text)
+
+    def send(command):
         available, reason = probe_available(command, args)
         if not available:
             counts["skipped"] += 1
             if args.verbose:
-                print("[--] 0x%04X %-52s %s"
-                      % (command.opcode, command.name, reason))
-            continue
-
-        payload = command.build(ctx)
+                report(command, "--", reason)
+            return
 
         # A command that answers nothing on success is the one case where no
         # event is the pass. Give it a short window rather than the usual
@@ -1455,65 +1485,69 @@ def cmd_probe(hci, args):
         timeout = 0.5 if command.reply == hci_commands.NONE else 3.0
 
         try:
-            status, data = hci.command(command.opcode, payload,
+            status, data = hci.command(command.opcode, command.build(ctx),
                                        timeout=timeout, allow_fail=True)
         except HciError as err:
             if command.reply == hci_commands.NONE:
                 counts["silent"] += 1
-                print("[ok] 0x%04X %-52s silent, as it must be"
-                      % (command.opcode, command.name))
+                report(command, "ok", "silent, as it must be")
             else:
                 counts["unknown"] += 1
-                print("[!!] 0x%04X %-52s %s"
-                      % (command.opcode, command.name, err))
-            if command.undo is not None:
-                undo.append(command.undo)
-            continue
+                report(command, "!!", str(err))
+            status = None
 
-        if command.reply == hci_commands.NONE:
-            # Something came back. On failure that is correct and says so;
-            # on success it means the row answers when it should not.
-            if status == 0:
-                counts["unknown"] += 1
-                print("[!!] 0x%04X %-52s answered on success, must be silent"
-                      % (command.opcode, command.name))
-            else:
-                counts["refused"] += 1
-                print("[  ] 0x%04X %-52s refused 0x%02X %s"
-                      % (command.opcode, command.name, status,
-                         ERROR_NAMES.get(status, "")))
+        if status == 0 and command.reply == hci_commands.NONE:
+            counts["unknown"] += 1
+            report(command, "!!", "answered on success, must be silent")
         elif status == 0:
             counts["ok"] += 1
-            extra = "%d byte return" % len(data) if data else "no return"
-            print("[ok] 0x%04X %-52s %s"
-                  % (command.opcode, command.name, extra))
+            report(command, "ok",
+                   "%d byte return" % len(data) if data else "no return")
         elif status == 0x01:
             counts["unknown"] += 1
-            print("[!!] 0x%04X %-52s Unknown HCI Command, not in the table"
-                  % (command.opcode, command.name))
-        else:
-            counts["refused"] += 1
-            print("[  ] 0x%04X %-52s refused 0x%02X %s"
-                  % (command.opcode, command.name, status,
-                     ERROR_NAMES.get(status, "")))
+            report(command, "!!", "Unknown HCI Command, not in the table")
+        elif status is not None:
+            refusal(command, status)
 
         if command.undo is not None:
             undo.append(command.undo)
 
-    # Put the controller back, most recent first, so a set is emptied before
-    # it is removed. Failures here are not interesting: many of these are
-    # only needed if the command above them worked.
+    for command in hci_commands.COMMANDS:
+        if command.opcode == 0x0C03:
+            # Reset was sent above. Sending it again here would drop the
+            # event masks and every set the later rows depend on.
+            continue
+        send(command)
+
+    # Put the controller back before the teardown, most recent first, so an
+    # advertising set stops advertising before anything tries to remove it.
+    # Failures here are not interesting: most of these are only needed if the
+    # command that registered them worked.
     for opcode, payload in reversed(undo):
         try:
-            hci.command(opcode, payload, allow_fail=True)
+            hci.command(opcode, payload, timeout=1.0, allow_fail=True)
         except HciError:
             pass
 
+    for command in hci_commands.TEARDOWN:
+        send(command)
+
     print()
-    print("%d accepted, %d correctly silent, %d refused, %d skipped."
-          % (counts["ok"], counts["silent"], counts["refused"],
-             counts["skipped"]))
+    print("%d accepted, %d refused as the table expects, %d correctly silent."
+          % (counts["ok"], counts["expected"], counts["silent"]))
+    print("%d refused otherwise, %d skipped."
+          % (counts["refused"], counts["skipped"]))
+
+    if counts["refused"]:
+        print()
+        print("A refusal is not by itself a defect. What it does mean is that")
+        print("the row did not describe what this controller was going to")
+        print("say, so one of the two is wrong. Check the parameter block in")
+        print("tests/hardware/hci_commands.py against the vendor header")
+        print("before concluding it is the firmware.")
+
     if counts["unknown"]:
+        print()
         print("%d answered Unknown HCI Command. Those opcodes are not in the"
               % counts["unknown"])
         print("dispatch table in src/hci_sdc_nrfxlib.cpp, which the host test")
@@ -1522,6 +1556,7 @@ def cmd_probe(hci, args):
         return 1
 
     if args.handle is None:
+        print()
         print("Connection scoped commands were skipped. Run advertise or")
         print("connect in another shell, then pass --handle with the handle")
         print("it reports.")

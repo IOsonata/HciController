@@ -112,7 +112,7 @@ def main(argv):
 
     values = opcode_values(nrfxlib, root)
     firmware = firmware_table(root, values)
-    tooling = {c.opcode: c for c in hci_commands.COMMANDS}
+    tooling = dict(hci_commands.BY_OPCODE)
 
     undriven = sorted(set(firmware) - set(tooling))
     orphaned = sorted(set(tooling) - set(firmware))
@@ -134,7 +134,7 @@ def main(argv):
     # difference between the table being complete and the radio having seen
     # every command is the part a reader will otherwise assume away.
     buckets = {}
-    for command in hci_commands.COMMANDS:
+    for command in hci_commands.BY_OPCODE.values():
         buckets[command.needs] = buckets.get(command.needs, 0) + 1
 
     print("[ok] %d opcodes, dispatched and driven, both ways."

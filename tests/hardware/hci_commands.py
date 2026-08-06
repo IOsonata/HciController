@@ -28,6 +28,9 @@ Fields
     needs       what must exist first, see NEEDS_*
     undo        an (opcode, payload) pair that puts the controller back, or
                 None when the command changes nothing that lasts
+    expect      status codes other than success that are a correct answer to
+                this parameter block, so a probe run can tell a controller
+                behaving properly from one that is not
     note        why the payload is what it is, where that is not obvious
 """
 
@@ -61,21 +64,31 @@ UNUSED_HANDLE = 0x0EFF
 PROBE_ADV_HANDLE = 0x00
 
 
+# Statuses a correct controller returns often enough to be worth naming.
+STATUS_UNKNOWN_CONNECTION = 0x02
+STATUS_COMMAND_DISALLOWED = 0x0C
+STATUS_UNSUPPORTED_FEATURE = 0x11
+STATUS_INVALID_PARAMS = 0x12
+STATUS_UNKNOWN_ADV_ID = 0x42
+
+
 def _conn(ctx, tail=b""):
     return struct.pack("<H", ctx.handle) + tail
 
 
 class Command(object):
-    __slots__ = ("opcode", "name", "reply", "payload", "needs", "undo", "note")
+    __slots__ = ("opcode", "name", "reply", "payload", "needs", "undo",
+                 "expect", "note")
 
     def __init__(self, opcode, name, reply, payload, needs=NEEDS_NOTHING,
-                 undo=None, note=""):
+                 undo=None, expect=(), note=""):
         self.opcode = opcode
         self.name = name
         self.reply = reply
         self.payload = payload
         self.needs = needs
         self.undo = undo
+        self.expect = expect
         self.note = note
 
     def build(self, ctx):
@@ -103,16 +116,20 @@ _CB = [
             lambda ctx: _conn(ctx, b"\x00"), needs=NEEDS_CONN,
             note="type 0 is the current level"),
     Command(0x0C31, "Set Controller To Host Flow Control", COMPLETE,
-            b"\x00", undo=(0x0C31, b"\x00"),
-            note="0 turns it off, which is where the probe leaves it"),
+            b"\x01", undo=(0x0C31, b"\x00"),
+            note="on for ACL, because Host Number Of Completed Packets below "
+                 "is Command Disallowed while it is off. Undo turns it back "
+                 "off, which is where a reset leaves it"),
     Command(0x0C33, "Host Buffer Size", COMPLETE,
             struct.pack("<HBHH", 251, 0, 4, 0),
             note="ACL only, no synchronous buffers"),
     Command(0x0C35, "Host Number Of Completed Packets", NONE,
             struct.pack("<BHH", 1, UNUSED_HANDLE, 0),
-            note="zero packets on a handle that has none, so the controller "
-                 "has nothing to credit back. Answers nothing on success, "
-                 "which is the whole point of testing it"),
+            expect=(STATUS_INVALID_PARAMS, STATUS_UNKNOWN_CONNECTION),
+            note="zero packets on a handle that has none. Answers nothing on "
+                 "success, which is the whole point of testing it, and a "
+                 "controller is equally right to reject the handle. Both are "
+                 "a pass; a Command Complete with success is not"),
     Command(0x0C7B, "Read Authenticated Payload Timeout", COMPLETE,
             lambda ctx: _conn(ctx), needs=NEEDS_CONN),
     Command(0x0C7C, "Write Authenticated Payload Timeout", COMPLETE,
@@ -163,10 +180,12 @@ _LE_BASIC = [
             bytes.fromhex("0102030405c0"),
             note="the top two bits set makes it a static random address"),
     Command(0x2006, "LE Set Advertising Parameters", COMPLETE,
-            struct.pack("<HHBBB6sBBB", 0x00A0, 0x00F0, 0x03, 0x00, 0x00,
-                        b"\x00" * 6, 0x07, 0x00, 0x00),
-            note="non connectable undirected, so enabling it later cannot "
-                 "let anything in"),
+            lambda ctx: struct.pack("<HHBBB6sBB", 0x00A0, 0x00F0, 0x03,
+                                    ctx.addr_type, 0x00, b"\x00" * 6,
+                                    0x07, 0x00),
+            note="fifteen octets, not sixteen: there is no trailing field "
+                 "after the filter policy. Type 3 is non connectable "
+                 "undirected, so enabling it later cannot let anything in"),
     Command(0x2007, "LE Read Advertising Physical Channel Tx Power", COMPLETE,
             b""),
     Command(0x2008, "LE Set Advertising Data", COMPLETE, _ADV_DATA),
@@ -176,8 +195,13 @@ _LE_BASIC = [
             note="turned back off by undo, so the probe does not walk away "
                  "with the radio transmitting"),
     Command(0x200B, "LE Set Scan Parameters", COMPLETE,
-            struct.pack("<BHHBB", 0x00, 0x0010, 0x0010, 0x00, 0x00),
-            note="passive, so the probe does not answer anything it hears"),
+            lambda ctx: struct.pack("<BHHBB", 0x00, 0x0060, 0x0030,
+                                    ctx.addr_type, 0x00),
+            note="passive, so the probe does not answer anything it hears. "
+                 "The address type has to be one the board has: naming the "
+                 "public address on a controller with none is accepted here "
+                 "and refused by Set Scan Enable, so the failure lands on "
+                 "the command after the one that is wrong"),
     Command(0x200C, "LE Set Scan Enable", COMPLETE, b"\x01\x00",
             undo=(0x200C, b"\x00\x00")),
     Command(0x200E, "LE Create Connection Cancel", COMPLETE, b"",
@@ -198,9 +222,10 @@ _LE_BASIC = [
             note="a zero key on zero plaintext, so the answer is a constant "
                  "the caller can recognise"),
     Command(0x2018, "LE Rand", COMPLETE, b""),
-    Command(0x201F, "LE Test End", COMPLETE, b"",
-            note="fails with 0x0C outside direct test mode, so the probe "
-                 "sends it only after starting a test"),
+    Command(0x201F, "LE Test End", COMPLETE, b"", needs=NEEDS_CONSENT,
+            note="Command Disallowed outside direct test mode, so it is only "
+                 "sent when the test commands are, where it is also their "
+                 "undo"),
     Command(0x2023, "LE Read Suggested Default Data Length", COMPLETE, b""),
     Command(0x2024, "LE Write Suggested Default Data Length", COMPLETE,
             struct.pack("<HH", 251, 2120),
@@ -221,11 +246,13 @@ _LE_BASIC = [
             struct.pack("<hh", 0, 0),
             note="zero both ways, which is what a board with no external "
                  "front end wants and what reset leaves"),
-    Command(0x2074, "LE Set Host Feature", COMPLETE, b"\x20\x01",
-            undo=(0x2074, b"\x20\x00"),
-            note="bit 32 is connection subrating host support"),
-    Command(0x207C, "LE Set Data Related Address Changes", COMPLETE,
-            b"\x00\x00", note="advertising set 0, change nothing"),
+    Command(0x2074, "LE Set Host Feature", COMPLETE, b"\x26\x01",
+            undo=(0x2074, b"\x26\x00"),
+            note="bit 38, Connection Subrating (Host Support), counting from "
+                 "LE Encryption at zero. Bit 32 is Isochronous Channels "
+                 "(Host Support), which this firmware does not enable, so "
+                 "asking for it gets Unsupported Feature and says nothing "
+                 "about subrating"),
     Command(0x207D, "LE Set Default Subrate", COMPLETE,
             struct.pack("<HHHHH", 1, 1, 0, 0, 300),
             note="a factor of one is no subrating, so this configures the "
@@ -281,13 +308,20 @@ _EXT_ADV_PARAMS = (
 )
 
 _LE_EXT = [
+    Command(0x2036, "LE Set Extended Advertising Parameters", COMPLETE,
+            _EXT_ADV_PARAMS,
+            note="creates the set every later row uses. It is not undone "
+                 "here: TEARDOWN removes it, after the undo pass has stopped "
+                 "it advertising"),
     Command(0x2035, "LE Set Advertising Set Random Address", COMPLETE,
             bytes([PROBE_ADV_HANDLE]) + bytes.fromhex("0102030405c0"),
-            note="must come after the set exists, so the probe orders it "
-                 "after Set Extended Advertising Parameters"),
-    Command(0x2036, "LE Set Extended Advertising Parameters", COMPLETE,
-            _EXT_ADV_PARAMS, undo=(0x203D, b""),
-            note="creates the set every later row uses, and undo clears it"),
+            needs=NEEDS_ADV_SET,
+            note="after the set exists, not before. A set advertising with a "
+                 "random own address type and no address set is refused at "
+                 "enable, not here"),
+    Command(0x207C, "LE Set Data Related Address Changes", COMPLETE,
+            bytes([PROBE_ADV_HANDLE, 0x00]), needs=NEEDS_ADV_SET,
+            note="change nothing, on a set that has to exist first"),
     Command(0x2037, "LE Set Extended Advertising Data", COMPLETE,
             bytes([PROBE_ADV_HANDLE, 0x03, 0x01, 3]) + bytes([2, 0x01, 0x06]),
             note="operation 3 is a complete block, fragment preference 1 is "
@@ -305,9 +339,6 @@ _LE_EXT = [
     Command(0x2042, "LE Set Extended Scan Enable", COMPLETE,
             struct.pack("<BBHH", 1, 0, 0, 0),
             undo=(0x2042, struct.pack("<BBHH", 0, 0, 0, 0))),
-    Command(0x203C, "LE Remove Advertising Set", COMPLETE,
-            bytes([PROBE_ADV_HANDLE]),
-            note="runs after everything that needs the set"),
 ]
 
 # ---------------------------------------------------------------------------
@@ -319,6 +350,15 @@ _LE_PERIODIC = [
             struct.pack("<BHHH", PROBE_ADV_HANDLE, 0x0060, 0x00A0, 0x0000),
             needs=NEEDS_ADV_SET,
             note="properties zero, so no transmit power in the header"),
+    Command(0x2086, "LE Set Periodic Advertising Parameters v2", COMPLETE,
+            struct.pack("<BHHHBBBBB", PROBE_ADV_HANDLE, 0x0060, 0x00A0,
+                        0x0000, 0, 0, 0, 0, 0),
+            needs=NEEDS_ADV_SET,
+            note="twelve octets. The trailing number of response slots is a "
+                 "field of its own, so leaving it off is one short and the "
+                 "controller rejects the parameters. Zero subevents is "
+                 "periodic advertising without responses, which is the only "
+                 "v2 call that needs no second radio"),
     Command(0x203F, "LE Set Periodic Advertising Data", COMPLETE,
             bytes([PROBE_ADV_HANDLE, 0x03, 3]) + bytes([2, 0xFF, 0x59]),
             needs=NEEDS_ADV_SET,
@@ -327,12 +367,6 @@ _LE_PERIODIC = [
     Command(0x2040, "LE Set Periodic Advertising Enable", COMPLETE,
             bytes([0x01, PROBE_ADV_HANDLE]), needs=NEEDS_ADV_SET,
             undo=(0x2040, bytes([0x00, PROBE_ADV_HANDLE]))),
-    Command(0x2086, "LE Set Periodic Advertising Parameters v2", COMPLETE,
-            struct.pack("<BHHHBBBB", PROBE_ADV_HANDLE, 0x0060, 0x00A0,
-                        0x0000, 0, 0, 0, 0),
-            needs=NEEDS_ADV_SET,
-            note="zero subevents, which is periodic advertising without "
-                 "responses and the only v2 call that needs no second radio"),
     Command(0x2045, "LE Periodic Advertising Create Sync Cancel", COMPLETE,
             b"", needs=NEEDS_CONSENT,
             note="fails with 0x0C when no sync is pending, so on request"),
@@ -368,6 +402,7 @@ _LE_PERIODIC = [
             struct.pack("<H", UNUSED_HANDLE), needs=NEEDS_SYNC),
     Command(0x2082, "LE Set Periodic Advertising Subevent Data", COMPLETE,
             bytes([PROBE_ADV_HANDLE, 1, 0, 0, 0, 0]), needs=NEEDS_ADV_SET,
+            expect=(STATUS_UNKNOWN_ADV_ID, STATUS_COMMAND_DISALLOWED),
             note="one subevent, no response slots, no data. The parameter "
                  "block is a walk of variable size entries rather than an "
                  "array, which is what makes it worth sending"),
@@ -505,10 +540,11 @@ _VENDOR = [
                  "it is worth knowing the command answers at all"),
     Command(0xFC0B, "VS Zephyr Read Chip Temperature", COMPLETE, b""),
     Command(0xFC0E, "VS Zephyr Write Tx Power", COMPLETE,
-            struct.pack("<BHb", 0, 0, 0),
-            note="role 0 is advertising, handle unused, 0 dBm"),
+            struct.pack("<BHb", 0, PROBE_ADV_HANDLE, 0), needs=NEEDS_ADV_SET,
+            note="handle type 0 is advertising, and for extended advertising "
+                 "the handle names the set, so the set has to exist. 0 dBm"),
     Command(0xFC0F, "VS Zephyr Read Tx Power", COMPLETE,
-            struct.pack("<BH", 0, 0)),
+            struct.pack("<BH", 0, PROBE_ADV_HANDLE), needs=NEEDS_ADV_SET),
     Command(0xFD01, "VS LLPM Mode Set", COMPLETE, b"\x00",
             note="off. Low latency packet mode is a Nordic extension that "
                  "only talks to another Nordic controller"),
@@ -524,9 +560,13 @@ _VENDOR = [
             needs=NEEDS_ADV_SET,
             note="zero extra randomness, the state after reset"),
     Command(0xFD0E, "VS QoS Channel Survey Enable", COMPLETE,
-            struct.pack("<BI", 0, 0), undo=(0xFD0E, struct.pack("<BI", 0, 0)),
-            note="disabled, with the interval that reset leaves. Enabling it "
-                 "puts the radio on the air between links"),
+            struct.pack("<BI", 1, 100000),
+            undo=(0xFD0E, struct.pack("<BI", 0, 0)),
+            note="on, with a 100 ms average measurement interval, which the "
+                 "header says must be between 3000 and 4000000 us. Undo "
+                 "turns it off. Disabling something never enabled is "
+                 "Command Disallowed, so the order is the wrong way round "
+                 "from what it looks like"),
     Command(0xFD11, "VS Read Average RSSI", COMPLETE,
             lambda ctx: _conn(ctx), needs=NEEDS_CONN),
     Command(0xFD14, "VS Get Next Connection Event Counter", COMPLETE,
@@ -538,13 +578,28 @@ _VENDOR = [
                  "SDC call behind it"),
 ]
 
-# The order matters. Everything that creates state comes before what uses it,
-# and the sets are torn down at the end by the undo entries.
+# The order matters. Everything that creates state comes before what uses it.
 COMMANDS = (_CB + _LC + _INFO + _LE_BASIC + _LE_PRIVACY + _LE_EXT
             + _LE_PERIODIC + _LE_CONN + _DTM + _VENDOR)
 
+# Run after everything above, and after the undo entries have been replayed.
+#
+# An advertising set cannot be removed while it is advertising, and the undo
+# entries are what stop it. So this cannot be an ordinary row: in the middle
+# of the list it takes the set away from everything below it, and at the end
+# of the list it runs before the undo pass and is refused. It gets its own
+# pass, after both.
+TEARDOWN = [
+    Command(0x203C, "LE Remove Advertising Set", COMPLETE,
+            bytes([PROBE_ADV_HANDLE]), needs=NEEDS_ADV_SET,
+            expect=(STATUS_UNKNOWN_ADV_ID,),
+            note="the set is already gone if Set Extended Advertising "
+                 "Parameters never worked, and saying so is better than "
+                 "hiding it"),
+]
+
 BY_OPCODE = {}
-for _cmd in COMMANDS:
+for _cmd in COMMANDS + TEARDOWN:
     if _cmd.opcode in BY_OPCODE:
         raise AssertionError("opcode 0x%04X listed twice" % _cmd.opcode)
     BY_OPCODE[_cmd.opcode] = _cmd

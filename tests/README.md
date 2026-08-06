@@ -181,6 +181,16 @@ Three answers matter and they are not the same:
 | refused | a status other than success. Often correct: a controller answers Command Disallowed to something out of order and Unsupported Feature to something the library does not do on this part |
 | Unknown HCI Command | the dispatch table does not carry the opcode, which contradicts what the host test said. This is the one that is always a defect |
 
+Where a refusal is the right answer to a well formed parameter block, the row
+says which statuses it expects and the run counts those as a pass. A refusal
+the table did not predict means one of the two is wrong, and the table is the
+better first suspect. The first run of `probe` against a dongle produced
+eighteen, and every one was a mistake in the table: two parameter blocks a
+field short of what the vendor header declares, a feature bit off by six, an
+own address type the board did not have, and rows that named an advertising
+set before it was created or after it was removed. The firmware answered
+correctly to all eighteen.
+
 Commands that need a link are skipped unless a handle is given, and commands
 that change the identity of the board, leave the radio transmitting or end the
 connection are skipped unless asked for:
