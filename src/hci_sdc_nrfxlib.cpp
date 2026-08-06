@@ -20,6 +20,7 @@
 #include "sdc_hci_cmd_link_control.h"
 #include "sdc_hci_cmd_info_params.h"
 #include "sdc_hci_cmd_le.h"
+#include "sdc_hci_cmd_status_params.h"
 #include "sdc_hci_vs.h"
 
 /*
@@ -83,6 +84,17 @@
  */
 #ifndef HCI_SDC_HAS_VS_READ_COUNTERS
 #define HCI_SDC_HAS_VS_READ_COUNTERS 1
+#endif
+
+/*
+ * Vendor specific unmodulated carrier, opcode 0xFD23. No standard HCI command
+ * produces a continuous wave, and it is what a regulatory pre-scan and an
+ * antenna measurement both want. Present in the nRF52 libraries, so it
+ * defaults on, but it is vendor specific and a different library may not carry
+ * it, which is what the macro is for.
+ */
+#ifndef HCI_SDC_HAS_VS_CARRIER_TEST
+#define HCI_SDC_HAS_VS_CARRIER_TEST 1
 #endif
 
 static HciCmdResult_t HciSdcComplete(uint8_t Status, size_t ReturnLen)
@@ -268,9 +280,18 @@ static HciCmdResult_t HciSdcCmdReadSupportedCommands(void *,
     supported.params.hci_le_read_transmit_power = 1U;
 #endif
 
+    supported.params.hci_read_rssi = 1U;
+
     supported.params.hci_le_receiver_test_v1 = 1U;
     supported.params.hci_le_transmitter_test_v1 = 1U;
+    supported.params.hci_le_receiver_test_v2 = 1U;
+    supported.params.hci_le_transmitter_test_v2 = 1U;
+    supported.params.hci_le_receiver_test_v3 = 1U;
+    supported.params.hci_le_transmitter_test_v3 = 1U;
+    supported.params.hci_le_transmitter_test_v4 = 1U;
     supported.params.hci_le_test_end = 1U;
+
+    supported.params.hci_le_set_host_feature = 1U;
 
     supported.params.hci_le_set_data_length = 1U;
     supported.params.hci_le_read_suggested_default_data_length = 1U;
@@ -880,13 +901,105 @@ HCI_SDC_CMD_NR(HciSdcCmdLeReadTransmitPower,
                sdc_hci_cmd_le_read_transmit_power_return_t)
 #endif
 
-/* Direct test mode. */
+/*
+ * Direct test mode.
+ *
+ * v1 is 1M and nothing else, so a board that advertises 2M and coded PHY can
+ * only be RF tested on its slowest one. v2 adds the PHY, v3 adds the constant
+ * tone extension, v4 adds transmit power.
+ *
+ * v3 and v4 carry an antenna switching pattern for direction finding, which
+ * needs the DFE that nRF52840 does not have. They are still worth carrying:
+ * the commands are the ones a modern test host sends, a switching pattern
+ * length of zero is a normal request on any part, and a part that cannot do
+ * the rest answers with a status rather than Unknown HCI Command, which tells
+ * the host something it can act on.
+ */
 HCI_SDC_CMD_P(HciSdcCmdLeReceiverTest, sdc_hci_cmd_le_receiver_test_v1,
               sdc_hci_cmd_le_receiver_test_v1_t, HciSdcComplete)
 HCI_SDC_CMD_P(HciSdcCmdLeTransmitterTest, sdc_hci_cmd_le_transmitter_test_v1,
               sdc_hci_cmd_le_transmitter_test_v1_t, HciSdcComplete)
+HCI_SDC_CMD_P(HciSdcCmdLeReceiverTestV2, sdc_hci_cmd_le_receiver_test_v2,
+              sdc_hci_cmd_le_receiver_test_v2_t, HciSdcComplete)
+HCI_SDC_CMD_P(HciSdcCmdLeTransmitterTestV2, sdc_hci_cmd_le_transmitter_test_v2,
+              sdc_hci_cmd_le_transmitter_test_v2_t, HciSdcComplete)
+
+/*
+ * Switching_Pattern_Length counts antenna identifiers and each one is a byte,
+ * so the byte count form of the check applies unchanged, the same as the
+ * advertising data commands.
+ */
+HCI_SDC_CMD_VB(HciSdcCmdLeReceiverTestV3, sdc_hci_cmd_le_receiver_test_v3,
+               sdc_hci_cmd_le_receiver_test_v3_t, antenna_ids,
+               switching_pattern_length, HciSdcComplete)
+HCI_SDC_CMD_VB(HciSdcCmdLeTransmitterTestV3, sdc_hci_cmd_le_transmitter_test_v3,
+               sdc_hci_cmd_le_transmitter_test_v3_t, antenna_ids,
+               switching_pattern_length, HciSdcComplete)
+
+/*
+ * v4 is the one shape none of the macros fit. Vol 4 Part E 7.8.128 puts
+ * TX_Power_Level after the antenna identifiers, so the trailing array is not
+ * the end of the packet and the length is the fixed head plus the switching
+ * pattern plus one, not plus the switching pattern. The SDC type names that
+ * whole tail antenna_ids_and_remaining_parameters rather than pretending it is
+ * an array of identifiers, which is the same admission in the header.
+ *
+ * Checking it here rather than trusting the count matters for the usual
+ * reason: the receive buffer is reused and not cleared, so a short packet with
+ * a large count makes SDC read the previous one.
+ */
+static HciCmdResult_t HciSdcCmdLeTransmitterTestV4(void *,
+                                                   const uint8_t *pParams,
+                                                   size_t ParamLen,
+                                                   uint8_t *,
+                                                   size_t)
+{
+    const size_t head =
+        offsetof(sdc_hci_cmd_le_transmitter_test_v4_t,
+                 antenna_ids_and_remaining_parameters);
+
+    if (ParamLen < head)
+    {
+        return HciSdcComplete(HCI_STATUS_INVALID_HCI_PARAMETERS, 0U);
+    }
+
+    const sdc_hci_cmd_le_transmitter_test_v4_t *pCmd =
+        reinterpret_cast<const sdc_hci_cmd_le_transmitter_test_v4_t *>(pParams);
+
+    /* The antenna identifiers, then one byte of transmit power. */
+    if (ParamLen - head != (size_t)pCmd->switching_pattern_length + 1U)
+    {
+        return HciSdcComplete(HCI_STATUS_INVALID_HCI_PARAMETERS, 0U);
+    }
+
+    return HciSdcComplete(sdc_hci_cmd_le_transmitter_test_v4(pCmd), 0U);
+}
+
 HCI_SDC_CMD_NR(HciSdcCmdLeTestEnd, sdc_hci_cmd_le_test_end,
                sdc_hci_cmd_le_test_end_return_t)
+
+#if HCI_SDC_HAS_VS_CARRIER_TEST
+HCI_SDC_CMD_P(HciSdcCmdVsTransmitterCarrierTest,
+              sdc_hci_cmd_vs_transmitter_carrier_test,
+              sdc_hci_cmd_vs_transmitter_carrier_test_t, HciSdcComplete)
+#endif
+
+/*
+ * Status parameters. Vol 4 Part E 7.5.4, the RSSI of the last packet received
+ * on a connection. One command, and the thing every link quality script
+ * reaches for first.
+ */
+HCI_SDC_CMD_PR(HciSdcCmdReadRssi, sdc_hci_cmd_sp_read_rssi,
+               sdc_hci_cmd_sp_read_rssi_t, sdc_hci_cmd_sp_read_rssi_return_t)
+
+/*
+ * Vol 4 Part E 7.8.115. How a host declares which optional features it
+ * supports, and the gate the controller checks before it will negotiate
+ * subrating or a CIS. Zephyr sends it during initialisation, so without it a
+ * host log carries an unexplained Unknown HCI Command.
+ */
+HCI_SDC_CMD_P(HciSdcCmdLeSetHostFeature, sdc_hci_cmd_le_set_host_feature,
+              sdc_hci_cmd_le_set_host_feature_t, HciSdcComplete)
 
 /* Data length. */
 HCI_SDC_CMD_PR(HciSdcCmdLeSetDataLength, sdc_hci_cmd_le_set_data_length,
@@ -1013,6 +1126,11 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
     HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_IP_READ_BD_ADDR, 0U,
                      HciSdcCmdReadBdAddr,
                      sdc_hci_cmd_ip_read_bd_addr_return_t),
+
+    /* Status parameters. */
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_SP_READ_RSSI,
+                     sizeof(sdc_hci_cmd_sp_read_rssi_t), HciSdcCmdReadRssi,
+                     sdc_hci_cmd_sp_read_rssi_return_t),
 
     /* LE basics. */
     HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_EVENT_MASK, 8U,
@@ -1147,6 +1265,18 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
     HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_TRANSMITTER_TEST_V1,
                     sizeof(sdc_hci_cmd_le_transmitter_test_v1_t),
                     HciSdcCmdLeTransmitterTest),
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_RECEIVER_TEST_V2,
+                    sizeof(sdc_hci_cmd_le_receiver_test_v2_t),
+                    HciSdcCmdLeReceiverTestV2),
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_TRANSMITTER_TEST_V2,
+                    sizeof(sdc_hci_cmd_le_transmitter_test_v2_t),
+                    HciSdcCmdLeTransmitterTestV2),
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_RECEIVER_TEST_V3,
+                    HCI_CMD_VARIABLE_PARAM_LEN, HciSdcCmdLeReceiverTestV3),
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_TRANSMITTER_TEST_V3,
+                    HCI_CMD_VARIABLE_PARAM_LEN, HciSdcCmdLeTransmitterTestV3),
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_TRANSMITTER_TEST_V4,
+                    HCI_CMD_VARIABLE_PARAM_LEN, HciSdcCmdLeTransmitterTestV4),
     HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_TEST_END, 0U, HciSdcCmdLeTestEnd,
                      sdc_hci_cmd_le_test_end_return_t),
 
@@ -1212,6 +1342,22 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
                     HciSdcCmdLeSetExtScanEnable),
     HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_EXT_CREATE_CONN,
                     HCI_CMD_VARIABLE_PARAM_LEN, HciSdcCmdLeExtCreateConn),
+
+    /* Host declared features. */
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_HOST_FEATURE,
+                    sizeof(sdc_hci_cmd_le_set_host_feature_t),
+                    HciSdcCmdLeSetHostFeature),
+
+#if HCI_SDC_HAS_VS_CARRIER_TEST
+    /*
+     * Vendor specific, and grouped with direct test mode rather than with the
+     * vendor rows below because that is what it is for. LE Test End stops it,
+     * the same as any other test mode.
+     */
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_VS_TRANSMITTER_CARRIER_TEST,
+                    sizeof(sdc_hci_cmd_vs_transmitter_carrier_test_t),
+                    HciSdcCmdVsTransmitterCarrierTest),
+#endif
 
     /*
      * Vendor specific. The return type ends in a flexible array, so sizeof()
@@ -1292,6 +1438,10 @@ HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_long_term_key_request_reply_t, 18U);  /* 7.8.25 
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_long_term_key_request_negative_reply_t, 2U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_receiver_test_v1_t, 1U);              /* 7.8.28 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_transmitter_test_v1_t, 3U);           /* 7.8.29 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_receiver_test_v2_t, 3U);              /* 7.8.50 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_transmitter_test_v2_t, 4U);           /* 7.8.51 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_host_feature_t, 2U);             /* 7.8.115 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_sp_read_rssi_t, 2U);                      /* 7.5.4 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_data_length_t, 6U);               /* 7.8.33 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_write_suggested_default_data_length_t, 4U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_phy_t, 2U);                      /* 7.8.47 */
@@ -1308,6 +1458,14 @@ HCI_SDC_SPEC_LEN(sdc_hci_cmd_lc_read_remote_version_information_t, 2U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_cb_read_authenticated_payload_timeout_t, 2U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_cb_write_authenticated_payload_timeout_t, 4U);
 #endif
+#if HCI_SDC_HAS_VS_CARRIER_TEST
+/*
+ * Vendor specific, so the length comes from Nordic rather than from Vol 4
+ * Part E. TX_Channel and TX_Power_Level, one octet each.
+ */
+static_assert(sizeof(sdc_hci_cmd_vs_transmitter_carrier_test_t) == 2U,
+              "VS Transmitter Carrier Test is not 2 octets");
+#endif
 
 /*
  * The fixed part of a variable length command, which is what the length check
@@ -1319,6 +1477,20 @@ static_assert(offsetof(sdc_hci_cmd_le_set_ext_scan_params_t, array_params) == 3U
               "LE Set Extended Scan Parameters fixed part is not 3 octets");
 static_assert(offsetof(sdc_hci_cmd_le_ext_create_conn_t, array_params) == 10U,
               "LE Extended Create Connection fixed part is not 10 octets");
+
+/*
+ * The direct test mode commands that carry an antenna switching pattern. All
+ * three have the same seven octet head, Vol 4 Part E 7.8.50, 7.8.51 and
+ * 7.8.128, and v4 adds one octet of transmit power after the pattern rather
+ * than before it, which is why its length check is the odd one.
+ */
+static_assert(offsetof(sdc_hci_cmd_le_receiver_test_v3_t, antenna_ids) == 7U,
+              "LE Receiver Test v3 fixed part is not 7 octets");
+static_assert(offsetof(sdc_hci_cmd_le_transmitter_test_v3_t, antenna_ids) == 7U,
+              "LE Transmitter Test v3 fixed part is not 7 octets");
+static_assert(offsetof(sdc_hci_cmd_le_transmitter_test_v4_t,
+                       antenna_ids_and_remaining_parameters) == 7U,
+              "LE Transmitter Test v4 fixed part is not 7 octets");
 
 /* Return parameters, status excluded since the event carries it separately. */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_ip_read_local_version_information_return_t, 8U);
@@ -1333,6 +1505,8 @@ HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_encrypt_return_t, 16U);               /* 7.8.22 
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_rand_return_t, 8U);                   /* 7.8.23 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_long_term_key_request_reply_return_t, 2U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_test_end_return_t, 2U);               /* 7.8.30 */
+/* Connection_Handle and RSSI, the handle echoed back. Vol 4 Part E 7.5.4. */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_sp_read_rssi_return_t, 3U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_data_length_return_t, 2U);        /* 7.8.33 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_suggested_default_data_length_return_t, 4U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_max_data_length_return_t, 8U);   /* 7.8.46 */

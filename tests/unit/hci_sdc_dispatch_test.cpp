@@ -19,6 +19,7 @@
 #include "sdc_hci_cmd_info_params.h"
 #include "sdc_hci_cmd_le.h"
 #include "sdc_hci_cmd_link_control.h"
+#include "sdc_hci_cmd_status_params.h"
 #include "sdc_hci_vs.h"
 #include "sdc_stub.h"
 
@@ -44,6 +45,10 @@
 
 #ifndef HCI_SDC_HAS_VS_READ_COUNTERS
 #define HCI_SDC_HAS_VS_READ_COUNTERS 1
+#endif
+
+#ifndef HCI_SDC_HAS_VS_CARRIER_TEST
+#define HCI_SDC_HAS_VS_CARRIER_TEST 1
 #endif
 
 #define EVENT_COMMAND_COMPLETE 0x0E
@@ -499,6 +504,74 @@ int main(void)
     ExpectComplete("LE Set Data Related Address Changes", 0x207C, zeros,
                    sizeof(sdc_hci_cmd_le_set_data_related_address_changes_t),
                    0U);
+
+    /*
+     * Direct test mode past v1, plus the two commands a modern host expects to
+     * find and would otherwise log as unknown.
+     */
+    ExpectComplete("Read RSSI", 0x1405, zeros,
+                   sizeof(sdc_hci_cmd_sp_read_rssi_t),
+                   sizeof(sdc_hci_cmd_sp_read_rssi_return_t));
+    ExpectComplete("LE Set Host Feature", 0x2074, zeros,
+                   sizeof(sdc_hci_cmd_le_set_host_feature_t), 0U);
+    ExpectComplete("LE Receiver Test v2", 0x2033, zeros,
+                   sizeof(sdc_hci_cmd_le_receiver_test_v2_t), 0U);
+    ExpectComplete("LE Transmitter Test v2", 0x2034, zeros,
+                   sizeof(sdc_hci_cmd_le_transmitter_test_v2_t), 0U);
+    ExpectComplete("VS Transmitter Carrier Test", 0xFD23, zeros,
+                   sizeof(sdc_hci_cmd_vs_transmitter_carrier_test_t), 0U);
+
+    {
+        /*
+         * v3 carries an antenna switching pattern counted in bytes. Zero of
+         * them is the normal request on a part with no direction finding, and
+         * is the fixed part on its own.
+         */
+        const size_t head3 =
+            offsetof(sdc_hci_cmd_le_receiver_test_v3_t, antenna_ids);
+
+        ExpectComplete("LE Receiver Test v3, no pattern", 0x204F, zeros, head3,
+                       0U);
+        ExpectComplete("LE Transmitter Test v3, no pattern", 0x2050, zeros,
+                       head3, 0U);
+
+        /* Two identifiers declared and two supplied. */
+        const uint8_t pattern[] = {0x00U, 0x01U, 0x00U, 0x00U, 0x00U,
+                                   0x00U, 0x02U, 0x01U, 0x02U};
+        ExpectComplete("LE Receiver Test v3, two antennas", 0x204F, pattern,
+                       sizeof(pattern), 0U);
+
+        /* Two declared, one supplied. */
+        const uint8_t shortPattern[] = {0x00U, 0x01U, 0x00U, 0x00U,
+                                        0x00U, 0x00U, 0x02U, 0x01U};
+        ExpectRejected("LE Receiver Test v3, count lies", 0x204F, shortPattern,
+                       sizeof(shortPattern), 0x12);
+
+        /*
+         * v4 puts one octet of transmit power after the pattern, so the same
+         * body that is exact for v3 is one short for v4. That is the whole
+         * reason it does not share the macro, and refusing it here is what
+         * proves the extra octet is really required.
+         */
+        ExpectRejected("LE Transmitter Test v4, no power octet", 0x207B, zeros,
+                       offsetof(sdc_hci_cmd_le_transmitter_test_v4_t,
+                                antenna_ids_and_remaining_parameters),
+                       0x12);
+        ExpectComplete("LE Transmitter Test v4, no pattern", 0x207B, zeros,
+                       offsetof(sdc_hci_cmd_le_transmitter_test_v4_t,
+                                antenna_ids_and_remaining_parameters) + 1U,
+                       0U);
+
+        /* Two identifiers, then the power octet. */
+        const uint8_t v4[] = {0x00U, 0x01U, 0x00U, 0x00U, 0x00U,
+                              0x00U, 0x02U, 0x01U, 0x02U, 0x00U};
+        ExpectComplete("LE Transmitter Test v4, two antennas", 0x207B, v4,
+                       sizeof(v4), 0U);
+
+        /* And the same body without the power octet is refused. */
+        ExpectRejected("LE Transmitter Test v4, pattern but no power", 0x207B,
+                       v4, sizeof(v4) - 1U, 0x12);
+    }
 
     /*
      * One short of the keys is a host that has mistaken the layout, and the
@@ -957,6 +1030,25 @@ int main(void)
             BITMAP_ENTRY(
                 SDC_HCI_OPCODE_CMD_LE_SET_DATA_RELATED_ADDRESS_CHANGES,
                 hci_le_set_data_related_address_changes),
+
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_SP_READ_RSSI, hci_read_rssi),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_HOST_FEATURE,
+                         hci_le_set_host_feature),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_RECEIVER_TEST_V2,
+                         hci_le_receiver_test_v2),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_TRANSMITTER_TEST_V2,
+                         hci_le_transmitter_test_v2),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_RECEIVER_TEST_V3,
+                         hci_le_receiver_test_v3),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_TRANSMITTER_TEST_V3,
+                         hci_le_transmitter_test_v3),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_TRANSMITTER_TEST_V4,
+                         hci_le_transmitter_test_v4),
+#if HCI_SDC_HAS_VS_CARRIER_TEST
+            /* Vendor specific, so Vol 4 Part E 6.27 assigns it no bit. */
+            {SDC_HCI_OPCODE_CMD_VS_TRANSMITTER_CARRIER_TEST, NULL,
+             "vs_transmitter_carrier_test"},
+#endif
         };
 
 #undef BITMAP_ENTRY

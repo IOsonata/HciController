@@ -7,6 +7,7 @@
 #include "sdc_hci_cmd_link_control.h"
 #include "sdc_hci_cmd_info_params.h"
 #include "sdc_hci_cmd_le.h"
+#include "sdc_hci_cmd_status_params.h"
 #include "sdc_hci_vs.h"
 #include "sdc_stub.h"
 
@@ -342,6 +343,22 @@ uint8_t sdc_hci_cmd_le_receiver_test_v1(const sdc_hci_cmd_le_receiver_test_v1_t 
     return g_SdcStub.NextStatus;
 }
 
+uint8_t sdc_hci_cmd_le_receiver_test_v2(const sdc_hci_cmd_le_receiver_test_v2_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_receiver_test_v2";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_receiver_test_v3(const sdc_hci_cmd_le_receiver_test_v3_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_receiver_test_v3";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
 uint8_t sdc_hci_cmd_le_remove_adv_set(const sdc_hci_cmd_le_remove_adv_set_t * a0)
 {
     g_SdcStub.LastCall = "sdc_hci_cmd_le_remove_adv_set";
@@ -488,6 +505,14 @@ uint8_t sdc_hci_cmd_le_set_ext_scan_response_data(const sdc_hci_cmd_le_set_ext_s
     return g_SdcStub.NextStatus;
 }
 
+uint8_t sdc_hci_cmd_le_set_host_feature(const sdc_hci_cmd_le_set_host_feature_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_set_host_feature";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
 uint8_t sdc_hci_cmd_le_set_phy(const sdc_hci_cmd_le_set_phy_t * a0)
 {
     g_SdcStub.LastCall = "sdc_hci_cmd_le_set_phy";
@@ -560,6 +585,30 @@ uint8_t sdc_hci_cmd_le_transmitter_test_v1(const sdc_hci_cmd_le_transmitter_test
     return g_SdcStub.NextStatus;
 }
 
+uint8_t sdc_hci_cmd_le_transmitter_test_v2(const sdc_hci_cmd_le_transmitter_test_v2_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_transmitter_test_v2";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_transmitter_test_v3(const sdc_hci_cmd_le_transmitter_test_v3_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_transmitter_test_v3";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_transmitter_test_v4(const sdc_hci_cmd_le_transmitter_test_v4_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_transmitter_test_v4";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
 uint8_t sdc_hci_cmd_le_write_suggested_default_data_length(const sdc_hci_cmd_le_write_suggested_default_data_length_t * a0)
 {
     g_SdcStub.LastCall = "sdc_hci_cmd_le_write_suggested_default_data_length";
@@ -588,6 +637,23 @@ int32_t sdc_hci_iso_data_put(uint8_t const *p_data_in)
  * count is what the handler measures the return length with, so a stub that
  * filled it with the usual 0x5A would claim ninety addresses.
  */
+uint8_t sdc_hci_cmd_sp_read_rssi(const sdc_hci_cmd_sp_read_rssi_t * a0, sdc_hci_cmd_sp_read_rssi_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_sp_read_rssi";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_sp_read_rssi_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_vs_transmitter_carrier_test(const sdc_hci_cmd_vs_transmitter_carrier_test_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_vs_transmitter_carrier_test";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
 uint8_t sdc_hci_cmd_vs_zephyr_read_static_addresses(sdc_hci_cmd_vs_zephyr_read_static_addresses_return_t * a0)
 {
     g_SdcStub.LastCall = "sdc_hci_cmd_vs_zephyr_read_static_addresses";
