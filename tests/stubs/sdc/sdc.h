@@ -12,6 +12,10 @@
 /* Real sdc.h numbers these differently; only distinctness matters here. */
 #define SDC_CFG_TYPE_FAL_SIZE        7
 #define SDC_CFG_TYPE_EXTENDED_FEATURE_PAGE_COUNT 8
+#define SDC_CFG_TYPE_PERIODIC_ADV_COUNT          9
+#define SDC_CFG_TYPE_PERIODIC_SYNC_COUNT        10
+#define SDC_CFG_TYPE_PERIODIC_SYNC_BUFFER_CFG   11
+#define SDC_CFG_TYPE_PERIODIC_ADV_LIST_SIZE     12
 typedef struct { uint8_t count; } sdc_cfg_role_count_t;
 typedef struct { uint8_t rx_packet_size; uint8_t tx_packet_size;
                  uint8_t rx_packet_count; uint8_t tx_packet_count; } sdc_cfg_buffer_cfg_t;
@@ -27,6 +31,10 @@ typedef union {
     /* A bare integer in the real header, not a role count. */
     uint16_t fal_size;
     uint8_t extended_feature_page_count;
+    sdc_cfg_role_count_t periodic_adv_count;
+    sdc_cfg_role_count_t periodic_sync_count;
+    sdc_cfg_scan_buffer_cfg_t periodic_sync_buffer_cfg;
+    uint8_t periodic_adv_list_size;
 } sdc_cfg_t;
 typedef void (*sdc_fault_handler_t)(const char *, uint32_t);
 typedef void (*sdc_callback_t)(void);
@@ -61,6 +69,12 @@ void sdc_support_connection_subrating_peripheral(void);
 void sdc_support_extended_feature_set_central(void);
 void sdc_support_extended_feature_set_peripheral(void);
 void sdc_support_parallel_scanning_and_initiating(void);
+void sdc_support_le_periodic_adv(void);
+void sdc_support_le_periodic_sync(void);
+void sdc_support_periodic_adv_sync_transfer_sender_central(void);
+void sdc_support_periodic_adv_sync_transfer_sender_peripheral(void);
+void sdc_support_periodic_adv_sync_transfer_receiver_central(void);
+void sdc_support_periodic_adv_sync_transfer_receiver_peripheral(void);
 #ifdef __cplusplus
 }
 #endif
@@ -178,6 +192,14 @@ void sdc_support_parallel_scanning_and_initiating(void);
  *  and initiating at the same time.
  */
 #define SDC_MEM_INITIATOR (384)
+
+#define __MEM_PER_PERIODIC_ADV_SET_LOW(max_adv_data) ((3104+(max_adv_data)*18)/10)
+#define __MEM_PER_PERIODIC_ADV_SET_HIGH(max_adv_data) (498+(max_adv_data))
+#define SDC_MEM_PER_PERIODIC_ADV_SET(max_adv_data) ((max_adv_data<255)?\
+    (__MEM_PER_PERIODIC_ADV_SET_LOW(max_adv_data)):\
+    (__MEM_PER_PERIODIC_ADV_SET_HIGH(max_adv_data)))
+#define SDC_MEM_PER_PERIODIC_SYNC(buffer_count) (256 + (buffer_count) * 278)
+#define SDC_MEM_PERIODIC_ADV_LIST(list_size) ((list_size) * 8)
 
 /** Memory required for the Filter Accept List */
 #define SDC_MEM_FAL(max_num_entries) ((max_num_entries) > 0 ? (4 + (max_num_entries) * 8) : 0)

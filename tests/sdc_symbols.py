@@ -79,6 +79,24 @@ GATES = [
     ("HCI_SDC_HAS_VS_LLPM",
      ["sdc_hci_cmd_vs_llpm_mode_set",
       "sdc_hci_cmd_vs_conn_update"]),
+    ("HCI_SDC_HAS_LE_PERIODIC_ADV",
+     ["sdc_hci_cmd_le_set_periodic_adv_params",
+      "sdc_hci_cmd_le_set_periodic_adv_data",
+      "sdc_hci_cmd_le_set_periodic_adv_enable"]),
+    ("HCI_SDC_HAS_LE_PERIODIC_SYNC",
+     ["sdc_hci_cmd_le_periodic_adv_create_sync",
+      "sdc_hci_cmd_le_periodic_adv_create_sync_cancel",
+      "sdc_hci_cmd_le_periodic_adv_terminate_sync",
+      "sdc_hci_cmd_le_add_device_to_periodic_adv_list",
+      "sdc_hci_cmd_le_remove_device_from_periodic_adv_list",
+      "sdc_hci_cmd_le_clear_periodic_adv_list",
+      "sdc_hci_cmd_le_read_periodic_adv_list_size"]),
+    ("HCI_SDC_HAS_LE_PERIODIC_SYNC_TRANSFER",
+     ["sdc_hci_cmd_le_set_periodic_adv_receive_enable",
+      "sdc_hci_cmd_le_periodic_adv_sync_transfer",
+      "sdc_hci_cmd_le_periodic_adv_set_info_transfer",
+      "sdc_hci_cmd_le_set_periodic_adv_sync_transfer_params",
+      "sdc_hci_cmd_le_set_default_periodic_adv_sync_transfer_params"]),
 ]
 
 # Not a dispatch table gate. HCI_NRF52840_QOS_CHANNEL_SURVEY in
@@ -103,6 +121,13 @@ SUPPORT = [
       "sdc_support_extended_feature_set_peripheral"]),
     ("HCI_NRF52840_PARALLEL_SCAN_INIT",
      ["sdc_support_parallel_scanning_and_initiating"]),
+    ("HCI_NRF52840_PERIODIC_ADV", ["sdc_support_le_periodic_adv"]),
+    ("HCI_NRF52840_PERIODIC_SYNC", ["sdc_support_le_periodic_sync"]),
+    ("HCI_NRF52840_PERIODIC_SYNC_TRANSFER",
+     ["sdc_support_periodic_adv_sync_transfer_sender_central",
+      "sdc_support_periodic_adv_sync_transfer_sender_peripheral",
+      "sdc_support_periodic_adv_sync_transfer_receiver_central",
+      "sdc_support_periodic_adv_sync_transfer_receiver_peripheral"]),
 ]
 
 DEFAULT_LIB = ("../external/sdk-nrfxlib/softdevice_controller/lib/nrf52/"

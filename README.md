@@ -326,7 +326,11 @@ count grows the array that holds it rather than needing a second edit.
 | Connection subrating | on | 492 for eight links |
 | Extended feature pages | 10 | 2083 for eight links |
 | Scan and initiate together | on | 384 |
-| | | **30808 total** |
+| Periodic advertising sets | 1 | 753 each |
+| Periodic syncs | 2 | 1368 each, four buffers |
+| Periodic advertiser list | 8 | 64 for eight |
+| Periodic sync transfer | on | 1125 for eight links |
+| | | **35486 total** |
 
 The pool is that total plus a 512 octet margin, because sdk-nrfxlib says the
 memory macros may move between minor releases and the number that decides

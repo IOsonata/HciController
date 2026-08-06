@@ -201,6 +201,12 @@ extern "C" void sdc_support_connection_subrating_peripheral(void) {}
 extern "C" void sdc_support_extended_feature_set_central(void) {}
 extern "C" void sdc_support_extended_feature_set_peripheral(void) {}
 extern "C" void sdc_support_parallel_scanning_and_initiating(void) {}
+extern "C" void sdc_support_le_periodic_adv(void) {}
+extern "C" void sdc_support_le_periodic_sync(void) {}
+extern "C" void sdc_support_periodic_adv_sync_transfer_sender_central(void) {}
+extern "C" void sdc_support_periodic_adv_sync_transfer_sender_peripheral(void) {}
+extern "C" void sdc_support_periodic_adv_sync_transfer_receiver_central(void) {}
+extern "C" void sdc_support_periodic_adv_sync_transfer_receiver_peripheral(void) {}
 
 extern "C" void HciTaktOsWake(HciTaktOs_t *, uint32_t) {}
 

@@ -647,6 +647,27 @@ static bool HciNrf52840SdcInit(HciNrf52840_t *pTarget)
     sdc_support_parallel_scanning_and_initiating();
 #endif
 
+#if HCI_NRF52840_PERIODIC_ADV
+    sdc_support_le_periodic_adv();
+#endif
+
+#if HCI_NRF52840_PERIODIC_SYNC
+    sdc_support_le_periodic_sync();
+#endif
+
+#if HCI_NRF52840_PERIODIC_SYNC_TRANSFER
+    /*
+     * Four calls rather than two. Sending and receiving a sync are separate
+     * capabilities and each is per role, so a build that only ever hands a
+     * sync out still needs both sender calls, and this image supports both
+     * roles.
+     */
+    sdc_support_periodic_adv_sync_transfer_sender_central();
+    sdc_support_periodic_adv_sync_transfer_sender_peripheral();
+    sdc_support_periodic_adv_sync_transfer_receiver_central();
+    sdc_support_periodic_adv_sync_transfer_receiver_peripheral();
+#endif
+
     sdc_cfg_t cfg = {};
     cfg.buffer_cfg.rx_packet_size = HCI_NRF52840_ACL_PACKET_SIZE;
     cfg.buffer_cfg.tx_packet_size = HCI_NRF52840_ACL_PACKET_SIZE;
@@ -693,6 +714,50 @@ static bool HciNrf52840SdcInit(HciNrf52840_t *pTarget)
     cfg.extended_feature_page_count = HCI_NRF52840_EXTENDED_FEATURE_PAGES;
     if (!HciNrf52840CfgSet(pTarget, SDC_CFG_TYPE_EXTENDED_FEATURE_PAGE_COUNT,
                            &cfg))
+    {
+        return false;
+    }
+#endif
+
+#if HCI_NRF52840_PERIODIC_ADV
+    /*
+     * Periodic advertisers. Each takes one of the advertising sets configured
+     * above, which is why hci_nrf52840.h refuses a count larger than that one
+     * at build time rather than letting sdc_cfg_set refuse it here.
+     */
+    cfg = {};
+    cfg.periodic_adv_count.count = HCI_NRF52840_PERIODIC_ADV_COUNT;
+    if (!HciNrf52840CfgSet(pTarget, SDC_CFG_TYPE_PERIODIC_ADV_COUNT, &cfg))
+    {
+        return false;
+    }
+#endif
+
+#if HCI_NRF52840_PERIODIC_SYNC
+    cfg = {};
+    cfg.periodic_sync_count.count = HCI_NRF52840_PERIODIC_SYNC_COUNT;
+    if (!HciNrf52840CfgSet(pTarget, SDC_CFG_TYPE_PERIODIC_SYNC_COUNT, &cfg))
+    {
+        return false;
+    }
+
+    cfg = {};
+    cfg.periodic_sync_buffer_cfg.count =
+        HCI_NRF52840_PERIODIC_SYNC_BUFFER_COUNT;
+    if (!HciNrf52840CfgSet(pTarget, SDC_CFG_TYPE_PERIODIC_SYNC_BUFFER_CFG,
+                           &cfg))
+    {
+        return false;
+    }
+
+    /*
+     * The periodic advertiser list. The controller default is zero, so left
+     * unset a host that reads the size is told the list does not work, and
+     * every train has to be named by address instead.
+     */
+    cfg = {};
+    cfg.periodic_adv_list_size = HCI_NRF52840_PERIODIC_ADV_LIST_SIZE;
+    if (!HciNrf52840CfgSet(pTarget, SDC_CFG_TYPE_PERIODIC_ADV_LIST_SIZE, &cfg))
     {
         return false;
     }

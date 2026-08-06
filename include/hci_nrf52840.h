@@ -47,6 +47,8 @@ extern "C" {
  *   subrating         492 for eight links
  *   extended features 2083 for eight links at ten pages
  *   parallel scan and initiate  384
+ *   periodic adv set  753 each  periodic sync 1368 each at four buffers
+ *   periodic adv list   8 each  sync transfer 1125 for eight links
  */
 #ifndef HCI_NRF52840_PERIPHERAL_COUNT
 #define HCI_NRF52840_PERIPHERAL_COUNT 4U
@@ -214,6 +216,93 @@ extern "C" {
 #define HCI_NRF52840_SCA_UPDATE 1
 #endif
 
+/*
+ * Periodic advertising: an advertiser that transmits on a fixed schedule and
+ * scanners that lock to it, with no connection between them. This is what
+ * Auracast and broadcast audio rest on, and what a receiver has to sync to
+ * before any of it can be tested.
+ *
+ * Two halves, and either can be built without the other.
+ *
+ * The advertiser needs an advertising set of its own, so
+ * HCI_NRF52840_PERIODIC_ADV_COUNT has to be no larger than
+ * HCI_NRF52840_ADV_SET_COUNT above. sdc_cfg_set says so and this file has a
+ * static assert for it, because the failure is a controller that will not
+ * enable rather than anything the message names.
+ *
+ * The receiver keeps a sync per train it follows and a buffer pool per sync,
+ * which is where most of the cost is. Two syncs at four buffers is 2736, well
+ * over half the total, and the first number to bring down if a build only ever
+ * follows one train.
+ */
+#ifndef HCI_NRF52840_PERIODIC_ADV
+#define HCI_NRF52840_PERIODIC_ADV 1
+#endif
+
+#ifndef HCI_NRF52840_PERIODIC_SYNC
+#define HCI_NRF52840_PERIODIC_SYNC 1
+#endif
+
+#ifndef HCI_NRF52840_PERIODIC_ADV_COUNT
+#define HCI_NRF52840_PERIODIC_ADV_COUNT 1U
+#endif
+
+#ifndef HCI_NRF52840_PERIODIC_SYNC_COUNT
+#define HCI_NRF52840_PERIODIC_SYNC_COUNT 2U
+#endif
+
+#ifndef HCI_NRF52840_PERIODIC_SYNC_BUFFER_COUNT
+#define HCI_NRF52840_PERIODIC_SYNC_BUFFER_COUNT 4U
+#endif
+
+/*
+ * The periodic advertiser list, which lets a scanner name trains to accept
+ * without carrying every address in the host. The SoftDevice Controller
+ * default is zero, so a host that reads the size gets nothing usable unless
+ * this is set. Eight entries at eight octets each.
+ */
+#ifndef HCI_NRF52840_PERIODIC_ADV_LIST_SIZE
+#define HCI_NRF52840_PERIODIC_ADV_LIST_SIZE 8U
+#endif
+
+/*
+ * Periodic Advertising Sync Transfer. One device that has already locked to a
+ * train hands the sync to a peer over a connection, so the peer joins without
+ * scanning for it. Per link rather than per sync, 13 plus 139 each.
+ *
+ * Separate from the two above because it is the connection oriented half: it
+ * needs a link, and a build with no periodic advertising at all has no use for
+ * it.
+ */
+#ifndef HCI_NRF52840_PERIODIC_SYNC_TRANSFER
+#define HCI_NRF52840_PERIODIC_SYNC_TRANSFER 1
+#endif
+
+#if HCI_NRF52840_PERIODIC_ADV
+#define HCI_NRF52840_SDC_MEM_PERIODIC_ADV                                     \
+    (SDC_MEM_PER_PERIODIC_ADV_SET(HCI_NRF52840_MAX_ADV_DATA) *                \
+     HCI_NRF52840_PERIODIC_ADV_COUNT)
+#else
+#define HCI_NRF52840_SDC_MEM_PERIODIC_ADV 0
+#endif
+
+#if HCI_NRF52840_PERIODIC_SYNC
+#define HCI_NRF52840_SDC_MEM_PERIODIC_SYNC                                    \
+    (SDC_MEM_PER_PERIODIC_SYNC(HCI_NRF52840_PERIODIC_SYNC_BUFFER_COUNT) *     \
+         HCI_NRF52840_PERIODIC_SYNC_COUNT +                                   \
+     SDC_MEM_PERIODIC_ADV_LIST(HCI_NRF52840_PERIODIC_ADV_LIST_SIZE))
+#else
+#define HCI_NRF52840_SDC_MEM_PERIODIC_SYNC 0
+#endif
+
+#if HCI_NRF52840_PERIODIC_SYNC_TRANSFER
+#define HCI_NRF52840_SDC_MEM_SYNC_TRANSFER                                    \
+    SDC_MEM_SYNC_TRANSFER(HCI_NRF52840_PERIPHERAL_COUNT +                     \
+                          HCI_NRF52840_CENTRAL_COUNT)
+#else
+#define HCI_NRF52840_SDC_MEM_SYNC_TRANSFER 0
+#endif
+
 #define HCI_NRF52840_SDC_MEM_REQUIRED                                         \
     (SDC_MEM_PER_PERIPHERAL_LINK(HCI_NRF52840_ACL_PACKET_SIZE,                \
                                  HCI_NRF52840_ACL_PACKET_SIZE,                \
@@ -232,7 +321,21 @@ extern "C" {
      SDC_MEM_FAL(HCI_NRF52840_FAL_SIZE) + HCI_NRF52840_SDC_MEM_QOS +          \
      HCI_NRF52840_SDC_MEM_POWER_CONTROL + HCI_NRF52840_SDC_MEM_SUBRATING +    \
      HCI_NRF52840_SDC_MEM_EXTENDED_FEATURES +                                 \
-     HCI_NRF52840_SDC_MEM_PARALLEL_SCAN_INIT)
+     HCI_NRF52840_SDC_MEM_PARALLEL_SCAN_INIT +                                \
+     HCI_NRF52840_SDC_MEM_PERIODIC_ADV +                                      \
+     HCI_NRF52840_SDC_MEM_PERIODIC_SYNC +                                     \
+     HCI_NRF52840_SDC_MEM_SYNC_TRANSFER)
+
+/*
+ * A periodic advertiser needs an advertising set to carry it, so asking for
+ * more periodic trains than advertising sets makes sdc_cfg_set refuse. The
+ * error it gives names neither macro, so it is caught here instead.
+ */
+#if HCI_NRF52840_PERIODIC_ADV
+#if HCI_NRF52840_PERIODIC_ADV_COUNT > HCI_NRF52840_ADV_SET_COUNT
+#error "HCI_NRF52840_PERIODIC_ADV_COUNT exceeds HCI_NRF52840_ADV_SET_COUNT"
+#endif
+#endif
 
 /*
  * sdc.h says the memory requirement defines "may change between minor

@@ -53,7 +53,7 @@ wrong.
 | `hci_nrf52840_usb_test` | `hci_nrf52840.cpp` | USB bring up order, that MPSL keeps the clock, that every wait is bounded and reports its own error code |
 | `hci_taktos_poll_test` | `hci_taktos.cpp` | the poll interval, so a lost wake cannot stall the USB transport |
 | `hci_tinyusb_init_test` | `hci_tinyusb.cpp` | that bring up goes through `tusb_rhport_init` and records the device role, which is what makes the interrupt handler dispatch |
-| `hci_sdc_dispatch_test` | `hci_sdc_nrfxlib.cpp` | all 107 opcodes reach the intended SDC call with the right response type and parameter length, and the supported commands bitmap agrees with the table in both directions |
+| `hci_sdc_dispatch_test` | `hci_sdc_nrfxlib.cpp` | all 122 opcodes reach the intended SDC call with the right response type and parameter length, and the supported commands bitmap agrees with the table in both directions |
 | `hci_nrf52840_resources_test` | `hci_nrf52840.h` | every term of the SoftDevice Controller memory pool against the real nrfxlib macros, and every `sdc_cfg_t` member the firmware writes against the real union |
 
 The last two need `NRFXLIB_DIR` and are skipped without it. They are the only
@@ -106,8 +106,8 @@ see the headroom on a sealed dongle, and the way to watch it shrink across an
 nrfxlib upgrade before a controller refuses to enable:
 
 ```
-   SDC pool required                 30808
-   SDC pool reserved                 31320
+   SDC pool required                 35486
+   SDC pool reserved                 35998
                                        512  headroom
 ```
 

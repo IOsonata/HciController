@@ -29,6 +29,15 @@
 #define EXPECT_EXTENDED_FEAT   2083
 #define EXPECT_PARALLEL         384
 
-#define EXPECT_REQUIRED       30808
+/*
+ * Periodic advertising, per unit rather than per total, so a failure names
+ * which one moved. The totals follow from the counts in hci_nrf52840.h.
+ */
+#define EXPECT_PERIODIC_ADV_SET   753   /* each, at 255 octets of data */
+#define EXPECT_PERIODIC_SYNC     1368   /* each, at four receive buffers */
+#define EXPECT_PERIODIC_ADV_LIST   64   /* eight entries */
+#define EXPECT_SYNC_TRANSFER     1125   /* eight links */
+
+#define EXPECT_REQUIRED       35486
 
 #endif

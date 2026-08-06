@@ -91,6 +91,18 @@
 #define HCI_SDC_HAS_VS_LLPM 1
 #endif
 
+#ifndef HCI_SDC_HAS_LE_PERIODIC_ADV
+#define HCI_SDC_HAS_LE_PERIODIC_ADV 1
+#endif
+
+#ifndef HCI_SDC_HAS_LE_PERIODIC_SYNC
+#define HCI_SDC_HAS_LE_PERIODIC_SYNC 1
+#endif
+
+#ifndef HCI_SDC_HAS_LE_PERIODIC_SYNC_TRANSFER
+#define HCI_SDC_HAS_LE_PERIODIC_SYNC_TRANSFER 1
+#endif
+
 #define EVENT_COMMAND_COMPLETE 0x0E
 #define EVENT_COMMAND_STATUS   0x0F
 
@@ -629,6 +641,101 @@ int main(void)
     ExpectStatus("LE Read All Remote Features", 0x2088, zeros,
                  sizeof(sdc_hci_cmd_le_read_all_remote_features_t));
 #endif
+
+#if HCI_SDC_HAS_LE_PERIODIC_ADV
+    ExpectComplete("LE Set Periodic Adv Params", 0x203E, zeros,
+                   sizeof(sdc_hci_cmd_le_set_periodic_adv_params_t), 0U);
+    ExpectComplete("LE Set Periodic Adv Enable", 0x2040, zeros,
+                   sizeof(sdc_hci_cmd_le_set_periodic_adv_enable_t), 0U);
+
+    {
+        /*
+         * Byte counted trailing array, the same shape as extended advertising
+         * data, so it gets the same two cases: an empty body is the fixed part
+         * alone, and a count that disagrees with the length is refused rather
+         * than handed to SDC to read past the packet.
+         */
+        const size_t head =
+            offsetof(sdc_hci_cmd_le_set_periodic_adv_data_t, adv_data);
+
+        ExpectComplete("LE Set Periodic Adv Data, empty", 0x203F, zeros, head,
+                       0U);
+
+        const uint8_t honest[] = {0x00U, 0x03U, 0x04U,
+                                  0xAAU, 0xBBU, 0xCCU, 0xDDU};
+        ExpectComplete("LE Set Periodic Adv Data, honest count", 0x203F,
+                       honest, sizeof(honest), 0U);
+
+        const uint8_t lying[] = {0x00U, 0x03U, 0x08U, 0xAAU, 0xBBU};
+        ExpectRejected("LE Set Periodic Adv Data, lying count", 0x203F, lying,
+                       sizeof(lying), 0x12);
+    }
+#endif
+
+#if HCI_SDC_HAS_LE_PERIODIC_SYNC
+    /*
+     * Create Sync answers a status now and a Sync Established event once the
+     * controller has actually found the train, or Sync Lost if it never does.
+     * Vol 4 Part E 7.8.67. A Command Complete would be wrong at any length.
+     */
+    ExpectStatus("LE Periodic Adv Create Sync", 0x2044, zeros,
+                 sizeof(sdc_hci_cmd_le_periodic_adv_create_sync_t));
+    ExpectComplete("LE Periodic Adv Create Sync Cancel", 0x2045, zeros, 0U,
+                   0U);
+    ExpectComplete("LE Periodic Adv Terminate Sync", 0x2046, zeros,
+                   sizeof(sdc_hci_cmd_le_periodic_adv_terminate_sync_t), 0U);
+    ExpectComplete(
+        "LE Add Device To Periodic Adv List", 0x2047, zeros,
+        sizeof(sdc_hci_cmd_le_add_device_to_periodic_adv_list_t), 0U);
+    ExpectComplete(
+        "LE Remove Device From Periodic Adv List", 0x2048, zeros,
+        sizeof(sdc_hci_cmd_le_remove_device_from_periodic_adv_list_t), 0U);
+    ExpectComplete("LE Clear Periodic Adv List", 0x2049, zeros, 0U, 0U);
+    ExpectComplete(
+        "LE Read Periodic Adv List Size", 0x204A, zeros, 0U,
+        sizeof(sdc_hci_cmd_le_read_periodic_adv_list_size_return_t));
+
+    /*
+     * Add and Remove take the same eight octets, and Terminate Sync takes two.
+     * A host that sends a sync handle to the list commands has confused them.
+     */
+    ExpectRejected("LE Add Device To Periodic Adv List, handle sized", 0x2047,
+                   zeros,
+                   sizeof(sdc_hci_cmd_le_periodic_adv_terminate_sync_t), 0x12);
+#endif
+
+#if HCI_SDC_HAS_LE_PERIODIC_SYNC_TRANSFER
+    ExpectComplete(
+        "LE Set Periodic Adv Receive Enable", 0x2059, zeros,
+        sizeof(sdc_hci_cmd_le_set_periodic_adv_receive_enable_t), 0U);
+    ExpectComplete(
+        "LE Periodic Adv Sync Transfer", 0x205A, zeros,
+        sizeof(sdc_hci_cmd_le_periodic_adv_sync_transfer_t),
+        sizeof(sdc_hci_cmd_le_periodic_adv_sync_transfer_return_t));
+    ExpectComplete(
+        "LE Periodic Adv Set Info Transfer", 0x205B, zeros,
+        sizeof(sdc_hci_cmd_le_periodic_adv_set_info_transfer_t),
+        sizeof(sdc_hci_cmd_le_periodic_adv_set_info_transfer_return_t));
+    ExpectComplete(
+        "LE Set Periodic Adv Sync Transfer Params", 0x205C, zeros,
+        sizeof(sdc_hci_cmd_le_set_periodic_adv_sync_transfer_params_t),
+        sizeof(
+            sdc_hci_cmd_le_set_periodic_adv_sync_transfer_params_return_t));
+    ExpectComplete(
+        "LE Set Default Periodic Adv Sync Transfer Params", 0x205D, zeros,
+        sizeof(
+            sdc_hci_cmd_le_set_default_periodic_adv_sync_transfer_params_t),
+        0U);
+
+    /*
+     * The transfer params pair differ only by a leading connection handle, 8
+     * octets against 6, which is the same trap the subrate pair sets.
+     */
+    ExpectRejected(
+        "LE Set Periodic Adv Sync Transfer Params, no handle", 0x205C, zeros,
+        sizeof(sdc_hci_cmd_le_set_default_periodic_adv_sync_transfer_params_t),
+        0x12);
+#endif
 #if HCI_SDC_HAS_VS_READ_COUNTERS
     ExpectCompleteLocal("VS Read Counters", HCI_COUNTERS_OPCODE,
                         zeros, 0U, HCI_COUNTERS_RETURN_LEN);
@@ -645,12 +752,12 @@ int main(void)
         assert(ReadCounter(32U) == 0U);
         assert(ReadCounter(33U) == 0U);
 
-        HciCountersSetSdcMem(&gCounters, 30808U, 31320U);
+        HciCountersSetSdcMem(&gCounters, 35486U, 35998U);
         ExpectCompleteLocal("VS Read Counters, pool reported",
                             HCI_COUNTERS_OPCODE, zeros, 0U,
                             HCI_COUNTERS_RETURN_LEN);
-        assert(ReadCounter(32U) == 30808U);
-        assert(ReadCounter(33U) == 31320U);
+        assert(ReadCounter(32U) == 35486U);
+        assert(ReadCounter(33U) == 35998U);
         printf("[ok] %-38s required %u of %u\n", "pool figures reach the host",
                (unsigned)ReadCounter(32U), (unsigned)ReadCounter(33U));
 
@@ -1328,6 +1435,47 @@ int main(void)
 #if HCI_SDC_HAS_LE_READ_ALL_REMOTE_FEATURES
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_READ_ALL_REMOTE_FEATURES,
                          hci_le_read_all_remote_features),
+#endif
+#if HCI_SDC_HAS_LE_PERIODIC_ADV
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_PARAMS,
+                         hci_le_set_periodic_advertising_parameters),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_DATA,
+                         hci_le_set_periodic_advertising_data),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_ENABLE,
+                         hci_le_set_periodic_advertising_enable),
+#endif
+#if HCI_SDC_HAS_LE_PERIODIC_SYNC
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_PERIODIC_ADV_CREATE_SYNC,
+                         hci_le_periodic_advertising_create_sync),
+            BITMAP_ENTRY(
+                SDC_HCI_OPCODE_CMD_LE_PERIODIC_ADV_CREATE_SYNC_CANCEL,
+                hci_le_periodic_advertising_create_sync_cancel),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_PERIODIC_ADV_TERMINATE_SYNC,
+                         hci_le_periodic_advertising_terminate_sync),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_ADD_DEVICE_TO_PERIODIC_ADV_LIST,
+                         hci_le_add_device_to_periodic_advertiser_list),
+            BITMAP_ENTRY(
+                SDC_HCI_OPCODE_CMD_LE_REMOVE_DEVICE_FROM_PERIODIC_ADV_LIST,
+                hci_le_remove_device_from_periodic_advertiser_list),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_CLEAR_PERIODIC_ADV_LIST,
+                         hci_le_clear_periodic_advertiser_list),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_READ_PERIODIC_ADV_LIST_SIZE,
+                         hci_le_read_periodic_advertiser_list_size),
+#endif
+#if HCI_SDC_HAS_LE_PERIODIC_SYNC_TRANSFER
+            BITMAP_ENTRY(
+                SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_RECEIVE_ENABLE,
+                hci_le_set_periodic_advertising_receive_enable),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_PERIODIC_ADV_SYNC_TRANSFER,
+                         hci_le_periodic_advertising_sync_transfer),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_PERIODIC_ADV_SET_INFO_TRANSFER,
+                         hci_le_periodic_advertising_set_info_transfer),
+            BITMAP_ENTRY(
+                SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_SYNC_TRANSFER_PARAMS,
+                hci_le_set_periodic_advertising_sync_transfer_parameters),
+            BITMAP_ENTRY(
+                SDC_HCI_OPCODE_CMD_LE_SET_DEFAULT_PERIODIC_ADV_SYNC_TRANSFER_PARAMS,
+                hci_le_set_default_periodic_advertising_sync_transfer_parameters),
 #endif
 #if HCI_SDC_HAS_VS_SET_ADV_RANDOMNESS
             /* Nordic vendor, so Vol 4 Part E 6.27 assigns no bit. */

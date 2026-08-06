@@ -230,6 +230,35 @@
 #define HCI_SDC_HAS_VS_LLPM 1
 #endif
 
+/*
+ * Periodic advertising, Vol 4 Part E 7.8.61 to 7.8.73 and 7.8.88 to 7.8.92.
+ *
+ * Three gates rather than one, matching the three the platform side has, since
+ * the three halves are independently useful: transmitting a train, following
+ * one, and handing a sync to a peer over a connection.
+ *
+ * As everywhere else here, these say the symbols are in the library.
+ * HCI_NRF52840_PERIODIC_ADV, _PERIODIC_SYNC and _PERIODIC_SYNC_TRANSFER in
+ * hci_nrf52840.h say the feature is configured in and carry the pool. Clearing
+ * one of those and leaving the matching one here gives commands that dispatch
+ * and are refused by SDC with a status, which is what a host can act on.
+ *
+ * The reports come back as LE meta events, subevents 0x0E to 0x10 and 0x18.
+ * Those arrive from sdc_hci_get like any other event and the bridge forwards
+ * them, so nothing here has to be taught about them.
+ */
+#ifndef HCI_SDC_HAS_LE_PERIODIC_ADV
+#define HCI_SDC_HAS_LE_PERIODIC_ADV 1
+#endif
+
+#ifndef HCI_SDC_HAS_LE_PERIODIC_SYNC
+#define HCI_SDC_HAS_LE_PERIODIC_SYNC 1
+#endif
+
+#ifndef HCI_SDC_HAS_LE_PERIODIC_SYNC_TRANSFER
+#define HCI_SDC_HAS_LE_PERIODIC_SYNC_TRANSFER 1
+#endif
+
 static HciCmdResult_t HciSdcComplete(uint8_t Status, size_t ReturnLen)
 {
     HciCmdResult_t result = {Status, HCI_CMD_RESPONSE_COMPLETE, ReturnLen};
@@ -449,6 +478,30 @@ static HciCmdResult_t HciSdcCmdReadSupportedCommands(void *,
 #endif
 #if HCI_SDC_HAS_LE_READ_ALL_REMOTE_FEATURES
     supported.params.hci_le_read_all_remote_features = 1U;
+#endif
+
+#if HCI_SDC_HAS_LE_PERIODIC_ADV
+    supported.params.hci_le_set_periodic_advertising_parameters = 1U;
+    supported.params.hci_le_set_periodic_advertising_data = 1U;
+    supported.params.hci_le_set_periodic_advertising_enable = 1U;
+#endif
+#if HCI_SDC_HAS_LE_PERIODIC_SYNC
+    supported.params.hci_le_periodic_advertising_create_sync = 1U;
+    supported.params.hci_le_periodic_advertising_create_sync_cancel = 1U;
+    supported.params.hci_le_periodic_advertising_terminate_sync = 1U;
+    supported.params.hci_le_add_device_to_periodic_advertiser_list = 1U;
+    supported.params.hci_le_remove_device_from_periodic_advertiser_list = 1U;
+    supported.params.hci_le_clear_periodic_advertiser_list = 1U;
+    supported.params.hci_le_read_periodic_advertiser_list_size = 1U;
+#endif
+#if HCI_SDC_HAS_LE_PERIODIC_SYNC_TRANSFER
+    supported.params.hci_le_set_periodic_advertising_receive_enable = 1U;
+    supported.params.hci_le_periodic_advertising_sync_transfer = 1U;
+    supported.params.hci_le_periodic_advertising_set_info_transfer = 1U;
+    supported.params.hci_le_set_periodic_advertising_sync_transfer_parameters =
+        1U;
+    supported.params
+        .hci_le_set_default_periodic_advertising_sync_transfer_parameters = 1U;
 #endif
 
     supported.params.hci_le_set_data_length = 1U;
@@ -1103,6 +1156,79 @@ HCI_SDC_CMD_P(HciSdcCmdVsLlpmModeSet, sdc_hci_cmd_vs_llpm_mode_set,
 /* Command Status, then a VS Connection Update Complete event. */
 HCI_SDC_CMD_P(HciSdcCmdVsConnUpdate, sdc_hci_cmd_vs_conn_update,
               sdc_hci_cmd_vs_conn_update_t, HciSdcStatus)
+#endif
+
+/* Periodic advertising, the transmitting half. */
+#if HCI_SDC_HAS_LE_PERIODIC_ADV
+HCI_SDC_CMD_P(HciSdcCmdLeSetPeriodicAdvParams,
+              sdc_hci_cmd_le_set_periodic_adv_params,
+              sdc_hci_cmd_le_set_periodic_adv_params_t, HciSdcComplete)
+/*
+ * The same shape as LE Set Extended Advertising Data, a byte counted trailing
+ * array, so it gets the same check. Vol 4 Part E 7.8.62.
+ */
+HCI_SDC_CMD_VB(HciSdcCmdLeSetPeriodicAdvData,
+               sdc_hci_cmd_le_set_periodic_adv_data,
+               sdc_hci_cmd_le_set_periodic_adv_data_t, adv_data,
+               adv_data_length, HciSdcComplete)
+HCI_SDC_CMD_P(HciSdcCmdLeSetPeriodicAdvEnable,
+              sdc_hci_cmd_le_set_periodic_adv_enable,
+              sdc_hci_cmd_le_set_periodic_adv_enable_t, HciSdcComplete)
+#endif
+
+/* Following a train. */
+#if HCI_SDC_HAS_LE_PERIODIC_SYNC
+/*
+ * Command Status, then LE Periodic Advertising Sync Established once the
+ * controller has actually found the train, or Sync Lost if it never does.
+ * Vol 4 Part E 7.8.67. Nothing useful exists to put in a Command Complete at
+ * the moment the command is accepted, which is why it has no return type.
+ */
+HCI_SDC_CMD_P(HciSdcCmdLePeriodicAdvCreateSync,
+              sdc_hci_cmd_le_periodic_adv_create_sync,
+              sdc_hci_cmd_le_periodic_adv_create_sync_t, HciSdcStatus)
+HCI_SDC_CMD_N(HciSdcCmdLePeriodicAdvCreateSyncCancel,
+              sdc_hci_cmd_le_periodic_adv_create_sync_cancel)
+HCI_SDC_CMD_P(HciSdcCmdLePeriodicAdvTerminateSync,
+              sdc_hci_cmd_le_periodic_adv_terminate_sync,
+              sdc_hci_cmd_le_periodic_adv_terminate_sync_t, HciSdcComplete)
+HCI_SDC_CMD_P(HciSdcCmdLeAddDeviceToPeriodicAdvList,
+              sdc_hci_cmd_le_add_device_to_periodic_adv_list,
+              sdc_hci_cmd_le_add_device_to_periodic_adv_list_t,
+              HciSdcComplete)
+HCI_SDC_CMD_P(HciSdcCmdLeRemoveDeviceFromPeriodicAdvList,
+              sdc_hci_cmd_le_remove_device_from_periodic_adv_list,
+              sdc_hci_cmd_le_remove_device_from_periodic_adv_list_t,
+              HciSdcComplete)
+HCI_SDC_CMD_N(HciSdcCmdLeClearPeriodicAdvList,
+              sdc_hci_cmd_le_clear_periodic_adv_list)
+HCI_SDC_CMD_NR(HciSdcCmdLeReadPeriodicAdvListSize,
+               sdc_hci_cmd_le_read_periodic_adv_list_size,
+               sdc_hci_cmd_le_read_periodic_adv_list_size_return_t)
+#endif
+
+/* Handing a sync to a peer over a connection. */
+#if HCI_SDC_HAS_LE_PERIODIC_SYNC_TRANSFER
+HCI_SDC_CMD_P(HciSdcCmdLeSetPeriodicAdvReceiveEnable,
+              sdc_hci_cmd_le_set_periodic_adv_receive_enable,
+              sdc_hci_cmd_le_set_periodic_adv_receive_enable_t,
+              HciSdcComplete)
+HCI_SDC_CMD_PR(HciSdcCmdLePeriodicAdvSyncTransfer,
+               sdc_hci_cmd_le_periodic_adv_sync_transfer,
+               sdc_hci_cmd_le_periodic_adv_sync_transfer_t,
+               sdc_hci_cmd_le_periodic_adv_sync_transfer_return_t)
+HCI_SDC_CMD_PR(HciSdcCmdLePeriodicAdvSetInfoTransfer,
+               sdc_hci_cmd_le_periodic_adv_set_info_transfer,
+               sdc_hci_cmd_le_periodic_adv_set_info_transfer_t,
+               sdc_hci_cmd_le_periodic_adv_set_info_transfer_return_t)
+HCI_SDC_CMD_PR(HciSdcCmdLeSetPeriodicAdvSyncTransferParams,
+               sdc_hci_cmd_le_set_periodic_adv_sync_transfer_params,
+               sdc_hci_cmd_le_set_periodic_adv_sync_transfer_params_t,
+               sdc_hci_cmd_le_set_periodic_adv_sync_transfer_params_return_t)
+HCI_SDC_CMD_P(HciSdcCmdLeSetDefaultPeriodicAdvSyncTransferParams,
+              sdc_hci_cmd_le_set_default_periodic_adv_sync_transfer_params,
+              sdc_hci_cmd_le_set_default_periodic_adv_sync_transfer_params_t,
+              HciSdcComplete)
 #endif
 
 /* Controller and baseband. */
@@ -1777,6 +1903,68 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
                     HciSdcCmdVsConnUpdate),
 #endif
 
+#if HCI_SDC_HAS_LE_PERIODIC_ADV
+    /* Periodic advertising, transmitting. */
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_PARAMS,
+                    sizeof(sdc_hci_cmd_le_set_periodic_adv_params_t),
+                    HciSdcCmdLeSetPeriodicAdvParams),
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_DATA,
+                    HCI_CMD_VARIABLE_PARAM_LEN,
+                    HciSdcCmdLeSetPeriodicAdvData),
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_ENABLE,
+                    sizeof(sdc_hci_cmd_le_set_periodic_adv_enable_t),
+                    HciSdcCmdLeSetPeriodicAdvEnable),
+#endif
+#if HCI_SDC_HAS_LE_PERIODIC_SYNC
+    /* Following a train. Create Sync finishes in a Sync Established event. */
+    HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_PERIODIC_ADV_CREATE_SYNC,
+                    sizeof(sdc_hci_cmd_le_periodic_adv_create_sync_t),
+                    HciSdcCmdLePeriodicAdvCreateSync),
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_PERIODIC_ADV_CREATE_SYNC_CANCEL, 0U,
+                    HciSdcCmdLePeriodicAdvCreateSyncCancel),
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_PERIODIC_ADV_TERMINATE_SYNC,
+                    sizeof(sdc_hci_cmd_le_periodic_adv_terminate_sync_t),
+                    HciSdcCmdLePeriodicAdvTerminateSync),
+    HCI_SDC_ENTRY_C(
+        SDC_HCI_OPCODE_CMD_LE_ADD_DEVICE_TO_PERIODIC_ADV_LIST,
+        sizeof(sdc_hci_cmd_le_add_device_to_periodic_adv_list_t),
+        HciSdcCmdLeAddDeviceToPeriodicAdvList),
+    HCI_SDC_ENTRY_C(
+        SDC_HCI_OPCODE_CMD_LE_REMOVE_DEVICE_FROM_PERIODIC_ADV_LIST,
+        sizeof(sdc_hci_cmd_le_remove_device_from_periodic_adv_list_t),
+        HciSdcCmdLeRemoveDeviceFromPeriodicAdvList),
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_CLEAR_PERIODIC_ADV_LIST, 0U,
+                    HciSdcCmdLeClearPeriodicAdvList),
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_READ_PERIODIC_ADV_LIST_SIZE, 0U,
+                     HciSdcCmdLeReadPeriodicAdvListSize,
+                     sdc_hci_cmd_le_read_periodic_adv_list_size_return_t),
+#endif
+#if HCI_SDC_HAS_LE_PERIODIC_SYNC_TRANSFER
+    /* Handing a sync to a peer over a connection. */
+    HCI_SDC_ENTRY_C(
+        SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_RECEIVE_ENABLE,
+        sizeof(sdc_hci_cmd_le_set_periodic_adv_receive_enable_t),
+        HciSdcCmdLeSetPeriodicAdvReceiveEnable),
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_PERIODIC_ADV_SYNC_TRANSFER,
+                     sizeof(sdc_hci_cmd_le_periodic_adv_sync_transfer_t),
+                     HciSdcCmdLePeriodicAdvSyncTransfer,
+                     sdc_hci_cmd_le_periodic_adv_sync_transfer_return_t),
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_PERIODIC_ADV_SET_INFO_TRANSFER,
+                     sizeof(sdc_hci_cmd_le_periodic_adv_set_info_transfer_t),
+                     HciSdcCmdLePeriodicAdvSetInfoTransfer,
+                     sdc_hci_cmd_le_periodic_adv_set_info_transfer_return_t),
+    HCI_SDC_ENTRY_CR(
+        SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_SYNC_TRANSFER_PARAMS,
+        sizeof(sdc_hci_cmd_le_set_periodic_adv_sync_transfer_params_t),
+        HciSdcCmdLeSetPeriodicAdvSyncTransferParams,
+        sdc_hci_cmd_le_set_periodic_adv_sync_transfer_params_return_t),
+    HCI_SDC_ENTRY_C(
+        SDC_HCI_OPCODE_CMD_LE_SET_DEFAULT_PERIODIC_ADV_SYNC_TRANSFER_PARAMS,
+        sizeof(
+            sdc_hci_cmd_le_set_default_periodic_adv_sync_transfer_params_t),
+        HciSdcCmdLeSetDefaultPeriodicAdvSyncTransferParams),
+#endif
+
 #if HCI_SDC_HAS_VS_CARRIER_TEST
     /*
      * Vendor specific, and grouped with direct test mode rather than with the
@@ -1954,6 +2142,34 @@ HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_subrate_request_t, 12U);            /* 7.8.124 *
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_all_remote_features_t,
                  3U);                                               /* 7.8.150 */
 #endif
+#if HCI_SDC_HAS_LE_PERIODIC_ADV
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_periodic_adv_params_t, 7U);       /* 7.8.61 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_periodic_adv_enable_t, 2U);       /* 7.8.63 */
+/* Variable, so the fixed head alone is pinned. 7.8.62. */
+static_assert(offsetof(sdc_hci_cmd_le_set_periodic_adv_data_t, adv_data) == 3U,
+              "LE Set Periodic Advertising Data fixed part is not 3 octets");
+#endif
+#if HCI_SDC_HAS_LE_PERIODIC_SYNC
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_periodic_adv_create_sync_t, 14U);     /* 7.8.67 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_periodic_adv_terminate_sync_t, 2U);   /* 7.8.69 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_add_device_to_periodic_adv_list_t,
+                 8U);                                                 /* 7.8.70 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_remove_device_from_periodic_adv_list_t,
+                 8U);                                                 /* 7.8.71 */
+#endif
+#if HCI_SDC_HAS_LE_PERIODIC_SYNC_TRANSFER
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_periodic_adv_receive_enable_t,
+                 3U);                                                 /* 7.8.88 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_periodic_adv_sync_transfer_t,
+                 6U);                                                 /* 7.8.89 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_periodic_adv_set_info_transfer_t,
+                 5U);                                                 /* 7.8.90 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_periodic_adv_sync_transfer_params_t,
+                 8U);                                                 /* 7.8.91 */
+HCI_SDC_SPEC_LEN(
+    sdc_hci_cmd_le_set_default_periodic_adv_sync_transfer_params_t,
+    6U);                                                              /* 7.8.92 */
+#endif
 #if HCI_SDC_HAS_VS_SET_ADV_RANDOMNESS
 /* Vendor, so Nordic gives the length. Handle and a microsecond spread. */
 static_assert(sizeof(sdc_hci_cmd_vs_set_adv_randomness_t) == 3U,
@@ -2048,6 +2264,16 @@ HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_enhanced_read_transmit_power_level_return_t,
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_path_loss_reporting_params_return_t, 2U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_path_loss_reporting_enable_return_t, 2U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_transmit_power_reporting_enable_return_t,
+                 2U);
+#endif
+#if HCI_SDC_HAS_LE_PERIODIC_SYNC
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_periodic_adv_list_size_return_t, 1U);
+#endif
+#if HCI_SDC_HAS_LE_PERIODIC_SYNC_TRANSFER
+/* Three more whose return is the connection handle alone. */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_periodic_adv_sync_transfer_return_t, 2U);
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_periodic_adv_set_info_transfer_return_t, 2U);
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_periodic_adv_sync_transfer_params_return_t,
                  2U);
 #endif
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_data_length_return_t, 2U);        /* 7.8.33 */

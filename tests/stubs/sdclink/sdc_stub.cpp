@@ -127,6 +127,14 @@ uint8_t sdc_hci_cmd_le_add_device_to_filter_accept_list(const sdc_hci_cmd_le_add
     return g_SdcStub.NextStatus;
 }
 
+uint8_t sdc_hci_cmd_le_add_device_to_periodic_adv_list(const sdc_hci_cmd_le_add_device_to_periodic_adv_list_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_add_device_to_periodic_adv_list";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
 uint8_t sdc_hci_cmd_le_add_device_to_resolving_list(const sdc_hci_cmd_le_add_device_to_resolving_list_t * a0)
 {
     g_SdcStub.LastCall = "sdc_hci_cmd_le_add_device_to_resolving_list";
@@ -145,6 +153,13 @@ uint8_t sdc_hci_cmd_le_clear_adv_sets(void)
 uint8_t sdc_hci_cmd_le_clear_filter_accept_list(void)
 {
     g_SdcStub.LastCall = "sdc_hci_cmd_le_clear_filter_accept_list";
+    g_SdcStub.Calls++;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_clear_periodic_adv_list(void)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_clear_periodic_adv_list";
     g_SdcStub.Calls++;
     return g_SdcStub.NextStatus;
 }
@@ -231,6 +246,47 @@ uint8_t sdc_hci_cmd_le_long_term_key_request_reply(const sdc_hci_cmd_le_long_ter
     return g_SdcStub.NextStatus;
 }
 
+uint8_t sdc_hci_cmd_le_periodic_adv_create_sync(const sdc_hci_cmd_le_periodic_adv_create_sync_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_periodic_adv_create_sync";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_periodic_adv_create_sync_cancel(void)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_periodic_adv_create_sync_cancel";
+    g_SdcStub.Calls++;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_periodic_adv_set_info_transfer(const sdc_hci_cmd_le_periodic_adv_set_info_transfer_t * a0, sdc_hci_cmd_le_periodic_adv_set_info_transfer_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_periodic_adv_set_info_transfer";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_le_periodic_adv_set_info_transfer_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_periodic_adv_sync_transfer(const sdc_hci_cmd_le_periodic_adv_sync_transfer_t * a0, sdc_hci_cmd_le_periodic_adv_sync_transfer_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_periodic_adv_sync_transfer";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_le_periodic_adv_sync_transfer_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_periodic_adv_terminate_sync(const sdc_hci_cmd_le_periodic_adv_terminate_sync_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_periodic_adv_terminate_sync";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
 uint8_t sdc_hci_cmd_le_rand(sdc_hci_cmd_le_rand_return_t * a0)
 {
     g_SdcStub.LastCall = "sdc_hci_cmd_le_rand";
@@ -309,6 +365,14 @@ uint8_t sdc_hci_cmd_le_read_number_of_supported_adv_sets(sdc_hci_cmd_le_read_num
     g_SdcStub.LastCall = "sdc_hci_cmd_le_read_number_of_supported_adv_sets";
     g_SdcStub.Calls++;
     if (a0 != NULL) { memset(a0, 0x5A, sizeof(sdc_hci_cmd_le_read_number_of_supported_adv_sets_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_read_periodic_adv_list_size(sdc_hci_cmd_le_read_periodic_adv_list_size_return_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_read_periodic_adv_list_size";
+    g_SdcStub.Calls++;
+    if (a0 != NULL) { memset(a0, 0x5A, sizeof(sdc_hci_cmd_le_read_periodic_adv_list_size_return_t)); }
     return g_SdcStub.NextStatus;
 }
 
@@ -417,6 +481,14 @@ uint8_t sdc_hci_cmd_le_remove_device_from_filter_accept_list(const sdc_hci_cmd_l
     return g_SdcStub.NextStatus;
 }
 
+uint8_t sdc_hci_cmd_le_remove_device_from_periodic_adv_list(const sdc_hci_cmd_le_remove_device_from_periodic_adv_list_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_remove_device_from_periodic_adv_list";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
 uint8_t sdc_hci_cmd_le_remove_device_from_resolving_list(const sdc_hci_cmd_le_remove_device_from_resolving_list_t * a0)
 {
     g_SdcStub.LastCall = "sdc_hci_cmd_le_remove_device_from_resolving_list";
@@ -485,6 +557,14 @@ uint8_t sdc_hci_cmd_le_set_data_length(const sdc_hci_cmd_le_set_data_length_t * 
 uint8_t sdc_hci_cmd_le_set_data_related_address_changes(const sdc_hci_cmd_le_set_data_related_address_changes_t * a0)
 {
     g_SdcStub.LastCall = "sdc_hci_cmd_le_set_data_related_address_changes";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_set_default_periodic_adv_sync_transfer_params(const sdc_hci_cmd_le_set_default_periodic_adv_sync_transfer_params_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_set_default_periodic_adv_sync_transfer_params";
     g_SdcStub.Calls++;
     (void)a0;
     return g_SdcStub.NextStatus;
@@ -594,6 +674,47 @@ uint8_t sdc_hci_cmd_le_set_path_loss_reporting_params(const sdc_hci_cmd_le_set_p
     g_SdcStub.Calls++;
     (void)a0;
     if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_le_set_path_loss_reporting_params_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_set_periodic_adv_data(const sdc_hci_cmd_le_set_periodic_adv_data_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_set_periodic_adv_data";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_set_periodic_adv_enable(const sdc_hci_cmd_le_set_periodic_adv_enable_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_set_periodic_adv_enable";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_set_periodic_adv_params(const sdc_hci_cmd_le_set_periodic_adv_params_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_set_periodic_adv_params";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_set_periodic_adv_receive_enable(const sdc_hci_cmd_le_set_periodic_adv_receive_enable_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_set_periodic_adv_receive_enable";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_set_periodic_adv_sync_transfer_params(const sdc_hci_cmd_le_set_periodic_adv_sync_transfer_params_t * a0, sdc_hci_cmd_le_set_periodic_adv_sync_transfer_params_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_set_periodic_adv_sync_transfer_params";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_le_set_periodic_adv_sync_transfer_params_return_t)); }
     return g_SdcStub.NextStatus;
 }
 

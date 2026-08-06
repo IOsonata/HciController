@@ -107,6 +107,23 @@ int main(void)
 #if HCI_NRF52840_PARALLEL_SCAN_INIT
     Check("scan and initiate together", SDC_MEM_INITIATOR, EXPECT_PARALLEL);
 #endif
+#if HCI_NRF52840_PERIODIC_ADV
+    Check("periodic adv set",
+          SDC_MEM_PER_PERIODIC_ADV_SET(HCI_NRF52840_MAX_ADV_DATA),
+          EXPECT_PERIODIC_ADV_SET);
+#endif
+#if HCI_NRF52840_PERIODIC_SYNC
+    Check("periodic sync",
+          SDC_MEM_PER_PERIODIC_SYNC(HCI_NRF52840_PERIODIC_SYNC_BUFFER_COUNT),
+          EXPECT_PERIODIC_SYNC);
+    Check("periodic adv list",
+          SDC_MEM_PERIODIC_ADV_LIST(HCI_NRF52840_PERIODIC_ADV_LIST_SIZE),
+          EXPECT_PERIODIC_ADV_LIST);
+#endif
+#if HCI_NRF52840_PERIODIC_SYNC_TRANSFER
+    Check("periodic sync transfer", SDC_MEM_SYNC_TRANSFER(links),
+          EXPECT_SYNC_TRANSFER);
+#endif
 
     Check("pool required", HCI_NRF52840_SDC_MEM_REQUIRED, EXPECT_REQUIRED);
     Check("pool allocated", HCI_NRF52840_DEFAULT_SDC_MEM_SIZE,
@@ -147,6 +164,15 @@ int main(void)
 #if HCI_NRF52840_EXTENDED_FEATURE_SET
         cfg.extended_feature_page_count = HCI_NRF52840_EXTENDED_FEATURE_PAGES;
 #endif
+#if HCI_NRF52840_PERIODIC_ADV
+        cfg.periodic_adv_count.count = HCI_NRF52840_PERIODIC_ADV_COUNT;
+#endif
+#if HCI_NRF52840_PERIODIC_SYNC
+        cfg.periodic_sync_count.count = HCI_NRF52840_PERIODIC_SYNC_COUNT;
+        cfg.periodic_sync_buffer_cfg.count =
+            HCI_NRF52840_PERIODIC_SYNC_BUFFER_COUNT;
+        cfg.periodic_adv_list_size = HCI_NRF52840_PERIODIC_ADV_LIST_SIZE;
+#endif
 
         /*
          * The tags, in the same order hci_nrf52840.cpp uses them. Distinct
@@ -159,6 +185,14 @@ int main(void)
             SDC_CFG_TYPE_FAL_SIZE,
 #if HCI_NRF52840_EXTENDED_FEATURE_SET
             SDC_CFG_TYPE_EXTENDED_FEATURE_PAGE_COUNT,
+#endif
+#if HCI_NRF52840_PERIODIC_ADV
+            SDC_CFG_TYPE_PERIODIC_ADV_COUNT,
+#endif
+#if HCI_NRF52840_PERIODIC_SYNC
+            SDC_CFG_TYPE_PERIODIC_SYNC_COUNT,
+            SDC_CFG_TYPE_PERIODIC_SYNC_BUFFER_CFG,
+            SDC_CFG_TYPE_PERIODIC_ADV_LIST_SIZE,
 #endif
         };
         const size_t tagCount = sizeof(tags) / sizeof(tags[0]);
@@ -190,6 +224,15 @@ int main(void)
     assert(HCI_NRF52840_EXTENDED_FEATURE_PAGES > 0U);
     assert(HCI_NRF52840_EXTENDED_FEATURE_PAGES <=
            SDC_DEFAULT_EXTENDED_FEATURE_PAGE_COUNT);
+#endif
+
+    /*
+     * A periodic advertiser needs an advertising set to carry it. The header
+     * refuses this at build time; asserting it here as well means the rule is
+     * stated where the numbers are, for anyone reading only this file.
+     */
+#if HCI_NRF52840_PERIODIC_ADV
+    assert(HCI_NRF52840_PERIODIC_ADV_COUNT <= HCI_NRF52840_ADV_SET_COUNT);
 #endif
 
     printf("\n");
