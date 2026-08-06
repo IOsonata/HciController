@@ -86,9 +86,19 @@
 			<locationURI>PARENT-2-PROJECT_LOC/include/hci_sdc_nrfxlib.h</locationURI>
 		</link>
 		<link>
+			<name>include/hci_sdc_resources.h</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/include/hci_sdc_resources.h</locationURI>
+		</link>
+		<link>
 			<name>include/hci_taktos.h</name>
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/include/hci_taktos.h</locationURI>
+		</link>
+		<link>
+			<name>include/hci_target.h</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/include/hci_target.h</locationURI>
 		</link>
 		<link>
 			<name>include/hci_tinyusb.h</name>
@@ -154,6 +164,11 @@
 			<name>src/hci_sdc_nrfxlib.cpp</name>
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/src/hci_sdc_nrfxlib.cpp</locationURI>
+		</link>
+		<link>
+			<name>src/hci_sdc_resources.cpp</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/src/hci_sdc_resources.cpp</locationURI>
 		</link>
 		<link>
 			<name>src/hci_taktos.cpp</name>

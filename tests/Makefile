@@ -100,7 +100,9 @@ RESOURCES_TARGET := $(BUILD_DIR)/hci_sdc_resources_test
 TARGETS += $(RESOURCES_TARGET)
 endif
 
-.PHONY: all run clean check-root print-config
+.PHONY: all run clean check-root check-project print-config
+
+PYTHON ?= python3
 
 all: $(TARGETS) $(OBJECTS)
 
@@ -140,7 +142,16 @@ $(RESOURCES_TARGET): $(UNIT)/hci_sdc_resources_test.cpp \
 	  $(UNIT)/hci_sdc_resources_test.cpp -o $@
 endif
 
-run: all
+# The Eclipse project names every file individually, so one added to src/ and
+# not added there is not compiled, and the target build fails at link time
+# naming a symbol rather than a file. Nothing a C++ test can see.
+check-project:
+	@command -v $(PYTHON) >/dev/null 2>&1 || { \
+	  echo "[TEST] project_files.py skipped, no $(PYTHON)"; exit 0; }
+	@echo "[TEST] project_files.py"
+	@$(PYTHON) $(THIS_DIR)/project_files.py $(ROOT)
+
+run: all check-project
 	@set -e; for t in $(TARGETS); do \
 	  echo "[TEST] $$(basename $$t)"; $$t; done
 	@echo

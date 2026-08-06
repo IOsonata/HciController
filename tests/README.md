@@ -9,6 +9,7 @@ tests/
   Makefile              builds and runs every C++ test
   unit/                 the C++ tests
   stubs/                fake target headers, see below
+  project_files.py      the Eclipse project against the tree
   hardware/             Python tools that talk to a board
 ```
 
@@ -86,6 +87,24 @@ second build checks every trace call against its format string.
 That second build is why `hci_trace.h` has a non-ARM path. Semihosting is an
 ARM debug call; off target the line goes to stderr, which is not useful on a
 workstation and is not meant to be. It is there so the file compiles.
+
+## The Eclipse project
+
+`make -C tests run` starts by running `project_files.py`, which compares the
+files in `src/` and `include/` with the linked resources in
+`nRF52840/ioc/.project`.
+
+That project names every file individually, so a source added to the tree and
+not added there is simply not compiled. Nothing in a host test can see it: the
+Makefile finds the file by wildcard and builds it happily, while the target
+build links without it and fails on an undefined reference that names a symbol
+rather than a file. `src/hci_sdc_resources.cpp` went out that way once.
+
+It needs Python 3 and is skipped with a message when there is none.
+
+```sh
+python3 tests/project_files.py
+```
 
 That matters most for `hci_sdc_resources_test`. `stubs/sdc/sdc.h` holds
 hand written copies of the `SDC_MEM_*` macros, and the pool is computed from
