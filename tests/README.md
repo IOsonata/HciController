@@ -184,12 +184,31 @@ Three answers matter and they are not the same:
 Where a refusal is the right answer to a well formed parameter block, the row
 says which statuses it expects and the run counts those as a pass. A refusal
 the table did not predict means one of the two is wrong, and the table is the
-better first suspect. The first run of `probe` against a dongle produced
-eighteen, and every one was a mistake in the table: two parameter blocks a
-field short of what the vendor header declares, a feature bit off by six, an
-own address type the board did not have, and rows that named an advertising
-set before it was created or after it was removed. The firmware answered
-correctly to all eighteen.
+better first suspect. Two runs against a dongle produced eighteen refusals
+and then ten, and all twenty eight were mistakes in the table. The firmware
+answered correctly every time.
+
+What they were is worth knowing, because each is a way a host can be wrong
+about a controller that is behaving:
+
+- two parameter blocks a field short of what the vendor header declares
+- a feature bit off by six, asking for Isochronous Channels (Host Support)
+  while the comment claimed Connection Subrating
+- an own address type naming a public address the board does not have, which
+  the parameter commands accept and the enables refuse, so the failure lands
+  one command late
+- rows naming an advertising set before it was created or after it was gone
+- two commands sent in the one order that cannot succeed: crediting packets
+  with flow control off, and disabling a channel survey never enabled
+- **legacy and extended advertising commands in the same session**
+
+The last one accounted for ten by itself. A controller is in legacy
+advertising mode or extended advertising mode, not both, and whichever set of
+commands the host uses first, the other is Command Disallowed until reset.
+Vol 4 Part E 3.1.1. So `probe` runs in three parts: the commands that work in
+either mode, then the legacy ones, then a reset, then the extended ones. A
+run that skips the reset gets Command Disallowed for everything extended,
+which reads exactly like a controller missing half its commands.
 
 Commands that need a link are skipped unless a handle is given, and commands
 that change the identity of the board, leave the radio transmitting or end the

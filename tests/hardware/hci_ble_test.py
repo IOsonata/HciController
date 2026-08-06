@@ -1435,21 +1435,30 @@ def cmd_probe(hci, args):
     Where a refusal is the right answer to a well formed parameter block, the
     table says so and the run counts it as a pass. A refusal that the table
     did not predict means one of the two is wrong, and usually it is the
-    table: the first run of this against a dongle produced eighteen, of which
-    every one was a mistake here.
-    """
-    print("Resetting the controller.")
-    hci.command(OP_RESET)
-    hci.command(OP_SET_EVENT_MASK, bytes.fromhex("ffffffffffffff3f"))
-    hci.command(OP_LE_SET_EVENT_MASK, bytes.fromhex("ffff030000000000"))
+    table: the first two runs of this against a dongle produced eighteen and
+    then ten, and all twenty eight were mistakes here.
 
+    The run is in three parts because a controller is in legacy advertising
+    mode or extended advertising mode and not both. Whichever set of commands
+    is used first, the other is Command Disallowed until reset. So the
+    commands that work in either mode go first, then the legacy ones, then a
+    reset, then the extended ones.
+    """
     # Own_Address_Type has to name an address the board has. Asking for the
     # public address on a controller with none is accepted by the parameter
     # commands and refused by the enables, so the failure lands on the
     # command after the one that is wrong.
     identity, addr_type, source = hci.identity()
-    if addr_type == 0x01:
-        hci.command(OP_LE_SET_RANDOM_ADDRESS, identity)
+
+    def preamble(label):
+        print("%s." % label)
+        hci.command(OP_RESET)
+        hci.command(OP_SET_EVENT_MASK, bytes.fromhex("ffffffffffffff3f"))
+        hci.command(OP_LE_SET_EVENT_MASK, bytes.fromhex("ffff030000000000"))
+        if addr_type == 0x01:
+            hci.command(OP_LE_SET_RANDOM_ADDRESS, identity)
+
+    preamble("Resetting the controller")
     print("Identity %s (%s)" % (addr_str(identity), source))
     print()
 
@@ -1512,22 +1521,40 @@ def cmd_probe(hci, args):
         if command.undo is not None:
             undo.append(command.undo)
 
-    for command in hci_commands.COMMANDS:
-        if command.opcode == 0x0C03:
-            # Reset was sent above. Sending it again here would drop the
-            # event masks and every set the later rows depend on.
-            continue
-        send(command)
+    def unwind():
+        """
+        Put the controller back, most recent first, so an advertising set
+        stops advertising before anything tries to remove it. Failures here
+        are not interesting: most of these are only needed if the command
+        that registered them worked.
+        """
+        for opcode, payload in reversed(undo):
+            try:
+                hci.command(opcode, payload, timeout=1.0, allow_fail=True)
+            except HciError:
+                pass
+        del undo[:]
 
-    # Put the controller back before the teardown, most recent first, so an
-    # advertising set stops advertising before anything tries to remove it.
-    # Failures here are not interesting: most of these are only needed if the
-    # command that registered them worked.
-    for opcode, payload in reversed(undo):
-        try:
-            hci.command(opcode, payload, timeout=1.0, allow_fail=True)
-        except HciError:
-            pass
+    def run_phase(phase):
+        for command in hci_commands.COMMANDS:
+            if command.phase != phase:
+                continue
+            if command.opcode == 0x0C03:
+                # Reset is the preamble's job. Sending it as a row would drop
+                # the event masks and every set the later rows depend on.
+                continue
+            send(command)
+
+    run_phase(hci_commands.PHASE_ANY)
+    run_phase(hci_commands.PHASE_LEGACY)
+    unwind()
+
+    print()
+    preamble("Resetting, so the extended advertising commands are allowed")
+    print()
+
+    run_phase(hci_commands.PHASE_EXTENDED)
+    unwind()
 
     for command in hci_commands.TEARDOWN:
         send(command)

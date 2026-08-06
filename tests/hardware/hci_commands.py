@@ -26,6 +26,7 @@ Fields
     reply       COMPLETE, STATUS or NONE, what the controller must send back
     payload     bytes, or a callable taking the probe context
     needs       what must exist first, see NEEDS_*
+    phase       which advertising mode the command belongs to, see PHASE_*
     undo        an (opcode, payload) pair that puts the controller back, or
                 None when the command changes nothing that lasts
     expect      status codes other than success that are a correct answer to
@@ -63,6 +64,22 @@ UNUSED_HANDLE = 0x0EFF
 # The advertising set the probe configures and tears down.
 PROBE_ADV_HANDLE = 0x00
 
+# A controller is in legacy advertising mode or extended advertising mode,
+# not both, and the specification says so in Vol 4 Part E 3.1.1. Whichever
+# set of commands the host uses first, the other set is Command Disallowed
+# until the controller is reset. Scanning and initiating go the same way.
+#
+# This is not optional and it is not a Nordic quirk. A run that sends
+# LE Set Advertising Enable and then LE Set Extended Advertising Parameters
+# gets Command Disallowed for everything extended that follows, which reads
+# exactly like a controller missing half its commands. It is not: it is a
+# host doing something a host is not allowed to do.
+#
+# So the rows are split, and the probe resets between the two groups.
+PHASE_ANY = ""
+PHASE_LEGACY = "legacy"
+PHASE_EXTENDED = "extended"
+
 
 # Statuses a correct controller returns often enough to be worth naming.
 STATUS_UNKNOWN_CONNECTION = 0x02
@@ -78,10 +95,10 @@ def _conn(ctx, tail=b""):
 
 class Command(object):
     __slots__ = ("opcode", "name", "reply", "payload", "needs", "undo",
-                 "expect", "note")
+                 "expect", "phase", "note")
 
     def __init__(self, opcode, name, reply, payload, needs=NEEDS_NOTHING,
-                 undo=None, expect=(), note=""):
+                 undo=None, expect=(), phase=PHASE_ANY, note=""):
         self.opcode = opcode
         self.name = name
         self.reply = reply
@@ -89,6 +106,7 @@ class Command(object):
         self.needs = needs
         self.undo = undo
         self.expect = expect
+        self.phase = phase
         self.note = note
 
     def build(self, ctx):
@@ -185,15 +203,19 @@ _LE_BASIC = [
                                     0x07, 0x00),
             note="fifteen octets, not sixteen: there is no trailing field "
                  "after the filter policy. Type 3 is non connectable "
-                 "undirected, so enabling it later cannot let anything in"),
+                 "undirected, so enabling it later cannot let anything in",
+            phase=PHASE_LEGACY),
     Command(0x2007, "LE Read Advertising Physical Channel Tx Power", COMPLETE,
             b""),
-    Command(0x2008, "LE Set Advertising Data", COMPLETE, _ADV_DATA),
-    Command(0x2009, "LE Set Scan Response Data", COMPLETE, _SCAN_RSP),
+    Command(0x2008, "LE Set Advertising Data", COMPLETE, _ADV_DATA,
+            phase=PHASE_LEGACY),
+    Command(0x2009, "LE Set Scan Response Data", COMPLETE, _SCAN_RSP,
+            phase=PHASE_LEGACY),
     Command(0x200A, "LE Set Advertising Enable", COMPLETE, b"\x01",
             undo=(0x200A, b"\x00"),
             note="turned back off by undo, so the probe does not walk away "
-                 "with the radio transmitting"),
+                 "with the radio transmitting",
+            phase=PHASE_LEGACY),
     Command(0x200B, "LE Set Scan Parameters", COMPLETE,
             lambda ctx: struct.pack("<BHHBB", 0x00, 0x0060, 0x0030,
                                     ctx.addr_type, 0x00),
@@ -201,13 +223,16 @@ _LE_BASIC = [
                  "The address type has to be one the board has: naming the "
                  "public address on a controller with none is accepted here "
                  "and refused by Set Scan Enable, so the failure lands on "
-                 "the command after the one that is wrong"),
+                 "the command after the one that is wrong",
+            phase=PHASE_LEGACY),
     Command(0x200C, "LE Set Scan Enable", COMPLETE, b"\x01\x00",
-            undo=(0x200C, b"\x00\x00")),
+            undo=(0x200C, b"\x00\x00"),
+            phase=PHASE_LEGACY),
     Command(0x200E, "LE Create Connection Cancel", COMPLETE, b"",
             needs=NEEDS_CONSENT,
             note="fails with 0x0C when nothing is being connected, which is "
-                 "the normal state, so it is only sent on request"),
+                 "the normal state, so it is only sent on request",
+            phase=PHASE_LEGACY),
     Command(0x200F, "LE Read Filter Accept List Size", COMPLETE, b""),
     Command(0x2010, "LE Clear Filter Accept List", COMPLETE, b""),
     Command(0x2011, "LE Add Device To Filter Accept List", COMPLETE,
@@ -238,7 +263,8 @@ _LE_BASIC = [
     Command(0x203A, "LE Read Maximum Advertising Data Length", COMPLETE, b""),
     Command(0x203B, "LE Read Number Of Supported Advertising Sets", COMPLETE,
             b""),
-    Command(0x203D, "LE Clear Advertising Sets", COMPLETE, b""),
+    Command(0x203D, "LE Clear Advertising Sets", COMPLETE, b"",
+            phase=PHASE_EXTENDED),
     Command(0x204A, "LE Read Periodic Advertiser List Size", COMPLETE, b""),
     Command(0x204B, "LE Read Transmit Power", COMPLETE, b""),
     Command(0x204C, "LE Read RF Path Compensation", COMPLETE, b""),
@@ -312,33 +338,36 @@ _LE_EXT = [
             _EXT_ADV_PARAMS,
             note="creates the set every later row uses. It is not undone "
                  "here: TEARDOWN removes it, after the undo pass has stopped "
-                 "it advertising"),
+                 "it advertising",
+            phase=PHASE_EXTENDED),
     Command(0x2035, "LE Set Advertising Set Random Address", COMPLETE,
             bytes([PROBE_ADV_HANDLE]) + bytes.fromhex("0102030405c0"),
             needs=NEEDS_ADV_SET,
             note="after the set exists, not before. A set advertising with a "
                  "random own address type and no address set is refused at "
-                 "enable, not here"),
+                 "enable, not here",
+            phase=PHASE_EXTENDED),
     Command(0x207C, "LE Set Data Related Address Changes", COMPLETE,
             bytes([PROBE_ADV_HANDLE, 0x00]), needs=NEEDS_ADV_SET,
-            note="change nothing, on a set that has to exist first"),
+            note="change nothing, on a set that has to exist first",
+            phase=PHASE_EXTENDED),
     Command(0x2037, "LE Set Extended Advertising Data", COMPLETE,
             bytes([PROBE_ADV_HANDLE, 0x03, 0x01, 3]) + bytes([2, 0x01, 0x06]),
             note="operation 3 is a complete block, fragment preference 1 is "
-                 "do not fragment"),
+                 "do not fragment",
+            phase=PHASE_EXTENDED),
     Command(0x2038, "LE Set Extended Scan Response Data", COMPLETE,
             bytes([PROBE_ADV_HANDLE, 0x03, 0x01, 0]),
-            note="empty, because the set is not scannable"),
-    Command(0x2039, "LE Set Extended Advertising Enable", COMPLETE,
-            bytes([0x01, 0x01, PROBE_ADV_HANDLE]) + struct.pack("<HB", 0, 0),
-            undo=(0x2039, b"\x00\x00"),
-            note="no duration and no event limit, then disabled by undo"),
+            note="empty, because the set is not scannable",
+            phase=PHASE_EXTENDED),
     Command(0x2041, "LE Set Extended Scan Parameters", COMPLETE,
             bytes([0x01, 0x00, 0x01]) + struct.pack("<BHH", 0x00, 0x10, 0x10),
-            note="one PHY, LE 1M, passive"),
+            note="one PHY, LE 1M, passive",
+            phase=PHASE_EXTENDED),
     Command(0x2042, "LE Set Extended Scan Enable", COMPLETE,
             struct.pack("<BBHH", 1, 0, 0, 0),
-            undo=(0x2042, struct.pack("<BBHH", 0, 0, 0, 0))),
+            undo=(0x2042, struct.pack("<BBHH", 0, 0, 0, 0)),
+            phase=PHASE_EXTENDED),
 ]
 
 # ---------------------------------------------------------------------------
@@ -349,7 +378,8 @@ _LE_PERIODIC = [
     Command(0x203E, "LE Set Periodic Advertising Parameters", COMPLETE,
             struct.pack("<BHHH", PROBE_ADV_HANDLE, 0x0060, 0x00A0, 0x0000),
             needs=NEEDS_ADV_SET,
-            note="properties zero, so no transmit power in the header"),
+            note="properties zero, so no transmit power in the header",
+            phase=PHASE_EXTENDED),
     Command(0x2086, "LE Set Periodic Advertising Parameters v2", COMPLETE,
             struct.pack("<BHHHBBBBB", PROBE_ADV_HANDLE, 0x0060, 0x00A0,
                         0x0000, 0, 0, 0, 0, 0),
@@ -358,18 +388,27 @@ _LE_PERIODIC = [
                  "field of its own, so leaving it off is one short and the "
                  "controller rejects the parameters. Zero subevents is "
                  "periodic advertising without responses, which is the only "
-                 "v2 call that needs no second radio"),
+                 "v2 call that needs no second radio",
+            phase=PHASE_EXTENDED),
     Command(0x203F, "LE Set Periodic Advertising Data", COMPLETE,
             bytes([PROBE_ADV_HANDLE, 0x03, 3]) + bytes([2, 0xFF, 0x59]),
             needs=NEEDS_ADV_SET,
             note="one manufacturer specific byte, Nordic's company id low "
-                 "octet, so the block is well formed"),
+                 "octet, so the block is well formed",
+            phase=PHASE_EXTENDED),
+    Command(0x2039, "LE Set Extended Advertising Enable", COMPLETE,
+            bytes([0x01, 0x01, PROBE_ADV_HANDLE]) + struct.pack("<HB", 0, 0),
+            undo=(0x2039, b"\x00\x00"),
+            note="no duration and no event limit, then disabled by undo",
+            phase=PHASE_EXTENDED),
     Command(0x2040, "LE Set Periodic Advertising Enable", COMPLETE,
             bytes([0x01, PROBE_ADV_HANDLE]), needs=NEEDS_ADV_SET,
-            undo=(0x2040, bytes([0x00, PROBE_ADV_HANDLE]))),
+            undo=(0x2040, bytes([0x00, PROBE_ADV_HANDLE])),
+            phase=PHASE_EXTENDED),
     Command(0x2045, "LE Periodic Advertising Create Sync Cancel", COMPLETE,
             b"", needs=NEEDS_CONSENT,
-            note="fails with 0x0C when no sync is pending, so on request"),
+            note="fails with 0x0C when no sync is pending, so on request",
+            phase=PHASE_EXTENDED),
     Command(0x2047, "LE Add Device To Periodic Advertiser List", COMPLETE,
             b"\x00" + bytes.fromhex("0102030405c0") + b"\x00",
             undo=(0x2049, b"")),
@@ -381,13 +420,16 @@ _LE_PERIODIC = [
             struct.pack("<BHHB", 0, 0, 0x000A, 0),
             note="mode 0 is no reporting, which changes nothing about a link"),
     Command(0x2059, "LE Set Periodic Advertising Receive Enable", COMPLETE,
-            struct.pack("<HB", UNUSED_HANDLE, 0), needs=NEEDS_SYNC),
+            struct.pack("<HB", UNUSED_HANDLE, 0), needs=NEEDS_SYNC,
+            phase=PHASE_EXTENDED),
     Command(0x205A, "LE Periodic Advertising Sync Transfer", COMPLETE,
             lambda ctx: _conn(ctx, struct.pack("<HH", 0, UNUSED_HANDLE)),
-            needs=NEEDS_SYNC),
+            needs=NEEDS_SYNC,
+            phase=PHASE_EXTENDED),
     Command(0x205B, "LE Periodic Advertising Set Info Transfer", COMPLETE,
             lambda ctx: _conn(ctx, struct.pack("<HB", 0, PROBE_ADV_HANDLE)),
-            needs=NEEDS_CONN),
+            needs=NEEDS_CONN,
+            phase=PHASE_EXTENDED),
     Command(0x205C, "LE Set Periodic Advertising Sync Transfer Parameters",
             COMPLETE,
             lambda ctx: _conn(ctx, struct.pack("<BHHB", 0, 0, 0x000A, 0)),
@@ -397,20 +439,25 @@ _LE_PERIODIC = [
             + struct.pack("<HHBB", 0, 0x000A, 0, 0),
             needs=NEEDS_CONSENT,
             note="starts a scan for a periodic train that is not there. "
-                 "Cancel it, or it keeps the radio busy"),
+                 "Cancel it, or it keeps the radio busy",
+            phase=PHASE_EXTENDED),
     Command(0x2046, "LE Periodic Advertising Terminate Sync", COMPLETE,
-            struct.pack("<H", UNUSED_HANDLE), needs=NEEDS_SYNC),
+            struct.pack("<H", UNUSED_HANDLE), needs=NEEDS_SYNC,
+            phase=PHASE_EXTENDED),
     Command(0x2082, "LE Set Periodic Advertising Subevent Data", COMPLETE,
             bytes([PROBE_ADV_HANDLE, 1, 0, 0, 0, 0]), needs=NEEDS_ADV_SET,
             expect=(STATUS_UNKNOWN_ADV_ID, STATUS_COMMAND_DISALLOWED),
             note="one subevent, no response slots, no data. The parameter "
                  "block is a walk of variable size entries rather than an "
-                 "array, which is what makes it worth sending"),
+                 "array, which is what makes it worth sending",
+            phase=PHASE_EXTENDED),
     Command(0x2083, "LE Set Periodic Advertising Response Data", COMPLETE,
             struct.pack("<HHBBBB", UNUSED_HANDLE, 0, 0, 0, 0, 0),
-            needs=NEEDS_SYNC),
+            needs=NEEDS_SYNC,
+            phase=PHASE_EXTENDED),
     Command(0x2084, "LE Set Periodic Sync Subevent", COMPLETE,
-            struct.pack("<HHB", UNUSED_HANDLE, 0, 0), needs=NEEDS_SYNC),
+            struct.pack("<HHB", UNUSED_HANDLE, 0, 0), needs=NEEDS_SYNC,
+            phase=PHASE_EXTENDED),
 ]
 
 # ---------------------------------------------------------------------------
@@ -424,7 +471,8 @@ _LE_CONN = [
                         0x0018, 0x0028, 0, 0x02BC, 0, 0),
             needs=NEEDS_CONSENT,
             note="an address nothing answers to, so this starts an initiator "
-                 "that has to be cancelled"),
+                 "that has to be cancelled",
+            phase=PHASE_LEGACY),
     Command(0x2013, "LE Connection Update", STATUS,
             lambda ctx: _conn(ctx, struct.pack("<HHHHHH", 0x0018, 0x0028, 0,
                                                0x02BC, 0, 0)),
@@ -458,7 +506,8 @@ _LE_CONN = [
             needs=NEEDS_CONSENT,
             note="one PHY set in the mask, so exactly one parameter group "
                  "follows. Getting that count wrong is the mistake this "
-                 "command exists to catch"),
+                 "command exists to catch",
+            phase=PHASE_EXTENDED),
     Command(0x2076, "LE Enhanced Read Transmit Power Level", COMPLETE,
             lambda ctx: _conn(ctx, b"\x01"), needs=NEEDS_CONN,
             note="PHY 1 is LE 1M"),
@@ -595,7 +644,8 @@ TEARDOWN = [
             expect=(STATUS_UNKNOWN_ADV_ID,),
             note="the set is already gone if Set Extended Advertising "
                  "Parameters never worked, and saying so is better than "
-                 "hiding it"),
+                 "hiding it",
+            phase=PHASE_EXTENDED),
 ]
 
 BY_OPCODE = {}
