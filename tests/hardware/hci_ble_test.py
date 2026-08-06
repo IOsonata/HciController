@@ -16,9 +16,12 @@ the ACL data path are all exercised without a Bluetooth stack on the machine.
 probe is the broad one. The firmware dispatches 126 opcodes and this used to
 drive 29, so most of what the host tests pinned down had never met a radio.
 It sends every command in hci_commands.py, reports what came back, and puts
-the controller back where it found it. Commands that need a link are skipped
-unless --handle is given, and commands that change the identity of the board
-or leave the radio transmitting are skipped unless --consent is.
+the controller back where it found it. Commands that change the identity of
+the board or leave the radio transmitting need --consent. Commands that need
+a link need a handle, and --wait-connect gets one by advertising and letting
+a phone connect, which needs no second board.
+
+    python3 hci_ble_test.py probe --consent --wait-connect 30
 
 connect --flood N sends N ACL packets while ignoring flow control, which a host
 is not supposed to do. On an nRF52840 the SoftDevice Controller answers 0 to a
@@ -1419,6 +1422,8 @@ def cmd_dtm_rx(hci, args):
 class ProbeContext(object):
     """What a command entry needs resolved before it can be sent."""
 
+    identity = None
+
     def __init__(self, handle=None, addr_type=0x01):
         self.handle = handle if handle is not None else \
             hci_commands.UNUSED_HANDLE
@@ -1444,6 +1449,69 @@ def probe_available(command, args, live_handle):
     if hci_commands.NEEDS_ADV_SET in needs and args.no_adv_set:
         return False, "advertising set not created"
     return True, ""
+
+
+def probe_wait_for_peer(hci, ctx, args):
+    """
+    Advertise until something connects, and answer with the handle.
+
+    The twenty eight commands that need a link are the last group with no
+    hardware behind them, and a dongle cannot connect to itself. What it can
+    do is advertise and let a phone tap connect, which needs no second board
+    and no host stack on the machine.
+
+    Connectable undirected, so a scanner app offers to connect. This is the
+    one place the probe puts the radio on the air on purpose and leaves it
+    there, which is why it is behind a flag.
+    """
+    handle = 0x00
+    name = b"HCI-PROBE"
+    adv = bytes([2, 0x01, 0x06, len(name) + 1, 0x09]) + name
+
+    print()
+    print("Advertising as HCI-PROBE for %d seconds. Connect to it with a"
+          % args.wait_connect)
+    print("phone, nRF Connect or LightBlue, to unlock the commands that need")
+    print("a link.")
+
+    hci.command(0x2036,
+                bytes([handle]) + struct.pack("<H", 0x0013)
+                + b"\xa0\x00\x00" + b"\xf0\x00\x00" + b"\x07"
+                + bytes([ctx.addr_type]) + b"\x00" + bytes(6) + b"\x00"
+                + struct.pack("<b", 0x7F) + b"\x01\x00\x01\x00\x00")
+    if ctx.addr_type == 0x01 and ctx.identity:
+        hci.command(0x2035, bytes([handle]) + ctx.identity)
+    hci.command(0x2037, bytes([handle, 0x03, 0x01, len(adv)]) + adv)
+    hci.command(0x2039,
+                bytes([0x01, 0x01, handle]) + struct.pack("<HB", 0, 0))
+
+    deadline = time.time() + args.wait_connect
+    conn_handle = None
+    while time.time() < deadline:
+        packet = hci.read_packet(0.5)
+        if packet is None:
+            continue
+        kind, code, body = packet
+        if kind != H4_EVENT or code != EVT_LE_META:
+            continue
+        info = parse_connection(body)
+        if info is None:
+            continue
+        status, conn_handle, role, peer, _, _, _ = info
+        if status != 0:
+            print("Connection failed, status 0x%02X" % status)
+            conn_handle = None
+            continue
+        print("Connected to %s, handle 0x%04X"
+              % (addr_str(peer), conn_handle))
+        break
+
+    hci.command(0x2039, bytes([0x00, 0x00]), allow_fail=True)
+
+    if conn_handle is None:
+        print("Nothing connected. The commands that need a link stay "
+              "skipped.")
+    return conn_handle
 
 
 def cmd_probe(hci, args):
@@ -1511,9 +1579,14 @@ def cmd_probe(hci, args):
     print()
 
     ctx = ProbeContext(handle=args.handle, addr_type=addr_type)
+    ctx.identity = identity
     undo = []
     counts = {"ok": 0, "expected": 0, "silent": 0, "refused": 0,
-              "unknown": 0, "skipped": 0}
+              "unknown": 0}
+    # By opcode rather than a tally, because a command skipped for want of a
+    # link is sent later when one arrives, and counting it in both places
+    # would say the run covered more than it did.
+    skipped = set()
 
     def report(command, tag, text):
         print("[%s] 0x%04X %-52s %s"
@@ -1533,10 +1606,11 @@ def cmd_probe(hci, args):
     def send(command):
         available, reason = probe_available(command, args, live_handle)
         if not available:
-            counts["skipped"] += 1
+            skipped.add(command.opcode)
             if args.verbose:
                 report(command, "--", reason)
             return
+        skipped.discard(command.opcode)
 
         # A command that answers nothing on success is the one case where no
         # event is the pass. Give it a short window rather than the usual
@@ -1633,11 +1707,35 @@ def cmd_probe(hci, args):
     for command in hci_commands.TEARDOWN:
         send(command)
 
+    if args.wait_connect and not live_handle:
+        handle = probe_wait_for_peer(hci, ctx, args)
+        if handle is not None:
+            args.handle = handle
+            ctx.handle = handle
+            live_handle = True
+            print()
+            print("Running the commands that need a link, on handle 0x%04X."
+                  % handle)
+            print()
+            # Disconnect ends the link every other row here needs, so it
+            # goes last whatever order the table is in.
+            linked = [c for c in hci_commands.COMMANDS
+                      if hci_commands.NEEDS_CONN in c.needs]
+            linked.sort(key=lambda c: c.opcode == 0x0406)
+            for command in linked:
+                send(command)
+            unwind()
+
+            # Leave nothing connected, whether or not Disconnect was one of
+            # the rows that ran.
+            hci.command(0x0406, struct.pack("<HB", handle, 0x13),
+                        allow_fail=True)
+
     print()
     print("%d accepted, %d refused as the table expects, %d correctly silent."
           % (counts["ok"], counts["expected"], counts["silent"]))
     print("%d refused otherwise, %d skipped."
-          % (counts["refused"], counts["skipped"]))
+          % (counts["refused"], len(skipped)))
 
     if counts["refused"]:
         print()
@@ -1724,6 +1822,11 @@ def main():
                    help="skip the commands that need an advertising set")
     p.add_argument("--verbose", action="store_true",
                    help="say why each skipped command was skipped")
+    p.add_argument("--wait-connect", type=int, default=0, metavar="SECONDS",
+                   help="after the rest of the run, advertise for this long "
+                        "and let a phone connect, then send the commands "
+                        "that need a link. A dongle cannot connect to "
+                        "itself, and this needs no second board")
     p.add_argument("--settle-ms", type=int, default=100, metavar="MS",
                    help="wait this long before undoing a command that puts "
                         "the radio to work, so a direct test mode test is "

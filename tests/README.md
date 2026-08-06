@@ -233,7 +233,24 @@ a peer. Those undo themselves immediately rather than at the end of the
 phase, because a running test is Command Disallowed for the next test, for
 advertising, and for scanning.
 
-Five commands cannot be reached from one board at all. They need a periodic
+### Getting the commands that need a link
+
+Twenty eight commands need a connection, and a dongle cannot connect to
+itself. `--wait-connect` closes that with no second board: after the rest of
+the run it advertises as `HCI-PROBE`, waits for a phone to tap connect, and
+sends the connection scoped rows against the handle it gets. Disconnect runs
+last whatever order the table is in, and the link is closed afterwards
+either way.
+
+```sh
+python3 tests/hardware/hci_ble_test.py probe --consent --wait-connect 30
+```
+
+nRF Connect or LightBlue is enough on the phone side. Nothing has to be
+paired and no service has to be discovered; the connection itself is what the
+commands need.
+
+Five commands are still out of reach from one board. They need a periodic
 advertising sync, which needs a second radio transmitting a periodic train,
 and `probe` says so rather than pretending to cover them.
 
