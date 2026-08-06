@@ -184,8 +184,15 @@
 //=============================================================================
 
 /*
- * Placeholders, as on the dongle above. Check them against the schematic
- * before building this board with -DHCI_HOST_SELECT=HCI_HOST_SELECT_UART.
+ * A default rather than a constraint. This is a breakout: the module's I/O
+ * comes out to headers and nothing on the board claims a UART, so any four
+ * free pins will do and these four are only the ones the firmware arrives
+ * with. Change them to whatever the wiring on the bench is; there is no
+ * schematic to check them against.
+ *
+ * RTS and CTS are named even though UART_HW_FLOWCTRL is left at 0, so turning
+ * flow control on is one line and not a pin hunt. Nothing drives them until
+ * it is turned on.
  */
 #define UART_TX_PORT            0
 #define UART_TX_PIN             25
