@@ -211,6 +211,19 @@ class HciError(Exception):
     pass
 
 
+class HciGone(Exception):
+    """
+    The port went away underneath us.
+
+    On a dongle this is not a serial problem. MPSL and the SoftDevice
+    Controller reset the chip from their assert handlers by design, see
+    HciNrf52840MpslAssert in src/hci_nrf52840.cpp, so a controller fault
+    takes the USB device with it and the CDC port disappears. The board then
+    re-enumerates and the next run starts clean, which is exactly what makes
+    it easy to mistake for a flaky cable.
+    """
+
+
 def addr_str(raw):
     return ":".join("%02X" % b for b in reversed(raw))
 
@@ -257,18 +270,26 @@ class Hci:
         self.ser.close()
 
     def write_packet(self, data):
+        """Raises HciGone when the port has disappeared under us."""
         if self.raw:
             print("   tx", data.hex(" "))
-        self.ser.write(data)
-        self.ser.flush()
+        try:
+            self.ser.write(data)
+            self.ser.flush()
+        except (serial.SerialException, OSError) as err:
+            raise HciGone(str(err))
 
     def read_exact(self, count, deadline):
+        """Raises HciGone when the port has disappeared under us."""
         data = b""
         while len(data) < count:
             if time.time() > deadline:
                 raise HciError("timed out after %d of %d bytes"
                                % (len(data), count))
-            chunk = self.ser.read(count - len(data))
+            try:
+                chunk = self.ser.read(count - len(data))
+            except (serial.SerialException, OSError) as err:
+                raise HciGone(str(err))
             if chunk:
                 data += chunk
         return data
@@ -282,7 +303,12 @@ class Hci:
     def read_wire(self, timeout=1.0):
         """Always reads from the port, never from the deferred queue."""
         deadline = time.time() + timeout
-        chunk = self.ser.read(1)
+        try:
+            chunk = self.ser.read(1)
+        except (serial.SerialException, OSError) as err:
+            # The device node went away. On a dongle that is a controller
+            # reset, not a cable problem.
+            raise HciGone(str(err))
         if not chunk:
             return None
 
@@ -1517,6 +1543,9 @@ def cmd_probe(hci, args):
         try:
             status, data = hci.command(command.opcode, command.build(ctx),
                                        timeout=timeout, allow_fail=True)
+        except HciGone:
+            report(command, "!!", "the port disappeared here")
+            raise
         except HciError as err:
             if command.reply == hci_commands.NONE:
                 counts["silent"] += 1
@@ -1545,9 +1574,19 @@ def cmd_probe(hci, args):
             # State that blocks whatever comes next: a direct test mode test
             # still running, an initiator still scanning. Deferring these to
             # the end of the phase loses every command after them.
+            #
+            # The wait matters. A direct test mode test ended in the same
+            # millisecond it was started has reset this controller, so the
+            # radio is given time to actually be doing something first.
+            if args.settle_ms:
+                time.sleep(args.settle_ms / 1000.0)
             try:
                 hci.command(command.undo[0], command.undo[1], timeout=1.0,
                             allow_fail=True)
+            except HciGone:
+                report(command, "!!",
+                       "the port disappeared while undoing this")
+                raise
             except HciError:
                 pass
         else:
@@ -1682,6 +1721,11 @@ def main():
                    help="skip the commands that need an advertising set")
     p.add_argument("--verbose", action="store_true",
                    help="say why each skipped command was skipped")
+    p.add_argument("--settle-ms", type=int, default=100, metavar="MS",
+                   help="wait this long before undoing a command that puts "
+                        "the radio to work, so a direct test mode test is "
+                        "running before it is ended. 0 ends it at once, "
+                        "which is how the controller reset was found")
     p.set_defaults(func=cmd_probe)
 
     args = parser.parse_args()
@@ -1698,6 +1742,17 @@ def main():
     result = 1
     try:
         result = args.func(hci, args)
+    except HciGone as err:
+        print()
+        print("The port went away: %s" % err)
+        print()
+        print("On a dongle that is not a cable problem. MPSL and the")
+        print("SoftDevice Controller reset the chip from their assert")
+        print("handlers, by design, so a controller fault takes the USB")
+        print("device with it. The board re-enumerates and the next run")
+        print("starts clean, which is what makes this easy to blame on the")
+        print("cable. The command named above is where it happened.")
+        result = 3
     except HciError as err:
         print()
         print("HCI error: %s" % err)

@@ -235,6 +235,28 @@ Five commands cannot be reached from one board at all. They need a periodic
 advertising sync, which needs a second radio transmitting a periodic train,
 and `probe` says so rather than pretending to cover them.
 
+### When the port disappears
+
+`probe` reports this rather than raising, because on a dongle it is a
+finding. MPSL and the SoftDevice Controller reset the chip from their assert
+handlers by design, see `HciNrf52840MpslAssert` in `src/hci_nrf52840.cpp`, so
+a controller fault takes the USB device with it. The board re-enumerates and
+the next run starts clean, which is what makes it easy to blame on the cable.
+The run names the command that was in flight and exits 3.
+
+`--settle-ms` is how that gets narrowed down. Commands that put the radio to
+work undo themselves immediately, and this is the pause before that undo. The
+default is 100 ms. Zero ends a direct test mode test in the same millisecond
+it was started, which is how the first controller reset was found:
+
+```sh
+python3 tests/hardware/hci_ble_test.py probe --consent --settle-ms 0
+python3 tests/hardware/hci_ble_test.py probe --consent --settle-ms 500
+```
+
+A board that survives one and not the other says the fault is in the timing
+of the teardown, not in either command.
+
 `counters` reads the firmware's own tallies over the vendor specific opcode in
 `hci_counters.h`. Nothing else puts those numbers on the wire, so without it a
 running board can only be questioned with a debugger.
