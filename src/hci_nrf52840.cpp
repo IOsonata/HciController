@@ -668,6 +668,19 @@ static bool HciNrf52840SdcInit(HciNrf52840_t *pTarget)
     sdc_support_periodic_adv_sync_transfer_receiver_peripheral();
 #endif
 
+    /*
+     * Periodic advertising with responses, last because sdk-nrfxlib requires
+     * extended advertising, the matching plain periodic half, and a sync
+     * transfer sender or receiver, all of which are above.
+     */
+#if HCI_NRF52840_PERIODIC_ADV_RSP
+    sdc_support_le_periodic_adv_with_rsp();
+#endif
+
+#if HCI_NRF52840_PERIODIC_SYNC_RSP
+    sdc_support_le_periodic_sync_with_rsp();
+#endif
+
     sdc_cfg_t cfg = {};
     cfg.buffer_cfg.rx_packet_size = HCI_NRF52840_ACL_PACKET_SIZE;
     cfg.buffer_cfg.tx_packet_size = HCI_NRF52840_ACL_PACKET_SIZE;
@@ -758,6 +771,55 @@ static bool HciNrf52840SdcInit(HciNrf52840_t *pTarget)
     cfg = {};
     cfg.periodic_adv_list_size = HCI_NRF52840_PERIODIC_ADV_LIST_SIZE;
     if (!HciNrf52840CfgSet(pTarget, SDC_CFG_TYPE_PERIODIC_ADV_LIST_SIZE, &cfg))
+    {
+        return false;
+    }
+#endif
+
+#if HCI_NRF52840_PERIODIC_ADV_RSP
+    cfg = {};
+    cfg.periodic_adv_rsp_count.count = HCI_NRF52840_PERIODIC_ADV_RSP_COUNT;
+    if (!HciNrf52840CfgSet(pTarget, SDC_CFG_TYPE_PERIODIC_ADV_RSP_COUNT, &cfg))
+    {
+        return false;
+    }
+
+    /*
+     * All three buffer numbers together, because the vendor structure carries
+     * them in one member and the pool macro takes all three. Setting one and
+     * leaving the others to their defaults would compute a pool for numbers the
+     * controller was never given.
+     */
+    cfg = {};
+    cfg.periodic_adv_rsp_buffer_cfg.tx_buffer_count =
+        HCI_NRF52840_PERIODIC_ADV_RSP_TX_BUFFERS;
+    cfg.periodic_adv_rsp_buffer_cfg.rx_buffer_count =
+        HCI_NRF52840_PERIODIC_ADV_RSP_RX_BUFFERS;
+    cfg.periodic_adv_rsp_buffer_cfg.max_tx_data_size =
+        HCI_NRF52840_PERIODIC_ADV_RSP_MAX_TX_DATA;
+    if (!HciNrf52840CfgSet(pTarget, SDC_CFG_TYPE_PERIODIC_ADV_RSP_BUFFER_CFG,
+                           &cfg))
+    {
+        return false;
+    }
+
+    cfg = {};
+    cfg.periodic_adv_rsp_failure_reporting_cfg =
+        HCI_NRF52840_PERIODIC_ADV_RSP_FAILURE_REPORTING;
+    if (!HciNrf52840CfgSet(
+            pTarget, SDC_CFG_TYPE_PERIODIC_ADV_RSP_FAILURE_REPORTING_CFG,
+            &cfg))
+    {
+        return false;
+    }
+#endif
+
+#if HCI_NRF52840_PERIODIC_SYNC_RSP
+    cfg = {};
+    cfg.periodic_sync_rsp_tx_buffer_cfg.count =
+        HCI_NRF52840_PERIODIC_SYNC_RSP_TX_BUFFERS;
+    if (!HciNrf52840CfgSet(pTarget,
+                           SDC_CFG_TYPE_PERIODIC_SYNC_RSP_TX_BUFFER_CFG, &cfg))
     {
         return false;
     }

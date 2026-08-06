@@ -103,6 +103,14 @@
 #define HCI_SDC_HAS_LE_PERIODIC_SYNC_TRANSFER 1
 #endif
 
+#ifndef HCI_SDC_HAS_LE_PERIODIC_ADV_RSP
+#define HCI_SDC_HAS_LE_PERIODIC_ADV_RSP 1
+#endif
+
+#ifndef HCI_SDC_HAS_LE_PERIODIC_SYNC_RSP
+#define HCI_SDC_HAS_LE_PERIODIC_SYNC_RSP 1
+#endif
+
 #define EVENT_COMMAND_COMPLETE 0x0E
 #define EVENT_COMMAND_STATUS   0x0F
 
@@ -736,6 +744,103 @@ int main(void)
         sizeof(sdc_hci_cmd_le_set_default_periodic_adv_sync_transfer_params_t),
         0x12);
 #endif
+
+#if HCI_SDC_HAS_LE_PERIODIC_ADV_RSP
+    ExpectComplete(
+        "LE Set Periodic Adv Params v2", 0x2086, zeros,
+        sizeof(sdc_hci_cmd_le_set_periodic_adv_params_v2_t),
+        sizeof(sdc_hci_cmd_le_set_periodic_adv_params_v2_return_t));
+
+    {
+        /*
+         * Subevent Data is the one command here whose trailing array is not an
+         * array. Vol 4 Part E 7.8.125 gives entries of four octets plus a
+         * declared data length each, so the count cannot be multiplied by
+         * anything and the handler walks them instead.
+         *
+         * These cases are what make the walk worth having: a count of zero, a
+         * well formed pair of unequal entries, an entry whose declared length
+         * runs off the end, and a body longer than the entries account for.
+         */
+        const size_t head =
+            offsetof(sdc_hci_cmd_le_set_periodic_adv_subevent_data_t,
+                     array_params);
+
+        ExpectComplete("LE Set Periodic Adv Subevent Data, none", 0x2082,
+                       zeros, head,
+                       sizeof(
+                           sdc_hci_cmd_le_set_periodic_adv_subevent_data_return_t));
+
+        /*
+         * Handle, two entries. First carries three octets, second carries one,
+         * so a fixed stride would get the second one wrong.
+         */
+        const uint8_t two[] = {0x00U, 0x02U,
+                               0x00U, 0x00U, 0x01U, 0x03U, 0xAAU, 0xBBU, 0xCCU,
+                               0x01U, 0x00U, 0x01U, 0x01U, 0xDDU};
+        ExpectComplete(
+            "LE Set Periodic Adv Subevent Data, two unequal", 0x2082, two,
+            sizeof(two),
+            sizeof(sdc_hci_cmd_le_set_periodic_adv_subevent_data_return_t));
+
+        /* One entry declaring eight octets of data with three supplied. */
+        const uint8_t over[] = {0x00U, 0x01U,
+                                0x00U, 0x00U, 0x01U, 0x08U, 0xAAU, 0xBBU,
+                                0xCCU};
+        ExpectRejected("LE Set Periodic Adv Subevent Data, entry overruns",
+                       0x2082, over, sizeof(over), 0x12);
+
+        /* One entry, correctly formed, then a stray octet after it. */
+        const uint8_t trailing[] = {0x00U, 0x01U,
+                                    0x00U, 0x00U, 0x01U, 0x01U, 0xAAU, 0xFFU};
+        ExpectRejected("LE Set Periodic Adv Subevent Data, surplus", 0x2082,
+                       trailing, sizeof(trailing), 0x12);
+
+        /* Two declared, one supplied. */
+        const uint8_t shortCount[] = {0x00U, 0x02U,
+                                      0x00U, 0x00U, 0x01U, 0x01U, 0xAAU};
+        ExpectRejected("LE Set Periodic Adv Subevent Data, count lies", 0x2082,
+                       shortCount, sizeof(shortCount), 0x12);
+    }
+#endif
+
+#if HCI_SDC_HAS_LE_PERIODIC_SYNC_RSP
+    {
+        /*
+         * Both of these are byte counted and answer with a handle, which is a
+         * shape nothing else in this table has. The empty and lying cases are
+         * what prove the count is checked before SDC sees the packet.
+         */
+        const size_t rspHead =
+            offsetof(sdc_hci_cmd_le_set_periodic_adv_response_data_t,
+                     response_data);
+        ExpectComplete(
+            "LE Set Periodic Adv Response Data, empty", 0x2083, zeros,
+            rspHead,
+            sizeof(sdc_hci_cmd_le_set_periodic_adv_response_data_return_t));
+
+        const uint8_t lying[] = {0x40U, 0x00U, 0x01U, 0x00U,
+                                 0x00U, 0x00U, 0x00U, 0x04U, 0xAAU};
+        ExpectRejected("LE Set Periodic Adv Response Data, lying count",
+                       0x2083, lying, sizeof(lying), 0x12);
+
+        const size_t subHead =
+            offsetof(sdc_hci_cmd_le_set_periodic_sync_subevent_t, subevents);
+        ExpectComplete(
+            "LE Set Periodic Sync Subevent, none", 0x2084, zeros, subHead,
+            sizeof(sdc_hci_cmd_le_set_periodic_sync_subevent_return_t));
+
+        const uint8_t three[] = {0x40U, 0x00U, 0x00U, 0x00U, 0x03U,
+                                 0x00U, 0x01U, 0x02U};
+        ExpectComplete(
+            "LE Set Periodic Sync Subevent, three", 0x2084, three,
+            sizeof(three),
+            sizeof(sdc_hci_cmd_le_set_periodic_sync_subevent_return_t));
+
+        ExpectRejected("LE Set Periodic Sync Subevent, count lies", 0x2084,
+                       three, sizeof(three) - 1U, 0x12);
+    }
+#endif
 #if HCI_SDC_HAS_VS_READ_COUNTERS
     ExpectCompleteLocal("VS Read Counters", HCI_COUNTERS_OPCODE,
                         zeros, 0U, HCI_COUNTERS_RETURN_LEN);
@@ -752,12 +857,12 @@ int main(void)
         assert(ReadCounter(32U) == 0U);
         assert(ReadCounter(33U) == 0U);
 
-        HciCountersSetSdcMem(&gCounters, 35486U, 35998U);
+        HciCountersSetSdcMem(&gCounters, 38860U, 39372U);
         ExpectCompleteLocal("VS Read Counters, pool reported",
                             HCI_COUNTERS_OPCODE, zeros, 0U,
                             HCI_COUNTERS_RETURN_LEN);
-        assert(ReadCounter(32U) == 35486U);
-        assert(ReadCounter(33U) == 35998U);
+        assert(ReadCounter(32U) == 38860U);
+        assert(ReadCounter(33U) == 39372U);
         printf("[ok] %-38s required %u of %u\n", "pool figures reach the host",
                (unsigned)ReadCounter(32U), (unsigned)ReadCounter(33U));
 
@@ -1476,6 +1581,18 @@ int main(void)
             BITMAP_ENTRY(
                 SDC_HCI_OPCODE_CMD_LE_SET_DEFAULT_PERIODIC_ADV_SYNC_TRANSFER_PARAMS,
                 hci_le_set_default_periodic_advertising_sync_transfer_parameters),
+#endif
+#if HCI_SDC_HAS_LE_PERIODIC_ADV_RSP
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_PARAMS_V2,
+                         hci_le_set_periodic_advertising_parameters_v2),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_SUBEVENT_DATA,
+                         hci_le_set_periodic_advertising_subevent_data),
+#endif
+#if HCI_SDC_HAS_LE_PERIODIC_SYNC_RSP
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_RESPONSE_DATA,
+                         hci_le_set_periodic_advertising_response_data),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_SYNC_SUBEVENT,
+                         hci_le_set_periodic_sync_subevent),
 #endif
 #if HCI_SDC_HAS_VS_SET_ADV_RANDOMNESS
             /* Nordic vendor, so Vol 4 Part E 6.27 assigns no bit. */

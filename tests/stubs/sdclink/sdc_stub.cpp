@@ -701,11 +701,38 @@ uint8_t sdc_hci_cmd_le_set_periodic_adv_params(const sdc_hci_cmd_le_set_periodic
     return g_SdcStub.NextStatus;
 }
 
+uint8_t sdc_hci_cmd_le_set_periodic_adv_params_v2(const sdc_hci_cmd_le_set_periodic_adv_params_v2_t * a0, sdc_hci_cmd_le_set_periodic_adv_params_v2_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_set_periodic_adv_params_v2";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_le_set_periodic_adv_params_v2_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
 uint8_t sdc_hci_cmd_le_set_periodic_adv_receive_enable(const sdc_hci_cmd_le_set_periodic_adv_receive_enable_t * a0)
 {
     g_SdcStub.LastCall = "sdc_hci_cmd_le_set_periodic_adv_receive_enable";
     g_SdcStub.Calls++;
     (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_set_periodic_adv_response_data(const sdc_hci_cmd_le_set_periodic_adv_response_data_t * a0, sdc_hci_cmd_le_set_periodic_adv_response_data_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_set_periodic_adv_response_data";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_le_set_periodic_adv_response_data_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_set_periodic_adv_subevent_data(const sdc_hci_cmd_le_set_periodic_adv_subevent_data_t * a0, sdc_hci_cmd_le_set_periodic_adv_subevent_data_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_set_periodic_adv_subevent_data";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_le_set_periodic_adv_subevent_data_return_t)); }
     return g_SdcStub.NextStatus;
 }
 
@@ -715,6 +742,15 @@ uint8_t sdc_hci_cmd_le_set_periodic_adv_sync_transfer_params(const sdc_hci_cmd_l
     g_SdcStub.Calls++;
     (void)a0;
     if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_le_set_periodic_adv_sync_transfer_params_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_set_periodic_sync_subevent(const sdc_hci_cmd_le_set_periodic_sync_subevent_t * a0, sdc_hci_cmd_le_set_periodic_sync_subevent_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_set_periodic_sync_subevent";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_le_set_periodic_sync_subevent_return_t)); }
     return g_SdcStub.NextStatus;
 }
 

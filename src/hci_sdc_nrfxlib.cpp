@@ -259,6 +259,25 @@
 #define HCI_SDC_HAS_LE_PERIODIC_SYNC_TRANSFER 1
 #endif
 
+/*
+ * Periodic Advertising with Responses, Vol 4 Part E 7.8.125 to 7.8.128 and
+ * 7.8.61 v2. The advertiser divides the period into subevents and offers
+ * response slots; a device that heard the broadcast answers in one, without
+ * ever forming a connection. Electronic shelf labels are the case that makes
+ * it worth having.
+ *
+ * Split by role like the plain periodic pair. The advertiser sets subevent
+ * data and takes the v2 parameters that describe the subevent structure; the
+ * scanner picks which subevents to follow and puts data in a response slot.
+ */
+#ifndef HCI_SDC_HAS_LE_PERIODIC_ADV_RSP
+#define HCI_SDC_HAS_LE_PERIODIC_ADV_RSP 1
+#endif
+
+#ifndef HCI_SDC_HAS_LE_PERIODIC_SYNC_RSP
+#define HCI_SDC_HAS_LE_PERIODIC_SYNC_RSP 1
+#endif
+
 static HciCmdResult_t HciSdcComplete(uint8_t Status, size_t ReturnLen)
 {
     HciCmdResult_t result = {Status, HCI_CMD_RESPONSE_COMPLETE, ReturnLen};
@@ -502,6 +521,14 @@ static HciCmdResult_t HciSdcCmdReadSupportedCommands(void *,
         1U;
     supported.params
         .hci_le_set_default_periodic_advertising_sync_transfer_parameters = 1U;
+#endif
+#if HCI_SDC_HAS_LE_PERIODIC_ADV_RSP
+    supported.params.hci_le_set_periodic_advertising_parameters_v2 = 1U;
+    supported.params.hci_le_set_periodic_advertising_subevent_data = 1U;
+#endif
+#if HCI_SDC_HAS_LE_PERIODIC_SYNC_RSP
+    supported.params.hci_le_set_periodic_advertising_response_data = 1U;
+    supported.params.hci_le_set_periodic_sync_subevent = 1U;
 #endif
 
     supported.params.hci_le_set_data_length = 1U;
@@ -885,6 +912,44 @@ static HciCmdResult_t HciSdcCmdLeSetScanEnable(void *,
     }
 
 /*
+ * The byte counted form again, for commands that also answer with a return
+ * structure. Periodic advertising with responses is where these appear: every
+ * one of its commands echoes a handle back, and three of the four are variable
+ * length, a combination that does not occur anywhere else in this table.
+ */
+#define HCI_SDC_CMD_VBR(Name, SdcFunc, SdcType, SdcReturn, ArrayField,        \
+                        CountField)                                           \
+    static HciCmdResult_t Name(void *,                                        \
+                               const uint8_t *pParams,                        \
+                               size_t ParamLen,                               \
+                               uint8_t *pReturn,                              \
+                               size_t ReturnCapacity)                         \
+    {                                                                         \
+        SdcReturn result;                                                     \
+        if (!HciSdcReturnFits(sizeof(result), ReturnCapacity))                \
+        {                                                                     \
+            return HciSdcComplete(HCI_STATUS_MEMORY_CAPACITY_EXCEEDED, 0U);   \
+        }                                                                     \
+        if (ParamLen < offsetof(SdcType, ArrayField))                         \
+        {                                                                     \
+            return HciSdcComplete(HCI_STATUS_INVALID_HCI_PARAMETERS, 0U);     \
+        }                                                                     \
+        const SdcType *pCmd = reinterpret_cast<const SdcType *>(pParams);     \
+        if (ParamLen - offsetof(SdcType, ArrayField) !=                        \
+            (size_t)pCmd->CountField)                                         \
+        {                                                                     \
+            return HciSdcComplete(HCI_STATUS_INVALID_HCI_PARAMETERS, 0U);     \
+        }                                                                     \
+        uint8_t status = SdcFunc(pCmd, &result);                              \
+        if (status != HCI_STATUS_SUCCESS)                                     \
+        {                                                                     \
+            return HciSdcComplete(status, 0U);                                \
+        }                                                                     \
+        memcpy(pReturn, &result, sizeof(result));                             \
+        return HciSdcComplete(status, sizeof(result));                        \
+    }
+
+/*
  * The count is the number of bits set in a PHY bitmap. Vol 4 Part E 7.8.64
  * and 7.8.66 give one array element per PHY named in the bitmap. A reserved
  * bit therefore raises the required length and the packet is rejected, which
@@ -1229,6 +1294,107 @@ HCI_SDC_CMD_P(HciSdcCmdLeSetDefaultPeriodicAdvSyncTransferParams,
               sdc_hci_cmd_le_set_default_periodic_adv_sync_transfer_params,
               sdc_hci_cmd_le_set_default_periodic_adv_sync_transfer_params_t,
               HciSdcComplete)
+#endif
+
+#if HCI_SDC_HAS_LE_PERIODIC_ADV_RSP
+HCI_SDC_CMD_PR(HciSdcCmdLeSetPeriodicAdvParamsV2,
+               sdc_hci_cmd_le_set_periodic_adv_params_v2,
+               sdc_hci_cmd_le_set_periodic_adv_params_v2_t,
+               sdc_hci_cmd_le_set_periodic_adv_params_v2_return_t)
+
+/*
+ * The one command in this table whose trailing array is not an array. Vol 4
+ * Part E 7.8.125 gives Num_Subevents entries, each of them four octets
+ * followed by Subevent_Data_Length more, so the entries are different sizes
+ * and the count cannot be multiplied by anything. The SDC type admits this by
+ * declaring the whole tail as uint8_t array_params[].
+ *
+ * So it is walked. Each step needs four octets of header before it can read
+ * the length that says how far the next one starts, and the total has to land
+ * exactly on the end of the packet. Anything else is a host that disagrees
+ * with itself, and handing it to SDC means SDC walks the same entries with
+ * whatever the previous packet left after them.
+ */
+static HciCmdResult_t HciSdcCmdLeSetPeriodicAdvSubeventData(void *,
+                                                            const uint8_t *pParams,
+                                                            size_t ParamLen,
+                                                            uint8_t *pReturn,
+                                                            size_t ReturnCapacity)
+{
+    sdc_hci_cmd_le_set_periodic_adv_subevent_data_return_t result;
+    if (!HciSdcReturnFits(sizeof(result), ReturnCapacity))
+    {
+        return HciSdcComplete(HCI_STATUS_MEMORY_CAPACITY_EXCEEDED, 0U);
+    }
+
+    const size_t head =
+        offsetof(sdc_hci_cmd_le_set_periodic_adv_subevent_data_t, array_params);
+    if (ParamLen < head)
+    {
+        return HciSdcComplete(HCI_STATUS_INVALID_HCI_PARAMETERS, 0U);
+    }
+
+    const sdc_hci_cmd_le_set_periodic_adv_subevent_data_t *pCmd =
+        reinterpret_cast<
+            const sdc_hci_cmd_le_set_periodic_adv_subevent_data_t *>(pParams);
+
+    /*
+     * Subevent, Response_Slot_Start, Response_Slot_Count, Subevent_Data_Length,
+     * then the data. Vol 4 Part E 7.8.125.
+     */
+    const size_t entryHead = 4U;
+    size_t offset = 0U;
+    const size_t available = ParamLen - head;
+
+    for (size_t i = 0U; i < (size_t)pCmd->num_subevents_with_data; i++)
+    {
+        if (available - offset < entryHead)
+        {
+            return HciSdcComplete(HCI_STATUS_INVALID_HCI_PARAMETERS, 0U);
+        }
+
+        const size_t dataLen = pCmd->array_params[offset + 3U];
+        if (available - offset - entryHead < dataLen)
+        {
+            return HciSdcComplete(HCI_STATUS_INVALID_HCI_PARAMETERS, 0U);
+        }
+
+        offset += entryHead + dataLen;
+    }
+
+    if (offset != available)
+    {
+        return HciSdcComplete(HCI_STATUS_INVALID_HCI_PARAMETERS, 0U);
+    }
+
+    uint8_t status = sdc_hci_cmd_le_set_periodic_adv_subevent_data(pCmd,
+                                                                   &result);
+    if (status != HCI_STATUS_SUCCESS)
+    {
+        return HciSdcComplete(status, 0U);
+    }
+
+    memcpy(pReturn, &result, sizeof(result));
+    return HciSdcComplete(status, sizeof(result));
+}
+#endif
+
+#if HCI_SDC_HAS_LE_PERIODIC_SYNC_RSP
+/* Byte counted, and answers with the sync handle. 7.8.126 and 7.8.127. */
+HCI_SDC_CMD_VBR(HciSdcCmdLeSetPeriodicAdvResponseData,
+                sdc_hci_cmd_le_set_periodic_adv_response_data,
+                sdc_hci_cmd_le_set_periodic_adv_response_data_t,
+                sdc_hci_cmd_le_set_periodic_adv_response_data_return_t,
+                response_data, response_data_length)
+/*
+ * The subevents to follow, one octet each, so the count is also the byte
+ * count and the same macro fits.
+ */
+HCI_SDC_CMD_VBR(HciSdcCmdLeSetPeriodicSyncSubevent,
+                sdc_hci_cmd_le_set_periodic_sync_subevent,
+                sdc_hci_cmd_le_set_periodic_sync_subevent_t,
+                sdc_hci_cmd_le_set_periodic_sync_subevent_return_t,
+                subevents, num_subevents_to_sync)
 #endif
 
 /* Controller and baseband. */
@@ -1964,6 +2130,32 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
             sdc_hci_cmd_le_set_default_periodic_adv_sync_transfer_params_t),
         HciSdcCmdLeSetDefaultPeriodicAdvSyncTransferParams),
 #endif
+#if HCI_SDC_HAS_LE_PERIODIC_ADV_RSP
+    /*
+     * Periodic advertising with responses, the advertiser. Subevent Data
+     * declares the return length it produces on success, which is the handle,
+     * and that is also what an error is padded out to.
+     */
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_PARAMS_V2,
+                     sizeof(sdc_hci_cmd_le_set_periodic_adv_params_v2_t),
+                     HciSdcCmdLeSetPeriodicAdvParamsV2,
+                     sdc_hci_cmd_le_set_periodic_adv_params_v2_return_t),
+    {SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_SUBEVENT_DATA,
+     HCI_CMD_VARIABLE_PARAM_LEN,
+     (uint16_t)sizeof(sdc_hci_cmd_le_set_periodic_adv_subevent_data_return_t),
+     HCI_CMD_RESPONSE_COMPLETE, HciSdcCmdLeSetPeriodicAdvSubeventData},
+#endif
+#if HCI_SDC_HAS_LE_PERIODIC_SYNC_RSP
+    /* And the scanner, which answers in a slot and picks what to follow. */
+    {SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_RESPONSE_DATA,
+     HCI_CMD_VARIABLE_PARAM_LEN,
+     (uint16_t)sizeof(sdc_hci_cmd_le_set_periodic_adv_response_data_return_t),
+     HCI_CMD_RESPONSE_COMPLETE, HciSdcCmdLeSetPeriodicAdvResponseData},
+    {SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_SYNC_SUBEVENT,
+     HCI_CMD_VARIABLE_PARAM_LEN,
+     (uint16_t)sizeof(sdc_hci_cmd_le_set_periodic_sync_subevent_return_t),
+     HCI_CMD_RESPONSE_COMPLETE, HciSdcCmdLeSetPeriodicSyncSubevent},
+#endif
 
 #if HCI_SDC_HAS_VS_CARRIER_TEST
     /*
@@ -2169,6 +2361,26 @@ HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_periodic_adv_sync_transfer_params_t,
 HCI_SDC_SPEC_LEN(
     sdc_hci_cmd_le_set_default_periodic_adv_sync_transfer_params_t,
     6U);                                                              /* 7.8.92 */
+#endif
+#if HCI_SDC_HAS_LE_PERIODIC_ADV_RSP
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_periodic_adv_params_v2_t,
+                 12U);                                             /* 7.8.61 v2 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_periodic_adv_params_v2_return_t, 1U);
+/* Handle and count, then entries this layer walks rather than multiplies. */
+static_assert(offsetof(sdc_hci_cmd_le_set_periodic_adv_subevent_data_t,
+                       array_params) == 2U,
+              "LE Set Periodic Adv Subevent Data fixed part is not 2 octets");
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_periodic_adv_subevent_data_return_t, 1U);
+#endif
+#if HCI_SDC_HAS_LE_PERIODIC_SYNC_RSP
+static_assert(offsetof(sdc_hci_cmd_le_set_periodic_adv_response_data_t,
+                       response_data) == 8U,
+              "LE Set Periodic Adv Response Data fixed part is not 8 octets");
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_periodic_adv_response_data_return_t, 2U);
+static_assert(offsetof(sdc_hci_cmd_le_set_periodic_sync_subevent_t,
+                       subevents) == 5U,
+              "LE Set Periodic Sync Subevent fixed part is not 5 octets");
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_periodic_sync_subevent_return_t, 2U);
 #endif
 #if HCI_SDC_HAS_VS_SET_ADV_RANDOMNESS
 /* Vendor, so Nordic gives the length. Handle and a microsecond spread. */

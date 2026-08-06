@@ -47,8 +47,9 @@ extern "C" {
  *   subrating         492 for eight links
  *   extended features 2083 for eight links at ten pages
  *   parallel scan and initiate  384
- *   periodic adv set  753 each  periodic sync 1368 each at four buffers
+ *   periodic adv set  753 each  periodic sync 1787 each with responses
  *   periodic adv list   8 each  sync transfer 1125 for eight links
+ *   periodic set with responses 1575 each
  */
 #ifndef HCI_NRF52840_PERIPHERAL_COUNT
 #define HCI_NRF52840_PERIPHERAL_COUNT 4U
@@ -73,7 +74,7 @@ extern "C" {
 #endif
 
 #ifndef HCI_NRF52840_ADV_SET_COUNT
-#define HCI_NRF52840_ADV_SET_COUNT 2U
+#define HCI_NRF52840_ADV_SET_COUNT 3U
 #endif
 
 #ifndef HCI_NRF52840_SCAN_BUFFER_COUNT
@@ -286,13 +287,116 @@ extern "C" {
 #define HCI_NRF52840_SDC_MEM_PERIODIC_ADV 0
 #endif
 
+/*
+ * Periodic Advertising with Responses. The advertiser divides each period into
+ * subevents and offers response slots, so a device that heard the broadcast can
+ * answer in one without ever forming a connection. Electronic shelf labels run
+ * on this: thousands of tags listening, each answering only in the slot it was
+ * given.
+ *
+ * Two halves again, advertiser and scanner, and both need the plain periodic
+ * halves underneath. sdk-nrfxlib asks for extended advertising, periodic
+ * advertising or sync, and a sync transfer sender or receiver, before it will
+ * accept either of these, which this image already has.
+ *
+ * The advertiser needs its own advertising set on top of the plain periodic
+ * one, so HCI_NRF52840_ADV_SET_COUNT goes to three.
+ */
+#ifndef HCI_NRF52840_PERIODIC_ADV_RSP
+#define HCI_NRF52840_PERIODIC_ADV_RSP 1
+#endif
+
+#ifndef HCI_NRF52840_PERIODIC_SYNC_RSP
+#define HCI_NRF52840_PERIODIC_SYNC_RSP 1
+#endif
+
+#ifndef HCI_NRF52840_PERIODIC_ADV_RSP_COUNT
+#define HCI_NRF52840_PERIODIC_ADV_RSP_COUNT 1U
+#endif
+
+/*
+ * Buffers on the advertiser. Transmit is what it puts in a subevent, receive is
+ * what it collects from the response slots. Receive can be zero, which means
+ * broadcasting into subevents and never listening, and saves the 283 per buffer
+ * plus 300 of fixed cost.
+ *
+ * The transmit size is the sdk-nrfxlib default. It is the cap on one subevent
+ * rather than on the whole period, so it is smaller than it looks.
+ */
+#ifndef HCI_NRF52840_PERIODIC_ADV_RSP_TX_BUFFERS
+#define HCI_NRF52840_PERIODIC_ADV_RSP_TX_BUFFERS 1U
+#endif
+
+#ifndef HCI_NRF52840_PERIODIC_ADV_RSP_RX_BUFFERS
+#define HCI_NRF52840_PERIODIC_ADV_RSP_RX_BUFFERS 1U
+#endif
+
+#ifndef HCI_NRF52840_PERIODIC_ADV_RSP_MAX_TX_DATA
+#define HCI_NRF52840_PERIODIC_ADV_RSP_MAX_TX_DATA                             \
+    SDC_DEFAULT_PERIODIC_ADV_RSP_MAX_TX_DATA
+#endif
+
+/*
+ * Failure reporting tells the advertiser about response slots that were
+ * expected and stayed empty. Off by default in sdk-nrfxlib and off here, since
+ * it costs 224 and a shelf label rig cares about the answers rather than the
+ * silences. Worth turning on when the question is how many tags stopped
+ * answering.
+ */
+#ifndef HCI_NRF52840_PERIODIC_ADV_RSP_FAILURE_REPORTING
+#define HCI_NRF52840_PERIODIC_ADV_RSP_FAILURE_REPORTING 0U
+#endif
+
+/* Responses the scanner can hold before the controller sends them. */
+#ifndef HCI_NRF52840_PERIODIC_SYNC_RSP_TX_BUFFERS
+#define HCI_NRF52840_PERIODIC_SYNC_RSP_TX_BUFFERS 1U
+#endif
+
 #if HCI_NRF52840_PERIODIC_SYNC
+/*
+ * A sync costs more once the controller can answer in a response slot, and the
+ * vendor macro is per sync rather than per feature, so enabling the scanner
+ * half raises the price of every sync rather than adding a separate term.
+ */
+#if HCI_NRF52840_PERIODIC_SYNC_RSP
+#define HCI_NRF52840_SDC_MEM_PER_SYNC                                         \
+    SDC_MEM_PER_PERIODIC_SYNC_RSP(HCI_NRF52840_PERIODIC_SYNC_RSP_TX_BUFFERS,  \
+                                  HCI_NRF52840_PERIODIC_SYNC_BUFFER_COUNT)
+#else
+#define HCI_NRF52840_SDC_MEM_PER_SYNC                                         \
+    SDC_MEM_PER_PERIODIC_SYNC(HCI_NRF52840_PERIODIC_SYNC_BUFFER_COUNT)
+#endif
+
 #define HCI_NRF52840_SDC_MEM_PERIODIC_SYNC                                    \
-    (SDC_MEM_PER_PERIODIC_SYNC(HCI_NRF52840_PERIODIC_SYNC_BUFFER_COUNT) *     \
-         HCI_NRF52840_PERIODIC_SYNC_COUNT +                                   \
+    (HCI_NRF52840_SDC_MEM_PER_SYNC * HCI_NRF52840_PERIODIC_SYNC_COUNT +       \
      SDC_MEM_PERIODIC_ADV_LIST(HCI_NRF52840_PERIODIC_ADV_LIST_SIZE))
 #else
 #define HCI_NRF52840_SDC_MEM_PERIODIC_SYNC 0
+#endif
+
+/*
+ * The advertiser side is a separate term. SDC_MEM_PER_PERIODIC_ADV_RSP_SET
+ * already includes a plain periodic set inside itself, so this is a whole set
+ * rather than an increment on one, and it is added to the plain sets rather
+ * than replacing them.
+ *
+ * Whether sdk-nrfxlib counts a responding set against periodic_adv_count as
+ * well is not stated. Reserving for both is the safe direction: too much pool
+ * wastes RAM, too little is a controller that will not enable. The figure
+ * sdc_cfg_set answers at run time is what settles it, and that is now readable
+ * over HCI through the counter block.
+ */
+#if HCI_NRF52840_PERIODIC_ADV_RSP
+#define HCI_NRF52840_SDC_MEM_PERIODIC_ADV_RSP                                 \
+    (SDC_MEM_PER_PERIODIC_ADV_RSP_SET(                                        \
+         HCI_NRF52840_MAX_ADV_DATA,                                           \
+         HCI_NRF52840_PERIODIC_ADV_RSP_TX_BUFFERS,                            \
+         HCI_NRF52840_PERIODIC_ADV_RSP_RX_BUFFERS,                            \
+         HCI_NRF52840_PERIODIC_ADV_RSP_MAX_TX_DATA,                           \
+         HCI_NRF52840_PERIODIC_ADV_RSP_FAILURE_REPORTING) *                   \
+     HCI_NRF52840_PERIODIC_ADV_RSP_COUNT)
+#else
+#define HCI_NRF52840_SDC_MEM_PERIODIC_ADV_RSP 0
 #endif
 
 #if HCI_NRF52840_PERIODIC_SYNC_TRANSFER
@@ -324,7 +428,8 @@ extern "C" {
      HCI_NRF52840_SDC_MEM_PARALLEL_SCAN_INIT +                                \
      HCI_NRF52840_SDC_MEM_PERIODIC_ADV +                                      \
      HCI_NRF52840_SDC_MEM_PERIODIC_SYNC +                                     \
-     HCI_NRF52840_SDC_MEM_SYNC_TRANSFER)
+     HCI_NRF52840_SDC_MEM_SYNC_TRANSFER +                                     \
+     HCI_NRF52840_SDC_MEM_PERIODIC_ADV_RSP)
 
 /*
  * A periodic advertiser needs an advertising set to carry it, so asking for
@@ -332,8 +437,9 @@ extern "C" {
  * error it gives names neither macro, so it is caught here instead.
  */
 #if HCI_NRF52840_PERIODIC_ADV
-#if HCI_NRF52840_PERIODIC_ADV_COUNT > HCI_NRF52840_ADV_SET_COUNT
-#error "HCI_NRF52840_PERIODIC_ADV_COUNT exceeds HCI_NRF52840_ADV_SET_COUNT"
+#if (HCI_NRF52840_PERIODIC_ADV_COUNT + HCI_NRF52840_PERIODIC_ADV_RSP_COUNT) > \
+    HCI_NRF52840_ADV_SET_COUNT
+#error "periodic advertisers, with and without responses, exceed the advertising sets"
 #endif
 #endif
 

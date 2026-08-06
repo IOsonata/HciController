@@ -224,8 +224,8 @@ class Controller:
             counters = [0] * 34
             counters[0] = self.command_count
             counters[16] = self.acl_taken
-            counters[32] = 35486
-            counters[33] = 35998
+            counters[32] = 38860
+            counters[33] = 39372
             body = bytes([4]) + b"".join(
                 struct.pack("<I", v) for v in counters)
             return self.emit(command_complete(opcode, 0x00, body))

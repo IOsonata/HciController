@@ -97,6 +97,12 @@ GATES = [
       "sdc_hci_cmd_le_periodic_adv_set_info_transfer",
       "sdc_hci_cmd_le_set_periodic_adv_sync_transfer_params",
       "sdc_hci_cmd_le_set_default_periodic_adv_sync_transfer_params"]),
+    ("HCI_SDC_HAS_LE_PERIODIC_ADV_RSP",
+     ["sdc_hci_cmd_le_set_periodic_adv_params_v2",
+      "sdc_hci_cmd_le_set_periodic_adv_subevent_data"]),
+    ("HCI_SDC_HAS_LE_PERIODIC_SYNC_RSP",
+     ["sdc_hci_cmd_le_set_periodic_adv_response_data",
+      "sdc_hci_cmd_le_set_periodic_sync_subevent"]),
 ]
 
 # Not a dispatch table gate. HCI_NRF52840_QOS_CHANNEL_SURVEY in
@@ -128,6 +134,10 @@ SUPPORT = [
       "sdc_support_periodic_adv_sync_transfer_sender_peripheral",
       "sdc_support_periodic_adv_sync_transfer_receiver_central",
       "sdc_support_periodic_adv_sync_transfer_receiver_peripheral"]),
+    ("HCI_NRF52840_PERIODIC_ADV_RSP",
+     ["sdc_support_le_periodic_adv_with_rsp"]),
+    ("HCI_NRF52840_PERIODIC_SYNC_RSP",
+     ["sdc_support_le_periodic_sync_with_rsp"]),
 ]
 
 DEFAULT_LIB = ("../external/sdk-nrfxlib/softdevice_controller/lib/nrf52/"

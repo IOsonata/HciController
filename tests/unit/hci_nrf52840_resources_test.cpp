@@ -113,8 +113,12 @@ int main(void)
           EXPECT_PERIODIC_ADV_SET);
 #endif
 #if HCI_NRF52840_PERIODIC_SYNC
-    Check("periodic sync",
-          SDC_MEM_PER_PERIODIC_SYNC(HCI_NRF52840_PERIODIC_SYNC_BUFFER_COUNT),
+    /*
+     * The per sync cost, which the responding scanner raises for every sync
+     * rather than adding a term of its own. HCI_NRF52840_SDC_MEM_PER_SYNC is
+     * whichever of the two vendor macros applies.
+     */
+    Check("periodic sync", HCI_NRF52840_SDC_MEM_PER_SYNC,
           EXPECT_PERIODIC_SYNC);
     Check("periodic adv list",
           SDC_MEM_PERIODIC_ADV_LIST(HCI_NRF52840_PERIODIC_ADV_LIST_SIZE),
@@ -123,6 +127,16 @@ int main(void)
 #if HCI_NRF52840_PERIODIC_SYNC_TRANSFER
     Check("periodic sync transfer", SDC_MEM_SYNC_TRANSFER(links),
           EXPECT_SYNC_TRANSFER);
+#endif
+#if HCI_NRF52840_PERIODIC_ADV_RSP
+    Check("periodic adv set with responses",
+          SDC_MEM_PER_PERIODIC_ADV_RSP_SET(
+              HCI_NRF52840_MAX_ADV_DATA,
+              HCI_NRF52840_PERIODIC_ADV_RSP_TX_BUFFERS,
+              HCI_NRF52840_PERIODIC_ADV_RSP_RX_BUFFERS,
+              HCI_NRF52840_PERIODIC_ADV_RSP_MAX_TX_DATA,
+              HCI_NRF52840_PERIODIC_ADV_RSP_FAILURE_REPORTING),
+          EXPECT_PERIODIC_ADV_RSP);
 #endif
 
     Check("pool required", HCI_NRF52840_SDC_MEM_REQUIRED, EXPECT_REQUIRED);
@@ -173,6 +187,21 @@ int main(void)
             HCI_NRF52840_PERIODIC_SYNC_BUFFER_COUNT;
         cfg.periodic_adv_list_size = HCI_NRF52840_PERIODIC_ADV_LIST_SIZE;
 #endif
+#if HCI_NRF52840_PERIODIC_ADV_RSP
+        cfg.periodic_adv_rsp_count.count = HCI_NRF52840_PERIODIC_ADV_RSP_COUNT;
+        cfg.periodic_adv_rsp_buffer_cfg.tx_buffer_count =
+            HCI_NRF52840_PERIODIC_ADV_RSP_TX_BUFFERS;
+        cfg.periodic_adv_rsp_buffer_cfg.rx_buffer_count =
+            HCI_NRF52840_PERIODIC_ADV_RSP_RX_BUFFERS;
+        cfg.periodic_adv_rsp_buffer_cfg.max_tx_data_size =
+            HCI_NRF52840_PERIODIC_ADV_RSP_MAX_TX_DATA;
+        cfg.periodic_adv_rsp_failure_reporting_cfg =
+            HCI_NRF52840_PERIODIC_ADV_RSP_FAILURE_REPORTING;
+#endif
+#if HCI_NRF52840_PERIODIC_SYNC_RSP
+        cfg.periodic_sync_rsp_tx_buffer_cfg.count =
+            HCI_NRF52840_PERIODIC_SYNC_RSP_TX_BUFFERS;
+#endif
 
         /*
          * The tags, in the same order hci_nrf52840.cpp uses them. Distinct
@@ -193,6 +222,14 @@ int main(void)
             SDC_CFG_TYPE_PERIODIC_SYNC_COUNT,
             SDC_CFG_TYPE_PERIODIC_SYNC_BUFFER_CFG,
             SDC_CFG_TYPE_PERIODIC_ADV_LIST_SIZE,
+#endif
+#if HCI_NRF52840_PERIODIC_ADV_RSP
+            SDC_CFG_TYPE_PERIODIC_ADV_RSP_COUNT,
+            SDC_CFG_TYPE_PERIODIC_ADV_RSP_BUFFER_CFG,
+            SDC_CFG_TYPE_PERIODIC_ADV_RSP_FAILURE_REPORTING_CFG,
+#endif
+#if HCI_NRF52840_PERIODIC_SYNC_RSP
+            SDC_CFG_TYPE_PERIODIC_SYNC_RSP_TX_BUFFER_CFG,
 #endif
         };
         const size_t tagCount = sizeof(tags) / sizeof(tags[0]);
@@ -232,7 +269,9 @@ int main(void)
      * stated where the numbers are, for anyone reading only this file.
      */
 #if HCI_NRF52840_PERIODIC_ADV
-    assert(HCI_NRF52840_PERIODIC_ADV_COUNT <= HCI_NRF52840_ADV_SET_COUNT);
+    assert((HCI_NRF52840_PERIODIC_ADV_COUNT +
+            HCI_NRF52840_PERIODIC_ADV_RSP_COUNT) <=
+           HCI_NRF52840_ADV_SET_COUNT);
 #endif
 
     printf("\n");

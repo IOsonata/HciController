@@ -317,7 +317,7 @@ count grows the array that holds it rather than needing a second edit.
 | Central links | 4 | 2839 each |
 | ACL payload, each way | 251 octets | in the per-link cost |
 | ACL buffers, each way | 4 | in the per-link cost |
-| Advertising sets | 2 | 961 each |
+| Advertising sets | 3 | 961 each |
 | Advertising data | 255 octets | in the per-set cost |
 | Scan buffers | 4 | 1688 for four |
 | Filter accept list | 8 | 68 for eight |
@@ -327,10 +327,11 @@ count grows the array that holds it rather than needing a second edit.
 | Extended feature pages | 10 | 2083 for eight links |
 | Scan and initiate together | on | 384 |
 | Periodic advertising sets | 1 | 753 each |
-| Periodic syncs | 2 | 1368 each, four buffers |
+| Periodic syncs | 2 | 1787 each, four buffers, with responses |
 | Periodic advertiser list | 8 | 64 for eight |
 | Periodic sync transfer | on | 1125 for eight links |
-| | | **35486 total** |
+| Periodic sets with responses | 1 | 1575 each |
+| | | **38860 total** |
 
 The pool is that total plus a 512 octet margin, because sdk-nrfxlib says the
 memory macros may move between minor releases and the number that decides

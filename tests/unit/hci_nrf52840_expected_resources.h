@@ -34,10 +34,11 @@
  * which one moved. The totals follow from the counts in hci_nrf52840.h.
  */
 #define EXPECT_PERIODIC_ADV_SET   753   /* each, at 255 octets of data */
-#define EXPECT_PERIODIC_SYNC     1368   /* each, at four receive buffers */
+#define EXPECT_PERIODIC_SYNC     1787   /* each, four rx buffers, with responses */
 #define EXPECT_PERIODIC_ADV_LIST   64   /* eight entries */
 #define EXPECT_SYNC_TRANSFER     1125   /* eight links */
+#define EXPECT_PERIODIC_ADV_RSP  1575   /* each, one tx and one rx buffer */
 
-#define EXPECT_REQUIRED       35486
+#define EXPECT_REQUIRED       38860
 
 #endif

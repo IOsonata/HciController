@@ -16,11 +16,17 @@
 #define SDC_CFG_TYPE_PERIODIC_SYNC_COUNT        10
 #define SDC_CFG_TYPE_PERIODIC_SYNC_BUFFER_CFG   11
 #define SDC_CFG_TYPE_PERIODIC_ADV_LIST_SIZE     12
+#define SDC_CFG_TYPE_PERIODIC_ADV_RSP_COUNT     13
+#define SDC_CFG_TYPE_PERIODIC_ADV_RSP_BUFFER_CFG 14
+#define SDC_CFG_TYPE_PERIODIC_ADV_RSP_FAILURE_REPORTING_CFG 15
+#define SDC_CFG_TYPE_PERIODIC_SYNC_RSP_TX_BUFFER_CFG 16
 typedef struct { uint8_t count; } sdc_cfg_role_count_t;
 typedef struct { uint8_t rx_packet_size; uint8_t tx_packet_size;
                  uint8_t rx_packet_count; uint8_t tx_packet_count; } sdc_cfg_buffer_cfg_t;
 typedef struct { uint16_t max_adv_data; } sdc_cfg_adv_buffer_cfg_t;
 typedef struct { uint8_t count; } sdc_cfg_scan_buffer_cfg_t;
+typedef struct { uint8_t tx_buffer_count; uint8_t max_tx_data_size;
+                 uint8_t rx_buffer_count; } sdc_cfg_periodic_adv_rsp_buffer_cfg_t;
 typedef union {
     sdc_cfg_buffer_cfg_t buffer_cfg;
     sdc_cfg_role_count_t peripheral_count;
@@ -35,6 +41,10 @@ typedef union {
     sdc_cfg_role_count_t periodic_sync_count;
     sdc_cfg_scan_buffer_cfg_t periodic_sync_buffer_cfg;
     uint8_t periodic_adv_list_size;
+    sdc_cfg_role_count_t periodic_adv_rsp_count;
+    sdc_cfg_periodic_adv_rsp_buffer_cfg_t periodic_adv_rsp_buffer_cfg;
+    uint8_t periodic_adv_rsp_failure_reporting_cfg;
+    sdc_cfg_scan_buffer_cfg_t periodic_sync_rsp_tx_buffer_cfg;
 } sdc_cfg_t;
 typedef void (*sdc_fault_handler_t)(const char *, uint32_t);
 typedef void (*sdc_callback_t)(void);
@@ -75,6 +85,8 @@ void sdc_support_periodic_adv_sync_transfer_sender_central(void);
 void sdc_support_periodic_adv_sync_transfer_sender_peripheral(void);
 void sdc_support_periodic_adv_sync_transfer_receiver_central(void);
 void sdc_support_periodic_adv_sync_transfer_receiver_peripheral(void);
+void sdc_support_le_periodic_adv_with_rsp(void);
+void sdc_support_le_periodic_sync_with_rsp(void);
 #ifdef __cplusplus
 }
 #endif
@@ -200,6 +212,21 @@ void sdc_support_periodic_adv_sync_transfer_receiver_peripheral(void);
     (__MEM_PER_PERIODIC_ADV_SET_HIGH(max_adv_data)))
 #define SDC_MEM_PER_PERIODIC_SYNC(buffer_count) (256 + (buffer_count) * 278)
 #define SDC_MEM_PERIODIC_ADV_LIST(list_size) ((list_size) * 8)
+#define SDC_DEFAULT_PERIODIC_ADV_RSP_MAX_TX_DATA 73
+#define __MEM_PER_PERIODIC_ADV_RSP_TX_BUFFER(max_tx_data_size) ((max_tx_data_size) + 5)
+#define __MEM_PER_PERIODIC_ADV_RSP_RX_BUFFER (283)
+#define __MEM_MINIMAL_PERIODIC_ADV_RSP_SET_SIZE_WITH_RX (461)
+#define __MEM_MINIMAL_PERIODIC_ADV_RSP_SET_SIZE_WITHOUT_RX (161)
+#define __MEM_FOR_PERIODIC_ADV_RSP_FAILURE_REPORTING (224)
+#define SDC_MEM_PER_PERIODIC_SYNC_RSP(tx_buffer_count, rx_buffer_count) \
+    (671 + (tx_buffer_count - 1) * 255 + (rx_buffer_count) * 279)
+#define SDC_MEM_PER_PERIODIC_ADV_RSP_SET(max_adv_data, tx_buffer_count, rx_buffer_count, max_tx_data_size, failure_reporting_enabled) \
+     (SDC_MEM_PER_PERIODIC_ADV_SET(max_adv_data) \
+     + ((rx_buffer_count) > 0 ? __MEM_MINIMAL_PERIODIC_ADV_RSP_SET_SIZE_WITH_RX : \
+                             __MEM_MINIMAL_PERIODIC_ADV_RSP_SET_SIZE_WITHOUT_RX ) \
+     + (tx_buffer_count) * __MEM_PER_PERIODIC_ADV_RSP_TX_BUFFER(max_tx_data_size) \
+     + (rx_buffer_count) * __MEM_PER_PERIODIC_ADV_RSP_RX_BUFFER \
+     + ((failure_reporting_enabled) ? __MEM_FOR_PERIODIC_ADV_RSP_FAILURE_REPORTING : 0))
 
 /** Memory required for the Filter Accept List */
 #define SDC_MEM_FAL(max_num_entries) ((max_num_entries) > 0 ? (4 + (max_num_entries) * 8) : 0)
