@@ -304,12 +304,48 @@ The TinyUSB adapter services the IOsonata `UsbdCdcIntrf` FIFOs. When the RX FIFO
 
 The UART path uses IOsonata's interrupt-driven FIFO/DMA UART implementation. Its 4 KiB RX and TX FIFOs absorb complete HCI packets and host scheduling latency.
 
+## Ports
+
+The tree is split so that a part supplies hardware and nothing else.
+
+```text
+include/hci_target.h          what the application needs from a part
+include/hci_sdc_resources.h   what the controller is configured for
+src/hci_sdc_resources.cpp     every sdc_support_ call, the sdc_cfg_set sequence
+include/hci_nrf52840.h        the nRF52840 port: clock, USB, errata
+src/hci_nrf52840.cpp          its bring up, and the HciTarget_t it publishes
+```
+
+Nothing above the radio names a part. `hci_app` holds an `HciTarget_t`, which
+is a table of function pointers and an opaque instance the port owns, and
+`main.cpp` decides which port that is in one line.
+
+The resource configuration is deliberately not part of a port. nrfxlib ships
+one `sdc.h` covering nrf52, nrf53, nrf54h, nrf54l, nrf54lm, nrf54ls, nrf54lv
+and nrf71, and every `SDC_MEM_` macro the pool is computed from comes from it.
+A port does not get an opinion about how many links the controller carries.
+
+Adding a part means one header and one source:
+
+| | |
+| --- | --- |
+| a state structure | whatever its clock, USB and errata need |
+| `Init` | MPSL, the entropy source, `sdc_init`, then `HciSdcResourcesApply()`, then `sdc_enable` |
+| `GetTaktOsOps` | how the runtime starts it and pumps MPSL |
+| `UsbStart`, `UsbPassMark`, `UsbPowerProcess` | or null on a part with no USB device peripheral, and the application skips them |
+| `Stop` | |
+| `LastError` | |
+| one `HciTarget_t` returned by value | the instance is static in the port, because a board has one radio |
+
+The dispatch table, the H:4 parser, the transport, the bridge, the counters and
+the resource configuration are then already correct for it.
+
 ## Capacity
 
 What one image is configured for, and what it costs in the SoftDevice
-Controller memory pool. Every value is a constant in `include/hci_nrf52840.h`,
-and the pool is computed from them, so changing a count grows the array that
-holds it rather than needing a second edit. There are no build options here:
+Controller memory pool. Every value is a constant in
+`include/hci_sdc_resources.h`, and the pool is computed from them, so changing
+a count grows the array that holds it rather than needing a second edit. There are no build options here:
 configuring the controller differently means editing the value.
 
 | | | Pool cost |

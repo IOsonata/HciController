@@ -3,6 +3,7 @@
  */
 
 #include "hci_nrf52840.h"
+#include "hci_sdc_resources.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -14,11 +15,11 @@
 #include "coredev/system_core_clock.h"
 #include "crypto_rng_nrf.h"
 
-#include "hci_nrf52840_expected_resources.h"
+#include "hci_sdc_expected_resources.h"
 
 /*
  * The fake sdc.h this file builds against carries hand written copies of the
- * vendor SDC_MEM_ macros. hci_nrf52840_resources_test measures the real ones
+ * vendor SDC_MEM_ macros. hci_sdc_resources_test measures the real ones
  * against the same expectations, so a copy that drifts from the vendor header
  * fails here while the real one still passes, and the pair says which moved.
  *
@@ -26,7 +27,7 @@
  * much memory the controller wants makes every other number in this file a
  * measurement of the wrong thing.
  */
-static_assert(HCI_NRF52840_SDC_MEM_REQUIRED == EXPECT_REQUIRED,
+static_assert(HCI_SDC_MEM_REQUIRED == EXPECT_REQUIRED,
               "the fake sdc.h and the vendor one disagree about the pool");
 
 static NRF_POWER_Type gPower;

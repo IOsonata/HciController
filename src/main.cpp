@@ -20,6 +20,7 @@
 #include "coredev/iopincfg.h"
 #include "coredev/system_core_clock.h"
 #include "hci_app.h"
+#include "hci_nrf52840.h"
 #include "hci_trace.h"
 #include "iopinctrl.h"
 #include "miscdev/led.h"
@@ -196,10 +197,11 @@ int main(void)
         HciFatal();
     }
 
-    if (!HciAppInit(&s_HciApp, host))
+    if (!HciAppInit(&s_HciApp, host, HciNrf52840Target()))
     {
         HciTrace("fatal: HciAppInit err=%d target=%ld\r\n",
-                 s_HciApp.LastError, (long)s_HciApp.Target.LastError);
+                 s_HciApp.LastError,
+                 (long)HciTargetLastError(&s_HciApp.Target));
         HciFatal();
     }
 

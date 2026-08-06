@@ -3,20 +3,20 @@
  *
  * Shared by two tests that reach these numbers through different headers:
  *
- *   hci_nrf52840_resources_test  builds against the real nrfxlib sdc.h
- *   hci_nrf52840_usb_test        builds against the fake one under stubs/sdc
+ *   hci_sdc_resources_test   builds against the real nrfxlib sdc.h
+ *   hci_nrf52840_usb_test    builds against the fake one under stubs/sdc
  *
  * That is the point. The fake carries hand written copies of the SDC_MEM_
  * macros, and nothing used to compare them with the vendor ones. With both
  * tests measured against this file, a fake that drifts fails, a vendor header
  * that moves fails, and the two failing separately says which one moved.
  *
- * These are also the numbers include/hci_nrf52840.h and the README quote, so
- * a change here is a change those two need as well.
+ * These are also the numbers include/hci_sdc_resources.h and the README
+ * quote, so a change here is a change those two need as well.
  */
 
-#ifndef HCI_NRF52840_EXPECTED_RESOURCES_H
-#define HCI_NRF52840_EXPECTED_RESOURCES_H
+#ifndef HCI_SDC_EXPECTED_RESOURCES_H
+#define HCI_SDC_EXPECTED_RESOURCES_H
 
 #define EXPECT_PERIPHERAL_LINK 2935
 #define EXPECT_CENTRAL_LINK    2839
@@ -31,7 +31,8 @@
 
 /*
  * Periodic advertising, per unit rather than per total, so a failure names
- * which one moved. The totals follow from the counts in hci_nrf52840.h.
+ * which one moved. The totals follow from the counts in
+ * hci_sdc_resources.h.
  */
 #define EXPECT_PERIODIC_ADV_SET   753   /* each, at 255 octets of data */
 #define EXPECT_PERIODIC_SYNC     1787   /* each, four rx buffers, with responses */

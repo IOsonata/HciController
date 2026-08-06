@@ -55,7 +55,7 @@ static_assert(HCI_APP_PACKET_SIZE >= HCI_MSG_BUFFER_ISO_MAX_SIZE,
  * target's link counts.
  */
 static_assert(HCI_SDC_ACL_TRACK_HANDLES >=
-                  HCI_NRF52840_PERIPHERAL_COUNT + HCI_NRF52840_CENTRAL_COUNT,
+                  HCI_SDC_PERIPHERAL_COUNT + HCI_SDC_CENTRAL_COUNT,
               "HCI_SDC_ACL_TRACK_HANDLES is smaller than the link count");
 
 /*
@@ -259,9 +259,9 @@ static bool HciAppHostStart(void *pContext)
             return false;
         }
 
-        if (!HciNrf52840UsbStart(&pApp->Target))
+        if (!pApp->Target.pOps->UsbStart(pApp->Target.pContext))
         {
-            HciTrace("host: HciNrf52840UsbStart failed err=%ld\r\n",
+            HciTrace("host: target UsbStart failed err=%ld\r\n",
                      (long)pApp->Target.LastError);
             return false;
         }
@@ -284,8 +284,8 @@ static bool HciAppHostStart(void *pContext)
                 pApp->Runtime.Ops.ProcessMpsl(pApp->Runtime.Ops.pContext);
             }
 
-            HciNrf52840UsbPowerProcess(&pApp->Target);
-            HciNrf52840UsbPassMark(&pApp->Target);
+            pApp->Target.pOps->UsbPowerProcess(pApp->Target.pContext);
+            pApp->Target.pOps->UsbPassMark(pApp->Target.pContext);
             HciTinyUsbProcess(&pApp->Usb);
 
             if (HciTinyUsbIsMounted(&pApp->Usb))
@@ -354,7 +354,7 @@ static void HciAppHostProcess(void *pContext)
          * here, in the same context that pumps the device stack, because the
          * TinyUSB event queue is only protected against this context.
          */
-        HciNrf52840UsbPowerProcess(&pApp->Target);
+        pApp->Target.pOps->UsbPowerProcess(pApp->Target.pContext);
 
         HciTinyUsbProcess(&pApp->Usb);
         HciAppSetHostOpen(pApp, HciTinyUsbIsOpen(&pApp->Usb));
@@ -368,8 +368,13 @@ static void HciAppHostProcess(void *pContext)
     }
 }
 
-bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType)
+bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType, HciTarget_t Target)
 {
+    if (!HciTargetValid(&Target))
+    {
+        return false;
+    }
+
     if (pApp == nullptr ||
         (HostType != HCI_APP_HOST_UART && HostType != HCI_APP_HOST_USB) ||
         (s_pApp != nullptr && s_pApp != pApp))
@@ -379,6 +384,7 @@ bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType)
 
     memset(pApp, 0, sizeof(*pApp));
     pApp->HostType = HostType;
+    pApp->Target = Target;
     s_pApp = pApp;
 
     /*
@@ -435,13 +441,13 @@ bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType)
         return false;
     }
 
-    if (!HciNrf52840Init(&pApp->Target,
+    if (!pApp->Target.pOps->Init(pApp->Target.pContext,
                          &pApp->Runtime,
                          reinterpret_cast<uint8_t *>(pApp->SdcMem),
                          sizeof(pApp->SdcMem),
                          HostType == HCI_APP_HOST_USB))
     {
-        HciTrace("init: HciNrf52840Init failed\r\n");
+        HciTrace("init: target Init failed\r\n");
         pApp->LastError = -4;
         s_pApp = nullptr;
         return false;
@@ -458,7 +464,7 @@ bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType)
                          (uint32_t)pApp->Target.SdcMemCapacity);
 
     HciTaktOsOps_t runtimeOps = {};
-    HciNrf52840GetTaktOsOps(&pApp->Target, &runtimeOps);
+    pApp->Target.pOps->GetTaktOsOps(pApp->Target.pContext, &runtimeOps);
 
     HciTaktOsHostOps_t hostOps = {};
     hostOps.Start = HciAppHostStart;
@@ -503,7 +509,7 @@ void HciAppStop(HciApp_t *pApp)
         return;
     }
 
-    HciNrf52840Stop(&pApp->Target);
+    pApp->Target.pOps->Stop(pApp->Target.pContext);
     if (pApp->pHostIntrf != nullptr)
     {
         DeviceIntrfDisable(pApp->pHostIntrf);

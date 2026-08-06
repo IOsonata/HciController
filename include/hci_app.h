@@ -17,7 +17,8 @@
 #include "cfifo.h"
 #include "coredev/uart.h"
 #include "hci_controller.h"
-#include "hci_nrf52840.h"
+#include "hci_sdc_resources.h"
+#include "hci_target.h"
 #include "hci_sdc_nrfxlib.h"
 #include "hci_taktos.h"
 #include "hci_tinyusb.h"
@@ -53,12 +54,16 @@ typedef struct {
     bool HostOpen;
 
     HciTaktOs_t Runtime;
-    HciNrf52840_t Target;
+    /*
+     * The part, held through its interface. The instance belongs to the port,
+     * so nothing here has to know how large it is or which part it is.
+     */
+    HciTarget_t Target;
 
     uint8_t HostPacket[HCI_APP_PACKET_SIZE];
     uint8_t ControllerPacket[HCI_APP_PACKET_SIZE];
     uint8_t CommandEvent[HCI_APP_COMMAND_EVENT_SIZE];
-    uint64_t SdcMem[(HCI_NRF52840_DEFAULT_SDC_MEM_SIZE + 7U) / 8U];
+    uint64_t SdcMem[(HCI_SDC_MEM_SIZE + 7U) / 8U];
 
     alignas(4) uint8_t UartRxFifoMem[HCI_APP_FIFO_MEM_SIZE];
     alignas(4) uint8_t UartTxFifoMem[HCI_APP_FIFO_MEM_SIZE];
@@ -69,7 +74,11 @@ typedef struct {
     bool Initialized;
 } HciApp_t;
 
-bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType);
+/*
+ * The target is passed in rather than chosen here, so this layer names no
+ * part. A board decides which port it has and hands over the pair.
+ */
+bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType, HciTarget_t Target);
 void HciAppStop(HciApp_t *pApp);
 void HciAppThread(void *pContext);
 bool HciAppHostIsOpen(const HciApp_t *pApp);

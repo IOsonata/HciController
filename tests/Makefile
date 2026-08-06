@@ -52,7 +52,8 @@ hci_sdc_SRC            := $(SRC)/hci_sdc.cpp $(SRC)/hci_cmd_dispatch.cpp
 hci_intrf_transport_SRC := $(SRC)/hci_intrf_transport.cpp $(SRC)/hci_h4.cpp
 hci_controller_SRC     := $(SRC)/hci_controller.cpp \
                           $(SRC)/hci_intrf_transport.cpp $(SRC)/hci_h4.cpp
-hci_nrf52840_usb_SRC   := $(SRC)/hci_nrf52840.cpp
+hci_nrf52840_usb_SRC   := $(SRC)/hci_nrf52840.cpp \
+                          $(SRC)/hci_sdc_resources.cpp
 hci_taktos_poll_SRC    := $(SRC)/hci_taktos.cpp
 hci_tinyusb_init_SRC   := $(SRC)/hci_tinyusb.cpp
 
@@ -79,7 +80,7 @@ TARGETS += $(SDC_TARGET)
 # memory macros and the sdc_cfg_t members it copies have never been compared
 # with the vendor ones. This is the only thing that does that, and it needs no
 # firmware sources: the header and the real sdc.h are the whole subject.
-RESOURCES_TARGET := $(BUILD_DIR)/hci_nrf52840_resources_test
+RESOURCES_TARGET := $(BUILD_DIR)/hci_sdc_resources_test
 TARGETS += $(RESOURCES_TARGET)
 endif
 
@@ -107,12 +108,12 @@ $(SDC_TARGET): $(SDC_SOURCES) | check-root
 	  -DNRF52840_XXAA -DHCI_TRACE=0 $(CXXFLAGS) $(SDC_SOURCES) -o $@
 
 # No stubs/sdc on the path, so the real sdc.h is the one that answers.
-$(RESOURCES_TARGET): $(UNIT)/hci_nrf52840_resources_test.cpp \
-                     $(ROOT)/include/hci_nrf52840.h | check-root
+$(RESOURCES_TARGET): $(UNIT)/hci_sdc_resources_test.cpp \
+                     $(ROOT)/include/hci_sdc_resources.h | check-root
 	@mkdir -p $(dir $@)
 	$(CXX) -I$(STUBS) -I$(SDC_INCLUDE) -I$(ROOT)/include \
 	  -DNRF52840_XXAA -DHCI_TRACE=0 $(CXXFLAGS) \
-	  $(UNIT)/hci_nrf52840_resources_test.cpp -o $@
+	  $(UNIT)/hci_sdc_resources_test.cpp -o $@
 endif
 
 run: all
@@ -121,7 +122,7 @@ run: all
 	@echo
 	@echo "All HciController host tests passed."
 	@test -n "$(strip $(SDC_INCLUDE))" || \
-	  echo "Skipped hci_sdc_dispatch_test and hci_nrf52840_resources_test, \
+	  echo "Skipped hci_sdc_dispatch_test and hci_sdc_resources_test, \
 set NRFXLIB_DIR to a sdk-nrfxlib checkout."
 
 print-config:
