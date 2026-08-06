@@ -317,7 +317,7 @@ class Controller:
         if command is None:
             return self.emit(command_complete(opcode, 0x01))
 
-        if command.needs == hci_commands.NEEDS_CONN:
+        if hci_commands.NEEDS_CONN in command.needs:
             handle = struct.unpack("<H", payload[:2])[0] if len(payload) >= 2 \
                 else 0xFFFF
             if not self.connected or handle != CONN_HANDLE:
@@ -325,7 +325,7 @@ class Controller:
                     return self.emit(command_status(opcode, 0x02))
                 return self.emit(command_complete(opcode, 0x02))
 
-        if command.needs in (hci_commands.NEEDS_SYNC,):
+        if hci_commands.NEEDS_SYNC in command.needs:
             # Nothing here ever has a periodic sync, and Unknown Advertising
             # Identifier is what a controller answers to a handle it never
             # issued.

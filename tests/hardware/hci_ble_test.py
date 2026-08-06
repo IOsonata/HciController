@@ -1430,17 +1430,18 @@ class ProbeContext(object):
 
 def probe_available(command, args, live_handle):
     """Whether this entry can be sent, and why not when it cannot."""
-    if command.needs == hci_commands.NEEDS_CONN:
+    needs = command.needs
+    if hci_commands.NEEDS_CONN in needs:
         if args.handle is None:
             return False, "no connection, pass --handle"
         if not live_handle:
             return False, "handle 0x%04X has no connection behind it" \
                 % args.handle
-    if command.needs == hci_commands.NEEDS_SYNC:
+    if hci_commands.NEEDS_SYNC in needs:
         return False, "needs a periodic sync, so a second radio"
-    if command.needs == hci_commands.NEEDS_CONSENT and not args.consent:
+    if hci_commands.NEEDS_CONSENT in needs and not args.consent:
         return False, "changes state or uses the radio, pass --consent"
-    if command.needs == hci_commands.NEEDS_ADV_SET and args.no_adv_set:
+    if hci_commands.NEEDS_ADV_SET in needs and args.no_adv_set:
         return False, "advertising set not created"
     return True, ""
 
@@ -1526,6 +1527,8 @@ def cmd_probe(hci, args):
         else:
             counts["refused"] += 1
             report(command, "  ", text)
+            if args.verbose and command.note:
+                print("     what the row assumed: %s" % command.note)
 
     def send(command):
         available, reason = probe_available(command, args, live_handle)

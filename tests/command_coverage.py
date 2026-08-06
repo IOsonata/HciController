@@ -135,7 +135,8 @@ def main(argv):
     # every command is the part a reader will otherwise assume away.
     buckets = {}
     for command in hci_commands.BY_OPCODE.values():
-        buckets[command.needs] = buckets.get(command.needs, 0) + 1
+        for need in command.needs:
+            buckets[need] = buckets.get(need, 0) + 1
 
     print("[ok] %d opcodes, dispatched and driven, both ways."
           % len(firmware))

@@ -25,7 +25,10 @@ Fields
     name        as the specification writes it
     reply       COMPLETE, STATUS or NONE, what the controller must send back
     payload     bytes, or a callable taking the probe context
-    needs       what must exist first, see NEEDS_*
+    needs       what must exist first, see NEEDS_*. One value or several:
+                Disconnect needs both a connection and consent, and asking
+                for only one of the two sends it at a handle that is not
+                there
     phase       which advertising mode the command belongs to, see PHASE_*
     undo        an (opcode, payload) pair that puts the controller back, or
                 None when the command changes nothing that lasts
@@ -106,7 +109,7 @@ class Command(object):
         self.name = name
         self.reply = reply
         self.payload = payload
-        self.needs = needs
+        self.needs = (needs,) if isinstance(needs, str) else tuple(needs)
         self.undo = undo
         self.undo_now = undo_now
         self.expect = expect
@@ -165,7 +168,8 @@ _CB = [
 
 _LC = [
     Command(0x0406, "Disconnect", STATUS,
-            lambda ctx: _conn(ctx, b"\x13"), needs=NEEDS_CONSENT,
+            lambda ctx: _conn(ctx, b"\x13"),
+            needs=(NEEDS_CONSENT, NEEDS_CONN),
             note="0x13 is remote user terminated. Ends the link the probe is "
                  "using, so it runs last and only when asked"),
     Command(0x041D, "Read Remote Version Information", STATUS,
@@ -253,9 +257,10 @@ _LE_BASIC = [
                  "the caller can recognise"),
     Command(0x2018, "LE Rand", COMPLETE, b""),
     Command(0x201F, "LE Test End", COMPLETE, b"", needs=NEEDS_CONSENT,
-            note="Command Disallowed outside direct test mode, so it is only "
-                 "sent when the test commands are, where it is also their "
-                 "undo"),
+            expect=(STATUS_COMMAND_DISALLOWED,),
+            note="Command Disallowed outside direct test mode, which is a "
+                 "correct answer. Every test command ends its own test, so "
+                 "by the time this row is reached there is none running"),
     Command(0x2023, "LE Read Suggested Default Data Length", COMPLETE, b""),
     Command(0x2024, "LE Write Suggested Default Data Length", COMPLETE,
             struct.pack("<HH", 251, 2120),
@@ -494,13 +499,14 @@ _LE_CONN = [
             lambda ctx: _conn(ctx), needs=NEEDS_CONN),
     Command(0x2019, "LE Enable Encryption", STATUS,
             lambda ctx: _conn(ctx, bytes(8) + bytes(2) + bytes(16)),
-            needs=NEEDS_CONSENT,
+            needs=(NEEDS_CONSENT, NEEDS_CONN),
             note="a zero long term key. The peer will not agree, so this is "
                  "only about whether the command reaches the link layer"),
     Command(0x201A, "LE Long Term Key Request Reply", COMPLETE,
-            lambda ctx: _conn(ctx, bytes(16)), needs=NEEDS_CONSENT),
+            lambda ctx: _conn(ctx, bytes(16)),
+            needs=(NEEDS_CONSENT, NEEDS_CONN)),
     Command(0x201B, "LE Long Term Key Request Negative Reply", COMPLETE,
-            lambda ctx: _conn(ctx), needs=NEEDS_CONSENT),
+            lambda ctx: _conn(ctx), needs=(NEEDS_CONSENT, NEEDS_CONN)),
     Command(0x2022, "LE Set Data Length", COMPLETE,
             lambda ctx: _conn(ctx, struct.pack("<HH", 251, 2120)),
             needs=NEEDS_CONN),
@@ -609,9 +615,11 @@ _VENDOR = [
     Command(0xFC0E, "VS Zephyr Write Tx Power", COMPLETE,
             struct.pack("<BHb", 0, PROBE_ADV_HANDLE, 0), needs=NEEDS_ADV_SET,
             note="handle type 0 is advertising, and for extended advertising "
-                 "the handle names the set, so the set has to exist. 0 dBm"),
+                 "the handle names the set, so the set has to exist. 0 dBm",
+            phase=PHASE_EXTENDED),
     Command(0xFC0F, "VS Zephyr Read Tx Power", COMPLETE,
-            struct.pack("<BH", 0, PROBE_ADV_HANDLE), needs=NEEDS_ADV_SET),
+            struct.pack("<BH", 0, PROBE_ADV_HANDLE), needs=NEEDS_ADV_SET,
+            phase=PHASE_EXTENDED),
     Command(0xFD01, "VS LLPM Mode Set", COMPLETE, b"\x00",
             note="off. Low latency packet mode is a Nordic extension that "
                  "only talks to another Nordic controller"),
@@ -627,10 +635,11 @@ _VENDOR = [
     Command(0xFD0C, "VS Set Advertising Randomness", COMPLETE,
             struct.pack("<BH", PROBE_ADV_HANDLE, 0),
             needs=NEEDS_ADV_SET,
-            note="zero extra randomness, the state after reset"),
+            note="zero extra randomness, the state after reset",
+            phase=PHASE_EXTENDED),
     Command(0xFD0E, "VS QoS Channel Survey Enable", COMPLETE,
             struct.pack("<BI", 1, 100000),
-            undo=(0xFD0E, struct.pack("<BI", 0, 0)),
+            undo=(0xFD0E, struct.pack("<BI", 0, 0)), undo_now=True,
             note="on, with a 100 ms average measurement interval, which the "
                  "header says must be between 3000 and 4000000 us. Undo "
                  "turns it off. Disabling something never enabled is "

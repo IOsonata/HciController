@@ -223,7 +223,9 @@ python3 tests/hardware/hci_ble_test.py probe --verbose   # say why each skip
 The handle is checked once with a harmless read before anything uses it. A
 handle with nothing behind it would otherwise turn two dozen rows into two
 dozen Unknown Connection Identifier lines, which says nothing about any of
-them.
+them. A row can need more than one thing at a time: Disconnect and the
+encryption commands need consent **and** a live connection, and asking for
+only one of the two sends them at a handle that is not there.
 
 Some rows put the controller somewhere the next command cannot work from: a
 direct test mode test that is still running, an initiator still scanning for
