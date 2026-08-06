@@ -603,6 +603,15 @@ static bool HciNrf52840SdcInit(HciNrf52840_t *pTarget)
      */
     sdc_support_le_privacy();
 
+#if HCI_NRF52840_QOS_CHANNEL_SURVEY
+    /*
+     * The channel survey module, which the vendor command at 0xFD0E turns on
+     * and off. Without this call that command is rejected, so the two have to
+     * agree, and the pool in hci_nrf52840.h carries the matching 40 octets.
+     */
+    sdc_support_qos_channel_survey();
+#endif
+
     sdc_cfg_t cfg = {};
     cfg.buffer_cfg.rx_packet_size = HCI_NRF52840_ACL_PACKET_SIZE;
     cfg.buffer_cfg.tx_packet_size = HCI_NRF52840_ACL_PACKET_SIZE;

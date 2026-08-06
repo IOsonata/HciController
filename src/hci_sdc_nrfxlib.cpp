@@ -132,6 +132,28 @@
 #define HCI_SDC_HAS_VS_KEY_HIERARCHY_ROOTS 1
 #endif
 
+/*
+ * The quality of service commands, 0xFD04 to 0xFD1F. What the controller can
+ * say about the radio that a host stack cannot see: energy on each channel,
+ * CRC errors and RSSI per connection event, and where the next anchor point
+ * falls.
+ *
+ * Four of the five need nothing but a table row. Channel survey needs
+ * sdc_support_qos_channel_survey() and 40 octets of pool, which is
+ * HCI_NRF52840_QOS_CHANNEL_SURVEY in hci_nrf52840.h. That macro and this one
+ * are separate on purpose: this one says the symbol is in the library, that
+ * one says the module is configured in. A build that clears that one and
+ * leaves this set gets a command that dispatches and is refused by SDC, which
+ * is the honest answer.
+ *
+ * These four commands report through vendor events, subevents 0x80 to 0x82.
+ * Those arrive from sdc_hci_get like any other event and the bridge forwards
+ * them unchanged, so nothing here has to be taught about them.
+ */
+#ifndef HCI_SDC_HAS_VS_QOS
+#define HCI_SDC_HAS_VS_QOS 1
+#endif
+
 static HciCmdResult_t HciSdcComplete(uint8_t Status, size_t ReturnLen)
 {
     HciCmdResult_t result = {Status, HCI_CMD_RESPONSE_COMPLETE, ReturnLen};
@@ -874,6 +896,26 @@ HCI_SDC_CMD_NR(HciSdcCmdVsZephyrReadKeyHierarchyRoots,
                sdc_hci_cmd_vs_zephyr_read_key_hierarchy_roots_return_t)
 #endif
 
+#if HCI_SDC_HAS_VS_QOS
+HCI_SDC_CMD_P(HciSdcCmdVsQosConnEventReportEnable,
+              sdc_hci_cmd_vs_qos_conn_event_report_enable,
+              sdc_hci_cmd_vs_qos_conn_event_report_enable_t, HciSdcComplete)
+HCI_SDC_CMD_P(HciSdcCmdVsQosChannelSurveyEnable,
+              sdc_hci_cmd_vs_qos_channel_survey_enable,
+              sdc_hci_cmd_vs_qos_channel_survey_enable_t, HciSdcComplete)
+HCI_SDC_CMD_PR(HciSdcCmdVsReadAverageRssi, sdc_hci_cmd_vs_read_average_rssi,
+               sdc_hci_cmd_vs_read_average_rssi_t,
+               sdc_hci_cmd_vs_read_average_rssi_return_t)
+HCI_SDC_CMD_PR(HciSdcCmdVsGetNextConnEventCounter,
+               sdc_hci_cmd_vs_get_next_conn_event_counter,
+               sdc_hci_cmd_vs_get_next_conn_event_counter_t,
+               sdc_hci_cmd_vs_get_next_conn_event_counter_return_t)
+HCI_SDC_CMD_P(HciSdcCmdVsConnAnchorPointUpdateEnable,
+              sdc_hci_cmd_vs_conn_anchor_point_update_event_report_enable,
+              sdc_hci_cmd_vs_conn_anchor_point_update_event_report_enable_t,
+              HciSdcComplete)
+#endif
+
 /* Controller and baseband. */
 #if HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT
 HCI_SDC_CMD_PR(HciSdcCmdReadAuthPayloadTimeout,
@@ -1521,6 +1563,28 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
                      HciSdcCmdVsZephyrReadKeyHierarchyRoots,
                      sdc_hci_cmd_vs_zephyr_read_key_hierarchy_roots_return_t),
 #endif
+#if HCI_SDC_HAS_VS_QOS
+    /* Quality of service. What the radio saw, rather than what the link did. */
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_VS_QOS_CONN_EVENT_REPORT_ENABLE,
+                    sizeof(sdc_hci_cmd_vs_qos_conn_event_report_enable_t),
+                    HciSdcCmdVsQosConnEventReportEnable),
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_VS_QOS_CHANNEL_SURVEY_ENABLE,
+                    sizeof(sdc_hci_cmd_vs_qos_channel_survey_enable_t),
+                    HciSdcCmdVsQosChannelSurveyEnable),
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_VS_READ_AVERAGE_RSSI,
+                     sizeof(sdc_hci_cmd_vs_read_average_rssi_t),
+                     HciSdcCmdVsReadAverageRssi,
+                     sdc_hci_cmd_vs_read_average_rssi_return_t),
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_VS_GET_NEXT_CONN_EVENT_COUNTER,
+                     sizeof(sdc_hci_cmd_vs_get_next_conn_event_counter_t),
+                     HciSdcCmdVsGetNextConnEventCounter,
+                     sdc_hci_cmd_vs_get_next_conn_event_counter_return_t),
+    HCI_SDC_ENTRY_C(
+        SDC_HCI_OPCODE_CMD_VS_CONN_ANCHOR_POINT_UPDATE_EVENT_REPORT_ENABLE,
+        sizeof(
+            sdc_hci_cmd_vs_conn_anchor_point_update_event_report_enable_t),
+        HciSdcCmdVsConnAnchorPointUpdateEnable),
+#endif
 #if HCI_SDC_HAS_VS_READ_COUNTERS
     /*
      * Answered by the routing layer rather than by SDC, so it reports what
@@ -1705,6 +1769,25 @@ static_assert(sizeof(sdc_hci_cmd_vs_zephyr_read_tx_power_return_t) == 4U,
 static_assert(
     sizeof(sdc_hci_cmd_vs_zephyr_read_key_hierarchy_roots_return_t) == 32U,
     "Zephyr Read Key Hierarchy Roots is not 32 octets");
+#endif
+#if HCI_SDC_HAS_VS_QOS
+static_assert(sizeof(sdc_hci_cmd_vs_qos_conn_event_report_enable_t) == 1U,
+              "VS QoS Conn Event Report Enable is not 1 octet");
+/* One octet of enable and a four octet interval in microseconds. */
+static_assert(sizeof(sdc_hci_cmd_vs_qos_channel_survey_enable_t) == 5U,
+              "VS QoS Channel Survey Enable is not 5 octets");
+static_assert(sizeof(sdc_hci_cmd_vs_read_average_rssi_t) == 2U,
+              "VS Read Average RSSI is not 2 octets");
+static_assert(sizeof(sdc_hci_cmd_vs_read_average_rssi_return_t) == 3U,
+              "VS Read Average RSSI return is not 3 octets");
+static_assert(sizeof(sdc_hci_cmd_vs_get_next_conn_event_counter_t) == 2U,
+              "VS Get Next Conn Event Counter is not 2 octets");
+static_assert(
+    sizeof(sdc_hci_cmd_vs_get_next_conn_event_counter_return_t) == 4U,
+    "VS Get Next Conn Event Counter return is not 4 octets");
+static_assert(
+    sizeof(sdc_hci_cmd_vs_conn_anchor_point_update_event_report_enable_t) == 1U,
+    "VS Conn Anchor Point Update Report Enable is not 1 octet");
 #endif
 #if HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_cb_read_authenticated_payload_timeout_return_t, 4U);

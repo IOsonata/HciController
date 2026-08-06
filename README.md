@@ -321,7 +321,8 @@ count grows the array that holds it rather than needing a second edit.
 | Advertising data | 255 octets | in the per-set cost |
 | Scan buffers | 4 | 1688 for four |
 | Filter accept list | 8 | 68 for eight |
-| | | **26812 total** |
+| Channel survey | on | 40 |
+| | | **26852 total** |
 
 The pool is that total plus a 512 octet margin, because sdk-nrfxlib says the
 memory macros may move between minor releases and the number that decides

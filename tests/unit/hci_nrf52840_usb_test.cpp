@@ -175,6 +175,7 @@ extern "C" void sdc_support_phy_update_peripheral(void) {}
 extern "C" void sdc_support_phy_update_central(void) {}
 extern "C" void sdc_support_direct_test_mode(void) {}
 extern "C" void sdc_support_le_privacy(void) {}
+extern "C" void sdc_support_qos_channel_survey(void) {}
 
 extern "C" void HciTaktOsWake(HciTaktOs_t *, uint32_t) {}
 

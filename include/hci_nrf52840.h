@@ -42,7 +42,7 @@ extern "C" {
  *
  *   peripheral link  2935 octets      central link  2839 octets
  *   advertising set   961 octets      scan buffers  1688 for four
- *   accept list        68 for eight
+ *   accept list        68 for eight   channel survey  40
  */
 #ifndef HCI_NRF52840_PERIPHERAL_COUNT
 #define HCI_NRF52840_PERIPHERAL_COUNT 4U
@@ -83,6 +83,28 @@ extern "C" {
 #define HCI_NRF52840_FAL_SIZE 8U
 #endif
 
+/*
+ * The Quality of Service channel survey module, which reports the measured
+ * energy on each of the forty channels. 40 octets of pool and a support call,
+ * and it is the one thing on this board that gives a view of the band without
+ * a spectrum analyser, so it is on.
+ *
+ * It costs radio time rather than only memory. sdk-nrfxlib schedules the
+ * measurements at low priority, so they lose to connections and to scanning,
+ * and a busy controller simply reports less often than the requested interval
+ * asks for. Nothing else is delayed by it. A build that wants the 40 octets
+ * back can set this to 0, and the command then answers Unknown HCI Command.
+ */
+#ifndef HCI_NRF52840_QOS_CHANNEL_SURVEY
+#define HCI_NRF52840_QOS_CHANNEL_SURVEY 1
+#endif
+
+#if HCI_NRF52840_QOS_CHANNEL_SURVEY
+#define HCI_NRF52840_SDC_MEM_QOS SDC_MEM_QOS_CHANNEL_SURVEY
+#else
+#define HCI_NRF52840_SDC_MEM_QOS 0
+#endif
+
 #define HCI_NRF52840_SDC_MEM_REQUIRED                                         \
     (SDC_MEM_PER_PERIPHERAL_LINK(HCI_NRF52840_ACL_PACKET_SIZE,                \
                                  HCI_NRF52840_ACL_PACKET_SIZE,                \
@@ -98,7 +120,7 @@ extern "C" {
      SDC_MEM_SCAN_EXT(HCI_NRF52840_SCAN_BUFFER_COUNT) +                       \
      SDC_MEM_PER_ADV_SET(HCI_NRF52840_MAX_ADV_DATA) *                         \
          HCI_NRF52840_ADV_SET_COUNT +                                         \
-     SDC_MEM_FAL(HCI_NRF52840_FAL_SIZE))
+     SDC_MEM_FAL(HCI_NRF52840_FAL_SIZE) + HCI_NRF52840_SDC_MEM_QOS)
 
 /*
  * sdc.h says the memory requirement defines "may change between minor

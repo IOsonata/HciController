@@ -59,6 +59,10 @@
 #define HCI_SDC_HAS_VS_KEY_HIERARCHY_ROOTS 1
 #endif
 
+#ifndef HCI_SDC_HAS_VS_QOS
+#define HCI_SDC_HAS_VS_QOS 1
+#endif
+
 #define EVENT_COMMAND_COMPLETE 0x0E
 #define EVENT_COMMAND_STATUS   0x0F
 
@@ -458,6 +462,31 @@ int main(void)
     ExpectComplete(
         "VS Zephyr Read Key Hierarchy Roots", 0xFC0A, zeros, 0U,
         sizeof(sdc_hci_cmd_vs_zephyr_read_key_hierarchy_roots_return_t));
+#endif
+#if HCI_SDC_HAS_VS_QOS
+    ExpectComplete("VS QoS Conn Event Report Enable", 0xFD04, zeros,
+                   sizeof(sdc_hci_cmd_vs_qos_conn_event_report_enable_t), 0U);
+    ExpectComplete("VS QoS Channel Survey Enable", 0xFD0E, zeros,
+                   sizeof(sdc_hci_cmd_vs_qos_channel_survey_enable_t), 0U);
+    ExpectComplete("VS Read Average RSSI", 0xFD11, zeros,
+                   sizeof(sdc_hci_cmd_vs_read_average_rssi_t),
+                   sizeof(sdc_hci_cmd_vs_read_average_rssi_return_t));
+    ExpectComplete("VS Get Next Conn Event Counter", 0xFD14, zeros,
+                   sizeof(sdc_hci_cmd_vs_get_next_conn_event_counter_t),
+                   sizeof(sdc_hci_cmd_vs_get_next_conn_event_counter_return_t));
+    ExpectComplete(
+        "VS Conn Anchor Point Update Enable", 0xFD1F, zeros,
+        sizeof(sdc_hci_cmd_vs_conn_anchor_point_update_event_report_enable_t),
+        0U);
+
+    /*
+     * Channel survey carries a four octet interval after the enable byte, so
+     * the enable byte on its own is the shape a host would send if it had
+     * mistaken this command for the other two enables here. Refused rather
+     * than passed on with four octets of whatever the last packet left.
+     */
+    ExpectRejected("VS QoS Channel Survey Enable, enable byte only", 0xFD0E,
+                   zeros, 1U, 0x12);
 #endif
 #if HCI_SDC_HAS_VS_READ_COUNTERS
     ExpectCompleteLocal("VS Read Counters", HCI_COUNTERS_OPCODE,
@@ -1135,6 +1164,22 @@ int main(void)
 #if HCI_SDC_HAS_VS_KEY_HIERARCHY_ROOTS
             {SDC_HCI_OPCODE_CMD_VS_ZEPHYR_READ_KEY_HIERARCHY_ROOTS, NULL,
              "vs_zephyr_read_key_hierarchy_roots"},
+#endif
+#if HCI_SDC_HAS_VS_QOS
+            /*
+             * Nordic vendor rather than Zephyr vendor, so they appear in
+             * neither bitmap. A host finds them by opcode or not at all.
+             */
+            {SDC_HCI_OPCODE_CMD_VS_QOS_CONN_EVENT_REPORT_ENABLE, NULL,
+             "vs_qos_conn_event_report_enable"},
+            {SDC_HCI_OPCODE_CMD_VS_QOS_CHANNEL_SURVEY_ENABLE, NULL,
+             "vs_qos_channel_survey_enable"},
+            {SDC_HCI_OPCODE_CMD_VS_READ_AVERAGE_RSSI, NULL,
+             "vs_read_average_rssi"},
+            {SDC_HCI_OPCODE_CMD_VS_GET_NEXT_CONN_EVENT_COUNTER, NULL,
+             "vs_get_next_conn_event_counter"},
+            {SDC_HCI_OPCODE_CMD_VS_CONN_ANCHOR_POINT_UPDATE_EVENT_REPORT_ENABLE,
+             NULL, "vs_conn_anchor_point_update_event_report_enable"},
 #endif
         };
 

@@ -646,6 +646,48 @@ uint8_t sdc_hci_cmd_sp_read_rssi(const sdc_hci_cmd_sp_read_rssi_t * a0, sdc_hci_
     return g_SdcStub.NextStatus;
 }
 
+uint8_t sdc_hci_cmd_vs_conn_anchor_point_update_event_report_enable(const sdc_hci_cmd_vs_conn_anchor_point_update_event_report_enable_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_vs_conn_anchor_point_update_event_report_enable";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_vs_get_next_conn_event_counter(const sdc_hci_cmd_vs_get_next_conn_event_counter_t * a0, sdc_hci_cmd_vs_get_next_conn_event_counter_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_vs_get_next_conn_event_counter";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_vs_get_next_conn_event_counter_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_vs_qos_channel_survey_enable(const sdc_hci_cmd_vs_qos_channel_survey_enable_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_vs_qos_channel_survey_enable";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_vs_qos_conn_event_report_enable(const sdc_hci_cmd_vs_qos_conn_event_report_enable_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_vs_qos_conn_event_report_enable";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_vs_read_average_rssi(const sdc_hci_cmd_vs_read_average_rssi_t * a0, sdc_hci_cmd_vs_read_average_rssi_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_vs_read_average_rssi";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_vs_read_average_rssi_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
 uint8_t sdc_hci_cmd_vs_transmitter_carrier_test(const sdc_hci_cmd_vs_transmitter_carrier_test_t * a0)
 {
     g_SdcStub.LastCall = "sdc_hci_cmd_vs_transmitter_carrier_test";

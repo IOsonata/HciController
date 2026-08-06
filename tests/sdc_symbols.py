@@ -50,6 +50,20 @@ GATES = [
       "sdc_hci_cmd_vs_zephyr_read_tx_power"]),
     ("HCI_SDC_HAS_VS_KEY_HIERARCHY_ROOTS",
      ["sdc_hci_cmd_vs_zephyr_read_key_hierarchy_roots"]),
+    ("HCI_SDC_HAS_VS_QOS",
+     ["sdc_hci_cmd_vs_qos_conn_event_report_enable",
+      "sdc_hci_cmd_vs_qos_channel_survey_enable",
+      "sdc_hci_cmd_vs_read_average_rssi",
+      "sdc_hci_cmd_vs_get_next_conn_event_counter",
+      "sdc_hci_cmd_vs_conn_anchor_point_update_event_report_enable"]),
+]
+
+# Not a dispatch table gate. HCI_NRF52840_QOS_CHANNEL_SURVEY in
+# include/hci_nrf52840.h decides whether the module is configured in, and it
+# needs a support function rather than a command. Checked here because a build
+# that sets it without the symbol does not link.
+SUPPORT = [
+    ("HCI_NRF52840_QOS_CHANNEL_SURVEY", ["sdc_support_qos_channel_survey"]),
 ]
 
 DEFAULT_LIB = ("../external/sdk-nrfxlib/softdevice_controller/lib/nrf52/"
@@ -83,16 +97,18 @@ def archive_symbols(path):
     return set(n.decode("ascii", "replace") for n in names if n)
 
 
-def source_defaults(path):
-    """The value each gate macro defaults to in the source."""
-    try:
-        with open(path) as handle:
-            text = handle.read()
-    except IOError:
-        return {}
+def source_defaults(paths, macros):
+    """The value each named macro defaults to, across the given sources."""
+    text = ""
+    for path in paths:
+        try:
+            with open(path) as handle:
+                text += handle.read()
+        except IOError:
+            pass
 
     found = {}
-    for macro, _ in GATES:
+    for macro in macros:
         match = re.search(r"^#define\s+%s\s+(\d+)\s*$" % macro, text,
                           re.MULTILINE)
         if match:
@@ -127,11 +143,14 @@ def main():
     print("%d symbols, %d of them HCI commands" % (len(symbols), len(commands)))
     print()
 
-    defaults = source_defaults(os.path.join(root, "src",
-                                            "hci_sdc_nrfxlib.cpp"))
+    sources = [os.path.join(root, "src", "hci_sdc_nrfxlib.cpp"),
+               os.path.join(root, "include", "hci_nrf52840.h")]
+    defaults = source_defaults(sources,
+                               [m for m, _ in GATES] +
+                               [m for m, _ in SUPPORT])
     disagreed = 0
 
-    for macro, needed in GATES:
+    for macro, needed in GATES + SUPPORT:
         if not needed:
             want = 1
             note = "needs no SDC symbol"
