@@ -284,6 +284,14 @@ static void ReadCounters(uint32_t *pCounters)
                        ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
     }
 }
+
+/* One field of it, for the cases that care about a single index. */
+static uint32_t ReadCounter(size_t Index)
+{
+    const uint8_t *p = &gLastReturn[1U + (Index * 4U)];
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) |
+           ((uint32_t)p[3] << 24);
+}
 #endif
 
 static void ExpectStatus(const char *label, uint16_t opcode,
@@ -627,6 +635,28 @@ int main(void)
     assert(gLastReturn[0] == HCI_COUNTERS_VERSION);
     printf("[ok] %-38s version %u\n", "counter block names its version",
            (unsigned)gLastReturn[0]);
+
+    {
+        /*
+         * The pool figures at 32 and 33. Nothing here has a platform layer, so
+         * they read zero, and that is the case worth pinning: a host has to be
+         * able to tell not reported from a controller that wants no memory.
+         */
+        assert(ReadCounter(32U) == 0U);
+        assert(ReadCounter(33U) == 0U);
+
+        HciCountersSetSdcMem(&gCounters, 30808U, 31320U);
+        ExpectCompleteLocal("VS Read Counters, pool reported",
+                            HCI_COUNTERS_OPCODE, zeros, 0U,
+                            HCI_COUNTERS_RETURN_LEN);
+        assert(ReadCounter(32U) == 30808U);
+        assert(ReadCounter(33U) == 31320U);
+        printf("[ok] %-38s required %u of %u\n", "pool figures reach the host",
+               (unsigned)ReadCounter(32U), (unsigned)ReadCounter(33U));
+
+        /* Left as the platform would leave them for the rest of the run. */
+        HciCountersSetSdcMem(&gCounters, 0U, 0U);
+    }
 #endif
     ExpectComplete("LE Create Connection Cancel", 0x200E, zeros, 0U, 0U);
     ExpectComplete("LE Read Filter Accept List Size", 0x200F, zeros, 0U,

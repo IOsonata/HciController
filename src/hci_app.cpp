@@ -447,6 +447,16 @@ bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType)
         return false;
     }
 
+    /*
+     * Now that sdc_cfg_set has answered, hand the two pool figures to the
+     * counter readout so a host can ask for them. On a sealed dongle the trace
+     * that carries them reaches nobody.
+     */
+    HciCountersSetSdcMem(&pApp->Counters,
+                         pApp->Target.RequiredSdcMem > 0 ?
+                             (uint32_t)pApp->Target.RequiredSdcMem : 0U,
+                         (uint32_t)pApp->Target.SdcMemCapacity);
+
     HciTaktOsOps_t runtimeOps = {};
     HciNrf52840GetTaktOsOps(&pApp->Target, &runtimeOps);
 

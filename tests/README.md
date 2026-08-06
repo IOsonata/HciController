@@ -97,6 +97,23 @@ python3 tests/hardware/hci_ble_test.py /dev/ttyACM0 counters
 `hci_counters.h`. Nothing else puts those numbers on the wire, so without it a
 running board can only be questioned with a debugger.
 
+It also reports the two SoftDevice Controller memory figures, which are not
+counters: what `sdc_cfg_set` asked for at startup and what the build reserved.
+The pool is computed from the configuration in `include/hci_nrf52840.h`, but
+`sdc.h` says the memory macros may move between minor releases, so the build
+time number can be right and the run time one larger. This is the only way to
+see the headroom on a sealed dongle, and the way to watch it shrink across an
+nrfxlib upgrade before a controller refuses to enable:
+
+```
+   SDC pool required                 30808
+   SDC pool reserved                 31320
+                                       512  headroom
+```
+
+A controller that reports zero for both has a platform layer that never filled
+them in, which is not the same as one that wanted no memory.
+
 `connect --flood N` sends N ACL packets while ignoring flow control and reports
 which counters moved. It first says how many of the N reached
 `sdc_hci_data_put` at all, because a block of refusal counters reading zero

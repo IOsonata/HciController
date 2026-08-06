@@ -87,7 +87,7 @@ OP_VS_READ_STATIC_ADDRESSES = 0xFC09
 # Vendor specific counter readout, HciController's own. See hci_counters.h.
 # Order is fixed there; names are appended, never renumbered.
 OP_VS_READ_COUNTERS = 0xFFF0
-COUNTER_VERSION = 3
+COUNTER_VERSION = 4
 COUNTER_NAMES = [
     "commands accepted",
     "unknown opcodes",
@@ -122,6 +122,14 @@ COUNTER_NAMES = [
     "host over its ACL credits",
     "link table overflow",
 ]
+
+# Indices 32 and 33 are not counters. They are the memory the SoftDevice
+# Controller asked for at startup and the memory the build reserved, and they
+# are in this block because a sealed dongle has no console to trace them to.
+# Kept out of COUNTER_NAMES so nothing treats them as events to be summed or
+# differenced.
+POOL_FIRST_INDEX = 32
+POOL_NAMES = ["SDC pool required", "SDC pool reserved"]
 
 CID_ATT = 0x0004
 CID_SIGNALING = 0x0005
@@ -368,11 +376,12 @@ class Hci:
             print("Counter block version %d, this script reads up to %d. The "
                   "counters it knows are still in the same places."
                   % (version, COUNTER_VERSION))
+        # Read everything present, not just the names this script knows, so
+        # the pool figures past the end of COUNTER_NAMES come back too.
         values = []
-        for i in range(len(COUNTER_NAMES)):
+        available = (len(data) - 1) // 4
+        for i in range(available):
             start = 1 + i * 4
-            if start + 4 > len(data):
-                break
             values.append(struct.unpack("<I", data[start:start + 4])[0])
         return values
 
@@ -1261,7 +1270,7 @@ def print_counters(values, baseline=None):
     if values is None:
         print("This controller does not carry the counter readout.")
         return
-    width = max(len(n) for n in COUNTER_NAMES)
+    width = max(len(n) for n in COUNTER_NAMES + POOL_NAMES)
     for i, name in enumerate(COUNTER_NAMES):
         if i >= len(values):
             break
@@ -1272,8 +1281,46 @@ def print_counters(values, baseline=None):
             print("   %-*s %10d  (+%d)" % (width, name, values[i], delta))
         elif values[i]:
             print("   %-*s %10d" % (width, name, values[i]))
-    if baseline is None and not any(values):
+
+    # "all zero" is about the counters, so the pool figures are excluded from
+    # it. They are always set on a controller that started.
+    counted = values[:len(COUNTER_NAMES)]
+    if baseline is None and not any(counted):
         print("   all zero")
+
+    print_pool(values)
+
+
+def print_pool(values):
+    """
+    The two memory figures, printed apart from the counters because they are
+    not events. Nothing to add up, and a delta between two readings of them
+    would always be zero.
+    """
+    end = POOL_FIRST_INDEX + len(POOL_NAMES)
+    if len(values) < end:
+        return
+
+    required, reserved = values[POOL_FIRST_INDEX:end]
+    if required == 0 and reserved == 0:
+        # A controller whose platform layer never filled them in. Says nothing
+        # about how much memory it wanted.
+        return
+
+    width = max(len(n) for n in COUNTER_NAMES + POOL_NAMES)
+    print()
+    for name, value in zip(POOL_NAMES, (required, reserved)):
+        print("   %-*s %10d" % (width, name, value))
+
+    if reserved >= required:
+        print("   %-*s %10d  headroom" % (width, "", reserved - required))
+    else:
+        # Cannot happen on a controller that started, since the firmware
+        # refuses to enable when the pool is short. Worth saying rather than
+        # printing a negative number, in case a future build reports these
+        # before the check.
+        print("   the controller asked for more than the build reserved, "
+              "which should have stopped it starting.")
 
 
 def cmd_counters(hci, args):
