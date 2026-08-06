@@ -159,6 +159,7 @@ void HciSdcResetFlowControl(HciSdc_t *pSdc)
      * connection handles the same section has already made meaningless.
      */
     pSdc->AclTrackEntries = 0U;
+    pSdc->AclOutstandingTotal = 0U;
     pSdc->CreditEntries = 0U;
 }
 
@@ -198,9 +199,13 @@ static int HciSdcAclSlot(HciSdc_t *pSdc, uint16_t Handle, bool Create)
 
 #if HCI_SDC_ENFORCE_ACL_CREDITS
 /*
- * True when the host already has as many packets in flight on this link as it
- * was told it could. Unknown limit or an untracked link answers false, so the
- * packet goes through: this refuses only what it can prove is over.
+ * True when the host already has as many packets in flight, across every link
+ * together, as it was told it could. Unknown limit answers false, and so does
+ * a link the table cannot hold, because a packet that will not be counted must
+ * not be refused either: this refuses only what it can prove is over.
+ *
+ * The slot is taken here rather than after the decision so that the answer and
+ * the counting agree about which links are tracked.
  */
 static bool HciSdcAclAtLimit(HciSdc_t *pSdc, const uint8_t *pPacket)
 {
@@ -215,7 +220,7 @@ static bool HciSdcAclAtLimit(HciSdc_t *pSdc, const uint8_t *pPacket)
         return false;
     }
 
-    return pSdc->AclOutstanding[slot] >= pSdc->AclLimit;
+    return pSdc->AclOutstandingTotal >= pSdc->AclLimit;
 }
 #endif
 
@@ -225,6 +230,7 @@ static void HciSdcAclPutTracked(HciSdc_t *pSdc, const uint8_t *pPacket)
     if (slot >= 0)
     {
         pSdc->AclOutstanding[slot]++;
+        pSdc->AclOutstandingTotal++;
     }
 }
 
@@ -234,6 +240,17 @@ static void HciSdcAclForget(HciSdc_t *pSdc, uint16_t Handle)
     if (slot < 0)
     {
         return;
+    }
+
+    /* The link takes its share of the total with it. */
+    if (pSdc->AclOutstandingTotal > pSdc->AclOutstanding[slot])
+    {
+        pSdc->AclOutstandingTotal =
+            (uint16_t)(pSdc->AclOutstandingTotal - pSdc->AclOutstanding[slot]);
+    }
+    else
+    {
+        pSdc->AclOutstandingTotal = 0U;
     }
 
     const uint8_t last = (uint8_t)(pSdc->AclTrackEntries - 1U);
@@ -280,15 +297,19 @@ static void HciSdcAclTrackEvent(HciSdc_t *pSdc,
                 continue;
             }
 
-            if (pSdc->AclOutstanding[slot] > done)
-            {
-                pSdc->AclOutstanding[slot] =
-                    (uint16_t)(pSdc->AclOutstanding[slot] - done);
-            }
-            else
-            {
-                pSdc->AclOutstanding[slot] = 0U;
-            }
+            /*
+             * Take off what the link actually had, not what the event claims,
+             * so a count larger than anything outstanding cannot drive the
+             * total below the sum of the other links.
+             */
+            const uint16_t freed = pSdc->AclOutstanding[slot] < done
+                                       ? pSdc->AclOutstanding[slot]
+                                       : done;
+
+            pSdc->AclOutstanding[slot] =
+                (uint16_t)(pSdc->AclOutstanding[slot] - freed);
+            pSdc->AclOutstandingTotal =
+                (uint16_t)(pSdc->AclOutstandingTotal - freed);
         }
         return;
     }

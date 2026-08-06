@@ -66,8 +66,15 @@ typedef struct {
 /* Vol 4 Part E 7.7.5. */
 #define HCI_SDC_EVENT_DISCONNECTION_COMPLETE 0x05U
 
-/* Links whose outstanding ACL packets are tracked at once. */
-#define HCI_SDC_ACL_TRACK_HANDLES 4U
+/*
+ * Links whose outstanding ACL packets are tracked at once. This has to be at
+ * least the number of connections the controller is configured for, because a
+ * link the table has no room for is not counted, and what is not counted
+ * cannot be enforced or handed back.
+ */
+#ifndef HCI_SDC_ACL_TRACK_HANDLES
+#define HCI_SDC_ACL_TRACK_HANDLES 8U
+#endif
 
 /*
  * Hold the host to the buffer count the controller advertised in LE Read
@@ -139,15 +146,30 @@ typedef struct {
 
     /*
      * What the host was told in LE Read Buffer Size, and how many packets it
-     * has in flight per link against that. Zero means the host has not asked
-     * yet, and nothing is enforced until it has, so the limit can never be a
-     * guess. Enforcement also stands down for a link the table has no room
-     * for: refusing traffic a host is entitled to send would be worse than the
-     * loss this guards against.
+     * has in flight against that. Zero means the host has not asked yet, and
+     * nothing is enforced until it has, so the limit can never be a guess.
+     * Enforcement also stands down for a link the table has no room for:
+     * refusing traffic a host is entitled to send would be worse than the loss
+     * this guards against.
+     *
+     * The budget is a total, not an allowance per link. Vol 4 Part E 4.1.1
+     * gives the host one pool of buffers to spend across every connection it
+     * has, and LE Read Buffer Size reports that one number. Testing each link
+     * against it separately let N links hold N times what the controller owns,
+     * which is the overrun this exists to refuse. It was invisible while the
+     * controller was built for a single link, where the two counts are the
+     * same number.
+     *
+     * So AclOutstandingTotal is what the limit is tested against, and the per
+     * link counts stay because the bookkeeping needs them: Number Of Completed
+     * Packets names a handle, and a disconnection takes that link's share of
+     * the total with it. The invariant is that the total is the sum of the
+     * entries, and every path that moves one moves the other.
      */
     uint16_t AclLimit;
     uint16_t AclTrackHandle[HCI_SDC_ACL_TRACK_HANDLES];
     uint16_t AclOutstanding[HCI_SDC_ACL_TRACK_HANDLES];
+    uint16_t AclOutstandingTotal;
     uint8_t AclTrackEntries;
     uint32_t AclCreditOverrunCount;
     uint32_t AclTrackOverflowCount;

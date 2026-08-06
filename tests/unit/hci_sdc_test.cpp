@@ -410,9 +410,15 @@ int main()
         printf("[ok] no limit is enforced before the host is told one\n");
 
 #if HCI_SDC_ENFORCE_ACL_CREDITS
-        /* Now it has. Four more fit, the fifth does not. */
+        /*
+         * Now it has. Four more fit, the fifth does not.
+         *
+         * The reset clears what the unenforced phase above left in flight.
+         * Reaching into AclOutstanding to do it would leave the running total
+         * saying otherwise, and the guard reads the total.
+         */
         HciSdcSetAclLimit(&limit, 4U);
-        limit.AclOutstanding[0] = 0U;
+        HciSdcResetFlowControl(&limit);
 
         for (unsigned i = 0U; i < 4U; i++)
         {
@@ -534,6 +540,94 @@ int main()
         }
         assert(limit.AclPutCount == putAfterReset + 4U);
         printf("[ok] a reset gives the link its allowance back\n");
+
+        /*
+         * The budget is one pool spread across every link, not an allowance
+         * each. Vol 4 Part E 4.1.1 gives the host one buffer count and LE Read
+         * Buffer Size reports that one number, so two links sharing a limit of
+         * four get four packets between them and not four each.
+         *
+         * This is what the guard used to get wrong. Testing each link against
+         * the whole number let N links hold N times what the controller owns,
+         * and it was invisible while the build allowed only one connection.
+         */
+        HciSdcResetFlowControl(&limit);
+        const uint8_t aclSix[] = {0x06U, 0x00U, 0x01U, 0x00U, 0xDDU};
+        const uint32_t putBeforeShare = limit.AclPutCount;
+        const uint32_t overrunBeforeShare = limit.AclCreditOverrunCount;
+
+        for (unsigned i = 0U; i < 2U; i++)
+        {
+            assert(ops5->Put(ops5->pContext, HCI_H4_PACKET_ACL, aclFive,
+                             sizeof(aclFive)));
+            assert(ops5->Put(ops5->pContext, HCI_H4_PACKET_ACL, aclSix,
+                             sizeof(aclSix)));
+        }
+        assert(limit.AclPutCount == putBeforeShare + 4U);
+        assert(limit.AclCreditOverrunCount == overrunBeforeShare);
+
+        /* The pool is spent. Neither link may send, however little it sent. */
+        assert(ops5->Put(ops5->pContext, HCI_H4_PACKET_ACL, aclFive,
+                         sizeof(aclFive)));
+        assert(ops5->Put(ops5->pContext, HCI_H4_PACKET_ACL, aclSix,
+                         sizeof(aclSix)));
+        assert(limit.AclPutCount == putBeforeShare + 4U);
+        assert(limit.AclCreditOverrunCount == overrunBeforeShare + 2U);
+        printf("[ok] two links share one budget rather than getting one "
+               "each\n");
+
+        /*
+         * Drain the credits the two refusals owe. They are built ahead of the
+         * controller queue, so leaving them here would mean the next Get hands
+         * back one of those instead of the event being injected below.
+         */
+        assert(ops5->Get(ops5->pContext, &limitType, limitOut,
+                         sizeof(limitOut), &limitLen) ==
+               HCI_CONTROLLER_GET_PACKET);
+        assert(limitOut[0] == HCI_SDC_EVENT_NUM_COMPLETED_PACKETS);
+        assert(limitOut[2] == 2U);
+
+        /* What one link returns is spendable by the other. */
+        const uint8_t freedOne[] = {HCI_SDC_EVENT_NUM_COMPLETED_PACKETS, 5U,
+                                    1U, 0x05U, 0x00U, 0x02U, 0x00U};
+        backend.GetResult = 0;
+        backend.GetType = HCI_SDC_MSG_TYPE_EVENT;
+        memcpy(backend.GetPacket, freedOne, sizeof(freedOne));
+        assert(ops5->Get(ops5->pContext, &limitType, limitOut,
+                         sizeof(limitOut), &limitLen) ==
+               HCI_CONTROLLER_GET_PACKET);
+        backend.GetResult = HCI_SDC_RETRY_ERROR;
+
+        for (unsigned i = 0U; i < 2U; i++)
+        {
+            assert(ops5->Put(ops5->pContext, HCI_H4_PACKET_ACL, aclSix,
+                             sizeof(aclSix)));
+        }
+        assert(limit.AclPutCount == putBeforeShare + 6U);
+        assert(limit.AclCreditOverrunCount == overrunBeforeShare + 2U);
+        printf("[ok] a completion on one link frees the pool for the other\n");
+
+        /*
+         * A disconnection takes that link's share of the total with it and
+         * nobody else's. Link six holds all four now, so dropping link five,
+         * which holds none, must not hand anything back.
+         */
+        const uint8_t goneFive[] = {HCI_SDC_EVENT_DISCONNECTION_COMPLETE, 4U,
+                                    0x00U, 0x05U, 0x00U, 0x13U};
+        backend.GetResult = 0;
+        backend.GetType = HCI_SDC_MSG_TYPE_EVENT;
+        memcpy(backend.GetPacket, goneFive, sizeof(goneFive));
+        assert(ops5->Get(ops5->pContext, &limitType, limitOut,
+                         sizeof(limitOut), &limitLen) ==
+               HCI_CONTROLLER_GET_PACKET);
+        backend.GetResult = HCI_SDC_RETRY_ERROR;
+
+        const uint32_t overrunBeforeGone = limit.AclCreditOverrunCount;
+        assert(ops5->Put(ops5->pContext, HCI_H4_PACKET_ACL, aclSix,
+                         sizeof(aclSix)));
+        assert(limit.AclPutCount == putBeforeShare + 6U);
+        assert(limit.AclCreditOverrunCount == overrunBeforeGone + 1U);
+        printf("[ok] a disconnection returns only what that link held\n");
 #else
         printf("[ok] credit enforcement is built out, nothing to check\n");
 #endif
