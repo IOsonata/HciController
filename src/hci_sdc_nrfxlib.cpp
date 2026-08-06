@@ -268,6 +268,15 @@ static HciCmdResult_t HciSdcCmdReadSupportedCommands(void *,
     supported.params.hci_le_set_extended_scan_enable = 1U;
     supported.params.hci_le_extended_create_connection = 1U;
 
+    supported.params.hci_le_add_device_to_resolving_list = 1U;
+    supported.params.hci_le_remove_device_from_resolving_list = 1U;
+    supported.params.hci_le_clear_resolving_list = 1U;
+    supported.params.hci_le_read_resolving_list_size = 1U;
+    supported.params.hci_le_set_address_resolution_enable = 1U;
+    supported.params.hci_le_set_resolvable_private_address_timeout = 1U;
+    supported.params.hci_le_set_privacy_mode = 1U;
+    supported.params.hci_le_set_data_related_address_changes = 1U;
+
     memcpy(pReturn, supported.raw, sizeof(supported.raw));
     return HciSdcComplete(HCI_STATUS_SUCCESS, sizeof(supported.raw));
 }
@@ -743,6 +752,44 @@ HCI_SDC_CMD_P(HciSdcCmdLeRemoveFromAcceptList,
               sdc_hci_cmd_le_remove_device_from_filter_accept_list_t,
               HciSdcComplete)
 
+/*
+ * Privacy and the resolving list.
+ *
+ * The controller resolves a peer's resolvable private address against the
+ * identity resolving keys held here, so a bonded peer that reconnects under a
+ * new address is recognised as itself. Without it the host sees a stranger
+ * every time, which is most of what a device does in the field: phones
+ * advertise and connect with resolvable addresses as a matter of course.
+ *
+ * The list is the controller's, not the host's, so every entry has to be put
+ * there over HCI. Vol 4 Part E 7.8.38 to 7.8.45 and 7.8.77.
+ */
+HCI_SDC_CMD_P(HciSdcCmdLeAddToResolvingList,
+              sdc_hci_cmd_le_add_device_to_resolving_list,
+              sdc_hci_cmd_le_add_device_to_resolving_list_t, HciSdcComplete)
+HCI_SDC_CMD_P(HciSdcCmdLeRemoveFromResolvingList,
+              sdc_hci_cmd_le_remove_device_from_resolving_list,
+              sdc_hci_cmd_le_remove_device_from_resolving_list_t,
+              HciSdcComplete)
+HCI_SDC_CMD_N(HciSdcCmdLeClearResolvingList,
+              sdc_hci_cmd_le_clear_resolving_list)
+HCI_SDC_CMD_NR(HciSdcCmdLeReadResolvingListSize,
+               sdc_hci_cmd_le_read_resolving_list_size,
+               sdc_hci_cmd_le_read_resolving_list_size_return_t)
+HCI_SDC_CMD_P(HciSdcCmdLeSetAddressResolutionEnable,
+              sdc_hci_cmd_le_set_address_resolution_enable,
+              sdc_hci_cmd_le_set_address_resolution_enable_t, HciSdcComplete)
+HCI_SDC_CMD_P(HciSdcCmdLeSetRpaTimeout,
+              sdc_hci_cmd_le_set_resolvable_private_address_timeout,
+              sdc_hci_cmd_le_set_resolvable_private_address_timeout_t,
+              HciSdcComplete)
+HCI_SDC_CMD_P(HciSdcCmdLeSetPrivacyMode, sdc_hci_cmd_le_set_privacy_mode,
+              sdc_hci_cmd_le_set_privacy_mode_t, HciSdcComplete)
+HCI_SDC_CMD_P(HciSdcCmdLeSetDataRelatedAddressChanges,
+              sdc_hci_cmd_le_set_data_related_address_changes,
+              sdc_hci_cmd_le_set_data_related_address_changes_t,
+              HciSdcComplete)
+
 /* Security. */
 HCI_SDC_CMD_PR(HciSdcCmdLeEncrypt, sdc_hci_cmd_le_encrypt,
                sdc_hci_cmd_le_encrypt_t, sdc_hci_cmd_le_encrypt_return_t)
@@ -971,6 +1018,32 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
         sizeof(sdc_hci_cmd_le_remove_device_from_filter_accept_list_t),
         HciSdcCmdLeRemoveFromAcceptList),
 
+    /* Privacy and the resolving list. */
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_ADD_DEVICE_TO_RESOLVING_LIST,
+                    sizeof(sdc_hci_cmd_le_add_device_to_resolving_list_t),
+                    HciSdcCmdLeAddToResolvingList),
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_REMOVE_DEVICE_FROM_RESOLVING_LIST,
+                    sizeof(sdc_hci_cmd_le_remove_device_from_resolving_list_t),
+                    HciSdcCmdLeRemoveFromResolvingList),
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_CLEAR_RESOLVING_LIST, 0U,
+                    HciSdcCmdLeClearResolvingList),
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_READ_RESOLVING_LIST_SIZE, 0U,
+                     HciSdcCmdLeReadResolvingListSize,
+                     sdc_hci_cmd_le_read_resolving_list_size_return_t),
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_ADDRESS_RESOLUTION_ENABLE,
+                    sizeof(sdc_hci_cmd_le_set_address_resolution_enable_t),
+                    HciSdcCmdLeSetAddressResolutionEnable),
+    HCI_SDC_ENTRY_C(
+        SDC_HCI_OPCODE_CMD_LE_SET_RESOLVABLE_PRIVATE_ADDRESS_TIMEOUT,
+        sizeof(sdc_hci_cmd_le_set_resolvable_private_address_timeout_t),
+        HciSdcCmdLeSetRpaTimeout),
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_PRIVACY_MODE,
+                    sizeof(sdc_hci_cmd_le_set_privacy_mode_t),
+                    HciSdcCmdLeSetPrivacyMode),
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_DATA_RELATED_ADDRESS_CHANGES,
+                    sizeof(sdc_hci_cmd_le_set_data_related_address_changes_t),
+                    HciSdcCmdLeSetDataRelatedAddressChanges),
+
     /* Security. */
     HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_ENCRYPT,
                      sizeof(sdc_hci_cmd_le_encrypt_t), HciSdcCmdLeEncrypt,
@@ -1127,6 +1200,18 @@ HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_scan_enable_t, 2U);               /* 7.8.11 
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_create_conn_t, 25U);                  /* 7.8.12 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_add_device_to_filter_accept_list_t, 7U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_remove_device_from_filter_accept_list_t, 7U);
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_add_device_to_resolving_list_t, 39U); /* 7.8.38 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_remove_device_from_resolving_list_t,
+                 7U);                                                 /* 7.8.39 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_resolving_list_size_return_t,
+                 1U);                                                 /* 7.8.41 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_address_resolution_enable_t,
+                 1U);                                                 /* 7.8.44 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_resolvable_private_address_timeout_t,
+                 2U);                                                 /* 7.8.45 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_privacy_mode_t, 8U);              /* 7.8.77 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_data_related_address_changes_t,
+                 2U);                                                /* 7.8.122 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_conn_update_t, 14U);                  /* 7.8.18 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_channel_map_t, 2U);              /* 7.8.20 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_remote_features_t, 2U);          /* 7.8.21 */

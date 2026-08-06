@@ -399,6 +399,40 @@ int main(void)
                    sizeof(sdc_hci_cmd_le_set_ext_scan_enable_t), 0U);
 
     /*
+     * Privacy and the resolving list. Add Device To Resolving List carries two
+     * sixteen octet keys and is now the longest fixed length command the table
+     * accepts, at 39, so it is the one that proves the parameter path is not
+     * quietly bounded somewhere short of what the specification allows.
+     */
+    ExpectComplete("LE Add Device To Resolving List", 0x2027, zeros,
+                   sizeof(sdc_hci_cmd_le_add_device_to_resolving_list_t), 0U);
+    ExpectComplete("LE Remove Device From Resolving List", 0x2028, zeros,
+                   sizeof(sdc_hci_cmd_le_remove_device_from_resolving_list_t),
+                   0U);
+    ExpectComplete("LE Clear Resolving List", 0x2029, zeros, 0U, 0U);
+    ExpectComplete("LE Read Resolving List Size", 0x202A, zeros, 0U,
+                   sizeof(sdc_hci_cmd_le_read_resolving_list_size_return_t));
+    ExpectComplete("LE Set Address Resolution Enable", 0x202D, zeros,
+                   sizeof(sdc_hci_cmd_le_set_address_resolution_enable_t), 0U);
+    ExpectComplete(
+        "LE Set RPA Timeout", 0x202E, zeros,
+        sizeof(sdc_hci_cmd_le_set_resolvable_private_address_timeout_t), 0U);
+    ExpectComplete("LE Set Privacy Mode", 0x204E, zeros,
+                   sizeof(sdc_hci_cmd_le_set_privacy_mode_t), 0U);
+    ExpectComplete("LE Set Data Related Address Changes", 0x207C, zeros,
+                   sizeof(sdc_hci_cmd_le_set_data_related_address_changes_t),
+                   0U);
+
+    /*
+     * One short of the keys is a host that has mistaken the layout, and the
+     * controller has no way to tell which sixteen octets it meant. Refused
+     * rather than passed to SDC with whatever followed in the buffer.
+     */
+    ExpectRejected("LE Add Device To Resolving List, one short", 0x2027, zeros,
+                   sizeof(sdc_hci_cmd_le_add_device_to_resolving_list_t) - 1U,
+                   0x12);
+
+    /*
      * Variable length commands with an all zero body declare an empty array,
      * so the exact length is the fixed part on its own. Anything longer is a
      * host that disagrees with itself, Vol 4 Part E 5.4.1.
@@ -820,6 +854,25 @@ int main(void)
                          hci_le_set_extended_scan_enable),
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_EXT_CREATE_CONN,
                          hci_le_extended_create_connection),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_ADD_DEVICE_TO_RESOLVING_LIST,
+                         hci_le_add_device_to_resolving_list),
+            BITMAP_ENTRY(
+                SDC_HCI_OPCODE_CMD_LE_REMOVE_DEVICE_FROM_RESOLVING_LIST,
+                hci_le_remove_device_from_resolving_list),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_CLEAR_RESOLVING_LIST,
+                         hci_le_clear_resolving_list),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_READ_RESOLVING_LIST_SIZE,
+                         hci_le_read_resolving_list_size),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_ADDRESS_RESOLUTION_ENABLE,
+                         hci_le_set_address_resolution_enable),
+            BITMAP_ENTRY(
+                SDC_HCI_OPCODE_CMD_LE_SET_RESOLVABLE_PRIVATE_ADDRESS_TIMEOUT,
+                hci_le_set_resolvable_private_address_timeout),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_PRIVACY_MODE,
+                         hci_le_set_privacy_mode),
+            BITMAP_ENTRY(
+                SDC_HCI_OPCODE_CMD_LE_SET_DATA_RELATED_ADDRESS_CHANGES,
+                hci_le_set_data_related_address_changes),
         };
 
 #undef BITMAP_ENTRY

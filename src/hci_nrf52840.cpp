@@ -594,6 +594,15 @@ static bool HciNrf52840SdcInit(HciNrf52840_t *pTarget)
     sdc_support_phy_update_central();
     sdc_support_direct_test_mode();
 
+    /*
+     * Address resolution in the controller. Without it the resolving list
+     * commands are rejected and a bonded peer arriving under a new resolvable
+     * private address is a stranger, which is what a phone looks like on every
+     * reconnection. Must be called before sdc_cfg_set and sdc_enable, which is
+     * why it sits here with the rest.
+     */
+    sdc_support_le_privacy();
+
     sdc_cfg_t cfg = {};
     cfg.buffer_cfg.rx_packet_size = HCI_NRF52840_ACL_PACKET_SIZE;
     cfg.buffer_cfg.tx_packet_size = HCI_NRF52840_ACL_PACKET_SIZE;
