@@ -93,6 +93,16 @@ arrived. Once that is established it distinguishes the retry path firing, the
 controller refusing with some other error, and the controller taking every
 packet.
 
+`sdc_symbols.py` reads a SoftDevice Controller archive and says which of the
+optional dispatch table rows its library actually defines, so the macros in
+`src/hci_sdc_nrfxlib.cpp` are set from evidence rather than from assumption. It
+parses the archive symbol index directly and needs no cross toolchain.
+
+```sh
+python3 tests/sdc_symbols.py
+python3 tests/sdc_symbols.py /path/to/libsoftdevice_controller_multirole.a
+```
+
 `fake_controller.py` is a controller simulator on a pty. It answers the same
 opcodes the firmware does and can simulate a connection, so the two tools above
 can be exercised and debugged with no board attached.

@@ -484,6 +484,56 @@ int main()
         assert(limit.AclPutCount == 20U);
         assert(limit.AclCreditOverrunCount == 1U);
         printf("[ok] a disconnection clears what the link had in flight\n");
+
+        /*
+         * Fill the link again so there is something to lose, then report a
+         * Disconnection Complete with a non zero status. Vol 4 Part E 7.7.5
+         * makes that a disconnection which did not happen, so the link is
+         * still up and what is in flight on it is still in flight. Clearing
+         * the count there would hand the host a whole fresh allowance on top
+         * of packets the controller has not returned yet.
+         */
+        for (unsigned i = 0U; i < 4U; i++)
+        {
+            (void)ops5->Put(ops5->pContext, HCI_H4_PACKET_ACL, aclFive,
+                            sizeof(aclFive));
+        }
+
+        const uint8_t failed[] = {HCI_SDC_EVENT_DISCONNECTION_COMPLETE, 4U,
+                                  0x0CU, 0x05U, 0x00U, 0x13U};
+        backend.GetResult = 0;
+        backend.GetType = HCI_SDC_MSG_TYPE_EVENT;
+        memcpy(backend.GetPacket, failed, sizeof(failed));
+        assert(ops5->Get(ops5->pContext, &limitType, limitOut,
+                         sizeof(limitOut), &limitLen) ==
+               HCI_CONTROLLER_GET_PACKET);
+        backend.GetResult = HCI_SDC_RETRY_ERROR;
+
+        const uint32_t putAfterFailed = limit.AclPutCount;
+        const uint32_t overrunAfterFailed = limit.AclCreditOverrunCount;
+        for (unsigned i = 0U; i < 4U; i++)
+        {
+            assert(ops5->Put(ops5->pContext, HCI_H4_PACKET_ACL, aclFive,
+                             sizeof(aclFive)));
+        }
+        assert(limit.AclPutCount == putAfterFailed);
+        assert(limit.AclCreditOverrunCount == overrunAfterFailed + 4U);
+        printf("[ok] a failed disconnection leaves the count alone\n");
+
+        /*
+         * HCI_Reset drops every connection and reports none of them, Vol 4
+         * Part E 7.3.2, so nothing else clears this and a handle handed out
+         * again after a reset would inherit the stale count and stay stalled.
+         */
+        HciSdcResetFlowControl(&limit);
+        const uint32_t putAfterReset = limit.AclPutCount;
+        for (unsigned i = 0U; i < 4U; i++)
+        {
+            assert(ops5->Put(ops5->pContext, HCI_H4_PACKET_ACL, aclFive,
+                             sizeof(aclFive)));
+        }
+        assert(limit.AclPutCount == putAfterReset + 4U);
+        printf("[ok] a reset gives the link its allowance back\n");
 #else
         printf("[ok] credit enforcement is built out, nothing to check\n");
 #endif

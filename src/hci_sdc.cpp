@@ -140,6 +140,28 @@ void HciSdcSetAclLimit(HciSdc_t *pSdc, uint16_t Limit)
     }
 }
 
+void HciSdcResetFlowControl(HciSdc_t *pSdc)
+{
+    if (pSdc == NULL)
+    {
+        return;
+    }
+
+    /*
+     * Vol 4 Part E 7.3.2 puts the link layer in standby and drops every
+     * connection, and no event is reported for them, so no Disconnection
+     * Complete arrives to clear this the usual way. Left alone, a handle the
+     * controller hands out again after a reset inherits the old in flight
+     * count and is throttled, or stalled outright once it reads as full, for
+     * the life of the board.
+     *
+     * The credits owed go with it. Emitting them after a reset would name
+     * connection handles the same section has already made meaningless.
+     */
+    pSdc->AclTrackEntries = 0U;
+    pSdc->CreditEntries = 0U;
+}
+
 static uint16_t HciSdcHandleOf(const uint8_t *pPacket)
 {
     return (uint16_t)(((uint16_t)pPacket[0] |
@@ -273,6 +295,19 @@ static void HciSdcAclTrackEvent(HciSdc_t *pSdc,
 
     if (pEvent[0] == HCI_SDC_EVENT_DISCONNECTION_COMPLETE && EventLen >= 5U)
     {
+        /*
+         * Only a successful one. Vol 4 Part E 7.7.5 gives the status octet the
+         * meaning that a non zero value is a disconnection that did not
+         * happen, so the handle is still live and what is in flight on it is
+         * still in flight. Forgetting it there hands the host a fresh full
+         * allowance on top of the packets the controller has not returned yet,
+         * which is the overrun this tracking exists to refuse.
+         */
+        if (pEvent[2] != HCI_STATUS_SUCCESS)
+        {
+            return;
+        }
+
         const uint16_t handle =
             (uint16_t)(((uint16_t)pEvent[3] |
                         ((uint16_t)pEvent[4] << 8)) & 0x0FFFU);

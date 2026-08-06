@@ -129,13 +129,31 @@ static HciCmdResult_t HciSdcCmdSetEventMask(void *,
     return HciSdcComplete(sdc_hci_cmd_cb_set_event_mask(&params), 0U);
 }
 
-static HciCmdResult_t HciSdcCmdReset(void *,
+static HciCmdResult_t HciSdcCmdReset(void *pContext,
                                      const uint8_t *,
                                      size_t,
                                      uint8_t *,
                                      size_t)
 {
-    return HciSdcComplete(sdc_hci_cmd_cb_reset(), 0U);
+    const uint8_t status = sdc_hci_cmd_cb_reset();
+
+    /*
+     * Vol 4 Part E 7.3.2 puts the link layer in standby and drops every
+     * connection, reporting none of them. So the routing layer's per link
+     * accounting has to be cleared here or nothing clears it, and a handle the
+     * controller hands out again after the reset inherits the old in flight
+     * count and is throttled or stalled on a link that is actually empty.
+     */
+    if (status == HCI_STATUS_SUCCESS)
+    {
+        HciCounters_t *pCounters = static_cast<HciCounters_t *>(pContext);
+        if (pCounters != NULL)
+        {
+            HciSdcResetFlowControl(pCounters->pSdc);
+        }
+    }
+
+    return HciSdcComplete(status, 0U);
 }
 
 static HciCmdResult_t HciSdcCmdReadLocalVersion(void *,
@@ -1220,11 +1238,35 @@ bool HciSdcNrfxlibInit(HciSdc_t *pSdc,
      * other handler in the table ignores it and talks to SDC through file
      * scope entry points.
      */
-    return HciSdcInit(pSdc,
-                      &ops,
-                      s_HciSdcCommands,
-                      sizeof(s_HciSdcCommands) / sizeof(s_HciSdcCommands[0]),
-                      pCounters,
-                      pCommandEvent,
-                      CommandEventCapacity);
+    if (!HciSdcInit(pSdc,
+                    &ops,
+                    s_HciSdcCommands,
+                    sizeof(s_HciSdcCommands) / sizeof(s_HciSdcCommands[0]),
+                    pCounters,
+                    pCommandEvent,
+                    CommandEventCapacity))
+    {
+        return false;
+    }
+
+    return true;
+}
+
+/*
+ * Say the controller is ready with a No Operation Command Complete.
+ *
+ * Whether a board needs this is a board fact, and this file cannot see board.h,
+ * so the caller decides. It used to be a macro tested here, which meant the
+ * only board that sets it got an image with the call compiled out and nothing
+ * to say so.
+ *
+ * Call it after init and before the runtime thread starts, which is where the
+ * dispatcher is empty and no command can have arrived.
+ */
+void HciSdcNrfxlibQueueStartupNop(HciSdc_t *pSdc)
+{
+    if (pSdc != NULL)
+    {
+        HciCmdDispatchQueueNop(&pSdc->Commands);
+    }
 }

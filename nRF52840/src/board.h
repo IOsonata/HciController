@@ -69,10 +69,17 @@
  *
  * Plain integers rather than an enum because main.cpp tests the selection with
  * #if, which does not see enumerators.
+ *
+ * None of them is zero, and that is deliberate. The preprocessor reads an
+ * identifier it does not know as 0, so with an AUTO of 0 a misspelt
+ * -DHCI_HOST_SELECT=HCI_HOST_SELECT_UARTT compiled clean and quietly gave the
+ * VBUS reading image, overriding the board that had asked for UART. Starting
+ * at 1 leaves 0 meaning nothing, so a misspelling matches no case at all and
+ * main.cpp refuses it.
  */
-#define HCI_HOST_SELECT_AUTO	0
-#define HCI_HOST_SELECT_USB		1
-#define HCI_HOST_SELECT_UART	2
+#define HCI_HOST_SELECT_AUTO	1
+#define HCI_HOST_SELECT_USB		2
+#define HCI_HOST_SELECT_UART	3
 
 #if BOARD == UDG_NRF52840
 

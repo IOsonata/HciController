@@ -271,6 +271,35 @@ int main(void)
     gOps = HciSdcGetControllerOps(&gSdc);
     assert(gOps != NULL);
 
+    /*
+     * The controller announces itself before it answers anything, so the very
+     * first event out is the No Operation Command Complete and every exchange
+     * below would otherwise read it as a command response. Take it here, and
+     * check it while it is in hand: five octets, no status, and the command
+     * credit that lets the host start.
+     *
+     * Queued explicitly rather than under a build macro. It used to be tested
+     * with #if against a default of off, so the check never ran in any build
+     * anyone made, and that is what let a board asking for the NOP ship with
+     * the call compiled out.
+     */
+    HciSdcNrfxlibQueueStartupNop(&gSdc);
+
+    {
+        HciH4PacketType_t nopType = HCI_H4_PACKET_NONE;
+        uint8_t nop[16];
+        size_t nopLen = 0U;
+        assert(gOps->Get(gOps->pContext, &nopType, nop, sizeof(nop),
+                         &nopLen) == HCI_CONTROLLER_GET_PACKET);
+        assert(nopType == HCI_H4_PACKET_EVENT);
+        assert(nopLen == 5U);
+        assert(nop[0] == EVENT_COMMAND_COMPLETE);
+        assert(nop[1] == 3U);
+        assert(nop[2] == 1U);
+        assert(nop[3] == 0x00U && nop[4] == 0x00U);
+        printf("[ok] %-38s before anything else\n", "startup NOP goes out");
+    }
+
     /* Commands the specification answers with Command Status. */
     ExpectStatus("Disconnect", 0x0406, zeros,
                  sizeof(sdc_hci_cmd_lc_disconnect_t));

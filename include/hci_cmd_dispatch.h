@@ -99,6 +99,24 @@ typedef struct {
     uint32_t EventBackpressureCount;
 } HciCmdDispatch_t;
 
+/*
+ * Queue the Command Complete for the No Operation opcode, which is how a
+ * controller says it is ready to take commands. Vol 4 Part E 7.7.14 gives 0x0000
+ * that meaning, and the event carries the command credit and the opcode and
+ * nothing else: no status, no return parameters, so it is five octets where
+ * every other Command Complete is at least six.
+ *
+ * A host may be waiting for it. Zephyr has BT_WAIT_NOP, which emits it from the
+ * controller and waits for it in the host, and Nordic turns that on for the
+ * Thingy:91 build of hci_lpuart while leaving it off for the nRF9160 DK. A host
+ * that is not waiting takes it as a command credit it already had, which costs
+ * nothing.
+ *
+ * It goes out ahead of anything else because the dispatcher holds one event and
+ * this one is queued before a command can arrive.
+ */
+void HciCmdDispatchQueueNop(HciCmdDispatch_t *pDispatch);
+
 bool HciCmdDispatchInit(HciCmdDispatch_t *pDispatch,
                         const HciCmdEntry_t *pEntries,
                         size_t EntryCount,

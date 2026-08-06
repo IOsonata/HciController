@@ -32,6 +32,17 @@ bool HciSdcNrfxlibInit(HciSdc_t *pSdc,
                        size_t CommandEventCapacity,
                        HciCounters_t *pCounters);
 
+/*
+ * Queue the No Operation Command Complete that says the controller is ready,
+ * Vol 4 Part E 7.7.14 with opcode 0x0000. Whether a board needs it is a board
+ * fact, so the caller decides: hci_sdc_nrfxlib.cpp cannot see board.h, and a
+ * macro tested there gave the one board that sets it an image with the call
+ * compiled out.
+ *
+ * Call after HciSdcNrfxlibInit and before the runtime thread starts.
+ */
+void HciSdcNrfxlibQueueStartupNop(HciSdc_t *pSdc);
+
 #ifdef __cplusplus
 }
 #endif

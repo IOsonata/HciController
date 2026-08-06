@@ -1,0 +1,157 @@
+#!/usr/bin/env python3
+"""
+Which SDC commands a SoftDevice Controller library actually defines.
+
+The nrfxlib headers declare the whole HCI API, but a library variant only
+contains the commands it was built with, so a declaration is no guarantee that
+the symbol links. Several rows in the dispatch table therefore sit behind a
+macro. This reads the archive and says what each of those macros should be.
+
+    python3 tests/sdc_symbols.py
+    python3 tests/sdc_symbols.py /path/to/libsoftdevice_controller_multirole.a
+
+It parses the archive symbol index directly, so it needs no toolchain. The
+alternative, arm-none-eabi-nm, is only on the machine that has the cross
+compiler installed, and this question comes up before the first build as often
+as after it.
+
+Exits non-zero when a macro default in the source disagrees with the library,
+so it can be run as a check.
+"""
+
+import os
+import re
+import struct
+import sys
+
+# Macro in src/hci_sdc_nrfxlib.cpp, and the symbols it needs. A macro with an
+# empty list needs no SDC symbol at all.
+GATES = [
+    ("HCI_SDC_HAS_READ_SUPPORTED_STATES",
+     ["sdc_hci_cmd_le_read_supported_states"]),
+    ("HCI_SDC_HAS_READ_TRANSMIT_POWER",
+     ["sdc_hci_cmd_le_read_transmit_power"]),
+    ("HCI_SDC_HAS_READ_REMOTE_VERSION",
+     ["sdc_hci_cmd_lc_read_remote_version_information"]),
+    ("HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT",
+     ["sdc_hci_cmd_cb_read_authenticated_payload_timeout",
+      "sdc_hci_cmd_cb_write_authenticated_payload_timeout"]),
+    ("HCI_SDC_HAS_VS_READ_STATIC_ADDRESSES",
+     ["sdc_hci_cmd_vs_zephyr_read_static_addresses"]),
+    ("HCI_SDC_HAS_VS_READ_COUNTERS", []),
+]
+
+DEFAULT_LIB = ("../external/sdk-nrfxlib/softdevice_controller/lib/nrf52/"
+               "hard-float/libsoftdevice_controller_multirole.a")
+
+
+def archive_symbols(path):
+    """
+    Names in an ar archive's symbol index, which is every symbol its members
+    define. GNU format: a first member called "/" holding a big endian count,
+    that many offsets, then the names as NUL terminated strings.
+    """
+    with open(path, "rb") as handle:
+        data = handle.read()
+
+    if data[:8] != b"!<arch>\n":
+        raise ValueError("%s is not an ar archive" % path)
+
+    name = data[8:24].decode("ascii", "replace").strip()
+    if name.startswith("__.SYMDEF"):
+        raise ValueError("%s is a BSD archive, which this does not read. Use "
+                         "nm on it instead." % path)
+    if name != "/":
+        raise ValueError("%s has no symbol index, so it was built without one "
+                         "and nothing can be said about it" % path)
+
+    size = int(data[56:66].decode("ascii").strip())
+    body = data[68:68 + size]
+    count = struct.unpack(">I", body[:4])[0]
+    names = body[4 + count * 4:].split(b"\x00")
+    return set(n.decode("ascii", "replace") for n in names if n)
+
+
+def source_defaults(path):
+    """The value each gate macro defaults to in the source."""
+    try:
+        with open(path) as handle:
+            text = handle.read()
+    except IOError:
+        return {}
+
+    found = {}
+    for macro, _ in GATES:
+        match = re.search(r"^#define\s+%s\s+(\d+)\s*$" % macro, text,
+                          re.MULTILINE)
+        if match:
+            found[macro] = int(match.group(1))
+    return found
+
+
+def main():
+    here = os.path.dirname(os.path.abspath(__file__))
+    root = os.path.dirname(here)
+
+    if len(sys.argv) > 2:
+        print(__doc__.strip())
+        return 2
+
+    lib = sys.argv[1] if len(sys.argv) > 1 else os.path.join(root, DEFAULT_LIB)
+    lib = os.path.normpath(lib)
+
+    if not os.path.exists(lib):
+        print("No library at %s" % lib)
+        print("Pass the path to a libsoftdevice_controller_*.a.")
+        return 2
+
+    try:
+        symbols = archive_symbols(lib)
+    except ValueError as error:
+        print(error)
+        return 2
+
+    commands = sorted(s for s in symbols if s.startswith("sdc_hci_cmd_"))
+    print("%s" % lib)
+    print("%d symbols, %d of them HCI commands" % (len(symbols), len(commands)))
+    print()
+
+    defaults = source_defaults(os.path.join(root, "src",
+                                            "hci_sdc_nrfxlib.cpp"))
+    disagreed = 0
+
+    for macro, needed in GATES:
+        if not needed:
+            want = 1
+            note = "needs no SDC symbol"
+        else:
+            absent = [s for s in needed if s not in symbols]
+            want = 0 if absent else 1
+            note = ("missing %s" % ", ".join(absent) if absent
+                    else "all present")
+
+        current = defaults.get(macro)
+        if current is None:
+            state = "not found in the source"
+        elif current == want:
+            state = "matches"
+        else:
+            state = "SOURCE SAYS %d" % current
+            disagreed += 1
+
+        print("  %-38s should be %d  %-34s %s"
+              % (macro, want, note, state))
+
+    print()
+    if disagreed:
+        print("%d macro default disagrees with this library. A wrong 1 is a "
+              "link error; a wrong 0 is a command answered Unknown HCI Command "
+              "that the controller could have run." % disagreed)
+        return 1
+
+    print("Every gate matches this library.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

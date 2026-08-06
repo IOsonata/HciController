@@ -203,6 +203,24 @@ void HciLpUartProcess(HciLpUart_t *pLp)
     }
 
     /*
+     * Read the state again before acting on it. Reading the clock is not
+     * instant, and the acknowledge arrives from the pin interrupt, so between
+     * the test above and here the peer can have answered and the port can
+     * already be putting bytes on the wire. Aborting then would drive the
+     * request low in the middle of a transfer, which the peer reads as the end
+     * of a packet it has only half received, and would release a buffer the
+     * port is still sending from.
+     *
+     * This narrows the window rather than closing it. Closing it needs the
+     * request interrupt masked across the whole function, which only the port
+     * can do, so a port that calls this from thread context should mask it.
+     */
+    if (pLp->TxState != HCI_LPUART_TX_WAIT_ACK)
+    {
+        return;
+    }
+
+    /*
      * The peer never answered. Give the wire back rather than hold a request
      * up forever, since a peer that comes back later has to see a fresh one,
      * and this side has to be able to send again.

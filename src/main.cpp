@@ -129,12 +129,14 @@ static void HciFatal(void)
 #endif
 
 /*
- * A UART host with no pins to reach it on would fail at HciAppInit, well after
- * the radio is up and with nothing on the wire to say why. Catching it here
- * costs nothing and names the missing piece.
+ * A UART host with no pins to reach it on would otherwise fail deep inside the
+ * UART_PINS expansion on an undeclared identifier, which does not say what is
+ * missing. Testing UART_PINS itself proves nothing: board.h defines it for
+ * every board, from these two. So test what it is built out of.
  */
-#if HCI_HOST_SELECT != HCI_HOST_SELECT_USB && !defined(UART_PINS)
-#error "the selected host needs UART_PINS from board.h"
+#if HCI_HOST_SELECT != HCI_HOST_SELECT_USB && \
+    (!defined(UART_RX_PORT) || !defined(UART_TX_PORT))
+#error "the selected host needs UART_RX_PORT/PIN and UART_TX_PORT/PIN from board.h"
 #endif
 
 static HciAppHost_t HciSelectHost(void)
@@ -143,9 +145,11 @@ static HciAppHost_t HciSelectHost(void)
     return HCI_APP_HOST_USB;
 #elif HCI_HOST_SELECT == HCI_HOST_SELECT_UART
     return HCI_APP_HOST_UART;
-#else
+#elif HCI_HOST_SELECT == HCI_HOST_SELECT_AUTO
     return (NRF_POWER->USBREGSTATUS & POWER_USBREGSTATUS_VBUSDETECT_Msk) != 0U ?
            HCI_APP_HOST_USB : HCI_APP_HOST_UART;
+#else
+#error "unreachable, the selection was checked above"
 #endif
 }
 
@@ -172,6 +176,7 @@ int main(void)
 #else
     static const char *pSelect = "auto";
 #endif
+
 
     HciTrace("boot: usbregstatus=0x%08lX vbus=%u outrdy=%u select=%s host=%s\r\n",
              (unsigned long)usbReg,

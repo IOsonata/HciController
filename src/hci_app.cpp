@@ -47,8 +47,32 @@ static_assert(HCI_APP_PACKET_SIZE >= HCI_MSG_BUFFER_ISO_MAX_SIZE,
               "controller packet must hold the largest SDC ISO message");
 #endif
 
+/*
+ * Which UART instance the board's pins belong to. board.h says, since a board
+ * that puts the host on UARTE1 would otherwise get UARTE0 configured with its
+ * pin map and no diagnostic.
+ */
+#ifndef UART_DEVNO
 #define HCI_APP_UART_DEVICE       0
+#else
+#define HCI_APP_UART_DEVICE       UART_DEVNO
+#endif
+
 #define HCI_APP_UART_IRQ_PRIORITY 6
+
+/*
+ * Say the controller is ready with a No Operation Command Complete once the
+ * stack is up. Off unless the board asks, because the boards validated on
+ * hardware do not need it. A Thingy:91 does: Nordic builds hci_lpuart for it
+ * with CONFIG_BT_WAIT_NOP, which waits for this event in the host.
+ *
+ * The test lives here rather than in hci_sdc_nrfxlib.cpp because that file
+ * does not include board.h and so could never see the answer, which is how the
+ * one board that sets it got an image with the call compiled out.
+ */
+#ifndef HCI_SDC_STARTUP_NOP
+#define HCI_SDC_STARTUP_NOP 0
+#endif
 
 /*
  * Device stack pump passes during enumeration, and the steady state tick that
@@ -363,6 +387,16 @@ bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType)
         s_pApp = nullptr;
         return false;
     }
+
+#if HCI_SDC_STARTUP_NOP
+    /*
+     * Queued here, with the dispatcher empty and no command able to have
+     * arrived, so it is the first thing the host sees. It cannot reach the wire
+     * before the radio is up, because a failure below leaves this function
+     * returning false and the runtime thread never starts.
+     */
+    HciSdcNrfxlibQueueStartupNop(&pApp->Sdc);
+#endif
 
     bool hostReady = HostType == HCI_APP_HOST_USB ?
                      HciAppInitUsb(pApp) : HciAppInitUart(pApp);

@@ -1,6 +1,7 @@
 #include "hci_cmd_dispatch.h"
 
 #include <assert.h>
+#include <stdio.h>
 #include <string.h>
 
 struct TestContext
@@ -113,5 +114,42 @@ int main()
     assert(HciCmdDispatchPut(&dispatch, noEventCmd, sizeof(noEventCmd)));
     assert(!HciCmdDispatchEventPending(&dispatch));
 
+    /*
+     * The No Operation Command Complete a controller uses to say it is ready.
+     * Vol 4 Part E 7.7.14 gives opcode 0x0000 that meaning, and the event has
+     * no status and no return parameters, so it is five octets where every
+     * other Command Complete is at least six. A host waiting for this one
+     * discards anything longer, so the length is the whole point.
+     */
+    HciCmdDispatchQueueNop(&dispatch);
+    assert(HciCmdDispatchEventPending(&dispatch));
+    assert(HciCmdDispatchGet(&dispatch, event, sizeof(event), &eventLen));
+    assert(eventLen == 5U);
+    assert(event[0] == HCI_EVENT_COMMAND_COMPLETE);
+    assert(event[1] == 3U);          /* parameter length, no status byte */
+    assert(event[2] == 1U);          /* one command packet may be sent */
+    assert(event[3] == 0x00U && event[4] == 0x00U);
+    assert(!HciCmdDispatchEventPending(&dispatch));
+    printf("[ok] %-44s %02X %02X %02X %02X %02X\n",
+           "the startup NOP is five octets, no status",
+           event[0], event[1], event[2], event[3], event[4]);
+
+    /*
+     * No buffer behind it queues nothing rather than writing anyway. This used
+     * to set EventCapacity to 4 by hand on a dispatcher that had just been
+     * initialised, but init refuses any capacity under six, so it asserted on a
+     * state the firmware cannot reach and proved nothing about the target. An
+     * uninitialised dispatcher is the state that can actually occur.
+     */
+    {
+        HciCmdDispatch_t empty;
+        memset(&empty, 0, sizeof(empty));
+        HciCmdDispatchQueueNop(&empty);
+        assert(!HciCmdDispatchEventPending(&empty));
+        HciCmdDispatchQueueNop(NULL);
+        printf("[ok] %-44s\n", "no buffer queues nothing");
+    }
+
+    printf("All command dispatch tests passed.\n");
     return 0;
 }

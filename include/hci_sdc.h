@@ -160,6 +160,14 @@ typedef struct {
  */
 void HciSdcSetAclLimit(HciSdc_t *pSdc, uint16_t Limit);
 
+/*
+ * Forget every link's in flight count and every credit still owed. HCI_Reset
+ * drops all connections and reports none of them, Vol 4 Part E 7.3.2, so
+ * nothing else clears this and a handle handed out again after a reset would
+ * inherit a stale count.
+ */
+void HciSdcResetFlowControl(HciSdc_t *pSdc);
+
 bool HciSdcInit(HciSdc_t *pSdc,
                 const HciSdcOps_t *pOps,
                 const HciCmdEntry_t *pCommands,

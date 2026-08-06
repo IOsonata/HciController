@@ -46,6 +46,28 @@ static void HciCmdBuildComplete(HciCmdDispatch_t *pDispatch,
     pDispatch->EventPending = true;
 }
 
+void HciCmdDispatchQueueNop(HciCmdDispatch_t *pDispatch)
+{
+    if (pDispatch == NULL || pDispatch->pEvent == NULL ||
+        pDispatch->EventCapacity < 5U)
+    {
+        return;
+    }
+
+    /*
+     * Five octets, not six. The No Operation opcode has no status byte and no
+     * return parameters, so the parameter length is three: the credit and the
+     * two opcode octets.
+     */
+    pDispatch->pEvent[0] = HCI_EVENT_COMMAND_COMPLETE;
+    pDispatch->pEvent[1] = 3U;
+    pDispatch->pEvent[2] = 1U;
+    pDispatch->pEvent[3] = 0x00U;
+    pDispatch->pEvent[4] = 0x00U;
+    pDispatch->EventLen = 5U;
+    pDispatch->EventPending = true;
+}
+
 /*
  * Zero the declared return parameter area and give back the length actually
  * used. A declared length the event buffer cannot hold collapses to zero
