@@ -97,6 +97,30 @@ static HciCmdResult_t HciSdcStatus(uint8_t Status, size_t)
     return result;
 }
 
+/*
+ * Nothing on success, Command Complete on failure.
+ *
+ * Vol 4 Part E 7.3.40 asks for exactly that shape for Host Number Of Completed
+ * Packets: "Normally, no event is generated... However, if the command
+ * contains one or more invalid parameters, the Controller shall return an
+ * HCI_Command_Complete event containing the error code Invalid HCI Command
+ * Parameters". It is the only command here that answers nothing when it works,
+ * which is why the reply has to be chosen from the status rather than fixed by
+ * the table row.
+ *
+ * The same section says the normal command flow control is not used for it, so
+ * emitting no event costs the host no credit it was expecting back.
+ */
+static HciCmdResult_t HciSdcSilentOnSuccess(uint8_t Status, size_t)
+{
+    HciCmdResult_t result = {Status,
+                             Status == HCI_STATUS_SUCCESS
+                                 ? HCI_CMD_RESPONSE_NONE
+                                 : HCI_CMD_RESPONSE_COMPLETE,
+                             0U};
+    return result;
+}
+
 static bool HciSdcReturnFits(size_t Required, size_t Capacity)
 {
     return Required <= Capacity;
@@ -194,6 +218,9 @@ static HciCmdResult_t HciSdcCmdReadSupportedCommands(void *,
 
     supported.params.hci_set_event_mask = 1U;
     supported.params.hci_reset = 1U;
+    supported.params.hci_set_controller_to_host_flow_control = 1U;
+    supported.params.hci_host_buffer_size = 1U;
+    supported.params.hci_host_number_of_completed_packets = 1U;
     supported.params.hci_read_local_version_information = 1U;
     supported.params.hci_read_local_supported_features = 1U;
     supported.params.hci_read_bd_addr = 1U;
@@ -718,6 +745,29 @@ HCI_SDC_CMD_PR(HciSdcCmdWriteAuthPayloadTimeout,
                sdc_hci_cmd_cb_write_authenticated_payload_timeout_return_t)
 #endif
 
+/*
+ * Controller to host flow control.
+ *
+ * Without it the controller has no way to know the host is behind. It sends
+ * what it has and a host that cannot keep up loses events and data rather than
+ * slowing the controller down. That matters here more than it would elsewhere,
+ * because the host on the other end of this is a script over a serial port,
+ * and EventBackpressureCount exists because it already happens.
+ *
+ * The host turns it on, says how many buffers it has, and hands them back as
+ * it empties them. Vol 4 Part E 7.3.38 to 7.3.40.
+ */
+HCI_SDC_CMD_P(HciSdcCmdSetControllerToHostFlowControl,
+              sdc_hci_cmd_cb_set_controller_to_host_flow_control,
+              sdc_hci_cmd_cb_set_controller_to_host_flow_control_t,
+              HciSdcComplete)
+HCI_SDC_CMD_P(HciSdcCmdHostBufferSize, sdc_hci_cmd_cb_host_buffer_size,
+              sdc_hci_cmd_cb_host_buffer_size_t, HciSdcComplete)
+HCI_SDC_CMD_VN(HciSdcCmdHostNumberOfCompletedPackets,
+               sdc_hci_cmd_cb_host_number_of_completed_packets,
+               sdc_hci_cmd_cb_host_number_of_completed_packets_t, array_params,
+               num_handles, HciSdcSilentOnSuccess)
+
 /* Link control. */
 HCI_SDC_CMD_P(HciSdcCmdDisconnect, sdc_hci_cmd_lc_disconnect,
               sdc_hci_cmd_lc_disconnect_t, HciSdcStatus)
@@ -921,6 +971,22 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
     HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_CB_SET_EVENT_MASK, 8U,
                     HciSdcCmdSetEventMask),
     HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_CB_RESET, 0U, HciSdcCmdReset),
+    HCI_SDC_ENTRY_C(
+        SDC_HCI_OPCODE_CMD_CB_SET_CONTROLLER_TO_HOST_FLOW_CONTROL,
+        sizeof(sdc_hci_cmd_cb_set_controller_to_host_flow_control_t),
+        HciSdcCmdSetControllerToHostFlowControl),
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_CB_HOST_BUFFER_SIZE,
+                    sizeof(sdc_hci_cmd_cb_host_buffer_size_t),
+                    HciSdcCmdHostBufferSize),
+    /*
+     * Answers nothing when it works, so the row declares no response at all.
+     * A length the dispatcher rejects before the handler runs still gets a
+     * Command Complete, because that is what Vol 4 Part E 7.3.40 asks for and
+     * what HciCmdBuildError produces for any row that is not Command Status.
+     */
+    {SDC_HCI_OPCODE_CMD_CB_HOST_NUMBER_OF_COMPLETED_PACKETS,
+     HCI_CMD_VARIABLE_PARAM_LEN, 0U, HCI_CMD_RESPONSE_NONE,
+     HciSdcCmdHostNumberOfCompletedPackets},
 #if HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT
     HCI_SDC_ENTRY_CR(
         SDC_HCI_OPCODE_CMD_CB_READ_AUTHENTICATED_PAYLOAD_TIMEOUT,
@@ -1188,6 +1254,11 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
 
 /* Command parameters. */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_cb_set_event_mask_t, 8U);                /* 7.3.1  */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_cb_set_controller_to_host_flow_control_t,
+                 1U);                                                 /* 7.3.38 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_cb_host_buffer_size_t, 7U);              /* 7.3.39 */
+/* Variable, so only the fixed head and one array element are pinned. 7.3.40 */
+HCI_SDC_SPEC_LEN(sdc_hci_cb_host_number_of_completed_packets_array_params_t, 4U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_lc_disconnect_t, 3U);                    /* 7.1.6  */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_event_mask_t, 8U);                /* 7.8.1  */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_random_address_t, 6U);            /* 7.8.4  */

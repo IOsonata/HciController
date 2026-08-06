@@ -12,6 +12,22 @@
 
 SdcStubState_t g_SdcStub;
 
+uint8_t sdc_hci_cmd_cb_host_buffer_size(const sdc_hci_cmd_cb_host_buffer_size_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_cb_host_buffer_size";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_cb_host_number_of_completed_packets(const sdc_hci_cmd_cb_host_number_of_completed_packets_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_cb_host_number_of_completed_packets";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
 uint8_t sdc_hci_cmd_cb_read_authenticated_payload_timeout(const sdc_hci_cmd_cb_read_authenticated_payload_timeout_t * a0, sdc_hci_cmd_cb_read_authenticated_payload_timeout_return_t * a1)
 {
     g_SdcStub.LastCall = "sdc_hci_cmd_cb_read_authenticated_payload_timeout";
@@ -25,6 +41,14 @@ uint8_t sdc_hci_cmd_cb_reset(void)
 {
     g_SdcStub.LastCall = "sdc_hci_cmd_cb_reset";
     g_SdcStub.Calls++;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_cb_set_controller_to_host_flow_control(const sdc_hci_cmd_cb_set_controller_to_host_flow_control_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_cb_set_controller_to_host_flow_control";
+    g_SdcStub.Calls++;
+    (void)a0;
     return g_SdcStub.NextStatus;
 }
 

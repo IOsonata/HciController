@@ -129,6 +129,56 @@ static Response Exchange(uint16_t opcode, const uint8_t *pParams, size_t len)
     return rsp;
 }
 
+/*
+ * A command that answers nothing when it works. Vol 4 Part E 7.3.40 makes Host
+ * Number Of Completed Packets the one such command here, and the point of the
+ * check is the silence: the controller has to reach SDC and then emit no
+ * event, because a host that is told nothing is what the specification
+ * promises and an unexpected Command Complete would spend a credit the host
+ * never lent.
+ */
+static void ExpectSilent(const char *label, uint16_t opcode,
+                         const uint8_t *pParams, size_t len)
+{
+    uint8_t packet[300];
+    packet[0] = (uint8_t)opcode;
+    packet[1] = (uint8_t)(opcode >> 8);
+    packet[2] = (uint8_t)len;
+    if (len > 0U)
+    {
+        memcpy(&packet[3], pParams, len);
+    }
+
+    g_SdcStub.NextStatus = 0x00;
+    g_SdcStub.LastCall = NULL;
+
+    /*
+     * Offered the same way Exchange does, because the routing layer holds the
+     * next command until the controller queue has had the outgoing slot and
+     * refuses the first offer. The difference is what is asserted afterwards:
+     * every Get has to come back empty.
+     */
+    HciH4PacketType_t type = HCI_H4_PACKET_NONE;
+    uint8_t out[300];
+    size_t outLen = 0U;
+    bool put = false;
+
+    for (unsigned pass = 0U; pass < 4U; pass++)
+    {
+        if (!put)
+        {
+            put = gOps->Put(gOps->pContext, HCI_H4_PACKET_COMMAND, packet,
+                            3U + len);
+        }
+        assert(gOps->Get(gOps->pContext, &type, out, sizeof(out), &outLen) !=
+               HCI_CONTROLLER_GET_PACKET);
+    }
+
+    assert(put);
+    assert(g_SdcStub.LastCall != NULL);
+    printf("[ok] %-38s no event, %s\n", label, g_SdcStub.LastCall);
+}
+
 static void ExpectComplete(const char *label, uint16_t opcode,
                            const uint8_t *pParams, size_t len,
                            size_t expectedReturn)
@@ -397,6 +447,33 @@ int main(void)
     ExpectComplete("LE Clear Advertising Sets", 0x203D, zeros, 0U, 0U);
     ExpectComplete("LE Set Extended Scan Enable", 0x2042, zeros,
                    sizeof(sdc_hci_cmd_le_set_ext_scan_enable_t), 0U);
+
+    /*
+     * Controller to host flow control. Two ordinary commands and one that is
+     * not: Host Number Of Completed Packets answers nothing when it works and
+     * a Command Complete carrying 0x12 when it does not, Vol 4 Part E 7.3.40.
+     */
+    ExpectComplete(
+        "Set Controller To Host Flow Control", 0x0C31, zeros,
+        sizeof(sdc_hci_cmd_cb_set_controller_to_host_flow_control_t), 0U);
+    ExpectComplete("Host Buffer Size", 0x0C33, zeros,
+                   sizeof(sdc_hci_cmd_cb_host_buffer_size_t), 0U);
+
+    {
+        /* One handle owing two packets: count, handle, then the count back. */
+        const uint8_t completed[] = {0x01U, 0x05U, 0x00U, 0x02U, 0x00U};
+        ExpectSilent("Host Number Of Completed Packets", 0x0C35, completed,
+                     sizeof(completed));
+
+        /* Two handles declared, one supplied. */
+        const uint8_t lying[] = {0x02U, 0x05U, 0x00U, 0x02U, 0x00U};
+        ExpectRejected("Host Number Of Completed Packets, count lies", 0x0C35,
+                       lying, sizeof(lying), 0x12);
+
+        /* Nothing at all still has to be answered rather than ignored. */
+        ExpectRejected("Host Number Of Completed Packets, empty", 0x0C35,
+                       zeros, 0U, 0x12);
+    }
 
     /*
      * Privacy and the resolving list. Add Device To Resolving List carries two
@@ -701,6 +778,13 @@ int main(void)
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_CB_SET_EVENT_MASK,
                          hci_set_event_mask),
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_CB_RESET, hci_reset),
+            BITMAP_ENTRY(
+                SDC_HCI_OPCODE_CMD_CB_SET_CONTROLLER_TO_HOST_FLOW_CONTROL,
+                hci_set_controller_to_host_flow_control),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_CB_HOST_BUFFER_SIZE,
+                         hci_host_buffer_size),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_CB_HOST_NUMBER_OF_COMPLETED_PACKETS,
+                         hci_host_number_of_completed_packets),
 #if HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT
             BITMAP_ENTRY(
                 SDC_HCI_OPCODE_CMD_CB_READ_AUTHENTICATED_PAYLOAD_TIMEOUT,
