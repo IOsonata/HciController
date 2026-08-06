@@ -220,6 +220,17 @@ python3 tests/hardware/hci_ble_test.py probe --consent
 python3 tests/hardware/hci_ble_test.py probe --verbose   # say why each skip
 ```
 
+The handle is checked once with a harmless read before anything uses it. A
+handle with nothing behind it would otherwise turn two dozen rows into two
+dozen Unknown Connection Identifier lines, which says nothing about any of
+them.
+
+Some rows put the controller somewhere the next command cannot work from: a
+direct test mode test that is still running, an initiator still scanning for
+a peer. Those undo themselves immediately rather than at the end of the
+phase, because a running test is Command Disallowed for the next test, for
+advertising, and for scanning.
+
 Five commands cannot be reached from one board at all. They need a periodic
 advertising sync, which needs a second radio transmitting a periodic train,
 and `probe` says so rather than pretending to cover them.

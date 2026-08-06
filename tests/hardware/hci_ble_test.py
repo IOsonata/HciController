@@ -1402,10 +1402,14 @@ class ProbeContext(object):
         self.addr_type = addr_type
 
 
-def probe_available(command, args):
+def probe_available(command, args, live_handle):
     """Whether this entry can be sent, and why not when it cannot."""
-    if command.needs == hci_commands.NEEDS_CONN and args.handle is None:
-        return False, "no connection, pass --handle"
+    if command.needs == hci_commands.NEEDS_CONN:
+        if args.handle is None:
+            return False, "no connection, pass --handle"
+        if not live_handle:
+            return False, "handle 0x%04X has no connection behind it" \
+                % args.handle
     if command.needs == hci_commands.NEEDS_SYNC:
         return False, "needs a periodic sync, so a second radio"
     if command.needs == hci_commands.NEEDS_CONSENT and not args.consent:
@@ -1460,6 +1464,23 @@ def cmd_probe(hci, args):
 
     preamble("Resetting the controller")
     print("Identity %s (%s)" % (addr_str(identity), source))
+
+    # A handle with nothing behind it turns two dozen rows into two dozen
+    # Unknown Connection Identifier lines, which says nothing about any of
+    # them. Ask once with a harmless read and skip the group if it is dead.
+    live_handle = False
+    if args.handle is not None:
+        status, _ = hci.command(0x2015, struct.pack("<H", args.handle),
+                                allow_fail=True)
+        live_handle = status == 0
+        if live_handle:
+            print("Handle 0x%04X is connected." % args.handle)
+        else:
+            print("Handle 0x%04X has no connection behind it, 0x%02X %s."
+                  % (args.handle, status, ERROR_NAMES.get(status, "")))
+            print("The commands that need a link are skipped. Run advertise")
+            print("or connect in another shell first, and pass the handle it")
+            print("reports.")
     print()
 
     ctx = ProbeContext(handle=args.handle, addr_type=addr_type)
@@ -1481,7 +1502,7 @@ def cmd_probe(hci, args):
             report(command, "  ", text)
 
     def send(command):
-        available, reason = probe_available(command, args)
+        available, reason = probe_available(command, args, live_handle)
         if not available:
             counts["skipped"] += 1
             if args.verbose:
@@ -1518,7 +1539,18 @@ def cmd_probe(hci, args):
         elif status is not None:
             refusal(command, status)
 
-        if command.undo is not None:
+        if command.undo is None:
+            return
+        if command.undo_now:
+            # State that blocks whatever comes next: a direct test mode test
+            # still running, an initiator still scanning. Deferring these to
+            # the end of the phase loses every command after them.
+            try:
+                hci.command(command.undo[0], command.undo[1], timeout=1.0,
+                            allow_fail=True)
+            except HciError:
+                pass
+        else:
             undo.append(command.undo)
 
     def unwind():

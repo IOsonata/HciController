@@ -29,6 +29,8 @@ Fields
     phase       which advertising mode the command belongs to, see PHASE_*
     undo        an (opcode, payload) pair that puts the controller back, or
                 None when the command changes nothing that lasts
+    undo_now    send the undo immediately rather than at the end of the
+                phase, for state that blocks the command after it
     expect      status codes other than success that are a correct answer to
                 this parameter block, so a probe run can tell a controller
                 behaving properly from one that is not
@@ -95,16 +97,18 @@ def _conn(ctx, tail=b""):
 
 class Command(object):
     __slots__ = ("opcode", "name", "reply", "payload", "needs", "undo",
-                 "expect", "phase", "note")
+                 "undo_now", "expect", "phase", "note")
 
     def __init__(self, opcode, name, reply, payload, needs=NEEDS_NOTHING,
-                 undo=None, expect=(), phase=PHASE_ANY, note=""):
+                 undo=None, undo_now=False, expect=(), phase=PHASE_ANY,
+                 note=""):
         self.opcode = opcode
         self.name = name
         self.reply = reply
         self.payload = payload
         self.needs = needs
         self.undo = undo
+        self.undo_now = undo_now
         self.expect = expect
         self.phase = phase
         self.note = note
@@ -229,9 +233,10 @@ _LE_BASIC = [
             undo=(0x200C, b"\x00\x00"),
             phase=PHASE_LEGACY),
     Command(0x200E, "LE Create Connection Cancel", COMPLETE, b"",
-            needs=NEEDS_CONSENT,
-            note="fails with 0x0C when nothing is being connected, which is "
-                 "the normal state, so it is only sent on request",
+            needs=NEEDS_CONSENT, expect=(STATUS_COMMAND_DISALLOWED,),
+            note="Command Disallowed when nothing is being connected, which "
+                 "is the normal state and a correct answer. It is also the "
+                 "undo for both Create Connection commands",
             phase=PHASE_LEGACY),
     Command(0x200F, "LE Read Filter Accept List Size", COMPLETE, b""),
     Command(0x2010, "LE Clear Filter Accept List", COMPLETE, b""),
@@ -406,8 +411,9 @@ _LE_PERIODIC = [
             undo=(0x2040, bytes([0x00, PROBE_ADV_HANDLE])),
             phase=PHASE_EXTENDED),
     Command(0x2045, "LE Periodic Advertising Create Sync Cancel", COMPLETE,
-            b"", needs=NEEDS_CONSENT,
-            note="fails with 0x0C when no sync is pending, so on request",
+            b"", needs=NEEDS_CONSENT, expect=(STATUS_COMMAND_DISALLOWED,),
+            note="Command Disallowed when no sync is pending, which is a "
+                 "correct answer. It is also the undo for Create Sync",
             phase=PHASE_EXTENDED),
     Command(0x2047, "LE Add Device To Periodic Advertiser List", COMPLETE,
             b"\x00" + bytes.fromhex("0102030405c0") + b"\x00",
@@ -435,11 +441,14 @@ _LE_PERIODIC = [
             lambda ctx: _conn(ctx, struct.pack("<BHHB", 0, 0, 0x000A, 0)),
             needs=NEEDS_CONN),
     Command(0x2044, "LE Periodic Advertising Create Sync", STATUS,
-            b"\x00\x00" + bytes.fromhex("0102030405c0")
-            + struct.pack("<HHBB", 0, 0x000A, 0, 0),
-            needs=NEEDS_CONSENT,
-            note="starts a scan for a periodic train that is not there. "
-                 "Cancel it, or it keeps the radio busy",
+            b"\x00\x00\x00" + bytes.fromhex("0102030405c0")
+            + struct.pack("<HHB", 0, 0x0100, 0),
+            needs=NEEDS_CONSENT, undo=(0x2045, b""), undo_now=True,
+            note="fourteen octets: options, advertising SID, address type, "
+                 "address, skip, sync timeout, sync CTE type. The timeout is "
+                 "in 10 ms units and 0x000A is the floor, which a controller "
+                 "rejects for a train it has to find first; 0x0100 is 2.56 "
+                 "seconds. It starts a scan, so it is cancelled at once",
             phase=PHASE_EXTENDED),
     Command(0x2046, "LE Periodic Advertising Terminate Sync", COMPLETE,
             struct.pack("<H", UNUSED_HANDLE), needs=NEEDS_SYNC,
@@ -469,9 +478,10 @@ _LE_CONN = [
             struct.pack("<HHBB6sBHHHHHH", 0x0060, 0x0030, 0, 0,
                         bytes.fromhex("0102030405c0"), 0,
                         0x0018, 0x0028, 0, 0x02BC, 0, 0),
-            needs=NEEDS_CONSENT,
+            needs=NEEDS_CONSENT, undo=(0x200E, b""), undo_now=True,
             note="an address nothing answers to, so this starts an initiator "
-                 "that has to be cancelled",
+                 "that is cancelled at once. Left running it is Command "
+                 "Disallowed for everything that touches the radio after it",
             phase=PHASE_LEGACY),
     Command(0x2013, "LE Connection Update", STATUS,
             lambda ctx: _conn(ctx, struct.pack("<HHHHHH", 0x0018, 0x0028, 0,
@@ -503,7 +513,7 @@ _LE_CONN = [
             b"\x00\x00\x00" + bytes.fromhex("0102030405c0") + b"\x01"
             + struct.pack("<HHHHHHHH", 0x0060, 0x0030, 0x0018, 0x0028, 0,
                           0x02BC, 0, 0),
-            needs=NEEDS_CONSENT,
+            needs=NEEDS_CONSENT, undo=(0x200E, b""), undo_now=True,
             note="one PHY set in the mask, so exactly one parameter group "
                  "follows. Getting that count wrong is the mistake this "
                  "command exists to catch",
@@ -531,8 +541,9 @@ _LE_CONN = [
             note="a factor of one, so the peer can agree without the link "
                  "timing changing"),
     Command(0x2088, "LE Read All Remote Features", STATUS,
-            lambda ctx: _conn(ctx, b"\x00\x00"), needs=NEEDS_CONN,
-            note="page zero, one page requested"),
+            lambda ctx: _conn(ctx, b"\x01"), needs=NEEDS_CONN,
+            note="three octets. The handle then one count of pages "
+                 "requested, not a page number and a count"),
 ]
 
 # ---------------------------------------------------------------------------
@@ -542,31 +553,38 @@ _LE_CONN = [
 
 _DTM = [
     Command(0x201D, "LE Receiver Test v1", COMPLETE, b"\x00",
-            needs=NEEDS_CONSENT, undo=(0x201F, b"")),
+            needs=NEEDS_CONSENT, undo=(0x201F, b""), undo_now=True,
+            note="every test command here ends its own test. A test left "
+                 "running is Command Disallowed for the next one, and for "
+                 "advertising and scanning as well, so deferring the undo "
+                 "to the end of the phase loses everything after it"),
     Command(0x201E, "LE Transmitter Test v1", COMPLETE, b"\x00\x25\x00",
-            needs=NEEDS_CONSENT, undo=(0x201F, b""),
+            needs=NEEDS_CONSENT, undo=(0x201F, b""), undo_now=True,
             note="channel 0, 37 octets, PRBS9"),
     Command(0x2033, "LE Receiver Test v2", COMPLETE, b"\x00\x01\x00",
-            needs=NEEDS_CONSENT, undo=(0x201F, b"")),
+            needs=NEEDS_CONSENT, undo=(0x201F, b""), undo_now=True),
     Command(0x2034, "LE Transmitter Test v2", COMPLETE, b"\x00\x25\x00\x01",
-            needs=NEEDS_CONSENT, undo=(0x201F, b"")),
+            needs=NEEDS_CONSENT, undo=(0x201F, b""), undo_now=True),
     Command(0x204F, "LE Receiver Test v3", COMPLETE,
-            b"\x00\x01\x00\x00\x00\x00", needs=NEEDS_CONSENT,
-            undo=(0x201F, b""),
-            note="no constant tone extension, so no antenna identifiers "
-                 "follow and the switching pattern length is zero"),
+            b"\x00\x01\x00\x00\x00\x01\x00", needs=NEEDS_CONSENT,
+            undo=(0x201F, b""), undo_now=True,
+            note="seven octets before the antenna identifiers: channel, PHY, "
+                 "modulation index, expected CTE length and type, slot "
+                 "durations, switching pattern length. No constant tone "
+                 "extension, so the pattern length is zero and nothing "
+                 "follows it"),
     Command(0x2050, "LE Transmitter Test v3", COMPLETE,
             b"\x00\x25\x00\x01\x00\x00\x00", needs=NEEDS_CONSENT,
-            undo=(0x201F, b"")),
+            undo=(0x201F, b""), undo_now=True),
     Command(0x207B, "LE Transmitter Test v4", COMPLETE,
             b"\x00\x25\x00\x01\x00\x00\x00" + struct.pack("<b", 0x7F),
-            needs=NEEDS_CONSENT, undo=(0x201F, b""),
+            needs=NEEDS_CONSENT, undo=(0x201F, b""), undo_now=True,
             note="the transmit power octet comes after the antenna "
                  "identifiers, not before them. v4 is the only test command "
                  "with a field past the variable part"),
     Command(0xFD23, "VS Transmitter Carrier Test", COMPLETE,
-            b"\x00" + struct.pack("<b", 0) + b"\x00",
-            needs=NEEDS_CONSENT, undo=(0x201F, b""),
+            b"\x00" + struct.pack("<b", 0),
+            needs=NEEDS_CONSENT, undo=(0x201F, b""), undo_now=True,
             note="an unmodulated carrier, which is what a regulatory "
                  "measurement wants and what nothing else here produces"),
 ]
@@ -598,10 +616,12 @@ _VENDOR = [
             note="off. Low latency packet mode is a Nordic extension that "
                  "only talks to another Nordic controller"),
     Command(0xFD02, "VS Connection Update", STATUS,
-            lambda ctx: _conn(ctx, struct.pack("<BHHH", 0, 24, 0, 300)),
+            lambda ctx: _conn(ctx, struct.pack("<IHH", 30000, 0, 300)),
             needs=NEEDS_CONN,
-            note="an interval in units the specification does not have, "
-                 "which is the point of the vendor command"),
+            note="the interval is microseconds in a 32 bit field, not the "
+                 "1.25 ms units the specification uses, which is the point "
+                 "of the vendor command. 30000 us, and the header says the "
+                 "range is 7500 to 4000000 in 1250 us steps"),
     Command(0xFD04, "VS QoS Connection Event Report Enable", COMPLETE,
             b"\x00", undo=(0xFD04, b"\x00")),
     Command(0xFD0C, "VS Set Advertising Randomness", COMPLETE,
