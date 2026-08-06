@@ -76,3 +76,7 @@ vcpkg_installed/
 /IOcomposer/.settings/
 .DS_Store
 *~
+
+# Python bytecode, from the tools under tests/.
+__pycache__/
+*.pyc

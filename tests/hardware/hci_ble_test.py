@@ -10,7 +10,15 @@ the ACL data path are all exercised without a Bluetooth stack on the machine.
     python3 hci_ble_test.py connect AA:BB:CC:DD:EE:FF
     python3 hci_ble_test.py dtm-tx                radio transmit test
     python3 hci_ble_test.py dtm-rx                radio receive test, gives PER
-    python3 hci_ble_test.py counters             what the firmware refused
+    python3 hci_ble_test.py counters              what the firmware refused
+    python3 hci_ble_test.py probe                 every command, at the radio
+
+probe is the broad one. The firmware dispatches 126 opcodes and this used to
+drive 29, so most of what the host tests pinned down had never met a radio.
+It sends every command in hci_commands.py, reports what came back, and puts
+the controller back where it found it. Commands that need a link are skipped
+unless --handle is given, and commands that change the identity of the board
+or leave the radio transmitting are skipped unless --consent is.
 
 connect --flood N sends N ACL packets while ignoring flow control, which a host
 is not supposed to do. On an nRF52840 the SoftDevice Controller answers 0 to a
@@ -24,9 +32,13 @@ single run. Connect with nRF Connect and browse the attribute table.
 """
 
 import argparse
+import os
 import struct
 import sys
 import time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import hci_commands
 
 try:
     import serial
@@ -1374,6 +1386,148 @@ def cmd_dtm_rx(hci, args):
     return 0
 
 
+class ProbeContext(object):
+    """What a command entry needs resolved before it can be sent."""
+
+    def __init__(self, handle=None, sync_handle=None):
+        self.handle = handle if handle is not None else \
+            hci_commands.UNUSED_HANDLE
+        self.sync_handle = sync_handle
+
+
+def probe_available(command, args):
+    """Whether this entry can be sent, and why not when it cannot."""
+    if command.needs == hci_commands.NEEDS_CONN and args.handle is None:
+        return False, "no connection, pass --handle"
+    if command.needs == hci_commands.NEEDS_SYNC:
+        return False, "needs a periodic sync, so a second radio"
+    if command.needs == hci_commands.NEEDS_CONSENT and not args.consent:
+        return False, "changes state or uses the radio, pass --consent"
+    if command.needs == hci_commands.NEEDS_ADV_SET and args.no_adv_set:
+        return False, "advertising set not created"
+    return True, ""
+
+
+def cmd_probe(hci, args):
+    """
+    Send every command in the table and report what came back.
+
+    The dispatch test in tests/unit checks all 126 opcodes reach the intended
+    SDC call. What it cannot check is whether the controller accepts the
+    command with a real radio behind it, because there is no radio in a host
+    build. This is that pass.
+
+    A command that is refused is not automatically a defect. A controller can
+    answer Command Disallowed to something that is correct but out of order,
+    and Unsupported Feature to something the library does not implement on
+    this part. What is a defect is Unknown HCI Command, which means the
+    dispatch table does not carry the opcode at all.
+    """
+    print("Resetting the controller.")
+    hci.command(OP_RESET)
+    hci.command(OP_SET_EVENT_MASK, bytes.fromhex("ffffffffffffff3f"))
+    hci.command(OP_LE_SET_EVENT_MASK, bytes.fromhex("ffff030000000000"))
+    print()
+
+    ctx = ProbeContext(handle=args.handle)
+    undo = []
+    counts = {"ok": 0, "refused": 0, "unknown": 0, "skipped": 0, "silent": 0}
+
+    for command in hci_commands.COMMANDS:
+        if command.opcode == 0x0C03:
+            # Sent above. Sending it again here would undo the event masks
+            # and every set the later rows depend on.
+            continue
+
+        available, reason = probe_available(command, args)
+        if not available:
+            counts["skipped"] += 1
+            if args.verbose:
+                print("[--] 0x%04X %-52s %s"
+                      % (command.opcode, command.name, reason))
+            continue
+
+        payload = command.build(ctx)
+
+        # A command that answers nothing on success is the one case where no
+        # event is the pass. Give it a short window rather than the usual
+        # three seconds, since the whole point is that nothing arrives.
+        timeout = 0.5 if command.reply == hci_commands.NONE else 3.0
+
+        try:
+            status, data = hci.command(command.opcode, payload,
+                                       timeout=timeout, allow_fail=True)
+        except HciError as err:
+            if command.reply == hci_commands.NONE:
+                counts["silent"] += 1
+                print("[ok] 0x%04X %-52s silent, as it must be"
+                      % (command.opcode, command.name))
+            else:
+                counts["unknown"] += 1
+                print("[!!] 0x%04X %-52s %s"
+                      % (command.opcode, command.name, err))
+            if command.undo is not None:
+                undo.append(command.undo)
+            continue
+
+        if command.reply == hci_commands.NONE:
+            # Something came back. On failure that is correct and says so;
+            # on success it means the row answers when it should not.
+            if status == 0:
+                counts["unknown"] += 1
+                print("[!!] 0x%04X %-52s answered on success, must be silent"
+                      % (command.opcode, command.name))
+            else:
+                counts["refused"] += 1
+                print("[  ] 0x%04X %-52s refused 0x%02X %s"
+                      % (command.opcode, command.name, status,
+                         ERROR_NAMES.get(status, "")))
+        elif status == 0:
+            counts["ok"] += 1
+            extra = "%d byte return" % len(data) if data else "no return"
+            print("[ok] 0x%04X %-52s %s"
+                  % (command.opcode, command.name, extra))
+        elif status == 0x01:
+            counts["unknown"] += 1
+            print("[!!] 0x%04X %-52s Unknown HCI Command, not in the table"
+                  % (command.opcode, command.name))
+        else:
+            counts["refused"] += 1
+            print("[  ] 0x%04X %-52s refused 0x%02X %s"
+                  % (command.opcode, command.name, status,
+                     ERROR_NAMES.get(status, "")))
+
+        if command.undo is not None:
+            undo.append(command.undo)
+
+    # Put the controller back, most recent first, so a set is emptied before
+    # it is removed. Failures here are not interesting: many of these are
+    # only needed if the command above them worked.
+    for opcode, payload in reversed(undo):
+        try:
+            hci.command(opcode, payload, allow_fail=True)
+        except HciError:
+            pass
+
+    print()
+    print("%d accepted, %d correctly silent, %d refused, %d skipped."
+          % (counts["ok"], counts["silent"], counts["refused"],
+             counts["skipped"]))
+    if counts["unknown"]:
+        print("%d answered Unknown HCI Command. Those opcodes are not in the"
+              % counts["unknown"])
+        print("dispatch table in src/hci_sdc_nrfxlib.cpp, which the host test")
+        print("said they were. That is a real disagreement, not a radio "
+              "problem.")
+        return 1
+
+    if args.handle is None:
+        print("Connection scoped commands were skipped. Run advertise or")
+        print("connect in another shell, then pass --handle with the handle")
+        print("it reports.")
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Over the air validation for the HciController")
@@ -1420,6 +1574,21 @@ def main():
     p.add_argument("--expected", type=int, default=0,
                    help="packets the transmitter sent, gives a PER figure")
     p.set_defaults(func=cmd_dtm_rx)
+
+    p = sub.add_parser("probe", help="send every command the firmware "
+                                     "dispatches and report what came back")
+    p.add_argument("--handle", type=lambda v: int(v, 0),
+                   help="an open connection handle, which unlocks the "
+                        "commands that need a link")
+    p.add_argument("--consent", action="store_true",
+                   help="also send the commands that change the identity of "
+                        "the board, put the radio on the air, or end the "
+                        "connection being used")
+    p.add_argument("--no-adv-set", action="store_true",
+                   help="skip the commands that need an advertising set")
+    p.add_argument("--verbose", action="store_true",
+                   help="say why each skipped command was skipped")
+    p.set_defaults(func=cmd_probe)
 
     args = parser.parse_args()
 

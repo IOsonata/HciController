@@ -100,7 +100,7 @@ RESOURCES_TARGET := $(BUILD_DIR)/hci_sdc_resources_test
 TARGETS += $(RESOURCES_TARGET)
 endif
 
-.PHONY: all run clean check-root check-project print-config
+.PHONY: all run clean check-root check-project check-commands print-config
 
 PYTHON ?= python3
 
@@ -151,7 +151,15 @@ check-project:
 	@echo "[TEST] project_files.py"
 	@$(PYTHON) $(THIS_DIR)/project_files.py $(ROOT)
 
-run: all check-project
+# The Python tooling against the dispatch table. For most of this branch the
+# firmware answered 126 opcodes and the tooling drove 29, and nothing said so.
+check-commands:
+	@command -v $(PYTHON) >/dev/null 2>&1 || { \
+	  echo "[TEST] command_coverage.py skipped, no $(PYTHON)"; exit 0; }
+	@echo "[TEST] command_coverage.py"
+	@NRFXLIB_DIR=$(NRFXLIB_DIR) $(PYTHON) $(THIS_DIR)/command_coverage.py
+
+run: all check-project check-commands
 	@set -e; for t in $(TARGETS); do \
 	  echo "[TEST] $$(basename $$t)"; $$t; done
 	@echo

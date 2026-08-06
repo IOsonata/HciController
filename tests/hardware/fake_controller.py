@@ -10,8 +10,12 @@ paths, simulates a peer connecting and driving ATT.
         --args="advertise --seconds 6"
     python3 fake_controller.py --serve                print the pty and stay up
 
-Anything not implemented gets Unknown HCI Command, which is what a real
-controller must do.
+Every opcode the firmware dispatches is answered, with the reply shape
+hci_commands.py declares for it: Command Complete, Command Status, or nothing
+at all. Anything outside that table gets Unknown HCI Command, which is what a
+real controller must do.
+
+    python3 fake_controller.py --script hci_ble_test.py --args=probe
 """
 
 import argparse
@@ -22,6 +26,9 @@ import subprocess
 import sys
 import threading
 import time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import hci_commands
 
 H4_COMMAND = 0x01
 H4_ACL = 0x02
@@ -288,7 +295,49 @@ class Controller:
                 self.test_packets = 1234
             return self.emit(command_complete(opcode, 0x00))
 
-        self.emit(command_complete(opcode, 0x01))
+        return self.on_table_command(opcode, payload)
+
+    def on_table_command(self, opcode, payload):
+        """
+        Answer anything else the firmware dispatches, by reply shape.
+
+        hci_commands.py says whether each opcode answers Command Complete,
+        Command Status or nothing, which is what hci_ble_test.py probe
+        checks. That is all this reproduces. It does not reproduce the length
+        of each return block: those are checked against the real nrfxlib
+        headers by tests/unit/hci_sdc_dispatch_test.cpp, and a second set of
+        numbers here would be a second set to keep right.
+
+        Connection scoped commands are refused with Unknown Connection
+        Identifier unless the simulated link is up and the handle matches,
+        because a probe run against a controller with no connection should
+        see what a real one does.
+        """
+        command = hci_commands.BY_OPCODE.get(opcode)
+        if command is None:
+            return self.emit(command_complete(opcode, 0x01))
+
+        if command.needs == hci_commands.NEEDS_CONN:
+            handle = struct.unpack("<H", payload[:2])[0] if len(payload) >= 2 \
+                else 0xFFFF
+            if not self.connected or handle != CONN_HANDLE:
+                if command.reply == hci_commands.STATUS:
+                    return self.emit(command_status(opcode, 0x02))
+                return self.emit(command_complete(opcode, 0x02))
+
+        if command.needs in (hci_commands.NEEDS_SYNC,):
+            # Nothing here ever has a periodic sync, and Unknown Advertising
+            # Identifier is what a controller answers to a handle it never
+            # issued.
+            return self.emit(command_complete(opcode, 0x42))
+
+        if command.reply == hci_commands.NONE:
+            return None
+
+        if command.reply == hci_commands.STATUS:
+            return self.emit(command_status(opcode, 0x00))
+
+        return self.emit(command_complete(opcode, 0x00))
 
     def on_acl(self, handle, cid, payload):
         # Every ACL packet that arrives is one the routing layer handed on, so

@@ -10,6 +10,7 @@ tests/
   unit/                 the C++ tests
   stubs/                fake target headers, see below
   project_files.py      the Eclipse project against the tree
+  command_coverage.py   the Python tooling against the dispatch table
   hardware/             Python tools that talk to a board
 ```
 
@@ -66,6 +67,13 @@ The last two need `NRFXLIB_DIR` and are skipped without it. They are the only
 tests that see the vendor headers; everything else builds against the fakes
 under `stubs/`.
 
+That matters most for `hci_sdc_resources_test`. `stubs/sdc/sdc.h` holds
+hand written copies of the `SDC_MEM_*` macros, and the pool is computed from
+them in every other test. Both that test and `hci_nrf52840_usb_test` measure
+their headers against `unit/hci_sdc_expected_resources.h`, so a copy that
+drifts from the vendor header fails the stub build while the real one still
+passes, and which of the two failed says which header moved.
+
 ## What is compiled but not run
 
 Two things are built by `make -C tests run` and never executed, because a
@@ -106,17 +114,37 @@ It needs Python 3 and is skipped with a message when there is none.
 python3 tests/project_files.py
 ```
 
-That matters most for `hci_sdc_resources_test`. `stubs/sdc/sdc.h` holds
-hand written copies of the `SDC_MEM_*` macros, and the pool is computed from
-them in every other test. Both that test and `hci_nrf52840_usb_test` measure
-their headers against `unit/hci_sdc_expected_resources.h`, so a copy that
-drifts from the vendor header fails the stub build while the real one still
-passes, and which of the two failed says which header moved.
+## The Python tooling against the dispatch table
+
+`command_coverage.py` runs next. It compares the opcodes in
+`src/hci_sdc_nrfxlib.cpp` with the entries in `hardware/hci_commands.py` and
+fails on either direction: a command the firmware dispatches that nothing will
+ever send at a radio, or an entry for a command that was removed.
+
+That gap was real and large. The firmware grew from 60 opcodes to 126 over
+this branch while the Python tooling drove 29, so most of what the host tests
+pinned down had only ever met a compiled stub. Nothing said so, because the
+two halves had no reason to look at each other.
+
+The opcode values come from the nrfxlib headers, since the dispatch table
+names them symbolically, so this needs a checkout and is skipped without one.
+
+```sh
+python3 tests/command_coverage.py /path/to/sdk-nrfxlib
+```
 
 ## Hardware tools
 
-`hardware/` holds three Python tools. They need Python 3.8 or later and no
-packages beyond the standard library.
+`hardware/` holds four Python tools and the command table they share. They
+need Python 3.8 or later and no packages beyond the standard library, except
+`hci_test.py` and `hci_ble_test.py`, which talk to a serial port and need
+pyserial.
+
+`hci_commands.py` is the table: one entry per opcode the firmware dispatches,
+with a parameter block that can be sent, what answer to expect, and what has
+to exist first. It holds no return lengths, because the C++ dispatch test
+already checks those against the vendor headers and a second copy in Python
+would be a second copy to keep right.
 
 `hci_test.py` checks the transport itself. It opens the CDC port, resets the
 controller and runs nine checks covering framing, command response pairing and
@@ -137,7 +165,35 @@ python3 tests/hardware/hci_ble_test.py /dev/ttyACM0 scan
 python3 tests/hardware/hci_ble_test.py /dev/ttyACM0 connect
 python3 tests/hardware/hci_ble_test.py /dev/ttyACM0 dtm-tx
 python3 tests/hardware/hci_ble_test.py /dev/ttyACM0 counters
+python3 tests/hardware/hci_ble_test.py /dev/ttyACM0 probe
 ```
+
+`probe` is the broad one, and it is what makes the 126 opcodes mean something
+on a radio rather than in a compiled stub. It sends every command in
+`hci_commands.py`, prints what came back, and puts the controller back where
+it found it.
+
+Three answers matter and they are not the same:
+
+| Answer | Meaning |
+| --- | --- |
+| accepted | the command reached the link layer and it agreed |
+| refused | a status other than success. Often correct: a controller answers Command Disallowed to something out of order and Unsupported Feature to something the library does not do on this part |
+| Unknown HCI Command | the dispatch table does not carry the opcode, which contradicts what the host test said. This is the one that is always a defect |
+
+Commands that need a link are skipped unless a handle is given, and commands
+that change the identity of the board, leave the radio transmitting or end the
+connection are skipped unless asked for:
+
+```sh
+python3 tests/hardware/hci_ble_test.py probe --handle 0x0040
+python3 tests/hardware/hci_ble_test.py probe --consent
+python3 tests/hardware/hci_ble_test.py probe --verbose   # say why each skip
+```
+
+Five commands cannot be reached from one board at all. They need a periodic
+advertising sync, which needs a second radio transmitting a periodic train,
+and `probe` says so rather than pretending to cover them.
 
 `counters` reads the firmware's own tallies over the vendor specific opcode in
 `hci_counters.h`. Nothing else puts those numbers on the wire, so without it a
@@ -184,12 +240,16 @@ python3 tests/sdc_symbols.py
 python3 tests/sdc_symbols.py /path/to/libsoftdevice_controller_multirole.a
 ```
 
-`fake_controller.py` is a controller simulator on a pty. It answers the same
-opcodes the firmware does and can simulate a connection, so the two tools above
-can be exercised and debugged with no board attached.
+`fake_controller.py` is a controller simulator on a pty. It answers every
+opcode in `hci_commands.py` with the reply shape that table declares, Command
+Complete or Command Status or nothing at all, and can simulate a connection,
+so the tools above can be exercised and debugged with no board attached. It
+does not reproduce return lengths, for the same reason the table does not
+carry them.
 
 ```sh
 python3 tests/hardware/fake_controller.py
+python3 tests/hardware/fake_controller.py --script hci_ble_test.py --args=probe
 ```
 
 Host tests do not replace hardware validation. They pin down the parts that can
