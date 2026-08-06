@@ -1,22 +1,27 @@
 #!/usr/bin/env python3
 """
-Which SDC commands a SoftDevice Controller library actually defines.
+Check that every SDC command the dispatch table calls is in the library.
 
-The nrfxlib headers declare the whole HCI API, but a library variant only
-contains the commands it was built with, so a declaration is no guarantee that
-the symbol links. Several rows in the dispatch table therefore sit behind a
-macro. This reads the archive and says what each of those macros should be.
+This firmware links libsoftdevice_controller_multirole and only that. An HCI
+controller exposes the whole controller to its host and the host chooses roles
+at run time, so there is no variant to select between and no row in
+src/hci_sdc_nrfxlib.cpp is conditional.
+
+That makes the useful question a different one. Not "which rows should be
+compiled in", which has one answer, but "does the library this release ships
+with still define everything the table calls". An nrfxlib upgrade that drops or
+renames a function is otherwise a link error naming one symbol with no
+indication of how many others went with it.
 
     python3 tests/sdc_symbols.py
     python3 tests/sdc_symbols.py /path/to/libsoftdevice_controller_multirole.a
 
-It parses the archive symbol index directly, so it needs no toolchain. The
+It reads the archive symbol index directly, so it needs no toolchain. The
 alternative, arm-none-eabi-nm, is only on the machine that has the cross
 compiler installed, and this question comes up before the first build as often
 as after it.
 
-Exits non-zero when a macro default in the source disagrees with the library,
-so it can be run as a check.
+Exits non-zero when the table calls something the archive does not define.
 """
 
 import os
@@ -24,25 +29,16 @@ import re
 import struct
 import sys
 
-# Macro in src/hci_sdc_nrfxlib.cpp, and the symbols it needs. A macro with an
-# empty list needs no SDC symbol at all.
-GATES = [
-    ("HCI_SDC_HAS_READ_SUPPORTED_STATES",
-     ["sdc_hci_cmd_le_read_supported_states"]),
-    ("HCI_SDC_HAS_READ_TRANSMIT_POWER",
-     ["sdc_hci_cmd_le_read_transmit_power"]),
-    ("HCI_SDC_HAS_READ_REMOTE_VERSION",
-     ["sdc_hci_cmd_lc_read_remote_version_information"]),
-    ("HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT",
-     ["sdc_hci_cmd_cb_read_authenticated_payload_timeout",
-      "sdc_hci_cmd_cb_write_authenticated_payload_timeout"]),
-    ("HCI_SDC_HAS_VS_READ_STATIC_ADDRESSES",
-     ["sdc_hci_cmd_vs_zephyr_read_static_addresses"]),
-    ("HCI_SDC_HAS_VS_READ_COUNTERS", []),
-]
+# Named absent on purpose. The multirole library does not define this one, the
+# table has no row for it, and the supported commands bitmap leaves its bit
+# clear. Reported rather than ignored, so that an nrfxlib release which starts
+# providing it is noticed instead of silently staying unused.
+KNOWN_ABSENT = ["sdc_hci_cmd_le_read_supported_states"]
 
 DEFAULT_LIB = ("../external/sdk-nrfxlib/softdevice_controller/lib/nrf52/"
                "hard-float/libsoftdevice_controller_multirole.a")
+
+TABLE_SOURCE = ("src", "hci_sdc_nrfxlib.cpp")
 
 
 def archive_symbols(path):
@@ -72,23 +68,35 @@ def archive_symbols(path):
     return set(n.decode("ascii", "replace") for n in names if n)
 
 
-def source_defaults(paths, macros):
-    """The value each named macro defaults to, across the given sources."""
-    text = ""
-    for path in paths:
-        try:
-            with open(path) as handle:
-                text += handle.read()
-        except IOError:
-            pass
+def strip_noise(text):
+    """
+    Comments and #include lines, removed before names are collected. Both
+    mention sdc_hci_cmd_ names that are not calls: the headers are called
+    sdc_hci_cmd_le.h and the like, and the commentary discusses commands the
+    table does not carry.
+    """
+    text = re.sub(r"/\*.*?\*/", " ", text, flags=re.S)
+    text = re.sub(r"//[^\n]*", " ", text)
+    text = re.sub(r"^\s*#\s*include[^\n]*", " ", text, flags=re.M)
+    return text
 
-    found = {}
-    for macro in macros:
-        match = re.search(r"^#define\s+%s\s+(\d+)\s*$" % macro, text,
-                          re.MULTILINE)
-        if match:
-            found[macro] = int(match.group(1))
-    return found
+
+def table_calls(path):
+    """
+    Every sdc_hci_cmd_ function named in the dispatch table source. Names reach
+    the SDC call either directly or as a macro argument, so both a following
+    parenthesis and a following comma count. Type names share the prefix and
+    end in _t, so they are dropped.
+    """
+    with open(path) as handle:
+        text = strip_noise(handle.read())
+
+    found = set()
+    for name in re.findall(r"\b(sdc_hci_cmd_[a-z0-9_]+)\s*[(,)]", text):
+        if name.endswith("_t"):
+            continue
+        found.add(name)
+    return sorted(found)
 
 
 def main():
@@ -104,7 +112,12 @@ def main():
 
     if not os.path.exists(lib):
         print("No library at %s" % lib)
-        print("Pass the path to a libsoftdevice_controller_*.a.")
+        print("Pass the path to a libsoftdevice_controller_multirole.a.")
+        return 2
+
+    source = os.path.join(root, *TABLE_SOURCE)
+    if not os.path.exists(source):
+        print("No dispatch table at %s" % source)
         return 2
 
     try:
@@ -113,45 +126,34 @@ def main():
         print(error)
         return 2
 
-    commands = sorted(s for s in symbols if s.startswith("sdc_hci_cmd_"))
+    calls = table_calls(source)
+    offered = sorted(s for s in symbols if s.startswith("sdc_hci_cmd_"))
+    missing = [c for c in calls
+               if c not in symbols and c not in KNOWN_ABSENT]
+
     print("%s" % lib)
-    print("%d symbols, %d of them HCI commands" % (len(symbols), len(commands)))
+    print("%d symbols, %d of them HCI commands" % (len(symbols), len(offered)))
+    print("%s calls %d of them" % (os.path.join(*TABLE_SOURCE), len(calls)))
     print()
 
-    sources = [os.path.join(root, "src", "hci_sdc_nrfxlib.cpp")]
-    defaults = source_defaults(sources, [m for m, _ in GATES])
-    disagreed = 0
-
-    for macro, needed in GATES:
-        if not needed:
-            want = 1
-            note = "needs no SDC symbol"
+    for name in KNOWN_ABSENT:
+        if name in symbols:
+            print("  %-56s now present, the table could carry it" % name)
         else:
-            absent = [s for s in needed if s not in symbols]
-            want = 0 if absent else 1
-            note = ("missing %s" % ", ".join(absent) if absent
-                    else "all present")
-
-        current = defaults.get(macro)
-        if current is None:
-            state = "not found in the source"
-        elif current == want:
-            state = "matches"
-        else:
-            state = "SOURCE SAYS %d" % current
-            disagreed += 1
-
-        print("  %-38s should be %d  %-34s %s"
-              % (macro, want, note, state))
+            print("  %-56s absent, as expected" % name)
 
     print()
-    if disagreed:
-        print("%d macro default disagrees with this library. A wrong 1 is a "
-              "link error; a wrong 0 is a command answered Unknown HCI Command "
-              "that the controller could have run." % disagreed)
+    if missing:
+        for name in missing:
+            print("  MISSING  %s" % name)
+        print()
+        print("%d command(s) the table calls are not in this library. Building "
+              "against it would fail to link. Either the nrfxlib release "
+              "dropped them or the table gained a row that was never checked."
+              % len(missing))
         return 1
 
-    print("Every gate matches this library.")
+    print("Every command the table calls is in this library.")
     return 0
 
 

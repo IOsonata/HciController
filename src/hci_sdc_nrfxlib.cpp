@@ -24,108 +24,36 @@
 #include "sdc_hci_vs.h"
 
 /*
- * The SoftDevice Controller headers declare the whole HCI API, but a library
- * variant only contains the commands it was built with, so a header alone does
- * not mean the symbol links. Every gate below is decided by what is really in
- * the archive:
+ * This firmware links libsoftdevice_controller_multirole and only that. An HCI
+ * controller exposes the whole controller to its host and the host chooses
+ * roles at run time over HCI, so there is no build in which it is central only
+ * or peripheral only, and no library variant to select between. Every
+ * sdc_hci_cmd_ function the table below calls is present in that archive, so
+ * the rows are unconditional.
  *
- *   python3 tests/sdc_symbols.py [path to libsoftdevice_controller_*.a]
+ * One command is not there to be called. LE Read Supported States reports the
+ * legacy advertising state combinations, and the multirole library does not
+ * define sdc_hci_cmd_le_read_supported_states at all. It has no row and no bit
+ * in the supported commands bitmap, so a host is told plainly that it is
+ * absent and gets Unknown HCI Command if it asks anyway. That is the correct
+ * answer rather than a gap: this controller advertises through the extended
+ * commands, and Vol 4 Part E 7.8.27 is about the legacy ones.
  *
- * which reads the archive symbol index and prints what each macro should be.
- * It needs no toolchain. A wrong 1 is a link error, which is loud. A wrong 0
- * is a command answered Unknown HCI Command that the controller could have
- * run, which is silent, so the check is worth running against a new nrfxlib
- * rather than assuming.
+ * tests/sdc_symbols.py checks the archive against every SDC function this
+ * table calls, so an nrfxlib release that drops one is a named failure rather
+ * than a link error with no context.
  *
- * Read Supported States is genuinely absent from the multirole library. It
- * reports legacy advertising states and is left out of a build that only
- * enables the extended advertiser.
- */
-#ifndef HCI_SDC_HAS_READ_SUPPORTED_STATES
-#define HCI_SDC_HAS_READ_SUPPORTED_STATES 0
-#endif
-
-/*
- * Vol 4 Part E 7.8.74, the minimum and maximum transmit power the controller
- * supports across its PHYs. Nothing to do with LE Power Control, which an
- * earlier comment here claimed, and it needs no sdc_support_ call.
- */
-#ifndef HCI_SDC_HAS_READ_TRANSMIT_POWER
-#define HCI_SDC_HAS_READ_TRANSMIT_POWER 1
-#endif
-
-/*
- * The two below default to 1 because the spec makes them mandatory for a BR or
- * LE controller and the library is expected to carry them. Read Remote Version
- * Information is Vol 4 Part E 7.1.23. The Authenticated Payload Timeout pair,
- * Vol 4 Part E 7.3.93 and 7.3.94, comes with LE Ping and is read and write
- * together, so one macro covers both.
- */
-#ifndef HCI_SDC_HAS_READ_REMOTE_VERSION
-#define HCI_SDC_HAS_READ_REMOTE_VERSION 1
-#endif
-
-#ifndef HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT
-#define HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT 1
-#endif
-
-/*
- * Vendor specific, and the one thing a host can ask when the board carries no
- * public address. A dongle with a blank BD_ADDR that answers nothing here
- * leaves the host to invent an address, so two runs are two different devices.
- */
-#ifndef HCI_SDC_HAS_VS_READ_STATIC_ADDRESSES
-#define HCI_SDC_HAS_VS_READ_STATIC_ADDRESSES 1
-#endif
-
-/*
- * Vendor specific counter readout. Costs one table row and no SDC symbol, so
- * it is on unless a build wants the opcode back.
- */
-#ifndef HCI_SDC_HAS_VS_READ_COUNTERS
-#define HCI_SDC_HAS_VS_READ_COUNTERS 1
-#endif
-
-/*
- * Vendor specific unmodulated carrier, opcode 0xFD23. No standard HCI command
- * produces a continuous wave, and it is what a regulatory pre-scan and an
- * antenna measurement both want. Present in the nRF52 libraries, so it
- * defaults on, but it is vendor specific and a different library may not carry
- * it, which is what the macro is for.
- */
-
-/*
- * The Zephyr vendor set, opcodes 0xFC01 to 0xFC0F. Read Version Information,
- * Read Supported Commands, Write BD_ADDR, Read Chip Temperature, and Read and
- * Write Tx Power Level. Read Static Addresses is one of the family but has its
- * own macro above, since it was here first.
- *
- * Nordic implements them and Zephyr and BlueZ both know them, so a host that
- * already speaks to a Zephyr controller speaks to this one unchanged. Bumble
- * carries bumble.vendor.zephyr.hci, which drives the two Tx Power commands
- * with no changes on either side.
- *
- * One macro for the group rather than six, because they come and go together
- * with the library variant.
- */
-
-/*
- * Read Key Hierarchy Roots, 0xFC0A, gets a macro of its own rather than
- * joining the group above, because it is the only command here that hands out
- * a secret.
- *
- * IR and ER are the per device roots a host derives its identity and
- * encryption keys from. Zephyr reads them so a host stack can key itself from
- * the controller instead of storing its own. On the USB dongle that costs
- * nothing anyone did not already have, since whoever can open the port has the
- * hardware in their hand. On a board where the controller talks to a host over
- * a UART that leaves the enclosure, it is a key readable by whatever is on the
- * other end of that wire. Turn it off there.
- */
-
-/*
  * Notes on groups of commands below whose behaviour is not obvious from the
  * table, kept here rather than repeated at each row.
+ *
+ * Vol 4 Part E 7.8.74, LE Read Transmit Power, is the minimum and maximum
+ * transmit power the controller supports across its PHYs. Nothing to do with
+ * LE Power Control, which an earlier comment here claimed, and it needs no
+ * sdc_support_ call.
+ *
+ * Read Remote Version Information, Vol 4 Part E 7.1.23, and the Authenticated
+ * Payload Timeout pair, 7.3.93 and 7.3.94, are mandatory for an LE controller
+ * and come with LE Ping.
  *
  * The quality of service commands, 0xFD04 to 0xFD1F, and the periodic
  * advertising reports all come back as events rather than command returns:
@@ -303,13 +231,9 @@ static HciCmdResult_t HciSdcCmdReadSupportedCommands(void *,
     supported.params.hci_le_set_scan_enable = 1U;
 
     supported.params.hci_disconnect = 1U;
-#if HCI_SDC_HAS_READ_REMOTE_VERSION
     supported.params.hci_read_remote_version_information = 1U;
-#endif
-#if HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT
     supported.params.hci_read_authenticated_payload_timeout = 1U;
     supported.params.hci_write_authenticated_payload_timeout = 1U;
-#endif
     supported.params.hci_le_create_connection = 1U;
     supported.params.hci_le_create_connection_cancel = 1U;
     supported.params.hci_le_connection_update = 1U;
@@ -327,12 +251,7 @@ static HciCmdResult_t HciSdcCmdReadSupportedCommands(void *,
     supported.params.hci_le_long_term_key_request_reply = 1U;
     supported.params.hci_le_long_term_key_request_negative_reply = 1U;
 
-#if HCI_SDC_HAS_READ_SUPPORTED_STATES
-    supported.params.hci_le_read_supported_states = 1U;
-#endif
-#if HCI_SDC_HAS_READ_TRANSMIT_POWER
     supported.params.hci_le_read_transmit_power = 1U;
-#endif
 
     supported.params.hci_read_rssi = 1U;
 
@@ -829,7 +748,6 @@ static HciCmdResult_t HciSdcCmdLeSetScanEnable(void *,
         return Reply(SdcFunc(pCmd), 0U);                                      \
     }
 
-#if HCI_SDC_HAS_VS_READ_STATIC_ADDRESSES
 /*
  * The address SDC reports here comes from FICR->DEVICEADDR with the two top
  * bits set, which is the same value IOsonata nrf_get_mac_address() produces,
@@ -881,7 +799,6 @@ static HciCmdResult_t HciSdcCmdVsReadStaticAddresses(void *,
 
     return HciSdcComplete(status, length);
 }
-#endif
 
 HCI_SDC_CMD_NR(HciSdcCmdVsZephyrReadVersionInfo,
                sdc_hci_cmd_vs_zephyr_read_version_info,
@@ -949,9 +866,6 @@ static HciCmdResult_t HciSdcCmdVsZephyrReadSupportedCommands(void *,
     result.params.read_host_stack_commands = 0U;
     result.params.set_scan_request_reports = 0U;
 
-#if !HCI_SDC_HAS_VS_READ_STATIC_ADDRESSES
-    result.params.read_static_addresses = 0U;
-#endif
 
     memcpy(pReturn, result.raw, sizeof(result.raw));
     return HciSdcComplete(status, sizeof(result.raw));
@@ -1218,7 +1132,6 @@ HCI_SDC_CMD_VBR(HciSdcCmdLeSetPeriodicSyncSubevent,
                 subevents, num_subevents_to_sync)
 
 /* Controller and baseband. */
-#if HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT
 HCI_SDC_CMD_PR(HciSdcCmdReadAuthPayloadTimeout,
                sdc_hci_cmd_cb_read_authenticated_payload_timeout,
                sdc_hci_cmd_cb_read_authenticated_payload_timeout_t,
@@ -1227,7 +1140,6 @@ HCI_SDC_CMD_PR(HciSdcCmdWriteAuthPayloadTimeout,
                sdc_hci_cmd_cb_write_authenticated_payload_timeout,
                sdc_hci_cmd_cb_write_authenticated_payload_timeout_t,
                sdc_hci_cmd_cb_write_authenticated_payload_timeout_return_t)
-#endif
 
 /*
  * Controller to host flow control.
@@ -1255,11 +1167,9 @@ HCI_SDC_CMD_VN(HciSdcCmdHostNumberOfCompletedPackets,
 /* Link control. */
 HCI_SDC_CMD_P(HciSdcCmdDisconnect, sdc_hci_cmd_lc_disconnect,
               sdc_hci_cmd_lc_disconnect_t, HciSdcStatus)
-#if HCI_SDC_HAS_READ_REMOTE_VERSION
 HCI_SDC_CMD_P(HciSdcCmdReadRemoteVersion,
               sdc_hci_cmd_lc_read_remote_version_information,
               sdc_hci_cmd_lc_read_remote_version_information_t, HciSdcStatus)
-#endif
 
 /* Connection management. */
 HCI_SDC_CMD_P(HciSdcCmdLeCreateConn, sdc_hci_cmd_le_create_conn,
@@ -1352,17 +1262,10 @@ HCI_SDC_CMD_PR(HciSdcCmdLeLtkNegativeReply,
  * legacy advertising states and is absent from a build that only enables the
  * extended advertiser. Read Transmit Power belongs to LE Power Control.
  */
-#if HCI_SDC_HAS_READ_SUPPORTED_STATES
-HCI_SDC_CMD_NR(HciSdcCmdLeReadSupportedStates,
-               sdc_hci_cmd_le_read_supported_states,
-               sdc_hci_cmd_le_read_supported_states_return_t)
-#endif
 
-#if HCI_SDC_HAS_READ_TRANSMIT_POWER
 HCI_SDC_CMD_NR(HciSdcCmdLeReadTransmitPower,
                sdc_hci_cmd_le_read_transmit_power,
                sdc_hci_cmd_le_read_transmit_power_return_t)
-#endif
 
 /*
  * Direct test mode.
@@ -1561,7 +1464,6 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
     {SDC_HCI_OPCODE_CMD_CB_HOST_NUMBER_OF_COMPLETED_PACKETS,
      HCI_CMD_VARIABLE_PARAM_LEN, 0U, HCI_CMD_RESPONSE_NONE,
      HciSdcCmdHostNumberOfCompletedPackets},
-#if HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT
     HCI_SDC_ENTRY_CR(
         SDC_HCI_OPCODE_CMD_CB_READ_AUTHENTICATED_PAYLOAD_TIMEOUT,
         sizeof(sdc_hci_cmd_cb_read_authenticated_payload_timeout_t),
@@ -1572,7 +1474,6 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
         sizeof(sdc_hci_cmd_cb_write_authenticated_payload_timeout_t),
         HciSdcCmdWriteAuthPayloadTimeout,
         sdc_hci_cmd_cb_write_authenticated_payload_timeout_return_t),
-#endif
 
     /* Informational parameters. */
     HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_IP_READ_LOCAL_VERSION_INFORMATION, 0U,
@@ -1625,12 +1526,10 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
     /* Link control. */
     HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LC_DISCONNECT,
                     sizeof(sdc_hci_cmd_lc_disconnect_t), HciSdcCmdDisconnect),
-#if HCI_SDC_HAS_READ_REMOTE_VERSION
     HCI_SDC_ENTRY_S(
         SDC_HCI_OPCODE_CMD_LC_READ_REMOTE_VERSION_INFORMATION,
         sizeof(sdc_hci_cmd_lc_read_remote_version_information_t),
         HciSdcCmdReadRemoteVersion),
-#endif
 
     /* Connection management. */
     HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_CREATE_CONN,
@@ -1708,16 +1607,9 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
         HciSdcCmdLeLtkNegativeReply,
         sdc_hci_cmd_le_long_term_key_request_negative_reply_return_t),
 
-#if HCI_SDC_HAS_READ_SUPPORTED_STATES
-    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_READ_SUPPORTED_STATES, 0U,
-                     HciSdcCmdLeReadSupportedStates,
-                     sdc_hci_cmd_le_read_supported_states_return_t),
-#endif
-#if HCI_SDC_HAS_READ_TRANSMIT_POWER
     HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_READ_TRANSMIT_POWER, 0U,
                      HciSdcCmdLeReadTransmitPower,
                      sdc_hci_cmd_le_read_transmit_power_return_t),
-#endif
 
     /* Direct test mode. */
     HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_RECEIVER_TEST_V1,
@@ -1965,11 +1857,9 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
      * on it is the count byte alone, which is exactly the minimum this command
      * always carries and what an error is padded out to.
      */
-#if HCI_SDC_HAS_VS_READ_STATIC_ADDRESSES
     HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_VS_ZEPHYR_READ_STATIC_ADDRESSES, 0U,
                      HciSdcCmdVsReadStaticAddresses,
                      sdc_hci_cmd_vs_zephyr_read_static_addresses_return_t),
-#endif
     /*
      * The rest of the Zephyr family. Read Supported Commands declares the full
      * 64 octet bitmap, which is what it always returns, masked or not.
@@ -2018,7 +1908,6 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
         sizeof(
             sdc_hci_cmd_vs_conn_anchor_point_update_event_report_enable_t),
         HciSdcCmdVsConnAnchorPointUpdateEnable),
-#if HCI_SDC_HAS_VS_READ_COUNTERS
     /*
      * Answered by the routing layer rather than by SDC, so it reports what
      * this firmware refused rather than what the radio did. The length is a
@@ -2027,7 +1916,6 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
      */
     {HCI_COUNTERS_OPCODE, 0U, (uint16_t)HCI_COUNTERS_RETURN_LEN,
      HCI_CMD_RESPONSE_COMPLETE, HciCountersRead},
-#endif
 };
 
 /*
@@ -2169,13 +2057,9 @@ HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_adv_set_random_address_t, 7U);    /* 7.8.52 
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_ext_adv_params_t, 25U);           /* 7.8.53 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_remove_adv_set_t, 1U);                /* 7.8.59 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_ext_scan_enable_t, 6U);           /* 7.8.65 */
-#if HCI_SDC_HAS_READ_REMOTE_VERSION
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_lc_read_remote_version_information_t, 2U);
-#endif
-#if HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_cb_read_authenticated_payload_timeout_t, 2U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_cb_write_authenticated_payload_timeout_t, 4U);
-#endif
 /*
  * Vendor specific, so the length comes from Nordic rather than from Vol 4
  * Part E. TX_Channel and TX_Power_Level, one octet each.
@@ -2249,16 +2133,12 @@ HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_phy_return_t, 4U);               /* 7.8.47 
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_ext_adv_params_return_t, 1U);     /* 7.8.53 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_max_adv_data_length_return_t, 2U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_number_of_supported_adv_sets_return_t, 1U);
-#if HCI_SDC_HAS_READ_TRANSMIT_POWER
 /* Min_TX_Power and Max_TX_Power, one octet each. Vol 4 Part E 7.8.74. */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_transmit_power_return_t, 2U);
-#endif
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_ip_read_local_supported_commands_return_t, 64U);
-#if HCI_SDC_HAS_VS_READ_STATIC_ADDRESSES
 /* Six octets of address and sixteen of identity root, per the Zephyr command. */
 HCI_SDC_SPEC_LEN(sdc_hci_vs_zephyr_static_address_t, 22U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_vs_zephyr_read_static_addresses_return_t, 1U);
-#endif
 /*
  * The rest of the Zephyr family. Vendor specific, so the lengths come from
  * Nordic and from what Zephyr and BlueZ already send, not from Vol 4 Part E.
@@ -2302,10 +2182,8 @@ static_assert(
 static_assert(
     sizeof(sdc_hci_cmd_vs_conn_anchor_point_update_event_report_enable_t) == 1U,
     "VS Conn Anchor Point Update Report Enable is not 1 octet");
-#if HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_cb_read_authenticated_payload_timeout_return_t, 4U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_cb_write_authenticated_payload_timeout_return_t, 2U);
-#endif
 
 #undef HCI_SDC_SPEC_LEN
 

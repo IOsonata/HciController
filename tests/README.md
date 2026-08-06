@@ -122,10 +122,16 @@ arrived. Once that is established it distinguishes the retry path firing, the
 controller refusing with some other error, and the controller taking every
 packet.
 
-`sdc_symbols.py` reads a SoftDevice Controller archive and says which of the
-optional dispatch table rows its library actually defines, so the macros in
-`src/hci_sdc_nrfxlib.cpp` are set from evidence rather than from assumption. It
+`sdc_symbols.py` reads a SoftDevice Controller archive and checks that every
+SDC command `src/hci_sdc_nrfxlib.cpp` calls is defined in it. The firmware
+links `libsoftdevice_controller_multirole` and only that, so no dispatch table
+row is conditional; the question worth asking is whether an nrfxlib upgrade
+dropped or renamed something the table needs. Without this that is a link error
+naming one symbol, with no indication of how many others went with it. It
 parses the archive symbol index directly and needs no cross toolchain.
+
+Pointed at the peripheral-only library it reports 41 missing commands, which is
+what a wrong archive looks like.
 
 ```sh
 python3 tests/sdc_symbols.py

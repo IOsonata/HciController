@@ -23,30 +23,6 @@
 #include "sdc_hci_vs.h"
 #include "sdc_stub.h"
 
-#ifndef HCI_SDC_HAS_READ_SUPPORTED_STATES
-#define HCI_SDC_HAS_READ_SUPPORTED_STATES 0
-#endif
-
-#ifndef HCI_SDC_HAS_READ_TRANSMIT_POWER
-#define HCI_SDC_HAS_READ_TRANSMIT_POWER 1
-#endif
-
-#ifndef HCI_SDC_HAS_READ_REMOTE_VERSION
-#define HCI_SDC_HAS_READ_REMOTE_VERSION 1
-#endif
-
-#ifndef HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT
-#define HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT 1
-#endif
-
-#ifndef HCI_SDC_HAS_VS_READ_STATIC_ADDRESSES
-#define HCI_SDC_HAS_VS_READ_STATIC_ADDRESSES 1
-#endif
-
-#ifndef HCI_SDC_HAS_VS_READ_COUNTERS
-#define HCI_SDC_HAS_VS_READ_COUNTERS 1
-#endif
-
 #define EVENT_COMMAND_COMPLETE 0x0E
 #define EVENT_COMMAND_STATUS   0x0F
 
@@ -219,7 +195,6 @@ static void ExpectCompleteLocal(const char *label, uint16_t opcode,
            label, expectedReturn);
 }
 
-#if HCI_SDC_HAS_VS_READ_COUNTERS
 /* Positions in the counter block, fixed by hci_counters.h. */
 enum {
     COUNTER_COMMAND = 0,
@@ -248,7 +223,6 @@ static uint32_t ReadCounter(size_t Index)
     return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) |
            ((uint32_t)p[3] << 24);
 }
-#endif
 
 static void ExpectStatus(const char *label, uint16_t opcode,
                          const uint8_t *pParams, size_t len)
@@ -362,10 +336,8 @@ int main(void)
     /* Commands the specification answers with Command Status. */
     ExpectStatus("Disconnect", 0x0406, zeros,
                  sizeof(sdc_hci_cmd_lc_disconnect_t));
-#if HCI_SDC_HAS_READ_REMOTE_VERSION
     ExpectStatus("Read Remote Version Information", 0x041D, zeros,
                  sizeof(sdc_hci_cmd_lc_read_remote_version_information_t));
-#endif
     ExpectStatus("LE Create Connection", 0x200D, zeros,
                  sizeof(sdc_hci_cmd_le_create_conn_t));
     ExpectStatus("LE Connection Update", 0x2013, zeros,
@@ -381,15 +353,12 @@ int main(void)
                  offsetof(sdc_hci_cmd_le_ext_create_conn_t, array_params));
 
     /* Commands answered with Command Complete, some carrying return data. */
-#if HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT
     ExpectComplete("Read Authenticated Payload Timeout", 0x0C7B, zeros,
                    sizeof(sdc_hci_cmd_cb_read_authenticated_payload_timeout_t),
         sizeof(sdc_hci_cmd_cb_read_authenticated_payload_timeout_return_t));
     ExpectComplete("Write Authenticated Payload Timeout", 0x0C7C, zeros,
                    sizeof(sdc_hci_cmd_cb_write_authenticated_payload_timeout_t),
         sizeof(sdc_hci_cmd_cb_write_authenticated_payload_timeout_return_t));
-#endif
-#if HCI_SDC_HAS_VS_READ_STATIC_ADDRESSES
     /*
      * Variable return: the count byte plus one 22 byte address, which is what
      * the stub reports. This is what a host asks when the board has no public
@@ -397,7 +366,6 @@ int main(void)
      */
     ExpectComplete("VS Read Static Addresses", 0xFC09, zeros, 0U,
                    1U + sizeof(sdc_hci_vs_zephyr_static_address_t));
-#endif
     ExpectComplete("VS Zephyr Read Version Info", 0xFC01, zeros, 0U,
                    sizeof(sdc_hci_cmd_vs_zephyr_read_version_info_return_t));
     ExpectComplete("VS Zephyr Write BD_ADDR", 0xFC06, zeros,
@@ -741,7 +709,6 @@ int main(void)
         ExpectRejected("LE Set Periodic Sync Subevent, count lies", 0x2084,
                        three, sizeof(three) - 1U, 0x12);
     }
-#if HCI_SDC_HAS_VS_READ_COUNTERS
     ExpectCompleteLocal("VS Read Counters", HCI_COUNTERS_OPCODE,
                         zeros, 0U, HCI_COUNTERS_RETURN_LEN);
     assert(gLastReturn[0] == HCI_COUNTERS_VERSION);
@@ -769,7 +736,6 @@ int main(void)
         /* Left as the platform would leave them for the rest of the run. */
         HciCountersSetSdcMem(&gCounters, 0U, 0U);
     }
-#endif
     ExpectComplete("LE Create Connection Cancel", 0x200E, zeros, 0U, 0U);
     ExpectComplete("LE Read Filter Accept List Size", 0x200F, zeros, 0U,
                    sizeof(sdc_hci_cmd_le_read_filter_accept_list_size_return_t));
@@ -786,23 +752,17 @@ int main(void)
                    sizeof(sdc_hci_cmd_le_long_term_key_request_reply_t),
                    sizeof(sdc_hci_cmd_le_long_term_key_request_reply_return_t));
     /*
-     * Opt in commands. The library variant decides whether the symbol exists,
-     * so the table entry is conditional and the test follows it.
+     * The multirole library does not define
+     * sdc_hci_cmd_le_read_supported_states, so the table has no row for it and
+     * a host asking gets Unknown HCI Command. That is permanent rather than a
+     * build choice: this firmware links multirole and nothing else. Vol 4
+     * Part E 7.8.27 reports the legacy advertising state combinations, and
+     * this controller advertises through the extended commands.
      */
-#if HCI_SDC_HAS_READ_SUPPORTED_STATES
-    ExpectComplete("LE Read Supported States", 0x201C, zeros, 0U,
-                   sizeof(sdc_hci_cmd_le_read_supported_states_return_t));
-#else
-    ExpectRejected("LE Read Supported States, not built", 0x201C, zeros, 0U,
-                   0x01);
-#endif
-#if HCI_SDC_HAS_READ_TRANSMIT_POWER
+    ExpectRejected("LE Read Supported States, absent from multirole", 0x201C,
+                   zeros, 0U, 0x01);
     ExpectComplete("LE Read Transmit Power", 0x204B, zeros, 0U,
                    sizeof(sdc_hci_cmd_le_read_transmit_power_return_t));
-#else
-    ExpectRejected("LE Read Transmit Power, not built", 0x204B, zeros, 0U,
-                   0x01);
-#endif
     ExpectComplete("LE Receiver Test", 0x201D, zeros,
                    sizeof(sdc_hci_cmd_le_receiver_test_v1_t), 0U);
     ExpectComplete("LE Test End", 0x201F, zeros, 0U,
@@ -1227,14 +1187,12 @@ int main(void)
                          hci_host_buffer_size),
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_CB_HOST_NUMBER_OF_COMPLETED_PACKETS,
                          hci_host_number_of_completed_packets),
-#if HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT
             BITMAP_ENTRY(
                 SDC_HCI_OPCODE_CMD_CB_READ_AUTHENTICATED_PAYLOAD_TIMEOUT,
                 hci_read_authenticated_payload_timeout),
             BITMAP_ENTRY(
                 SDC_HCI_OPCODE_CMD_CB_WRITE_AUTHENTICATED_PAYLOAD_TIMEOUT,
                 hci_write_authenticated_payload_timeout),
-#endif
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_IP_READ_LOCAL_VERSION_INFORMATION,
                          hci_read_local_version_information),
             /*
@@ -1243,7 +1201,6 @@ int main(void)
              */
             {SDC_HCI_OPCODE_CMD_IP_READ_LOCAL_SUPPORTED_COMMANDS, NULL,
              "hci_read_local_supported_commands"},
-#if HCI_SDC_HAS_VS_READ_STATIC_ADDRESSES
             /*
              * Vendor specific. Vol 4 Part E 6.27 covers the opcodes the
              * specification assigns and has no bit for anything in the 0x3F
@@ -1251,10 +1208,7 @@ int main(void)
              */
             {SDC_HCI_OPCODE_CMD_VS_ZEPHYR_READ_STATIC_ADDRESSES, NULL,
              "vs_zephyr_read_static_addresses"},
-#endif
-#if HCI_SDC_HAS_VS_READ_COUNTERS
             {HCI_COUNTERS_OPCODE, NULL, "vs_read_counters"},
-#endif
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_IP_READ_LOCAL_SUPPORTED_FEATURES,
                          hci_read_local_supported_features),
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_IP_READ_BD_ADDR, hci_read_bd_addr),
@@ -1285,11 +1239,9 @@ int main(void)
                          hci_le_set_scan_enable),
 
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LC_DISCONNECT, hci_disconnect),
-#if HCI_SDC_HAS_READ_REMOTE_VERSION
             BITMAP_ENTRY(
                 SDC_HCI_OPCODE_CMD_LC_READ_REMOTE_VERSION_INFORMATION,
                 hci_read_remote_version_information),
-#endif
 
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_CREATE_CONN,
                          hci_le_create_connection),
@@ -1323,14 +1275,8 @@ int main(void)
                 SDC_HCI_OPCODE_CMD_LE_LONG_TERM_KEY_REQUEST_NEGATIVE_REPLY,
                 hci_le_long_term_key_request_negative_reply),
 
-#if HCI_SDC_HAS_READ_SUPPORTED_STATES
-            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_READ_SUPPORTED_STATES,
-                         hci_le_read_supported_states),
-#endif
-#if HCI_SDC_HAS_READ_TRANSMIT_POWER
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_READ_TRANSMIT_POWER,
                          hci_le_read_transmit_power),
-#endif
 
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_RECEIVER_TEST_V1,
                          hci_le_receiver_test_v1),
@@ -1596,7 +1542,6 @@ int main(void)
                "bitmap agrees with the table", count);
     }
 
-#if HCI_SDC_HAS_VS_READ_COUNTERS
     /*
      * The readout is only worth having if the numbers move, and a block of
      * zeros passes every length and shape check there is. Read it, provoke two
@@ -1641,7 +1586,6 @@ int main(void)
         printf("[ok] %-38s unknown +1, bad length +1, commands +3\n",
                "counters follow what the layer refused");
     }
-#endif
 
     printf("All SDC dispatch tests passed.\n");
     return 0;
