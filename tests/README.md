@@ -53,7 +53,7 @@ wrong.
 | `hci_nrf52840_usb_test` | `hci_nrf52840.cpp` | USB bring up order, that MPSL keeps the clock, that every wait is bounded and reports its own error code |
 | `hci_taktos_poll_test` | `hci_taktos.cpp` | the poll interval, so a lost wake cannot stall the USB transport |
 | `hci_tinyusb_init_test` | `hci_tinyusb.cpp` | that bring up goes through `tusb_rhport_init` and records the device role, which is what makes the interrupt handler dispatch |
-| `hci_sdc_dispatch_test` | `hci_sdc_nrfxlib.cpp` | all 79 opcodes reach the intended SDC call with the right response type and parameter length, and the supported commands bitmap agrees with the table in both directions |
+| `hci_sdc_dispatch_test` | `hci_sdc_nrfxlib.cpp` | all 86 opcodes reach the intended SDC call with the right response type and parameter length, and the supported commands bitmap agrees with the table in both directions |
 
 ## Hardware tools
 

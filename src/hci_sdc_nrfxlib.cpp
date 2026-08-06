@@ -97,6 +97,41 @@
 #define HCI_SDC_HAS_VS_CARRIER_TEST 1
 #endif
 
+/*
+ * The Zephyr vendor set, opcodes 0xFC01 to 0xFC0F. Read Version Information,
+ * Read Supported Commands, Write BD_ADDR, Read Chip Temperature, and Read and
+ * Write Tx Power Level. Read Static Addresses is one of the family but has its
+ * own macro above, since it was here first.
+ *
+ * Nordic implements them and Zephyr and BlueZ both know them, so a host that
+ * already speaks to a Zephyr controller speaks to this one unchanged. Bumble
+ * carries bumble.vendor.zephyr.hci, which drives the two Tx Power commands
+ * with no changes on either side.
+ *
+ * One macro for the group rather than six, because they come and go together
+ * with the library variant.
+ */
+#ifndef HCI_SDC_HAS_VS_ZEPHYR_SET
+#define HCI_SDC_HAS_VS_ZEPHYR_SET 1
+#endif
+
+/*
+ * Read Key Hierarchy Roots, 0xFC0A, gets a macro of its own rather than
+ * joining the group above, because it is the only command here that hands out
+ * a secret.
+ *
+ * IR and ER are the per device roots a host derives its identity and
+ * encryption keys from. Zephyr reads them so a host stack can key itself from
+ * the controller instead of storing its own. On the USB dongle that costs
+ * nothing anyone did not already have, since whoever can open the port has the
+ * hardware in their hand. On a board where the controller talks to a host over
+ * a UART that leaves the enclosure, it is a key readable by whatever is on the
+ * other end of that wire. Turn it off there.
+ */
+#ifndef HCI_SDC_HAS_VS_KEY_HIERARCHY_ROOTS
+#define HCI_SDC_HAS_VS_KEY_HIERARCHY_ROOTS 1
+#endif
+
 static HciCmdResult_t HciSdcComplete(uint8_t Status, size_t ReturnLen)
 {
     HciCmdResult_t result = {Status, HCI_CMD_RESPONSE_COMPLETE, ReturnLen};
@@ -754,6 +789,91 @@ static HciCmdResult_t HciSdcCmdVsReadStaticAddresses(void *,
 }
 #endif
 
+#if HCI_SDC_HAS_VS_ZEPHYR_SET
+HCI_SDC_CMD_NR(HciSdcCmdVsZephyrReadVersionInfo,
+               sdc_hci_cmd_vs_zephyr_read_version_info,
+               sdc_hci_cmd_vs_zephyr_read_version_info_return_t)
+HCI_SDC_CMD_P(HciSdcCmdVsZephyrWriteBdAddr,
+              sdc_hci_cmd_vs_zephyr_write_bd_addr,
+              sdc_hci_cmd_vs_zephyr_write_bd_addr_t, HciSdcComplete)
+HCI_SDC_CMD_NR(HciSdcCmdVsZephyrReadChipTemp,
+               sdc_hci_cmd_vs_zephyr_read_chip_temp,
+               sdc_hci_cmd_vs_zephyr_read_chip_temp_return_t)
+HCI_SDC_CMD_PR(HciSdcCmdVsZephyrWriteTxPower,
+               sdc_hci_cmd_vs_zephyr_write_tx_power,
+               sdc_hci_cmd_vs_zephyr_write_tx_power_t,
+               sdc_hci_cmd_vs_zephyr_write_tx_power_return_t)
+HCI_SDC_CMD_PR(HciSdcCmdVsZephyrReadTxPower,
+               sdc_hci_cmd_vs_zephyr_read_tx_power,
+               sdc_hci_cmd_vs_zephyr_read_tx_power_t,
+               sdc_hci_cmd_vs_zephyr_read_tx_power_return_t)
+
+/*
+ * The vendor equivalent of Read Local Supported Commands, and it needs the
+ * same treatment for the same reason.
+ *
+ * SDC answers with what SDC implements. This layer dispatches a subset of
+ * that, so passing the answer through would name commands the table has no row
+ * for, and a host that reads the bitmap and then sends one gets Unknown HCI
+ * Command back. The standard bitmap is built up bit by bit from what the table
+ * carries and is checked against it in the tests; this one starts from SDC and
+ * is masked down to the same set, which reaches the same place from the other
+ * direction.
+ *
+ * Masked rather than rebuilt, because a bit means the command and the feature
+ * behind it are both there. SDC clearing one is information this layer does not
+ * have. So a bit survives only if SDC set it and there is a row to reach.
+ */
+static HciCmdResult_t HciSdcCmdVsZephyrReadSupportedCommands(void *,
+                                                             const uint8_t *,
+                                                             size_t,
+                                                             uint8_t *pReturn,
+                                                             size_t ReturnCapacity)
+{
+    sdc_hci_cmd_vs_zephyr_read_supported_commands_return_t result;
+
+    if (!HciSdcReturnFits(sizeof(result.raw), ReturnCapacity))
+    {
+        return HciSdcComplete(HCI_STATUS_MEMORY_CAPACITY_EXCEEDED, 0U);
+    }
+
+    uint8_t status = sdc_hci_cmd_vs_zephyr_read_supported_commands(&result);
+    if (status != HCI_STATUS_SUCCESS)
+    {
+        return HciSdcComplete(status, 0U);
+    }
+
+    /*
+     * Everything the table does not carry. Named one by one rather than
+     * cleared wholesale, so a future row is a compile error here if the name
+     * is removed and a visible omission if it is not.
+     */
+    result.params.read_supported_features = 0U;
+    result.params.set_event_mask = 0U;
+    result.params.reset = 0U;
+    result.params.set_trace_enable = 0U;
+    result.params.read_build_info = 0U;
+    result.params.read_host_stack_commands = 0U;
+    result.params.set_scan_request_reports = 0U;
+
+#if !HCI_SDC_HAS_VS_READ_STATIC_ADDRESSES
+    result.params.read_static_addresses = 0U;
+#endif
+#if !HCI_SDC_HAS_VS_KEY_HIERARCHY_ROOTS
+    result.params.read_key_hierarchy_roots = 0U;
+#endif
+
+    memcpy(pReturn, result.raw, sizeof(result.raw));
+    return HciSdcComplete(status, sizeof(result.raw));
+}
+#endif
+
+#if HCI_SDC_HAS_VS_KEY_HIERARCHY_ROOTS
+HCI_SDC_CMD_NR(HciSdcCmdVsZephyrReadKeyHierarchyRoots,
+               sdc_hci_cmd_vs_zephyr_read_key_hierarchy_roots,
+               sdc_hci_cmd_vs_zephyr_read_key_hierarchy_roots_return_t)
+#endif
+
 /* Controller and baseband. */
 #if HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT
 HCI_SDC_CMD_PR(HciSdcCmdReadAuthPayloadTimeout,
@@ -1369,6 +1489,38 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
                      HciSdcCmdVsReadStaticAddresses,
                      sdc_hci_cmd_vs_zephyr_read_static_addresses_return_t),
 #endif
+#if HCI_SDC_HAS_VS_ZEPHYR_SET
+    /*
+     * The rest of the Zephyr family. Read Supported Commands declares the full
+     * 64 octet bitmap, which is what it always returns, masked or not.
+     */
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_VS_ZEPHYR_READ_VERSION_INFO, 0U,
+                     HciSdcCmdVsZephyrReadVersionInfo,
+                     sdc_hci_cmd_vs_zephyr_read_version_info_return_t),
+    {SDC_HCI_OPCODE_CMD_VS_ZEPHYR_READ_SUPPORTED_COMMANDS, 0U,
+     (uint16_t)sizeof(
+         sdc_hci_cmd_vs_zephyr_read_supported_commands_return_t),
+     HCI_CMD_RESPONSE_COMPLETE, HciSdcCmdVsZephyrReadSupportedCommands},
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_VS_ZEPHYR_WRITE_BD_ADDR,
+                    sizeof(sdc_hci_cmd_vs_zephyr_write_bd_addr_t),
+                    HciSdcCmdVsZephyrWriteBdAddr),
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_VS_ZEPHYR_READ_CHIP_TEMP, 0U,
+                     HciSdcCmdVsZephyrReadChipTemp,
+                     sdc_hci_cmd_vs_zephyr_read_chip_temp_return_t),
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_VS_ZEPHYR_WRITE_TX_POWER,
+                     sizeof(sdc_hci_cmd_vs_zephyr_write_tx_power_t),
+                     HciSdcCmdVsZephyrWriteTxPower,
+                     sdc_hci_cmd_vs_zephyr_write_tx_power_return_t),
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_VS_ZEPHYR_READ_TX_POWER,
+                     sizeof(sdc_hci_cmd_vs_zephyr_read_tx_power_t),
+                     HciSdcCmdVsZephyrReadTxPower,
+                     sdc_hci_cmd_vs_zephyr_read_tx_power_return_t),
+#endif
+#if HCI_SDC_HAS_VS_KEY_HIERARCHY_ROOTS
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_VS_ZEPHYR_READ_KEY_HIERARCHY_ROOTS, 0U,
+                     HciSdcCmdVsZephyrReadKeyHierarchyRoots,
+                     sdc_hci_cmd_vs_zephyr_read_key_hierarchy_roots_return_t),
+#endif
 #if HCI_SDC_HAS_VS_READ_COUNTERS
     /*
      * Answered by the routing layer rather than by SDC, so it reports what
@@ -1523,6 +1675,36 @@ HCI_SDC_SPEC_LEN(sdc_hci_cmd_ip_read_local_supported_commands_return_t, 64U);
 /* Six octets of address and sixteen of identity root, per the Zephyr command. */
 HCI_SDC_SPEC_LEN(sdc_hci_vs_zephyr_static_address_t, 22U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_vs_zephyr_read_static_addresses_return_t, 1U);
+#endif
+/*
+ * The rest of the Zephyr family. Vendor specific, so the lengths come from
+ * Nordic and from what Zephyr and BlueZ already send, not from Vol 4 Part E.
+ * A mismatch here is a host that formats the command correctly and gets 0x12.
+ */
+#if HCI_SDC_HAS_VS_ZEPHYR_SET
+static_assert(sizeof(sdc_hci_cmd_vs_zephyr_read_version_info_return_t) == 12U,
+              "Zephyr Read Version Information is not 12 octets");
+static_assert(
+    sizeof(sdc_hci_cmd_vs_zephyr_read_supported_commands_return_t) == 64U,
+    "Zephyr Read Supported Commands is not 64 octets");
+static_assert(sizeof(sdc_hci_cmd_vs_zephyr_write_bd_addr_t) == 6U,
+              "Zephyr Write BD_ADDR is not 6 octets");
+static_assert(sizeof(sdc_hci_cmd_vs_zephyr_read_chip_temp_return_t) == 1U,
+              "Zephyr Read Chip Temperature is not 1 octet");
+static_assert(sizeof(sdc_hci_cmd_vs_zephyr_write_tx_power_t) == 4U,
+              "Zephyr Write Tx Power is not 4 octets");
+static_assert(sizeof(sdc_hci_cmd_vs_zephyr_write_tx_power_return_t) == 4U,
+              "Zephyr Write Tx Power return is not 4 octets");
+static_assert(sizeof(sdc_hci_cmd_vs_zephyr_read_tx_power_t) == 3U,
+              "Zephyr Read Tx Power is not 3 octets");
+static_assert(sizeof(sdc_hci_cmd_vs_zephyr_read_tx_power_return_t) == 4U,
+              "Zephyr Read Tx Power return is not 4 octets");
+#endif
+#if HCI_SDC_HAS_VS_KEY_HIERARCHY_ROOTS
+/* IR and ER, sixteen octets each. */
+static_assert(
+    sizeof(sdc_hci_cmd_vs_zephyr_read_key_hierarchy_roots_return_t) == 32U,
+    "Zephyr Read Key Hierarchy Roots is not 32 octets");
 #endif
 #if HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_cb_read_authenticated_payload_timeout_return_t, 4U);

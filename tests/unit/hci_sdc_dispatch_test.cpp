@@ -51,6 +51,14 @@
 #define HCI_SDC_HAS_VS_CARRIER_TEST 1
 #endif
 
+#ifndef HCI_SDC_HAS_VS_ZEPHYR_SET
+#define HCI_SDC_HAS_VS_ZEPHYR_SET 1
+#endif
+
+#ifndef HCI_SDC_HAS_VS_KEY_HIERARCHY_ROOTS
+#define HCI_SDC_HAS_VS_KEY_HIERARCHY_ROOTS 1
+#endif
+
 #define EVENT_COMMAND_COMPLETE 0x0E
 #define EVENT_COMMAND_STATUS   0x0F
 
@@ -393,6 +401,63 @@ int main(void)
      */
     ExpectComplete("VS Read Static Addresses", 0xFC09, zeros, 0U,
                    1U + sizeof(sdc_hci_vs_zephyr_static_address_t));
+#endif
+#if HCI_SDC_HAS_VS_ZEPHYR_SET
+    ExpectComplete("VS Zephyr Read Version Info", 0xFC01, zeros, 0U,
+                   sizeof(sdc_hci_cmd_vs_zephyr_read_version_info_return_t));
+    ExpectComplete("VS Zephyr Write BD_ADDR", 0xFC06, zeros,
+                   sizeof(sdc_hci_cmd_vs_zephyr_write_bd_addr_t), 0U);
+    ExpectComplete("VS Zephyr Read Chip Temperature", 0xFC0B, zeros, 0U,
+                   sizeof(sdc_hci_cmd_vs_zephyr_read_chip_temp_return_t));
+    ExpectComplete("VS Zephyr Write Tx Power", 0xFC0E, zeros,
+                   sizeof(sdc_hci_cmd_vs_zephyr_write_tx_power_t),
+                   sizeof(sdc_hci_cmd_vs_zephyr_write_tx_power_return_t));
+    ExpectComplete("VS Zephyr Read Tx Power", 0xFC0F, zeros,
+                   sizeof(sdc_hci_cmd_vs_zephyr_read_tx_power_t),
+                   sizeof(sdc_hci_cmd_vs_zephyr_read_tx_power_return_t));
+
+    {
+        /*
+         * Read Supported Commands is the one that does more than forward. SDC
+         * answers with what SDC implements, and this layer dispatches a subset,
+         * so the answer is masked down to what the table can actually reach.
+         *
+         * The stub fills the whole bitmap with 0x5A, which lands set bits on
+         * both sides of the mask. So this checks both directions: a command
+         * SDC offers and the table does not carry is cleared, and one the
+         * table does carry survives. Clearing everything would pass a one
+         * sided test.
+         */
+        ExpectComplete(
+            "VS Zephyr Read Supported Commands", 0xFC02, zeros, 0U,
+            sizeof(sdc_hci_cmd_vs_zephyr_read_supported_commands_return_t));
+
+        sdc_hci_cmd_vs_zephyr_read_supported_commands_return_t reported;
+        memcpy(&reported, gLastReturn, sizeof(reported));
+
+        /* 0x5A sets these, and the table has no row for any of them. */
+        assert(reported.params.set_event_mask == 0U);
+        assert(reported.params.reset == 0U);
+        assert(reported.params.set_trace_enable == 0U);
+        assert(reported.params.read_host_stack_commands == 0U);
+        assert(reported.params.set_scan_request_reports == 0U);
+
+        /* 0x5A sets these too, and the table does carry them. */
+        assert(reported.params.read_tx_power_level == 1U);
+#if HCI_SDC_HAS_VS_KEY_HIERARCHY_ROOTS
+        assert(reported.params.read_key_hierarchy_roots == 1U);
+#else
+        assert(reported.params.read_key_hierarchy_roots == 0U);
+#endif
+
+        printf("[ok] %-38s %s\n", "vendor bitmap is masked to the table",
+               "unreachable bits cleared, reachable kept");
+    }
+#endif
+#if HCI_SDC_HAS_VS_KEY_HIERARCHY_ROOTS
+    ExpectComplete(
+        "VS Zephyr Read Key Hierarchy Roots", 0xFC0A, zeros, 0U,
+        sizeof(sdc_hci_cmd_vs_zephyr_read_key_hierarchy_roots_return_t));
 #endif
 #if HCI_SDC_HAS_VS_READ_COUNTERS
     ExpectCompleteLocal("VS Read Counters", HCI_COUNTERS_OPCODE,
@@ -1048,6 +1113,28 @@ int main(void)
             /* Vendor specific, so Vol 4 Part E 6.27 assigns it no bit. */
             {SDC_HCI_OPCODE_CMD_VS_TRANSMITTER_CARRIER_TEST, NULL,
              "vs_transmitter_carrier_test"},
+#endif
+#if HCI_SDC_HAS_VS_ZEPHYR_SET
+            /*
+             * Same, and these have a bitmap of their own instead, the one
+             * Read Supported Commands answers with. It is checked above.
+             */
+            {SDC_HCI_OPCODE_CMD_VS_ZEPHYR_READ_VERSION_INFO, NULL,
+             "vs_zephyr_read_version_info"},
+            {SDC_HCI_OPCODE_CMD_VS_ZEPHYR_READ_SUPPORTED_COMMANDS, NULL,
+             "vs_zephyr_read_supported_commands"},
+            {SDC_HCI_OPCODE_CMD_VS_ZEPHYR_WRITE_BD_ADDR, NULL,
+             "vs_zephyr_write_bd_addr"},
+            {SDC_HCI_OPCODE_CMD_VS_ZEPHYR_READ_CHIP_TEMP, NULL,
+             "vs_zephyr_read_chip_temp"},
+            {SDC_HCI_OPCODE_CMD_VS_ZEPHYR_WRITE_TX_POWER, NULL,
+             "vs_zephyr_write_tx_power"},
+            {SDC_HCI_OPCODE_CMD_VS_ZEPHYR_READ_TX_POWER, NULL,
+             "vs_zephyr_read_tx_power"},
+#endif
+#if HCI_SDC_HAS_VS_KEY_HIERARCHY_ROOTS
+            {SDC_HCI_OPCODE_CMD_VS_ZEPHYR_READ_KEY_HIERARCHY_ROOTS, NULL,
+             "vs_zephyr_read_key_hierarchy_roots"},
 #endif
         };
 

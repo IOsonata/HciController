@@ -654,6 +654,22 @@ uint8_t sdc_hci_cmd_vs_transmitter_carrier_test(const sdc_hci_cmd_vs_transmitter
     return g_SdcStub.NextStatus;
 }
 
+uint8_t sdc_hci_cmd_vs_zephyr_read_chip_temp(sdc_hci_cmd_vs_zephyr_read_chip_temp_return_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_vs_zephyr_read_chip_temp";
+    g_SdcStub.Calls++;
+    if (a0 != NULL) { memset(a0, 0x5A, sizeof(sdc_hci_cmd_vs_zephyr_read_chip_temp_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_vs_zephyr_read_key_hierarchy_roots(sdc_hci_cmd_vs_zephyr_read_key_hierarchy_roots_return_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_vs_zephyr_read_key_hierarchy_roots";
+    g_SdcStub.Calls++;
+    if (a0 != NULL) { memset(a0, 0x5A, sizeof(sdc_hci_cmd_vs_zephyr_read_key_hierarchy_roots_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
 uint8_t sdc_hci_cmd_vs_zephyr_read_static_addresses(sdc_hci_cmd_vs_zephyr_read_static_addresses_return_t * a0)
 {
     g_SdcStub.LastCall = "sdc_hci_cmd_vs_zephyr_read_static_addresses";
@@ -664,6 +680,48 @@ uint8_t sdc_hci_cmd_vs_zephyr_read_static_addresses(sdc_hci_cmd_vs_zephyr_read_s
         memset(&a0->addresses[0], 0x5A, sizeof(sdc_hci_vs_zephyr_static_address_t));
         a0->addresses[0].address[5] = 0xC0 | 0x1A;
     }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_vs_zephyr_read_supported_commands(sdc_hci_cmd_vs_zephyr_read_supported_commands_return_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_vs_zephyr_read_supported_commands";
+    g_SdcStub.Calls++;
+    if (a0 != NULL) { memset(a0, 0x5A, sizeof(sdc_hci_cmd_vs_zephyr_read_supported_commands_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_vs_zephyr_read_tx_power(const sdc_hci_cmd_vs_zephyr_read_tx_power_t * a0, sdc_hci_cmd_vs_zephyr_read_tx_power_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_vs_zephyr_read_tx_power";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_vs_zephyr_read_tx_power_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_vs_zephyr_read_version_info(sdc_hci_cmd_vs_zephyr_read_version_info_return_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_vs_zephyr_read_version_info";
+    g_SdcStub.Calls++;
+    if (a0 != NULL) { memset(a0, 0x5A, sizeof(sdc_hci_cmd_vs_zephyr_read_version_info_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_vs_zephyr_write_bd_addr(const sdc_hci_cmd_vs_zephyr_write_bd_addr_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_vs_zephyr_write_bd_addr";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_vs_zephyr_write_tx_power(const sdc_hci_cmd_vs_zephyr_write_tx_power_t * a0, sdc_hci_cmd_vs_zephyr_write_tx_power_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_vs_zephyr_write_tx_power";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_vs_zephyr_write_tx_power_return_t)); }
     return g_SdcStub.NextStatus;
 }
 

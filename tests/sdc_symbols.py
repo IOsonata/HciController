@@ -39,6 +39,17 @@ GATES = [
     ("HCI_SDC_HAS_VS_READ_STATIC_ADDRESSES",
      ["sdc_hci_cmd_vs_zephyr_read_static_addresses"]),
     ("HCI_SDC_HAS_VS_READ_COUNTERS", []),
+    ("HCI_SDC_HAS_VS_CARRIER_TEST",
+     ["sdc_hci_cmd_vs_transmitter_carrier_test"]),
+    ("HCI_SDC_HAS_VS_ZEPHYR_SET",
+     ["sdc_hci_cmd_vs_zephyr_read_version_info",
+      "sdc_hci_cmd_vs_zephyr_read_supported_commands",
+      "sdc_hci_cmd_vs_zephyr_write_bd_addr",
+      "sdc_hci_cmd_vs_zephyr_read_chip_temp",
+      "sdc_hci_cmd_vs_zephyr_write_tx_power",
+      "sdc_hci_cmd_vs_zephyr_read_tx_power"]),
+    ("HCI_SDC_HAS_VS_KEY_HIERARCHY_ROOTS",
+     ["sdc_hci_cmd_vs_zephyr_read_key_hierarchy_roots"]),
 ]
 
 DEFAULT_LIB = ("../external/sdk-nrfxlib/softdevice_controller/lib/nrf52/"
