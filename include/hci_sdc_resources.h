@@ -27,7 +27,7 @@ extern "C" {
  * nrf53, nrf54h, nrf54l, nrf54lm, nrf54ls, nrf54lv and nrf71, and every
  * SDC_MEM_ macro used below comes from it. A port supplies the clock, the
  * host interface and the errata; it does not get an opinion about how many
- * links the controller carries.
+ * links the controller supports.
  *
  * This lived in hci_nrf52840.h, where three quarters of the file was this and
  * none of it was about the nRF52840. A second part would have had to copy it.

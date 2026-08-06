@@ -6,7 +6,7 @@
  *   hci_sdc_resources_test   builds against the real nrfxlib sdc.h
  *   hci_nrf52840_usb_test    builds against the fake one under stubs/sdc
  *
- * That is the point. The fake carries hand written copies of the SDC_MEM_
+ * That is the point. The fake holds hand written copies of the SDC_MEM_
  * macros, and nothing used to compare them with the vendor ones. With both
  * tests measured against this file, a fake that drifts fails, a vendor header
  * that moves fails, and the two failing separately says which one moved.

@@ -55,7 +55,35 @@ typedef struct {
     void (*UsbPassMark)(void *pContext);
     void (*UsbPowerProcess)(void *pContext);
 
+    /*
+     * True when the USB peripheral has reached a state that no further
+     * settling pass will leave, so the application stops waiting instead of
+     * spending its whole budget on a port that will never enumerate. What that
+     * state is differs per part. Optional; a port that cannot tell leaves it
+     * null and the loop runs to its limit.
+     */
+    bool (*UsbStuck)(const void *pContext);
+
+    /*
+     * Report what the port knows about USB bring up, under a label the
+     * application supplies. The detail is peripheral register state, which is
+     * why it is printed here and not by the caller: the application decides
+     * when a report is worth making, the port decides what it says. Pass is
+     * the settling pass number, or zero when the report is not from the loop.
+     */
+    void (*UsbTrace)(const void *pContext, const char *pLabel, uint32_t Pass);
+
     void (*Stop)(void *pContext);
+
+    /*
+     * The two SoftDevice Controller pool figures once Init has run: the octets
+     * the controller asked for, and the octets it was given. Both zero from a
+     * port that does not track them, which is not the same as a controller
+     * that wanted no memory.
+     */
+    void (*GetSdcMem)(const void *pContext,
+                      uint32_t *pRequired,
+                      uint32_t *pCapacity);
 
     /* Whatever the port last failed with, for the application to report. */
     int32_t (*LastError)(const void *pContext);
@@ -80,6 +108,53 @@ static inline bool HciTargetHasUsb(const HciTarget_t *pTarget)
            pTarget->pOps->UsbStart != NULL &&
            pTarget->pOps->UsbPassMark != NULL &&
            pTarget->pOps->UsbPowerProcess != NULL;
+}
+
+static inline bool HciTargetUsbStuck(const HciTarget_t *pTarget)
+{
+    if (pTarget == NULL || pTarget->pOps == NULL ||
+        pTarget->pOps->UsbStuck == NULL)
+    {
+        return false;
+    }
+
+    return pTarget->pOps->UsbStuck(pTarget->pContext);
+}
+
+static inline void HciTargetUsbTrace(const HciTarget_t *pTarget,
+                                     const char *pLabel,
+                                     uint32_t Pass)
+{
+    if (pTarget == NULL || pTarget->pOps == NULL ||
+        pTarget->pOps->UsbTrace == NULL)
+    {
+        return;
+    }
+
+    pTarget->pOps->UsbTrace(pTarget->pContext, pLabel, Pass);
+}
+
+static inline void HciTargetGetSdcMem(const HciTarget_t *pTarget,
+                                      uint32_t *pRequired,
+                                      uint32_t *pCapacity)
+{
+    if (pRequired != NULL)
+    {
+        *pRequired = 0U;
+    }
+
+    if (pCapacity != NULL)
+    {
+        *pCapacity = 0U;
+    }
+
+    if (pTarget == NULL || pTarget->pOps == NULL ||
+        pTarget->pOps->GetSdcMem == NULL)
+    {
+        return;
+    }
+
+    pTarget->pOps->GetSdcMem(pTarget->pContext, pRequired, pCapacity);
 }
 
 static inline int32_t HciTargetLastError(const HciTarget_t *pTarget)

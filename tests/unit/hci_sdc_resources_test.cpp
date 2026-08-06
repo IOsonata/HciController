@@ -2,12 +2,12 @@
  * The resource configuration, checked against the real nrfxlib headers.
  *
  * Everything else that touches hci_sdc_resources.h is compiled against the
- * fake sdc.h under stubs, which is written by hand. That fake carries copies of the
- * SDC_MEM_ macros and of the sdc_cfg_t members this firmware writes, and
- * nothing has ever compared those copies with the vendor header. So a renamed
- * field, a retyped union member, or a memory macro that moved between nrfxlib
- * releases would pass every test here and fail, or worse silently under
- * reserve, on the target.
+ * fake sdc.h under stubs, which is written by hand. That fake holds copies
+ * of the SDC_MEM_ macros and of the sdc_cfg_t members this firmware writes,
+ * and nothing has ever compared those copies with the vendor header. So a
+ * renamed field, a retyped union member, or a memory macro that moved between
+ * nrfxlib releases would pass every test here and fail, or worse silently
+ * under reserve, on the target.
  *
  * This closes that. It builds only with NRFXLIB_DIR set, and it does three
  * things the stub build cannot:
@@ -39,9 +39,9 @@
 /*
  * The per term costs, written out rather than derived, exactly as
  * include/hci_sdc_resources.h and the README quote them. These are what an
- * nrfxlib upgrade is most likely to move. The same file is measured against the fake
- * sdc.h by hci_nrf52840_usb_test, so the fake and the vendor header cannot
- * disagree without one of the two failing.
+ * nrfxlib upgrade is most likely to move. The same file is measured against
+ * the fake sdc.h by hci_nrf52840_usb_test, so the fake and the vendor header
+ * cannot disagree without one of the two failing.
  */
 #include "hci_sdc_expected_resources.h"
 

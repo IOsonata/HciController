@@ -1,17 +1,18 @@
+/*
+ * Enough of the IOsonata USB CDC interface for a host build.
+ *
+ * The device interface itself comes from device_intrf.h, which is the same
+ * header the UART stub uses. It used to be repeated here, which worked only
+ * because no test ever included both.
+ */
+
 #ifndef STUB_USBD_CDC_INTRF_H
 #define STUB_USBD_CDC_INTRF_H
+
 #include <stdint.h>
+
 #include "cfifo.h"
-
-typedef enum { DEVINTRF_EVT_RX_DATA = 0, DEVINTRF_EVT_TX_READY = 1 } DEVINTRF_EVT;
-
-struct __device_intrf;
-typedef int (*DevIntrfEvtHandler_t)(struct __device_intrf *pDev, DEVINTRF_EVT Evt,
-                                    uint8_t *pBuffer, int BufferLen);
-
-typedef struct __device_intrf {
-    DevIntrfEvtHandler_t EvtCB;
-} DevIntrf_t;
+#include "device_intrf.h"
 
 #define USBD_CDC_INTRF_TRANSBUFF_MAXLEN 64
 
@@ -22,5 +23,33 @@ typedef struct {
     uint8_t TransBuff[USBD_CDC_INTRF_TRANSBUFF_MAXLEN];
     int TransBuffLen;
 } UsbdCdcDevIntrf_t;
+
+/* Member names copied from IOsonata usb/usbd_cdc_intrf.h. */
+typedef struct {
+    bool bBlocking;
+    int RxFifoMemSize;
+    uint8_t *pRxFifoMem;
+    int TxFifoMemSize;
+    uint8_t *pTxFifoMem;
+    DevIntrfEvtHandler_t EvtCB;
+} UsbdCdcIntrfCfg_t;
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/*
+ * Records what it was given and answers gStubUsbdCdcInitResult, so a test can
+ * read back what the application asked for.
+ */
+extern UsbdCdcIntrfCfg_t gStubUsbdCdcCfg;
+extern int gStubUsbdCdcInitCount;
+extern bool gStubUsbdCdcInitResult;
+
+bool UsbdCdcIntrfInit(UsbdCdcDevIntrf_t *pDev, const UsbdCdcIntrfCfg_t *pCfg);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

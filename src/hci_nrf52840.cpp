@@ -1103,9 +1103,74 @@ static void HciNrf52840TargetUsbPowerProcess(void *pContext)
     HciNrf52840UsbPowerProcess(static_cast<HciNrf52840_t *>(pContext));
 }
 
+/*
+ * A storm is the USBD peripheral raising events with no interrupt source the
+ * driver recognises. Nothing later in the settling loop clears it, so once it
+ * is seen there is no point waiting out the remaining passes.
+ */
+static bool HciNrf52840TargetUsbStuck(const void *pContext)
+{
+    const HciNrf52840_t *pTarget =
+        static_cast<const HciNrf52840_t *>(pContext);
+
+    return pTarget != nullptr && pTarget->UsbStormEvents != 0U;
+}
+
+static void HciNrf52840TargetUsbTrace(const void *pContext,
+                                      const char *pLabel,
+                                      uint32_t Pass)
+{
+    const HciNrf52840_t *pTarget =
+        static_cast<const HciNrf52840_t *>(pContext);
+
+    if (pTarget == nullptr)
+    {
+        return;
+    }
+
+    HciTrace("host: %s pass=%lu irq=%lu stuck=%lu evtcause=0x%08lX "
+             "inten=0x%08lX storm=0x%08lX stormcause=0x%08lX\r\n",
+             pLabel,
+             (unsigned long)Pass,
+             (unsigned long)pTarget->UsbIrqCount,
+             (unsigned long)pTarget->UsbStuckCauseCount,
+             (unsigned long)pTarget->UsbEventCause,
+             (unsigned long)pTarget->UsbStormInten,
+             (unsigned long)pTarget->UsbStormEvents,
+             (unsigned long)pTarget->UsbStormCause);
+
+    /* HciTrace discards its arguments when tracing is off. */
+    (void)pLabel;
+    (void)Pass;
+}
+
 static void HciNrf52840TargetStop(void *pContext)
 {
     HciNrf52840Stop(static_cast<HciNrf52840_t *>(pContext));
+}
+
+static void HciNrf52840TargetGetSdcMem(const void *pContext,
+                                       uint32_t *pRequired,
+                                       uint32_t *pCapacity)
+{
+    const HciNrf52840_t *pTarget =
+        static_cast<const HciNrf52840_t *>(pContext);
+
+    if (pTarget == nullptr)
+    {
+        return;
+    }
+
+    if (pRequired != nullptr)
+    {
+        *pRequired = pTarget->RequiredSdcMem > 0 ?
+                     (uint32_t)pTarget->RequiredSdcMem : 0U;
+    }
+
+    if (pCapacity != nullptr)
+    {
+        *pCapacity = (uint32_t)pTarget->SdcMemCapacity;
+    }
 }
 
 static int32_t HciNrf52840TargetLastError(const void *pContext)
@@ -1122,7 +1187,10 @@ static const HciTargetOps_t s_Nrf52840Ops = {
     HciNrf52840TargetUsbStart,
     HciNrf52840TargetUsbPassMark,
     HciNrf52840TargetUsbPowerProcess,
+    HciNrf52840TargetUsbStuck,
+    HciNrf52840TargetUsbTrace,
     HciNrf52840TargetStop,
+    HciNrf52840TargetGetSdcMem,
     HciNrf52840TargetLastError,
 };
 

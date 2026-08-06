@@ -262,7 +262,7 @@ static bool HciAppHostStart(void *pContext)
         if (!pApp->Target.pOps->UsbStart(pApp->Target.pContext))
         {
             HciTrace("host: target UsbStart failed err=%ld\r\n",
-                     (long)pApp->Target.LastError);
+                     (long)HciTargetLastError(&pApp->Target));
             return false;
         }
 
@@ -300,36 +300,29 @@ static bool HciAppHostStart(void *pContext)
                 break;
             }
 
-            if (pApp->Target.UsbStormEvents != 0U)
+            /*
+             * The port says whether the peripheral has reached a state the
+             * remaining passes cannot change, and prints what it saw. Which
+             * registers those are is not something this layer knows.
+             */
+            if (HciTargetUsbStuck(&pApp->Target))
             {
-                HciTrace("host: storm pass=%lu irq=%lu inten=0x%08lX "
-                         "events=0x%08lX cause=0x%08lX\r\n",
-                         (unsigned long)pass + 1UL,
-                         (unsigned long)pApp->Target.UsbIrqCount,
-                         (unsigned long)pApp->Target.UsbStormInten,
-                         (unsigned long)pApp->Target.UsbStormEvents,
-                         (unsigned long)pApp->Target.UsbStormCause);
+                HciTargetUsbTrace(&pApp->Target, "storm", pass + 1U);
                 break;
             }
 
             if ((pass % HCI_APP_USB_SETTLE_REPORT) == (HCI_APP_USB_SETTLE_REPORT - 1U))
             {
-                HciTrace("host: settling pass=%lu irq=%lu stuck=%lu cause=0x%08lX\r\n",
-                         (unsigned long)pass + 1UL,
-                         (unsigned long)pApp->Target.UsbIrqCount,
-                         (unsigned long)pApp->Target.UsbStuckCauseCount,
-                         (unsigned long)pApp->Target.UsbEventCause);
+                HciTargetUsbTrace(&pApp->Target, "settling", pass + 1U);
             }
         }
 
         HciAppSetHostOpen(pApp, HciTinyUsbIsOpen(&pApp->Usb));
-        HciTrace("host: usb up mounted=%u open=%u irq=%lu task=%lu stuck=%lu cause=0x%08lX\r\n",
+        HciTrace("host: usb up mounted=%u open=%u task=%lu\r\n",
                  (unsigned)HciTinyUsbIsMounted(&pApp->Usb),
                  (unsigned)pApp->HostOpen,
-                 (unsigned long)pApp->Target.UsbIrqCount,
-                 (unsigned long)pApp->Usb.TaskCount,
-                 (unsigned long)pApp->Target.UsbStuckCauseCount,
-                 (unsigned long)pApp->Target.UsbEventCause);
+                 (unsigned long)pApp->Usb.TaskCount);
+        HciTargetUsbTrace(&pApp->Target, "usb up", 0U);
     }
     else
     {
@@ -458,10 +451,10 @@ bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType, HciTarget_t Target)
      * counter readout so a host can ask for them. On a sealed dongle the trace
      * that carries them reaches nobody.
      */
-    HciCountersSetSdcMem(&pApp->Counters,
-                         pApp->Target.RequiredSdcMem > 0 ?
-                             (uint32_t)pApp->Target.RequiredSdcMem : 0U,
-                         (uint32_t)pApp->Target.SdcMemCapacity);
+    uint32_t sdcRequired = 0U;
+    uint32_t sdcCapacity = 0U;
+    HciTargetGetSdcMem(&pApp->Target, &sdcRequired, &sdcCapacity);
+    HciCountersSetSdcMem(&pApp->Counters, sdcRequired, sdcCapacity);
 
     HciTaktOsOps_t runtimeOps = {};
     pApp->Target.pOps->GetTaktOsOps(pApp->Target.pContext, &runtimeOps);

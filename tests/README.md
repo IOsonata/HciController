@@ -12,6 +12,11 @@ tests/
   hardware/             Python tools that talk to a board
 ```
 
+The fakes under `stubs/` now cover the IOsonata UART, the USB CDC interface,
+the circular FIFO and a stand in `board.h`, so `src/hci_app.cpp` compiles off
+target. They carry the member names from the real headers and none of the
+behaviour.
+
 ## Running the C++ tests
 
 ```sh
@@ -60,7 +65,29 @@ The last two need `NRFXLIB_DIR` and are skipped without it. They are the only
 tests that see the vendor headers; everything else builds against the fakes
 under `stubs/`.
 
-That matters most for `hci_sdc_resources_test`. `stubs/sdc/sdc.h` carries
+## What is compiled but not run
+
+Two things are built by `make -C tests run` and never executed, because a
+compile is all that is needed to catch them.
+
+`src/hci_app.cpp` is compiled. It is the largest source here and no test links
+it, so a structure member that moved under it used to be found only by an
+`arm-none-eabi` build. Linking it would need MPSL, TinyUSB and a controller
+all answering, which is a target's job; compiling it costs nothing and catches
+the member names, the driver callback signatures and the configuration fields
+it fills in.
+
+Every source that does not need the vendor headers is also compiled a second
+time with `HCI_TRACE=1`. With tracing off the macro discards its arguments, so
+an argument naming a field that no longer exists is invisible until an ARM
+build with tracing on. `HciTrace` has the printf format attribute, so the
+second build checks every trace call against its format string.
+
+That second build is why `hci_trace.h` has a non-ARM path. Semihosting is an
+ARM debug call; off target the line goes to stderr, which is not useful on a
+workstation and is not meant to be. It is there so the file compiles.
+
+That matters most for `hci_sdc_resources_test`. `stubs/sdc/sdc.h` holds
 hand written copies of the `SDC_MEM_*` macros, and the pool is computed from
 them in every other test. Both that test and `hci_nrf52840_usb_test` measure
 their headers against `unit/hci_sdc_expected_resources.h`, so a copy that

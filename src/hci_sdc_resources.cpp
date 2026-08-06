@@ -233,7 +233,7 @@ int32_t HciSdcResourcesApply(void)
     }
 
     /*
-     * All three buffer numbers together, because the vendor structure carries
+     * All three buffer numbers together, because the vendor structure holds
      * them in one member and the pool macro takes all three. Setting one and
      * leaving the others to their defaults would compute a pool for numbers the
      * controller was never given.

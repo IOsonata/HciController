@@ -323,7 +323,7 @@ is a table of function pointers and an opaque instance the port owns, and
 The resource configuration is deliberately not part of a port. nrfxlib ships
 one `sdc.h` covering nrf52, nrf53, nrf54h, nrf54l, nrf54lm, nrf54ls, nrf54lv
 and nrf71, and every `SDC_MEM_` macro the pool is computed from comes from it.
-A port does not get an opinion about how many links the controller carries.
+A port does not get an opinion about how many links the controller supports.
 
 Adding a part means one header and one source:
 

@@ -57,6 +57,7 @@ extern "C" {
 __attribute__((unused))
 static void HciTraceWrite0(const char *pStr)
 {
+#if defined(__arm__)
     register const char *arg __asm__("r1") = pStr;
     register int op __asm__("r0") = HCI_TRACE_SYS_WRITE0;
 
@@ -65,6 +66,17 @@ static void HciTraceWrite0(const char *pStr)
                       : "r" (arg)
                       : "memory");
     (void)op;
+#else
+    /*
+     * Semihosting is an ARM debug call, so a host build has to go somewhere
+     * else. This is not there to be useful on a workstation. It is there so a
+     * host build can compile with HCI_TRACE=1, which is the only way the
+     * arguments to every trace call get checked against their format string:
+     * with tracing off the macro discards them and a wrong one is invisible
+     * until an ARM build with tracing on.
+     */
+    fputs(pStr, stderr);
+#endif
 }
 
 __attribute__((format(printf, 1, 2), unused))

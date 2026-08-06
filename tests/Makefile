@@ -32,8 +32,7 @@ CXXFLAGS ?= -std=c++14 -O0 -g3 -Wall -Wextra -Werror -Wshadow -Wundef
 # nrfxlib checkout that may also be on the path, and it is left out of the
 # dispatch test, which wants the real headers.
 MOCK_INCLUDES := -I$(STUBS)/sdc -I$(STUBS) -I$(ROOT)/include
-MOCK_DEFINES := -DHCI_TRACE=0 \
-                -DHCI_NRF52840_HFCLK_WAIT_LOOPS=1000 \
+MOCK_DEFINES := -DHCI_NRF52840_HFCLK_WAIT_LOOPS=1000 \
                 -DHCI_NRF52840_USBREG_WAIT_LOOPS=1000
 
 # name : test source : firmware sources under test
@@ -58,6 +57,23 @@ hci_taktos_poll_SRC    := $(SRC)/hci_taktos.cpp
 hci_tinyusb_init_SRC   := $(SRC)/hci_tinyusb.cpp
 
 TARGETS := $(addprefix $(BUILD_DIR)/,$(addsuffix _test,$(TESTS)))
+
+# Compiled but not linked, and not run.
+#
+# Two gaps this closes. hci_app.cpp is the largest source here and no test
+# linked it, so a structure member that moved under it was only found by an
+# arm-none-eabi build. And every test builds with HCI_TRACE=0, where the trace
+# macro discards its arguments, so an argument that no longer exists was
+# invisible until an ARM build with tracing on.
+#
+# So: every source that does not need the vendor headers is compiled a second
+# time with tracing on, and hci_app.cpp is compiled at all. Linking hci_app
+# would need MPSL, TinyUSB and a controller all answering, which is a target's
+# job; compiling it is what catches the two failures above.
+COMPILE_SRC := $(filter-out $(SRC)/hci_sdc_nrfxlib.cpp,$(wildcard $(SRC)/hci_*.cpp))
+
+OBJECTS := $(patsubst $(SRC)/%.cpp,$(BUILD_DIR)/trace/%.o,$(COMPILE_SRC)) \
+           $(BUILD_DIR)/notrace/hci_app.o
 
 # The dispatch test compiles the real command table against the real
 # SoftDevice Controller headers, with only the SDC entry points stubbed. It is
@@ -86,7 +102,7 @@ endif
 
 .PHONY: all run clean check-root print-config
 
-all: $(TARGETS)
+all: $(TARGETS) $(OBJECTS)
 
 check-root:
 	@test -n "$(strip $(ROOT))" || { \
@@ -99,7 +115,15 @@ check-root:
 .SECONDEXPANSION:
 $(BUILD_DIR)/%_test: $(UNIT)/%_test.cpp $$($$*_SRC) | check-root
 	@mkdir -p $(dir $@)
-	$(CXX) $(MOCK_INCLUDES) $(MOCK_DEFINES) $(CXXFLAGS) $^ -o $@
+	$(CXX) $(MOCK_INCLUDES) $(MOCK_DEFINES) -DHCI_TRACE=0 $(CXXFLAGS) $^ -o $@
+
+$(BUILD_DIR)/trace/%.o: $(SRC)/%.cpp | check-root
+	@mkdir -p $(dir $@)
+	$(CXX) $(MOCK_INCLUDES) $(MOCK_DEFINES) -DHCI_TRACE=1 $(CXXFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/notrace/%.o: $(SRC)/%.cpp | check-root
+	@mkdir -p $(dir $@)
+	$(CXX) $(MOCK_INCLUDES) $(MOCK_DEFINES) -DHCI_TRACE=0 $(CXXFLAGS) -c $< -o $@
 
 ifneq ($(strip $(SDC_INCLUDE)),)
 $(SDC_TARGET): $(SDC_SOURCES) | check-root
