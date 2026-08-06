@@ -107,10 +107,9 @@ typedef struct {
  * every other Command Complete is at least six.
  *
  * A host may be waiting for it. Zephyr has BT_WAIT_NOP, which emits it from the
- * controller and waits for it in the host, and Nordic turns that on for the
- * Thingy:91 build while leaving it off for the nRF9160 DK. A host
- * that is not waiting takes it as a command credit it already had, which costs
- * nothing.
+ * controller and waits for it in the host, and it is turned on per board rather
+ * than always, so a host either wants this event or does not. One that is not
+ * waiting takes it as a command credit it already had, which costs nothing.
  *
  * It goes out ahead of anything else because the dispatcher holds one event and
  * this one is queued before a command can arrive.

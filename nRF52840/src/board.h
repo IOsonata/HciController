@@ -32,17 +32,17 @@
 
 
 /*
- * Board ids 1 to 6 belong to IOsonata blyst840_boards.h. This one is local, so
- * it sits well clear of anything that header may add.
+ * The boards below are I-SYST hardware, and their ids come from IOsonata
+ * blyst840_boards.h. A port to something else is a new id, a new branch in the
+ * #if chain, and the pins and clock source that board actually has. Ids 1 to 6
+ * are taken by that header, so a local one wants to sit well clear of them.
  */
-#define THINGY91_NRF52840		100
 
 /* -DBOARD=... on the command line wins, which is how the build is checked
  * against every board without editing this file. */
 #ifndef BOARD
-//#define BOARD			UDG_NRF52840
+#define BOARD			UDG_NRF52840
 //#define BOARD			IBK_NRF52840
-#define BOARD			THINGY91_NRF52840
 #endif
 
 //=============================================================================
@@ -62,10 +62,11 @@
  * without editing this file.
  *
  * AUTO only means something where the USB socket belongs to this part, which
- * is what a dongle is. Where the socket belongs to something else it reads as
- * a host that is not there: a Thingy:91 on a charger would come up talking USB
- * CDC to nobody while the nRF9160 waited for an answer over the UART. A board
- * whose host is another part on the same PCB names UART for that reason.
+ * is what a dongle is. Where the socket belongs to something else, VBUS reads
+ * as a host that is not there: a board on a charger would come up talking USB
+ * CDC to nobody while the real host waited for an answer over the UART. A
+ * board whose host is another part on the same PCB names UART for that reason,
+ * as the BLYST840 does when it answers to an nRF9151.
  *
  * Plain integers rather than an enum because main.cpp tests the selection with
  * #if, which does not see enumerators.
@@ -206,90 +207,6 @@
 
 #define UART_RATE			1000000
 
-
-#elif BOARD == THINGY91_NRF52840
-
-#define BOARD_NAME                      "Nordic Thingy:91"
-#define BOARD_MODULE_NAME               "nRF52840"
-
-/*
- * The nRF52840 on a Thingy:91 is the Bluetooth side of a pair. The nRF9160 is
- * the host and reaches it over the MCU_IF lines. Replacing the stock firmware
- * with this one takes the USB serial bridge away with it, since that is what
- * the stock firmware was doing.
- */
-
-/*
- * No status LED. The RGB LED on a Thingy:91 hangs off the nRF9160, not this
- * part, so there is nothing here to drive and the pins the other boards use
- * are wired to something else entirely.
- */
-#define HCI_STATUS_LEDS                 0
-
-/*
- * The host is the nRF9160, always, and it is reached over UART. VBUS says
- * nothing about that here: the USB socket on a Thingy:91 goes to this part, so
- * leaving the choice to VBUS means a board on a charger comes up talking USB
- * to nobody while the nRF9160 waits for an answer that never comes.
- */
-#ifndef HCI_HOST_SELECT
-#define HCI_HOST_SELECT                 HCI_HOST_SELECT_UART
-#endif
-
-//=============================================================================
-// UART Pin Definitions
-//=============================================================================
-
-/*
- * The data pair. Crossed over, so this part's TX meets the nRF9160's RX.
- */
-#define UART_TX_PORT            0
-#define UART_TX_PIN             25
-#define UART_TX_PINOP           0
-
-#define UART_RX_PORT            1
-#define UART_RX_PIN             0
-#define UART_RX_PINOP           0
-
-/*
- * The flow control pair, on the two wires the board routes for it. Both are
- * MCU_IF lines on the PCA20035 schematic, the eight wire bus between the two
- * parts, along with P0.25 and P1.00 which carry the data. Coexistence is a
- * different group on different pins, P1.04, P1.07 and P1.11, reaching the
- * nRF9160 dedicated COEX inputs, so nothing here contends with it.
- *
- * RTS is an output and has to meet the nRF9160's CTS, so the assignment has to
- * agree with what that side names each wire. Reversed, the link comes up and
- * never sends.
- */
-#define UART_RTS_PORT           0
-#define UART_RTS_PIN            19
-#define UART_RTS_PINOP          0
-
-#define UART_CTS_PORT           0
-#define UART_CTS_PIN            22
-#define UART_CTS_PINOP          0
-
-#define UART_HW_FLOWCTRL	1
-
-#define UART_DEVNO			0
-
-#define UART_RATE			1000000
-
-/*
- * The host on this board expects the controller to announce itself with a No
- * Operation Command Complete before it will send anything. That is what
- * CONFIG_BT_WAIT_NOP asks for, which Nordic sets for this board and not for
- * the nRF9160 DK.
- */
-#define HCI_SDC_STARTUP_NOP             1
-
-/*
- * Low frequency clock. MPSL is told XTAL or RC from this. The PCA20035
- * schematic shows X2, a 32.768 kHz crystal on XL1 and XL2 with 12 pF loading,
- * so the crystal is there and there is no reason to run the radio off the RC.
- */
-#define MCU_OSC			{ {OSC_TYPE_XTAL, 32000000, 20, 100}, {OSC_TYPE_XTAL, 32768, 20, 0}, false }
 
 #else
 #error "No pins defined. Define the pins used by your board."

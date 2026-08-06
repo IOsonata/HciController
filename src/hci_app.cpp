@@ -62,13 +62,13 @@ static_assert(HCI_APP_PACKET_SIZE >= HCI_MSG_BUFFER_ISO_MAX_SIZE,
 
 /*
  * Say the controller is ready with a No Operation Command Complete once the
- * stack is up. Off unless the board asks, because the boards validated on
- * hardware do not need it. A Thingy:91 does: Nordic builds that board's
- * controller with CONFIG_BT_WAIT_NOP, which waits for this event in the host.
+ * stack is up. Off unless the board asks, because the boards here do not need
+ * it. A board answering to a host built with Zephyr CONFIG_BT_WAIT_NOP does:
+ * that host waits for this event before it will send anything.
  *
  * The test lives here rather than in hci_sdc_nrfxlib.cpp because that file
- * does not include board.h and so could never see the answer, which is how the
- * one board that sets it got an image with the call compiled out.
+ * does not include board.h and so could never see the answer, which is how a
+ * board that set it once got an image with the call compiled out.
  */
 #ifndef HCI_SDC_STARTUP_NOP
 #define HCI_SDC_STARTUP_NOP 0
@@ -165,7 +165,7 @@ static bool HciAppInitUsb(HciApp_t *pApp)
  * Hardware flow control is a property of the link, not of this layer, so the
  * board says. Where RTS and CTS go nowhere, none is right and asserting flow
  * control on unconnected pins would stop the link. Where the peer drives them,
- * as the nRF9160 on a Thingy:91 does, ignoring them loses data.
+ * ignoring them loses data.
  */
 #ifndef UART_FLOWCTRL
 #define HCI_APP_UART_FLOWCTRL UART_FLWCTRL_NONE

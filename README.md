@@ -34,18 +34,18 @@ on the command line wins over it:
 # a dongle image, VBUS decides
 arm-none-eabi-g++ ...
 
-# a UART controller for a Thingy:91, where the nRF9160 is the host
-arm-none-eabi-g++ -DBOARD=THINGY91_NRF52840 ...
-
 # force a dongle to come up on its UART
 arm-none-eabi-g++ -DHCI_HOST_SELECT=HCI_HOST_SELECT_UART ...
+
+# a board whose host is another part on the same PCB
+arm-none-eabi-g++ -DBOARD=MY_BOARD -DHCI_HOST_SELECT=HCI_HOST_SELECT_UART ...
 ```
 
 AUTO only means something where the USB socket belongs to the nRF52840, which
-is what a dongle is. Where the socket belongs to something else it reads as a
-host that is not there: a Thingy:91 on a charger would come up talking USB CDC
-to nobody while the nRF9160 waited for an answer over the UART. That board
-therefore defaults to UART.
+is what a dongle is. Where the socket belongs to something else, VBUS reads as
+a host that is not there: a board on a charger would come up talking USB CDC to
+nobody while the real host waited for an answer over the UART. A board whose
+host is another part on the same PCB should name UART outright.
 
 Selecting a UART host with no `UART_PINS` in `board.h` is refused at compile
 time rather than left to fail at startup, where nothing would be on the wire to
@@ -71,6 +71,49 @@ BLYST840 P0.24 TXD -> nRF9151 RXD
 BLYST840 P0.23 RXD <- nRF9151 TXD
 ```
 
+## The dongle
+
+The reference target is the I-SYST UDG-NRF52840x, an nRF52840 USB dongle built
+on the I-SYST BLYST840 module. Two variants, differing only in the USB
+connector:
+
+| Part | Connector |
+| --- | --- |
+| `UDG-NRF52840` | USB Type-A |
+| `UDG-NRF52840C` | USB Type-C |
+
+Both are 31 x 16 x 4 mm with a real connector rather than a bare PCB edge, and
+both carry a user LED, a user RGB LED, a user button, a reset button and 10
+GPIO on edge castellations. The BLYST840 module brings both oscillators the
+radio wants, a 32 MHz and a 32.768 kHz crystal at 20 ppm, so nothing here runs
+the radio off an RC.
+
+The module is certified rather than merely compliant: FCC ID `2ALTY-IBTZ840`,
+IC `25671-IBTZ840`, and an EU Declaration of Conformity under RED 2014/53/EU
+that names `UDG-NRF52840` and `UDG-NRF52840C` by part number. That matters if a
+dongle has to travel to a customer site or live in a regulated lab.
+
+The dongle carries a USB bootloader, so a first image needs no debugger. A
+Tag-Connect debug port is present for SWD when one is wanted, with nothing to
+solder.
+
+### Where to buy
+
+Both variants are stocked by Mouser and DigiKey. Prices and stock move, so
+these are links rather than quoted numbers.
+
+**UDG-NRF52840**, USB Type-A
+
+- Mouser [392-UDG-NRF52840](https://www.mouser.com/ProductDetail/392-UDG-NRF52840)
+- DigiKey [25675543](https://www.digikey.com/en/products/detail/i-syst/UDG-NRF52840/25675543)
+
+**UDG-NRF52840C**, USB Type-C
+
+- Mouser [392-UDG-NRF52840C](https://www.mouser.com/ProductDetail/392-UDG-NRF52840C)
+- DigiKey [25675547](https://www.digikey.com/en/products/detail/i-syst/UDG-NRF52840C/25675547)
+
+Product page: [i-syst.com/products/usb_dongle](https://www.i-syst.com/products/usb_dongle)
+
 ## Repository layout
 
 ```text
@@ -83,26 +126,37 @@ tests/              host tests and hardware tools
 
 ## Boards
 
-`nRF52840/src/board.h` selects the board with `BOARD`. It carries the I-SYST
-UDG-NRF52840x dongle, the IBK-NRF52840 breakout, and the Nordic Thingy:91,
-whose nRF52840 is the Bluetooth side of a pair with an nRF9160 host over UART.
+`nRF52840/src/board.h` selects the board with `BOARD`, and carries the I-SYST
+boards this firmware is developed and tested on: the UDG-NRF52840x dongle and
+the IBK-NRF52840 breakout.
 
-A board says three things beyond its pins. `HCI_HOST_SELECT`, the host port,
-described above. `HCI_STATUS_LEDS 0` where no status LED is reachable from this
-part, so nothing drives pins that belong to something else. And
-`UART_HW_FLOWCTRL 1` where the peer drives RTS and CTS.
+Other hardware is a port, and it is a small one. A board says four things
+beyond its pins:
+
+| | |
+| --- | --- |
+| `HCI_HOST_SELECT` | the host port, described above |
+| `HCI_STATUS_LEDS 0` | where no status LED is reachable from this part, so nothing drives pins that belong to something else |
+| `UART_HW_FLOWCTRL 1` | where the peer drives RTS and CTS |
+| `MCU_OSC` | where the low frequency clock is not the default |
+
+Add an id, add a branch to the `#if` chain, name the pins. Nothing else in the
+tree is board-aware.
 
 Flow control and the pin map are built together at the end of `board.h` rather
 than per board, because the two have to agree. Asking the peripheral for
 hardware flow control without RTS and CTS in the map gets a link that never
 sends; putting them in the map without asking for flow control drives two pins
-the peripheral never uses. On a Thingy:91 those two pins are the low power
-handshake, so the second mistake takes the link down rather than wasting a pin.
-That board defines no RTS or CTS names at all, and asking it for hardware flow
-control is refused at compile time.
+the peripheral never uses. A board that sets `UART_HW_FLOWCTRL` without naming
+RTS and CTS is refused at compile time, rather than failing further down on an
+undeclared macro inside the pin map, which would not say what is missing.
 
-Replacing the stock firmware on a Thingy:91 takes its USB serial bridge with
-it, because that is what the stock firmware was doing.
+RTS is an output and has to meet the peer's CTS, so a port has to agree with
+what the other side names each wire. Reversed, the board comes up, initialises
+cleanly and never transmits, and nothing in the firmware can tell.
+
+Where a board's stock firmware was doing something else over USB, a serial
+bridge or a sniffer, replacing it with this takes that with it.
 
 ## Prerequisites
 
@@ -274,6 +328,11 @@ HCI_USB_DEVICE_RELEASE=0x0100
 
 They are defined in the Eclipse project, under C/C++ Build, Settings, Compiler,
 Preprocessor. Change them there for a production USB identity.
+
+`0xCAFE` is the TinyUSB example vendor ID and is allocated to nobody. It is
+fine on a bench and wrong on anything shipped, so an image that leaves this
+board and meets a host that keeps a device database needs a real VID and PID
+before it goes.
 
 ## Tests
 
