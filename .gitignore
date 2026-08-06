@@ -49,6 +49,9 @@
 /Debug/
 /Release/
 build-*/
+# The host test output. The leading slash on /build/ above anchors it to the
+# repository root, so this needs its own line.
+/tests/build/
 
 # CMake generated files
 CMakeFiles/
