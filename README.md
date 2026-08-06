@@ -34,7 +34,7 @@ on the command line wins over it:
 # a dongle image, VBUS decides
 arm-none-eabi-g++ ...
 
-# a UART controller to replace Nordic hci_lpuart on a Thingy:91
+# a UART controller for a Thingy:91, where the nRF9160 is the host
 arm-none-eabi-g++ -DBOARD=THINGY91_NRF52840 ...
 
 # force a dongle to come up on its UART

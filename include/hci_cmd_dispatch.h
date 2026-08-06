@@ -108,7 +108,7 @@ typedef struct {
  *
  * A host may be waiting for it. Zephyr has BT_WAIT_NOP, which emits it from the
  * controller and waits for it in the host, and Nordic turns that on for the
- * Thingy:91 build of hci_lpuart while leaving it off for the nRF9160 DK. A host
+ * Thingy:91 build while leaving it off for the nRF9160 DK. A host
  * that is not waiting takes it as a command credit it already had, which costs
  * nothing.
  *

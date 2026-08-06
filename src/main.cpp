@@ -116,7 +116,8 @@ static void HciFatal(void)
 /*
  * board.h names the host port for the board it describes. A -D on the command
  * line overrides it, which is how the same tree builds a dongle image and a
- * replacement for Nordic hci_lpuart. hci_app.h documents the three values.
+ * UART controller for a board whose host is another part on the same PCB.
+ * hci_app.h documents the three values.
  */
 #ifndef HCI_HOST_SELECT
 #define HCI_HOST_SELECT HCI_HOST_SELECT_AUTO

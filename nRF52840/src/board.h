@@ -40,9 +40,9 @@
 /* -DBOARD=... on the command line wins, which is how the build is checked
  * against every board without editing this file. */
 #ifndef BOARD
-#define BOARD			UDG_NRF52840
+//#define BOARD			UDG_NRF52840
 //#define BOARD			IBK_NRF52840
-//#define BOARD			THINGY91_NRF52840
+#define BOARD			THINGY91_NRF52840
 #endif
 
 //=============================================================================
@@ -64,8 +64,8 @@
  * AUTO only means something where the USB socket belongs to this part, which
  * is what a dongle is. Where the socket belongs to something else it reads as
  * a host that is not there: a Thingy:91 on a charger would come up talking USB
- * CDC to nobody while the nRF9160 waited for an answer over the UART. Building
- * a replacement for Nordic hci_lpuart means UART for that reason.
+ * CDC to nobody while the nRF9160 waited for an answer over the UART. A board
+ * whose host is another part on the same PCB names UART for that reason.
  *
  * Plain integers rather than an enum because main.cpp tests the selection with
  * #if, which does not see enumerators.
@@ -241,9 +241,7 @@
 //=============================================================================
 
 /*
- * The data pair, from Nordic hci_lpuart boards/thingy91_nrf52840.overlay:
- * NRF_PSEL(UART_TX, 0, 25) and NRF_PSEL(UART_RX, 1, 0). Crossed over, so this
- * part's TX meets the nRF9160's RX.
+ * The data pair. Crossed over, so this part's TX meets the nRF9160's RX.
  */
 #define UART_TX_PORT            0
 #define UART_TX_PIN             25
@@ -253,45 +251,36 @@
 #define UART_RX_PIN             0
 #define UART_RX_PINOP           0
 
+/*
+ * The flow control pair, on the two wires the board routes for it. Both are
+ * MCU_IF lines on the PCA20035 schematic, the eight wire bus between the two
+ * parts, along with P0.25 and P1.00 which carry the data. Coexistence is a
+ * different group on different pins, P1.04, P1.07 and P1.11, reaching the
+ * nRF9160 dedicated COEX inputs, so nothing here contends with it.
+ *
+ * RTS is an output and has to meet the nRF9160's CTS, so the assignment has to
+ * agree with what that side names each wire. Reversed, the link comes up and
+ * never sends.
+ */
+#define UART_RTS_PORT           0
+#define UART_RTS_PIN            19
+#define UART_RTS_PINOP          0
+
+#define UART_CTS_PORT           0
+#define UART_CTS_PIN            22
+#define UART_CTS_PINOP          0
+
+#define UART_HW_FLOWCTRL	1
+
 #define UART_DEVNO			0
 
 #define UART_RATE			1000000
 
 /*
- * P0.22 and P0.19 are the two wires the board routes for RTS and CTS, and what
- * runs on them depends on what the nRF9160 side is running.
- *
- * Under hci_lpuart they are not RTS and CTS. That overlay leaves them out of
- * pinctrl entirely, so the UART peripheral never sees them, names them req and
- * rdy on a nordic,nrf-sw-lpuart node, and the driver behind it refuses any
- * hardware flow control at all: uart_nrf_sw_lpuart.c api_configure returns
- * -ENOTSUP for anything other than UART_CFG_FLOW_CTRL_NONE. The wires carry a
- * GPIO handshake instead, which is what lets both ends power their receivers
- * down between packets. RTS and CTS cannot do that, since a receiver that is
- * off cannot deassert RTS.
- *
- * So this board leaves UART_HW_FLOWCTRL off and keeps the two pins for the
- * handshake. Building against an nRF9160 that runs a plain hci_uart instead
- * means setting UART_HW_FLOWCTRL to 1 and adding RTS and CTS macros for the
- * same two pins; the shared block at the end of this file then puts them in
- * the map. The copper serves either scheme, only what is spoken on it differs.
- *
- * Both are MCU_IF lines on the PCA20035 schematic, the eight wire bus between
- * the two parts, along with P0.25 and P1.00 which carry the data. Coexistence
- * is a different group on different pins, P1.04, P1.07 and P1.11, reaching the
- * nRF9160 dedicated COEX inputs, so nothing here contends with it.
- */
-#define HCI_LPUART_REQ_PORT             0
-#define HCI_LPUART_REQ_PIN              22
-
-#define HCI_LPUART_RDY_PORT             0
-#define HCI_LPUART_RDY_PIN              19
-
-/*
- * Nordic sets CONFIG_BT_WAIT_NOP for the Thingy:91 build of hci_lpuart and not
- * for the nRF9160 DK, so the host on this board expects the controller to
- * announce itself with a No Operation Command Complete before it will send
- * anything.
+ * The host on this board expects the controller to announce itself with a No
+ * Operation Command Complete before it will send anything. That is what
+ * CONFIG_BT_WAIT_NOP asks for, which Nordic sets for this board and not for
+ * the nRF9160 DK.
  */
 #define HCI_SDC_STARTUP_NOP             1
 
@@ -315,8 +304,7 @@
  * two have to agree: asking the peripheral for hardware flow control without
  * RTS and CTS in the map gets a link that never sends, and putting them in the
  * map without asking for flow control drives two pins the peripheral will
- * never use. On a Thingy:91 those two pins are the low power handshake, so
- * that second mistake takes the link down rather than merely wasting a pin.
+ * never use.
  *
  * A board sets UART_HW_FLOWCTRL to 1 and defines the four RTS and CTS macros
  * to get both together.
@@ -330,8 +318,6 @@
 /*
  * A board that carries no RTS and CTS names would otherwise fail further down
  * on an undeclared macro inside the pin map, which does not say what to do.
- * The Thingy:91 is deliberately one of those: its two wires are the low power
- * handshake, and turning them into flow control means saying so here.
  */
 #if !defined(UART_RTS_PORT) || !defined(UART_CTS_PORT)
 #error "UART_HW_FLOWCTRL needs UART_RTS_PORT/PIN/PINOP and UART_CTS_PORT/PIN/PINOP from the board"

@@ -44,8 +44,7 @@ TESTS := hci_h4 \
          hci_controller \
          hci_nrf52840_usb \
          hci_taktos_poll \
-         hci_tinyusb_init \
-         hci_lpuart
+         hci_tinyusb_init
 
 hci_h4_SRC             := $(SRC)/hci_h4.cpp
 hci_cmd_dispatch_SRC   := $(SRC)/hci_cmd_dispatch.cpp
@@ -56,7 +55,6 @@ hci_controller_SRC     := $(SRC)/hci_controller.cpp \
 hci_nrf52840_usb_SRC   := $(SRC)/hci_nrf52840.cpp
 hci_taktos_poll_SRC    := $(SRC)/hci_taktos.cpp
 hci_tinyusb_init_SRC   := $(SRC)/hci_tinyusb.cpp
-hci_lpuart_SRC         := $(SRC)/hci_lpuart.cpp
 
 TARGETS := $(addprefix $(BUILD_DIR)/,$(addsuffix _test,$(TESTS)))
 

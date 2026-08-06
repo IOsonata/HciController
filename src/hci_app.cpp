@@ -63,8 +63,8 @@ static_assert(HCI_APP_PACKET_SIZE >= HCI_MSG_BUFFER_ISO_MAX_SIZE,
 /*
  * Say the controller is ready with a No Operation Command Complete once the
  * stack is up. Off unless the board asks, because the boards validated on
- * hardware do not need it. A Thingy:91 does: Nordic builds hci_lpuart for it
- * with CONFIG_BT_WAIT_NOP, which waits for this event in the host.
+ * hardware do not need it. A Thingy:91 does: Nordic builds that board's
+ * controller with CONFIG_BT_WAIT_NOP, which waits for this event in the host.
  *
  * The test lives here rather than in hci_sdc_nrfxlib.cpp because that file
  * does not include board.h and so could never see the answer, which is how the

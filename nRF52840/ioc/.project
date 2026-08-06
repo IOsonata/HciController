@@ -71,11 +71,6 @@
 			<locationURI>PARENT-2-PROJECT_LOC/include/hci_intrf_transport.h</locationURI>
 		</link>
 		<link>
-			<name>include/hci_lpuart.h</name>
-			<type>1</type>
-			<locationURI>PARENT-2-PROJECT_LOC/include/hci_lpuart.h</locationURI>
-		</link>
-		<link>
 			<name>include/hci_nrf52840.h</name>
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/include/hci_nrf52840.h</locationURI>
@@ -144,11 +139,6 @@
 			<name>src/hci_intrf_transport.cpp</name>
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/src/hci_intrf_transport.cpp</locationURI>
-		</link>
-		<link>
-			<name>src/hci_lpuart.cpp</name>
-			<type>1</type>
-			<locationURI>PARENT-2-PROJECT_LOC/src/hci_lpuart.cpp</locationURI>
 		</link>
 		<link>
 			<name>src/hci_nrf52840.cpp</name>
