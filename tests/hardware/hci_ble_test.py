@@ -1912,8 +1912,9 @@ def cmd_probe(hci, args):
     # command after the one that is wrong.
     identity, addr_type, source = hci.identity()
 
-    def preamble(label):
-        print("%s." % label)
+    def preamble(label, quiet=False):
+        if not quiet:
+            print("%s." % label)
         hci.command(OP_RESET)
         hci.command(OP_SET_EVENT_MASK, bytes.fromhex("ffffffffffffff3f"))
         hci.command(OP_LE_SET_EVENT_MASK, bytes.fromhex("ffff030000000000"))
@@ -2132,6 +2133,108 @@ def cmd_probe(hci, args):
                 pass
         del undo[:]
 
+    def replay(command):
+        """Send a row and its immediate undo, saying nothing about either."""
+        available, _ = probe_available(command, args, live_handle, ctx)
+        if not available or command.opcode == 0x0C03:
+            return
+        try:
+            hci.command(command.opcode, command.build(ctx), timeout=3.0,
+                        allow_fail=True)
+            if command.undo is not None and command.undo_now:
+                if args.settle_ms:
+                    time.sleep(args.settle_ms / 1000.0)
+                hci.command(command.undo[0], undo_payload(command.undo),
+                            timeout=1.0, allow_fail=True)
+        except HciError:
+            pass
+
+    def bisect(target_opcode):
+        """
+        Find the earliest row whose presence makes a later row fail.
+
+        A row refused after eighty others have run, and accepted when those
+        eighty are skipped, means one of the eighty is the subject. Guessing
+        which costs one hardware run per guess, and five guesses have been
+        wrong. This asks the board instead, by replaying prefixes of the
+        earlier rows and halving the range each time. Seven attempts covers
+        eighty rows.
+        """
+        target = hci_commands.BY_OPCODE.get(target_opcode)
+        if target is None:
+            print("0x%04X is not in the table." % target_opcode)
+            return
+        phase_rows = [c for c in hci_commands.COMMANDS
+                      if c.phase == target.phase]
+        if target not in phase_rows:
+            print("0x%04X is not one of the phase rows." % target_opcode)
+            return
+        # The rows the target needs sent first, and the pool to search. A
+        # phase boundary is a reset, so only the phases before the target's
+        # can leave anything behind: PHASE_ANY for a legacy row, and nothing
+        # for an extended one, which runs after its own reset.
+        fixed = phase_rows[:phase_rows.index(target)]
+        pool = []
+        if target.phase == hci_commands.PHASE_LEGACY:
+            pool = [c for c in hci_commands.COMMANDS
+                    if c.phase == hci_commands.PHASE_ANY
+                    and probe_available(c, args, live_handle, ctx)[0]
+                    and c.opcode != 0x0C03]
+
+        def attempt(count):
+            preamble("Resetting", quiet=True)
+            for command in pool[:count]:
+                replay(command)
+            for command in fixed:
+                replay(command)
+            status, _ = hci.command(target.opcode, target.build(ctx),
+                                    timeout=3.0, allow_fail=True)
+            # Put it back before the next attempt, whatever it answered.
+            if target.undo is not None:
+                hci.command(target.undo[0], undo_payload(target.undo),
+                            timeout=1.0, allow_fail=True)
+            return status
+
+        print("Bisecting 0x%04X %s over %d rows that run before it."
+              % (target.opcode, target.name, len(pool)))
+        print()
+        clean = attempt(0)
+        print("  with none of them:  %s"
+              % ("accepted" if clean == 0 else "refused 0x%02X" % clean))
+        dirty = attempt(len(pool))
+        print("  with all of them:   %s"
+              % ("accepted" if dirty == 0 else "refused 0x%02X" % dirty))
+        print()
+        if clean != 0:
+            print("It fails with none of them sent, so nothing before it is")
+            print("the subject and the parameter block is.")
+            return
+        if dirty == 0:
+            print("It works with all of them sent, so there is nothing here")
+            print("to find today. That is worth knowing too.")
+            return
+
+        # Smallest prefix that reproduces it. low always works, high always
+        # fails, so the row at high - 1 is the one that turns it over.
+        low, high = 0, len(pool)
+        while high - low > 1:
+            mid = (low + high) // 2
+            status = attempt(mid)
+            print("  first %2d rows:      %s"
+                  % (mid, "accepted" if status == 0
+                     else "refused 0x%02X" % status))
+            if status == 0:
+                low = mid
+            else:
+                high = mid
+        culprit = pool[high - 1]
+        print()
+        print("The first %d rows are enough to reproduce it, and the last of"
+              % high)
+        print("those is 0x%04X %s." % (culprit.opcode, culprit.name))
+        print("Sending it makes 0x%04X refuse; skipping it does not."
+              % target.opcode)
+
     only = None
     if args.only:
         only = set(int(v, 0) for v in args.only.replace(" ", "").split(","))
@@ -2150,6 +2253,10 @@ def cmd_probe(hci, args):
                 # the event masks and every set the later rows depend on.
                 continue
             send(command)
+
+    if args.bisect is not None:
+        bisect(args.bisect)
+        return
 
     check_alive("start up")
     run_phase(hci_commands.PHASE_ANY)
@@ -2356,6 +2463,11 @@ def main():
                         "Answering the request is what keeps the link "
                         "alive, and it turns the two reply rows into a real "
                         "exchange. 0 skips the wait")
+    p.add_argument("--bisect", type=lambda v: int(v, 0), metavar="OPCODE",
+                   help="find which earlier row makes this one fail, by "
+                        "replaying prefixes of the rows before it and "
+                        "halving the range. Answers in one run what a guess "
+                        "per run does not")
     p.add_argument("--only", metavar="OPCODES",
                    help="send only these rows, comma separated, 0x2006 "
                         "style. The preamble still runs and the phase order "
