@@ -91,6 +91,11 @@
 			<locationURI>PARENT-2-PROJECT_LOC/include/hci_sdc_resources.h</locationURI>
 		</link>
 		<link>
+			<name>include/hci_syslog.h</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/include/hci_syslog.h</locationURI>
+		</link>
+		<link>
 			<name>include/hci_taktos.h</name>
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/include/hci_taktos.h</locationURI>
@@ -169,6 +174,11 @@
 			<name>src/hci_sdc_resources.cpp</name>
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/src/hci_sdc_resources.cpp</locationURI>
+		</link>
+		<link>
+			<name>src/hci_syslog.cpp</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/src/hci_syslog.cpp</locationURI>
 		</link>
 		<link>
 			<name>src/hci_taktos.cpp</name>
