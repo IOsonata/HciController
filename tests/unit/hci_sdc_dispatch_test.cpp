@@ -23,6 +23,9 @@
 #include "sdc_hci_vs.h"
 #include "sdc_stub.h"
 
+/* For the configured pool figures the counter block reports. */
+#include "hci_sdc_resources.h"
+
 #define EVENT_COMMAND_COMPLETE 0x0E
 #define EVENT_COMMAND_STATUS   0x0F
 
@@ -724,12 +727,20 @@ int main(void)
         assert(ReadCounter(32U) == 0U);
         assert(ReadCounter(33U) == 0U);
 
-        HciCountersSetSdcMem(&gCounters, 38860U, 39372U);
+        /*
+         * The configured figures rather than two invented ones, so this
+         * cannot sit at a number the configuration has moved away from. It
+         * did: these were 38860 and 39372 until isochronous channels were
+         * added, which reads as a drift between the pool and the counters
+         * when it is only a stale literal in a test.
+         */
+        HciCountersSetSdcMem(&gCounters, HCI_SDC_MEM_REQUIRED,
+                             HCI_SDC_MEM_SIZE);
         ExpectCompleteLocal("VS Read Counters, pool reported",
                             HCI_COUNTERS_OPCODE, zeros, 0U,
                             HCI_COUNTERS_RETURN_LEN);
-        assert(ReadCounter(32U) == 38860U);
-        assert(ReadCounter(33U) == 39372U);
+        assert(ReadCounter(32U) == HCI_SDC_MEM_REQUIRED);
+        assert(ReadCounter(33U) == HCI_SDC_MEM_SIZE);
         printf("[ok] %-38s required %u of %u\n", "pool figures reach the host",
                (unsigned)ReadCounter(32U), (unsigned)ReadCounter(33U));
 

@@ -369,10 +369,18 @@ see the headroom on a sealed dongle, and the way to watch it shrink across an
 nrfxlib upgrade before a controller refuses to enable:
 
 ```
-   SDC pool required                 38860
-   SDC pool reserved                 39372
+   SDC pool required                 55944
+   SDC pool reserved                 56456
                                        512  headroom
 ```
+
+Those two figures are read from `tests/unit/hci_sdc_expected_resources.h`
+wherever a test or the simulator needs them, not copied. They were copied
+once, into `fake_controller.py` and `hci_sdc_dispatch_test.cpp`, and adding
+isochronous channels moved them by 17084 octets without moving either copy.
+Nothing failed, because neither copy was compared with anything; the
+simulator simply printed a headroom line from an older configuration, and the
+dispatch test asserted a number back from itself.
 
 A controller that reports zero for both has a platform layer that never filled
 them in, which is not the same as one that wanted no memory.

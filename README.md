@@ -381,28 +381,9 @@ The pool is that total plus a 512 octet margin, because sdk-nrfxlib says the
 memory macros may move between minor releases and the number that decides
 whether the controller starts is the one `sdc_cfg_set` answers at run time.
 
-Isochronous channels are the largest single item, 17084 of the total.
-Connected and broadcast streams, the scheduling and the data path are all
-supported on this part.
-
-Isochronous link layer encryption is a separate question, and one this part
-answers differently from its siblings. sdk-nrfxlib `README.rst` says nRF52820
-and nRF52833 are the nRF52 Series devices that encrypt and decrypt
-isochronous packets, which leaves nRF52840 out. The difference is one
-register: CCM authenticates the PDU header octet, and which bits of it are
-authenticated differs between an ACL data PDU and an isochronous one.
-nRF52833 and nRF52820 have `CCM.HEADERMASK`, their reference manuals call it
-the header (S0) mask, and nRF52840 does not. It is worth being clear that
-this is not the part being short of ciphers, since nRF52840 is the one of the
-three with a CryptoCell. It is the CCM accelerator in the radio datapath
-being one register short of the isochronous header layout. What this firmware
-answers to an encrypted request has not been measured on hardware.
-
-The receive SDU size is
-what the packet buffer above the controller is sized against, not the 4095
-octet ceiling the specification allows, because `sdc_hci_get` ties its
-requirement to the configured value. 251 plus the 12 octet isochronous header
-is 263, which the existing 1024 octet buffer holds.
+Isochronous channels are the largest single item, 17084 of the total. They
+have their own section below, because what this part does and does not do
+with them takes more than a paragraph.
 
 The ACL payload is worth calling out. 251 octets is the data length extension
 maximum, and it is what the controller reports in LE Read Buffer Size, so a
@@ -414,6 +395,94 @@ Part E 4.1.1 gives the host one pool to spend, and the controller refuses a
 packet past it rather than letting the SoftDevice Controller take the packet
 and the host's buffer with it. `AclCreditOverrunCount`, counter 30, says how
 often that has happened.
+
+## Isochronous channels
+
+The short version: unencrypted isochronous works on this part, encrypted does
+not, and the reason is one missing register rather than anything about
+isochronous transport or about the part's cryptography.
+
+### What works
+
+Every isochronous entry point is present in the nRF52 SoftDevice Controller
+library and all four roles are enabled here:
+
+| Role | `sdc_support_` call |
+| --- | --- |
+| Connected stream, central | `sdc_support_cis_central` |
+| Connected stream, peripheral | `sdc_support_cis_peripheral` |
+| Broadcast stream, source | `sdc_support_bis_source` |
+| Broadcast stream, sink | `sdc_support_bis_sink` |
+
+That is 24 opcodes, the group and stream setup, the data path, the four
+isochronous test commands, and `sdc_hci_iso_data_put` for the data itself.
+`LE Read Buffer Size v2` is part of the set rather than an extra: version 1
+reports only the ACL packet length and count, so without v2 a host has every
+command it needs to build a stream and no way to flow control it.
+
+### What does not, and why
+
+sdk-nrfxlib `README.rst` states the limit:
+
+> For the Isochronous Channels features, nRF52820 and nRF52833 are the nRF52
+> Series devices that support encrypting and decrypting the Isochronous
+> Channels packets.
+
+nRF52840 is not in that list. The cause is visible in the register maps. CCM
+authenticates the PDU header octet, and which bits of it are authenticated
+differ between an ACL data PDU and an isochronous one:
+
+```text
+nrf52840  CCM: ... MAXPACKETSIZE, RATEOVERRIDE
+nrf52833  CCM: ... MAXPACKETSIZE, RATEOVERRIDE, HEADERMASK
+nrf52820  CCM: ... MAXPACKETSIZE, RATEOVERRIDE, HEADERMASK
+```
+
+`CCM.HEADERMASK` is documented as the header (S0) mask, eight bits wide.
+Without it the CCM applies the fixed ACL mask, which is the wrong additional
+authenticated data for an isochronous PDU and so the wrong MIC.
+
+This is worth stating plainly because it inverts the obvious reading: the
+nRF52840 is the one of the three parts with a CryptoCell. It has more
+cryptographic hardware than the other two, not less. What it lacks is one
+register in the CCM accelerator that sits in the radio datapath, and nothing
+in software reaches around it. IOsonata's crypto engines are host side and
+cannot substitute: the one Bluetooth adjacent engine, `CryptoCtlrSdc`, sends
+HCI `LE Encrypt` to borrow the controller's AES block for pairing, which is a
+different thing entirely from link layer CCM inside the controller.
+
+### What this means in practice
+
+**Broadcast is unaffected.** Encryption is per group and optional: pass
+`Encryption = 0` to LE Create BIG and it is a public broadcast. Nothing about
+an unencrypted broadcast is degraded or non-conformant.
+
+**Connected streams have an open question.** A CIS does not have its own
+encryption switch the way a BIG does. What happens when a CIS is created over
+an already encrypted ACL link has not been measured on this part, and this
+document will not guess at it. The test is cheap now that pairing works:
+bring up an encrypted link, send LE Set CIG Parameters and then LE Create
+CIS, and read the status. Until that is run, treat unencrypted CIS between
+two of these dongles as the supported case.
+
+If encrypted isochronous is a requirement, it is a part change to nRF52820 or
+nRF52833. It is not something this firmware can be made to do.
+
+### Configuration
+
+Two connected groups, four connected streams, two broadcast groups, two
+broadcast source and two broadcast sink streams. Transmit SDU 247 octets,
+receive SDU 251, four buffers each way, three protocol units per stream each
+way. 17084 octets of the pool, the largest single item in it.
+
+The receive SDU size is also what the packet buffer above the controller is
+sized against, rather than the 4095 octet ceiling the specification allows,
+because `sdc_hci.h` ties the `sdc_hci_get` requirement to
+`sdc_cfg_iso_buffer_cfg_t::rx_sdu_buffer_size`. 251 plus the 12 octet
+isochronous header is 263, which the existing 1024 octet packet buffer holds,
+so isochronous costs no extra packet buffer at all. `src/hci_app.cpp` asserts
+this against the configured size, so raising the SDU without raising the
+buffer stops the build.
 
 ## TaktOS execution model
 

@@ -30,6 +30,47 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hci_commands
 
+
+def _sdc_pool():
+    """
+    The two memory figures, read rather than copied.
+
+    They were copied once, and adding isochronous channels moved them by
+    seventeen thousand octets without moving the copy, so the headroom line
+    this prints was a number from an older configuration.
+
+    The required figure comes from tests/unit/hci_sdc_expected_resources.h,
+    which is where it is declared once and checked against the real nrfxlib
+    macros by hci_sdc_resources_test. Reading it here means one number, held
+    in the file the C++ test already proves, rather than a second copy that
+    nothing compares.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    required = None
+    margin = None
+    try:
+        with open(os.path.join(here, "..", "unit",
+                               "hci_sdc_expected_resources.h")) as f:
+            for line in f:
+                if line.startswith("#define EXPECT_REQUIRED"):
+                    required = int(line.split()[2])
+        with open(os.path.join(here, "..", "..", "include",
+                               "hci_sdc_resources.h")) as f:
+            for line in f:
+                if line.startswith("#define HCI_SDC_MEM_MARGIN"):
+                    margin = int(line.split()[2].rstrip("Uu"))
+    except OSError:
+        pass
+    if required is None or margin is None:
+        # Running detached from the tree. Report nothing rather than a
+        # figure from nowhere: zero for both is what a board with no
+        # platform layer reports, and the scripts already say so.
+        return 0, 0
+    return required, required + margin
+
+
+SDC_POOL_REQUIRED, SDC_POOL_RESERVED = _sdc_pool()
+
 H4_COMMAND = 0x01
 H4_ACL = 0x02
 H4_EVENT = 0x04
@@ -224,15 +265,16 @@ class Controller:
             # to exercise the script's decoder and its flood arithmetic.
             #
             # The last two are not counters. They are the memory the
-            # controller asked for and the memory the build reserved, and they
-            # carry the real numbers so the script's headroom line is
-            # exercised rather than skipped.
+            # controller asked for and the memory the build reserved, read
+            # from include/hci_sdc_resources.h rather than written here, so
+            # the script's headroom line is exercised with figures that
+            # cannot fall behind the configuration.
             self.command_count += 1
             counters = [0] * 34
             counters[0] = self.command_count
             counters[16] = self.acl_taken
-            counters[32] = 38860
-            counters[33] = 39372
+            counters[32] = SDC_POOL_REQUIRED
+            counters[33] = SDC_POOL_RESERVED
             body = bytes([4]) + b"".join(
                 struct.pack("<I", v) for v in counters)
             return self.emit(command_complete(opcode, 0x00, body))
