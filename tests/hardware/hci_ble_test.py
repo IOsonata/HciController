@@ -2132,9 +2132,18 @@ def cmd_probe(hci, args):
                 pass
         del undo[:]
 
+    only = None
+    if args.only:
+        only = set(int(v, 0) for v in args.only.replace(" ", "").split(","))
+        print("Sending only: %s"
+              % ", ".join("0x%04X" % o for o in sorted(only)))
+        print()
+
     def run_phase(phase):
         for command in hci_commands.COMMANDS:
             if command.phase != phase:
+                continue
+            if only is not None and command.opcode not in only:
                 continue
             if command.opcode == 0x0C03:
                 # Reset is the preamble's job. Sending it as a row would drop
@@ -2347,6 +2356,12 @@ def main():
                         "Answering the request is what keeps the link "
                         "alive, and it turns the two reply rows into a real "
                         "exchange. 0 skips the wait")
+    p.add_argument("--only", metavar="OPCODES",
+                   help="send only these rows, comma separated, 0x2006 "
+                        "style. The preamble still runs and the phase order "
+                        "is still kept. For a row that is refused after "
+                        "eighty others have run, this is how to ask whether "
+                        "any of those eighty had anything to do with it")
     p.add_argument("--settle-ms", type=int, default=100, metavar="MS",
                    help="wait this long before undoing a command that puts "
                         "the radio to work, so a direct test mode test is "

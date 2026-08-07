@@ -110,17 +110,18 @@ def _conn(ctx, tail=b""):
     return struct.pack("<H", ctx.handle) + tail
 
 
-def _LEGACY_ADV_PARAMS(ctx):
+def _legacy_adv_params(ctx, adv_type=0x03):
     """
     Fifteen octets, not sixteen: there is no trailing field after the filter
     policy. Type 3 is non connectable undirected, so enabling it later cannot
     let anything in.
 
-    Named rather than inline because LE Set Advertising Enable sends it again
-    as one of its retry candidates, and the retry has to be the same block
-    the row was refused after rather than a second copy of it.
+    The type is a parameter because LE Set Advertising Enable sends this
+    again with other types as retry candidates. A non connectable type is
+    also non scannable, and scan response data belongs to a scannable one, so
+    whether the type and the data disagree is a question this can ask.
     """
-    return struct.pack("<HHBBB6sBB", 0x00A0, 0x00F0, 0x03,
+    return struct.pack("<HHBBB6sBB", 0x00A0, 0x00F0, adv_type,
                        ctx.addr_type, 0x00, b"\x00" * 6, 0x07, 0x00)
 
 
@@ -237,7 +238,7 @@ _LE_BASIC = [
             bytes.fromhex("0102030405c0"),
             note="the top two bits set makes it a static random address"),
     Command(0x2006, "LE Set Advertising Parameters", COMPLETE,
-            _LEGACY_ADV_PARAMS,
+            _legacy_adv_params,
             note="fifteen octets, not sixteen: there is no trailing field "
                  "after the filter policy. Type 3 is non connectable "
                  "undirected, so enabling it later cannot let anything in",
@@ -251,12 +252,13 @@ _LE_BASIC = [
     Command(0x200A, "LE Set Advertising Enable", COMPLETE, b"\x01",
             undo=(0x200A, b"\x00"),
             retry_after=[
+                (0x2009, bytes(32), "the scan response data cleared"),
+                (0x2008, bytes(32), "the advertising data cleared"),
+                (0x2006, lambda ctx: _legacy_adv_params(ctx, adv_type=0x02),
+                 "the type scannable undirected"),
+                (0x2006, lambda ctx: _legacy_adv_params(ctx, adv_type=0x00),
+                 "the type connectable undirected"),
                 (0x202D, b"\x00", "address resolution off"),
-                (0x2065, lambda ctx: bytes([PROBE_CIG_TEST_ID]),
-                 "the test CIG removed"),
-                (0x2006, _LEGACY_ADV_PARAMS, "the parameters sent again"),
-                (0x2005, lambda ctx: ctx.identity,
-                 "the random address set again"),
             ],
             note="turned back off by undo, so the probe does not walk away "
                  "with the radio transmitting.\n"
@@ -277,13 +279,25 @@ _LE_BASIC = [
                  "\n"
                  "Running without consent still fails, so the direct test "
                  "mode rows, VS Zephyr Write BD_ADDR and the broadcast rows "
-                 "are all out. What is left in front of it is the privacy "
-                 "group, which leaves address resolution enabled over an "
-                 "empty resolving list, and the isochronous group, which "
-                 "builds two connected groups and removes them. The "
-                 "candidates below are those, then the parameters again in "
-                 "case something invalidated them after they were accepted, "
-                 "then the address once more as a control",
+                 "are all out. Address resolution off, the isochronous "
+                 "group removed, the parameters sent again and the address "
+                 "sent again are all out too, each tried in one run.\n"
+                 "\n"
+                 "So the state in front of it is not the subject and the "
+                 "parameter block is. Type 3 is non connectable, which is "
+                 "also non scannable, and the two rows above this one set "
+                 "advertising data and scan response data. Scan response "
+                 "data belongs to a scannable advertiser, and this "
+                 "controller runs the legacy commands on its extended "
+                 "machinery, where that combination is the one the "
+                 "specification names Invalid HCI Command Parameters. The "
+                 "candidates clear each piece of data and then try the two "
+                 "types that would make the data belong.\n"
+                 "\n"
+                 "Use --only 0x2006,0x2008,0x2009,0x200A to send these four "
+                 "and nothing else. Refused there means the four rows are "
+                 "the whole of it; accepted means something above them is "
+                 "involved after all",
             phase=PHASE_LEGACY),
     Command(0x200B, "LE Set Scan Parameters", COMPLETE,
             lambda ctx: struct.pack("<BHHBB", 0x00, 0x0060, 0x0030,
