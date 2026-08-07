@@ -169,6 +169,13 @@ static HciCmdResult_t HciSdcCmdReset(void *pContext,
         {
             HciSdcResetFlowControl(pCounters->pSdc);
         }
+
+        /*
+         * Vol 4 Part E 3.1.1 ties the advertising command set a host has
+         * chosen to the last reset, so this is where the choice is given up
+         * and the host may pick the other one.
+         */
+        HciSdcNrfxlibResetAdvCommandType();
     }
 
     return HciSdcComplete(status, 0U);
@@ -2523,6 +2530,113 @@ static int32_t HciSdcNrfxlibGet(void *, uint8_t *pPacket, uint8_t *pType)
     return result;
 }
 
+/*
+ * Legacy and extended advertising, Vol 4 Part E 3.1.1.
+ *
+ * A host uses one set of advertising, scanning and initiating commands or the
+ * other, never both, and whichever it uses first makes the other Command
+ * Disallowed until the controller is reset.
+ *
+ * The SoftDevice Controller does not enforce this. sdk-nrf does, one layer
+ * above it, in subsys/bluetooth/controller/hci_internal.c, which is the layer
+ * this file replaces. Without it a host that mixes the two sets is not
+ * refused; it is handed to the controller and gets whatever the controller
+ * makes of the request, which was an unexplained Invalid HCI Command
+ * Parameters on an enable twenty commands after the command that caused it,
+ * and silence from everything in between. That cost eight hardware runs to
+ * find and it is the wrong answer besides: the specification asks for
+ * Command Disallowed and asks for it on the offending command.
+ *
+ * The two lists are hci_internal.c's, read from it rather than reasoned out,
+ * because which set a command belongs to is not always obvious. LE Read
+ * Maximum Advertising Data Length reads a number and changes nothing, and it
+ * is an extended command. LE Read Advertising Physical Channel Tx Power is
+ * the same shape and is a legacy one.
+ */
+typedef enum {
+    HCI_SDC_ADV_CMD_NONE = 0,
+    HCI_SDC_ADV_CMD_LEGACY,
+    HCI_SDC_ADV_CMD_EXTENDED,
+} HciSdcAdvCmdType_t;
+
+static HciSdcAdvCmdType_t s_AdvCmdTypeSinceReset = HCI_SDC_ADV_CMD_NONE;
+
+static HciSdcAdvCmdType_t HciSdcAdvCommandType(uint16_t Opcode)
+{
+    switch (Opcode)
+    {
+        case SDC_HCI_OPCODE_CMD_LE_SET_ADV_PARAMS:
+        case SDC_HCI_OPCODE_CMD_LE_SET_ADV_DATA:
+        case SDC_HCI_OPCODE_CMD_LE_SET_SCAN_RESPONSE_DATA:
+        case SDC_HCI_OPCODE_CMD_LE_SET_ADV_ENABLE:
+        case SDC_HCI_OPCODE_CMD_LE_SET_SCAN_PARAMS:
+        case SDC_HCI_OPCODE_CMD_LE_SET_SCAN_ENABLE:
+        case SDC_HCI_OPCODE_CMD_LE_CREATE_CONN:
+        case SDC_HCI_OPCODE_CMD_LE_READ_ADV_PHYSICAL_CHANNEL_TX_POWER:
+            return HCI_SDC_ADV_CMD_LEGACY;
+
+        case SDC_HCI_OPCODE_CMD_LE_SET_EXT_ADV_PARAMS:
+        case SDC_HCI_OPCODE_CMD_LE_READ_NUMBER_OF_SUPPORTED_ADV_SETS:
+        case SDC_HCI_OPCODE_CMD_LE_READ_PERIODIC_ADV_LIST_SIZE:
+        case SDC_HCI_OPCODE_CMD_LE_READ_MAX_ADV_DATA_LENGTH:
+        case SDC_HCI_OPCODE_CMD_LE_SET_EXT_ADV_DATA:
+        case SDC_HCI_OPCODE_CMD_LE_SET_EXT_SCAN_RESPONSE_DATA:
+        case SDC_HCI_OPCODE_CMD_LE_SET_EXT_ADV_ENABLE:
+        case SDC_HCI_OPCODE_CMD_LE_REMOVE_ADV_SET:
+        case SDC_HCI_OPCODE_CMD_LE_CLEAR_ADV_SETS:
+        case SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_PARAMS:
+        case SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_PARAMS_V2:
+        case SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_DATA:
+        case SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_ENABLE:
+        case SDC_HCI_OPCODE_CMD_LE_SET_EXT_SCAN_PARAMS:
+        case SDC_HCI_OPCODE_CMD_LE_SET_EXT_SCAN_ENABLE:
+        case SDC_HCI_OPCODE_CMD_LE_EXT_CREATE_CONN:
+        case SDC_HCI_OPCODE_CMD_LE_PERIODIC_ADV_CREATE_SYNC:
+        case SDC_HCI_OPCODE_CMD_LE_PERIODIC_ADV_CREATE_SYNC_CANCEL:
+        case SDC_HCI_OPCODE_CMD_LE_PERIODIC_ADV_TERMINATE_SYNC:
+        case SDC_HCI_OPCODE_CMD_LE_ADD_DEVICE_TO_PERIODIC_ADV_LIST:
+        case SDC_HCI_OPCODE_CMD_LE_REMOVE_DEVICE_FROM_PERIODIC_ADV_LIST:
+        case SDC_HCI_OPCODE_CMD_LE_CLEAR_PERIODIC_ADV_LIST:
+        case SDC_HCI_OPCODE_CMD_LE_SET_DEFAULT_PERIODIC_ADV_SYNC_TRANSFER_PARAMS:
+        case SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_SUBEVENT_DATA:
+        case SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_SYNC_SUBEVENT:
+        case SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_RESPONSE_DATA:
+        case SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_SYNC_TRANSFER_PARAMS:
+            return HCI_SDC_ADV_CMD_EXTENDED;
+
+        default:
+            return HCI_SDC_ADV_CMD_NONE;
+    }
+}
+
+void HciSdcNrfxlibResetAdvCommandType(void)
+{
+    s_AdvCmdTypeSinceReset = HCI_SDC_ADV_CMD_NONE;
+}
+
+static uint8_t HciSdcAdvCommandGuard(void *, uint16_t Opcode)
+{
+    const HciSdcAdvCmdType_t needed = HciSdcAdvCommandType(Opcode);
+
+    if (needed == HCI_SDC_ADV_CMD_NONE)
+    {
+        return HCI_STATUS_SUCCESS;
+    }
+
+    if (s_AdvCmdTypeSinceReset == HCI_SDC_ADV_CMD_NONE)
+    {
+        s_AdvCmdTypeSinceReset = needed;
+        return HCI_STATUS_SUCCESS;
+    }
+
+    if (s_AdvCmdTypeSinceReset != needed)
+    {
+        return HCI_STATUS_COMMAND_DISALLOWED;
+    }
+
+    return HCI_STATUS_SUCCESS;
+}
+
 bool HciSdcNrfxlibInit(HciSdc_t *pSdc,
                        uint8_t *pCommandEvent,
                        size_t CommandEventCapacity,
@@ -2552,6 +2666,13 @@ bool HciSdcNrfxlibInit(HciSdc_t *pSdc,
     {
         return false;
     }
+
+    /*
+     * A fresh controller has used neither advertising command set, and the
+     * guard is what keeps it that way until a host picks one.
+     */
+    HciSdcNrfxlibResetAdvCommandType();
+    pSdc->Commands.Guard = HciSdcAdvCommandGuard;
 
     return true;
 }

@@ -73,6 +73,11 @@ typedef HciCmdResult_t (*HciCmdHandler_t)(void *pContext,
  * ReturnLen is the number of return parameter bytes after the status byte, and
  * is zero for a Command Status entry.
  */
+/*
+ * Answers 0 to let a command through, or the status to refuse it with.
+ */
+typedef uint8_t (*HciCmdGuard_t)(void *pContext, uint16_t Opcode);
+
 typedef struct {
     uint16_t Opcode;
     uint16_t ParamLen;
@@ -97,6 +102,19 @@ typedef struct {
     uint32_t InvalidParamLenCount;
     uint32_t HandlerErrorCount;
     uint32_t EventBackpressureCount;
+
+    /*
+     * Asked about every command with a row, after the length check and before
+     * the handler. A non zero answer is the status the command is refused
+     * with, and the handler is not called.
+     *
+     * The dispatcher has no opinion about what any opcode means, and this is
+     * how it stays that way while still refusing a command for a reason that
+     * needs opcodes to state. Vol 4 Part E 3.1.1 is the reason it exists: a
+     * host may use the legacy advertising commands or the extended ones and
+     * not both, and the one that comes second is Command Disallowed.
+     */
+    HciCmdGuard_t Guard;
 } HciCmdDispatch_t;
 
 /*

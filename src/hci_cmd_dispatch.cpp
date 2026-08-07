@@ -215,6 +215,21 @@ bool HciCmdDispatchPut(HciCmdDispatch_t *pDispatch,
         return true;
     }
 
+    /*
+     * After the length check, so a malformed block is still answered for what
+     * is wrong with it rather than for the state it arrived in, and before
+     * the handler, so a refused command never reaches the controller.
+     */
+    if (pDispatch->Guard != NULL)
+    {
+        const uint8_t refuse = pDispatch->Guard(pDispatch->pContext, opcode);
+        if (refuse != HCI_STATUS_SUCCESS)
+        {
+            HciCmdBuildError(pDispatch, pEntry, opcode, refuse);
+            return true;
+        }
+    }
+
     uint8_t *pReturn = &pDispatch->pEvent[HCI_COMMAND_COMPLETE_BASE_SIZE];
     const size_t returnCapacity = pDispatch->EventCapacity - HCI_COMMAND_COMPLETE_BASE_SIZE;
     HciCmdResult_t result = pEntry->Handler(pDispatch->pContext,

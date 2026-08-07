@@ -23,6 +23,7 @@
 #include "sdc_hci_vs.h"
 #include "sdc_stub.h"
 
+
 /* For the configured pool figures the counter block reports. */
 #include "hci_sdc_resources.h"
 
@@ -351,6 +352,17 @@ int main(void)
                  sizeof(sdc_hci_cmd_le_enable_encryption_t));
     ExpectStatus("LE Set PHY", 0x2032, zeros,
                  sizeof(sdc_hci_cmd_le_set_phy_t));
+    /*
+     * A reset, because the rows above are legacy advertising and initiating
+     * and this one is extended, and Vol 4 Part E 3.1.1 does not allow a host
+     * to use both without one. The guard below enforces that now, so this
+     * sequence has to obey the rule it checks.
+     */
+    {
+        const uint8_t none = 0U;
+        Exchange(0x0C03, &none, 0U);
+    }
+
     /* initiating_phys is zero in the all zero packet, so no array is needed. */
     ExpectStatus("LE Extended Create Connection", 0x2043, zeros,
                  offsetof(sdc_hci_cmd_le_ext_create_conn_t, array_params));
@@ -1127,6 +1139,14 @@ int main(void)
                 pEntry->Opcode ==
                 SDC_HCI_OPCODE_CMD_VS_ZEPHYR_READ_STATIC_ADDRESSES;
 
+            /*
+             * This walk sends every row, so it uses both advertising command
+             * sets, which a host may not do. The subject here is the return
+             * length and the reply shape, not the state, so the choice is
+             * given up before each one rather than the walk being split.
+             */
+            HciSdcNrfxlibResetAdvCommandType();
+
             /* Success: the declared return length is what comes out. */
             g_SdcStub.NextStatus = 0x00;
             Response ok = Exchange(pEntry->Opcode, zeros, pEntry->ParamLen);
@@ -1651,6 +1671,46 @@ int main(void)
 
         printf("[ok] %-38s unknown +1, bad length +1, commands +3\n",
                "counters follow what the layer refused");
+    }
+
+    /*
+     * Vol 4 Part E 3.1.1. A host uses the legacy advertising commands or the
+     * extended ones and not both, and the SoftDevice Controller does not
+     * enforce it: sdk-nrf does, in the layer this file's subject replaces.
+     *
+     * Without it, mixing them is not refused. It reaches the controller and
+     * comes back as something else entirely, on a later command, which is
+     * what happened: an Invalid HCI Command Parameters on an enable twenty
+     * commands after the read that caused it. So this checks the refusal
+     * lands on the offending command, with the status the specification
+     * names, and that a reset lets the host choose again.
+     */
+    {
+        static const uint8_t extAdvParams[25] = {0};
+        static const uint8_t advParams[15] = {0};
+        static const uint8_t enable[1] = {0x00};
+        const uint8_t none = 0U;
+
+        Exchange(0x0C03, &none, 0U);
+
+        /* Legacy first, so the extended set is the one refused. */
+        ExpectComplete("guard, legacy chosen", 0x2006, advParams,
+                       sizeof(advParams), 0U);
+        ExpectRejected("guard, extended after legacy", 0x2036, extAdvParams,
+                       sizeof(extAdvParams), 0x0C);
+        ExpectRejected("guard, an extended read is extended", 0x203A,
+                       &none, 0U, 0x0C);
+        ExpectComplete("guard, more legacy still allowed", 0x200A, enable,
+                       sizeof(enable), 0U);
+
+        /* A reset gives the choice back. */
+        Exchange(0x0C03, &none, 0U);
+        ExpectComplete("guard, reset clears the choice", 0x203A, &none, 0U,
+                       2U);
+        ExpectRejected("guard, legacy after extended", 0x2006, advParams,
+                       sizeof(advParams), 0x0C);
+
+        Exchange(0x0C03, &none, 0U);
     }
 
     printf("All SDC dispatch tests passed.\n");
