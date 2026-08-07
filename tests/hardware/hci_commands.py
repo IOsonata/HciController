@@ -62,6 +62,11 @@ NEEDS_SYNC = "periodic sync"
 # sent when the caller asks for it.
 NEEDS_CONSENT = "consent"
 
+# Only the central may send it. A probe that got its link by advertising is
+# the peripheral, so these are Command Disallowed and rightly so. Reaching
+# them needs the probe to connect outward to a peer that will advertise.
+NEEDS_CENTRAL = "central role"
+
 # A handle no connection will ever have, for commands that are checked for
 # their reply shape rather than their effect.
 UNUSED_HANDLE = 0x0EFF
@@ -439,7 +444,11 @@ _LE_PERIODIC = [
             phase=PHASE_EXTENDED),
     Command(0x205B, "LE Periodic Advertising Set Info Transfer", COMPLETE,
             lambda ctx: _conn(ctx, struct.pack("<HB", 0, PROBE_ADV_HANDLE)),
-            needs=NEEDS_CONN,
+            needs=NEEDS_CONN, expect=(STATUS_UNKNOWN_ADV_ID,),
+            note="names an advertising set that has to be running a "
+                 "periodic train. The set the probe advertises from to get "
+                 "its link is connectable and has none, so Unknown "
+                 "Advertising Identifier is the right answer to it",
             phase=PHASE_EXTENDED),
     Command(0x205C, "LE Set Periodic Advertising Sync Transfer Parameters",
             COMPLETE,
@@ -492,21 +501,38 @@ _LE_CONN = [
             lambda ctx: _conn(ctx, struct.pack("<HHHHHH", 0x0018, 0x0028, 0,
                                                0x02BC, 0, 0)),
             needs=NEEDS_CONN,
-            note="30 to 50 ms, which any peer accepts"),
+            expect=(STATUS_UNSUPPORTED_FEATURE,),
+            note="30 to 50 ms, a seven second supervision timeout, no "
+                 "connection event length preference. Answered 0x11 on a "
+                 "link this board is the peripheral of, against a phone. "
+                 "Why is not established: it is recorded as an answer this "
+                 "row has seen rather than one it understands, and a run "
+                 "where the board is the central would settle it"),
     Command(0x2015, "LE Read Channel Map", COMPLETE,
             lambda ctx: _conn(ctx), needs=NEEDS_CONN),
     Command(0x2016, "LE Read Remote Features", STATUS,
             lambda ctx: _conn(ctx), needs=NEEDS_CONN),
     Command(0x2019, "LE Enable Encryption", STATUS,
             lambda ctx: _conn(ctx, bytes(8) + bytes(2) + bytes(16)),
-            needs=(NEEDS_CONSENT, NEEDS_CONN),
+            needs=(NEEDS_CONSENT, NEEDS_CONN, NEEDS_CENTRAL),
             note="a zero long term key. The peer will not agree, so this is "
-                 "only about whether the command reaches the link layer"),
+                 "only about whether the command reaches the link layer. "
+                 "Central only, so a probe that got its link by advertising "
+                 "cannot reach it"),
     Command(0x201A, "LE Long Term Key Request Reply", COMPLETE,
             lambda ctx: _conn(ctx, bytes(16)),
-            needs=(NEEDS_CONSENT, NEEDS_CONN)),
+            needs=(NEEDS_CONSENT, NEEDS_CONN),
+            expect=(STATUS_COMMAND_DISALLOWED,),
+            note="only valid while an LE Long Term Key Request is "
+                 "outstanding, which happens when a central starts "
+                 "encryption on a link this board is the peripheral of. "
+                 "Command Disallowed at any other time is correct, and "
+                 "neither role on its own produces the request"),
     Command(0x201B, "LE Long Term Key Request Negative Reply", COMPLETE,
-            lambda ctx: _conn(ctx), needs=(NEEDS_CONSENT, NEEDS_CONN)),
+            lambda ctx: _conn(ctx), needs=(NEEDS_CONSENT, NEEDS_CONN),
+            expect=(STATUS_COMMAND_DISALLOWED,),
+            note="same as the reply above: no request outstanding, so "
+                 "Command Disallowed is the right answer"),
     Command(0x2022, "LE Set Data Length", COMPLETE,
             lambda ctx: _conn(ctx, struct.pack("<HH", 251, 2120)),
             needs=NEEDS_CONN),
@@ -530,10 +556,15 @@ _LE_CONN = [
     Command(0x2077, "LE Read Remote Transmit Power Level", STATUS,
             lambda ctx: _conn(ctx, b"\x01"), needs=NEEDS_CONN),
     Command(0x2078, "LE Set Path Loss Reporting Parameters", COMPLETE,
-            lambda ctx: _conn(ctx, struct.pack("<BBBBH", 50, 10, 70, 10, 5)),
+            lambda ctx: _conn(ctx, struct.pack("<BBBBH", 70, 10, 50, 10, 5)),
             needs=NEEDS_CONN,
-            note="a high threshold of 70 dB with 10 dB of hysteresis, so a "
-                 "link on a bench sits in the low zone and reports once"),
+            note="high threshold, high hysteresis, low threshold, low "
+                 "hysteresis, minimum time spent. High means high path "
+                 "loss, so it is the larger number: 70 dB over 50 dB with "
+                 "10 dB of hysteresis either side. Written the other way "
+                 "round it is a block the controller has to reject, and it "
+                 "was, and then Set Path Loss Reporting Enable was "
+                 "Command Disallowed after it"),
     Command(0x2079, "LE Set Path Loss Reporting Enable", COMPLETE,
             lambda ctx: _conn(ctx, b"\x01"), needs=NEEDS_CONN,
             undo=None),
@@ -626,6 +657,7 @@ _VENDOR = [
     Command(0xFD02, "VS Connection Update", STATUS,
             lambda ctx: _conn(ctx, struct.pack("<IHH", 30000, 0, 300)),
             needs=NEEDS_CONN,
+            expect=(STATUS_UNSUPPORTED_FEATURE,),
             note="the interval is microseconds in a 32 bit field, not the "
                  "1.25 ms units the specification uses, which is the point "
                  "of the vendor command. 30000 us, and the header says the "

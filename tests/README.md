@@ -250,6 +250,15 @@ nRF Connect or LightBlue is enough on the phone side. Nothing has to be
 paired and no service has to be discovered; the connection itself is what the
 commands need.
 
+A link the probe gets by advertising makes the board the **peripheral**, and
+that decides what is reachable. LE Enable Encryption is central only, so it
+is skipped rather than sent and refused. The Long Term Key Request replies
+need a request outstanding, which only happens when a central starts
+encryption, so neither role on its own produces one and Command Disallowed is
+recorded as the answer they expect. Reaching the central side means the board
+connecting outward to something that advertises, which `connect` already
+does; wiring that into `probe` is not done.
+
 Five commands are still out of reach from one board. They need a periodic
 advertising sync, which needs a second radio transmitting a periodic train,
 and `probe` says so rather than pretending to cover them.

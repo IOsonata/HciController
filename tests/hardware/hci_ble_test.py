@@ -1423,6 +1423,9 @@ class ProbeContext(object):
     """What a command entry needs resolved before it can be sent."""
 
     identity = None
+    # 0 central, 1 peripheral. A link the probe got by advertising makes it
+    # the peripheral, which puts the central only commands out of reach.
+    role = None
 
     def __init__(self, handle=None, addr_type=0x01):
         self.handle = handle if handle is not None else \
@@ -1433,7 +1436,7 @@ class ProbeContext(object):
         self.addr_type = addr_type
 
 
-def probe_available(command, args, live_handle):
+def probe_available(command, args, live_handle, ctx):
     """Whether this entry can be sent, and why not when it cannot."""
     needs = command.needs
     if hci_commands.NEEDS_CONN in needs:
@@ -1442,6 +1445,9 @@ def probe_available(command, args, live_handle):
         if not live_handle:
             return False, "handle 0x%04X has no connection behind it" \
                 % args.handle
+    if hci_commands.NEEDS_CENTRAL in needs and ctx.role != 0:
+        return False, "central only, and this link has the board as the " \
+                      "peripheral"
     if hci_commands.NEEDS_SYNC in needs:
         return False, "needs a periodic sync, so a second radio"
     if hci_commands.NEEDS_CONSENT in needs and not args.consent:
@@ -1502,8 +1508,10 @@ def probe_wait_for_peer(hci, ctx, args):
             print("Connection failed, status 0x%02X" % status)
             conn_handle = None
             continue
-        print("Connected to %s, handle 0x%04X"
-              % (addr_str(peer), conn_handle))
+        ctx.role = role
+        print("Connected to %s, handle 0x%04X, this board is the %s."
+              % (addr_str(peer), conn_handle,
+                 "peripheral" if role == 1 else "central"))
         break
 
     hci.command(0x2039, bytes([0x00, 0x00]), allow_fail=True)
@@ -1604,7 +1612,7 @@ def cmd_probe(hci, args):
                 print("     what the row assumed: %s" % command.note)
 
     def send(command):
-        available, reason = probe_available(command, args, live_handle)
+        available, reason = probe_available(command, args, live_handle, ctx)
         if not available:
             skipped.add(command.opcode)
             if args.verbose:
