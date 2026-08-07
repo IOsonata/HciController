@@ -209,6 +209,19 @@
  * RTS and CTS are named even though UART_HW_FLOWCTRL is left at 0, so turning
  * flow control on is one line and not a pin hunt. Nothing drives them until
  * it is turned on.
+ *
+ * These four numbers are not arbitrary and that is the trap. They are the
+ * Nordic Thingy:91 nRF52840 interconnect with RTS and CTS crossed, and they
+ * reached three board branches by being copied between them. Against a
+ * Thingy:91 they half work: transmit and receive land on the right wires, so
+ * a link with no flow control appears to be wired correctly, and the moment
+ * flow control is turned on both directions stop. This part then drives RTS
+ * onto the line the nRF9160 drives its own RTS onto, and reads CTS from a
+ * line nothing drives at all, so neither side is ever told it may send.
+ *
+ * A Thingy:91 build wants BOARD=THINGY91_NRF52840, which has the same four
+ * the right way round. This branch is a breakout and its pins are whatever
+ * the bench is wired to.
  */
 #define UART_TX_PORT            0
 #define UART_TX_PIN             25
