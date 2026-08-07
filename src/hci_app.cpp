@@ -403,8 +403,41 @@ static size_t HciAppLogWrite(void *, const uint8_t *pData, size_t Len)
     return HciTinyUsbWrite(HCI_APP_LOG_INTERFACE, pData, Len);
 }
 
+/*
+ * Say something the moment a terminal opens the log, whatever is queued.
+ *
+ * Without this, an empty port has three explanations and no way to tell them
+ * apart: the port is dead, or nothing was ever written to the log, or
+ * everything was written before there was anywhere to put it. A line that
+ * appears on open rules out the first, and the counts in it answer the other
+ * two, which turns silence into one question rather than three.
+ *
+ * Written into the ring rather than to the port directly, so it comes out
+ * ahead of what was queued rather than in the middle of it.
+ */
+static void HciAppLogPortOpened(HciApp_t *pApp)
+{
+    const bool open = HciTinyUsbPortIsOpen(HCI_APP_LOG_INTERFACE);
+    if (open == pApp->LogPortOpen)
+    {
+        return;
+    }
+
+    pApp->LogPortOpen = open;
+    if (!open)
+    {
+        return;
+    }
+
+    HciSyslogPrint(HciSyslogDefault(),
+                   "log: port open, %u octet(s) queued, host=%s",
+                   (unsigned)HciSyslogPending(HciSyslogDefault()),
+                   pApp->HostType == HCI_APP_HOST_USB ? "usb" : "uart");
+}
+
 static void HciAppDrainLog(HciApp_t *pApp)
 {
+    HciAppLogPortOpened(pApp);
     HciSyslogDrain(HciSyslogDefault(), HciAppLogWrite, pApp);
 }
 

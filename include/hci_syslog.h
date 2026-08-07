@@ -122,6 +122,16 @@ void HciSyslogPrint(HciSyslog_t *pLog, const char *pFormat, ...)
 void HciSyslogPrintV(HciSyslog_t *pLog, const char *pFormat, va_list Args);
 
 /*
+ * Write a line that is already built, with no formatting pass over it. Same
+ * ending rule as the two above.
+ *
+ * For a caller that has the text in hand, which is what trace is: a second
+ * pass would spend another line's worth of stack and would read a percent sign
+ * in the text as a format.
+ */
+void HciSyslogWrite(HciSyslog_t *pLog, const char *pText);
+
+/*
  * Hand what is queued to the port. Called from the runtime thread, as often
  * as it likes; nothing here needs a timer or a rate.
  */

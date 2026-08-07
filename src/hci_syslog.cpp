@@ -125,12 +125,35 @@ extern "C" void HciSyslogTraceLine(const char *pLine)
         return;
     }
 
+    HciSyslogWrite(s_pTraceLog, pLine);
+}
+
+void HciSyslogWrite(HciSyslog_t *pLog, const char *pText)
+{
+    if (pLog == NULL || pText == NULL)
+    {
+        return;
+    }
+
     /*
-     * Already formatted, so it goes in as text rather than through the
-     * formatter again. A line arriving with a percent sign in it would
-     * otherwise be read as a format and take arguments that are not there.
+     * Straight in as text. Going through the formatter with "%s" would read a
+     * percent sign in the line as a format and take arguments that are not
+     * there, and would spend a second 160 octet frame on a line that has
+     * already been built in one. Trace calls this from a thread with a stack
+     * to keep, and HciTrace already holds a buffer that size.
      */
-    HciSyslogPrint(s_pTraceLog, "%s", pLine);
+    size_t len = strlen(pText);
+    HciSyslogPut(pLog, pText, len);
+
+    if (len > HCI_SYSLOG_SIZE - 1U)
+    {
+        len = HCI_SYSLOG_SIZE - 1U;
+    }
+
+    if (len == 0U || pText[len - 1U] != '\n')
+    {
+        HciSyslogPut(pLog, "\n", 1U);
+    }
 }
 
 void HciSyslogInit(HciSyslog_t *pLog)

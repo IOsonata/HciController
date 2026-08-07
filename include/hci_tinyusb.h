@@ -57,6 +57,13 @@ typedef struct {
  */
 size_t HciTinyUsbWrite(uint8_t Interface, const uint8_t *pData, size_t Len);
 
+/*
+ * Whether something has opened a given function, by the same test the write
+ * above makes: mounted and DTR asserted. For a caller that wants to know the
+ * moment a terminal arrives rather than finding out by having a write refused.
+ */
+bool HciTinyUsbPortIsOpen(uint8_t Interface);
+
 bool HciTinyUsbInit(HciTinyUsb_t *pUsb,
                     UsbdCdcDevIntrf_t *pIntrf,
                     uint8_t Interface,

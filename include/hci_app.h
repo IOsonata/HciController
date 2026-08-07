@@ -81,6 +81,12 @@ typedef struct {
      */
     bool UsbRunning;
 
+    /*
+     * Whether a terminal has the log port open. Kept so the moment it is
+     * opened can be noticed, which is when the log says it is there.
+     */
+    bool LogPortOpen;
+
     HciTaktOs_t Runtime;
     /*
      * The part, held through its interface. The instance belongs to the port,

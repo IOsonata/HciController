@@ -223,6 +223,21 @@ int main(void)
                "trace reaches the log", HCI_TRACE);
     }
 
+    /*
+     * A line already built goes in as text. The percent sign is the case that
+     * matters: through the formatter it would be read as a conversion and take
+     * an argument that is not there, and trace lines are built by callers that
+     * had no idea their text would be formatted twice.
+     */
+    {
+        Reset();
+        HciSyslogWrite(&gLog, "usb: 50% duty, eventcause=0x%08lX seen");
+        HciSyslogDrain(&gLog, SinkAll, NULL);
+        assert(strcmp(gSink, "usb: 50% duty, eventcause=0x%08lX seen\n") == 0);
+        printf("[ok] %-42s a percent sign is a percent sign\n",
+               "a built line is not formatted again");
+    }
+
     /* A null log and a null port are not a caller's problem. */
     {
         Reset();

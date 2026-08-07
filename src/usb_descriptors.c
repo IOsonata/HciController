@@ -98,6 +98,20 @@ static uint8_t const s_ConfigurationDescriptor[] = {
 _Static_assert(sizeof(s_ConfigurationDescriptor) == HCI_USB_CONFIG_TOTAL,
 			   "configuration descriptor length does not match what it declares");
 
+/*
+ * The descriptor above declares two CDC functions and the device stack has to
+ * be built for two, or it claims the first and leaves the second's endpoints
+ * unopened. The host still enumerates two serial ports in that case, because
+ * the descriptor said so, and the second one is dead: it opens, it accepts a
+ * terminal, and nothing ever comes out of it.
+ *
+ * That is a symptom with no visible cause, and the cause would be a
+ * tusb_config.h other than this project's arriving first on the include path.
+ * So it is a build failure here instead.
+ */
+_Static_assert(CFG_TUD_CDC >= 2,
+			   "the descriptor declares two CDC functions, CFG_TUD_CDC does not");
+
 static char const *const s_StringDescriptors[] = {
 	NULL,
 	"I-SYST inc.",

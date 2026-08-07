@@ -238,6 +238,12 @@ bool HciTinyUsbIsMounted(const HciTinyUsb_t *pUsb)
     return pUsb != nullptr && pUsb->Started && tud_mounted();
 }
 
+bool HciTinyUsbPortIsOpen(uint8_t Interface)
+{
+    return tud_mounted() &&
+           (tud_cdc_n_get_line_state(Interface) & 0x01U) != 0U;
+}
+
 size_t HciTinyUsbWrite(uint8_t Interface, const uint8_t *pData, size_t Len)
 {
     if (pData == NULL || Len == 0U || !tud_mounted())
