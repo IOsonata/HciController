@@ -524,15 +524,18 @@ _LE_CONN = [
             needs=(NEEDS_CONSENT, NEEDS_CONN),
             expect=(STATUS_COMMAND_DISALLOWED,),
             note="only valid while an LE Long Term Key Request is "
-                 "outstanding, which happens when a central starts "
-                 "encryption on a link this board is the peripheral of. "
-                 "Command Disallowed at any other time is correct, and "
-                 "neither role on its own produces the request"),
+                 "outstanding, which happens when a central offers to pair "
+                 "with a link this board is the peripheral of. Command "
+                 "Disallowed at any other time is correct. The probe sends "
+                 "the negative reply first when a request is outstanding, "
+                 "because this key is zeros and encrypting with it drops "
+                 "the link on the integrity check"),
     Command(0x201B, "LE Long Term Key Request Negative Reply", COMPLETE,
             lambda ctx: _conn(ctx), needs=(NEEDS_CONSENT, NEEDS_CONN),
             expect=(STATUS_COMMAND_DISALLOWED,),
-            note="same as the reply above: no request outstanding, so "
-                 "Command Disallowed is the right answer"),
+            note="refuses pairing without ending the link, so it is what "
+                 "the probe answers a real request with. Command Disallowed "
+                 "when there is none outstanding is equally correct"),
     Command(0x2022, "LE Set Data Length", COMPLETE,
             lambda ctx: _conn(ctx, struct.pack("<HH", 251, 2120)),
             needs=NEEDS_CONN),

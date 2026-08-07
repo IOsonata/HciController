@@ -252,12 +252,37 @@ commands need.
 
 A link the probe gets by advertising makes the board the **peripheral**, and
 that decides what is reachable. LE Enable Encryption is central only, so it
-is skipped rather than sent and refused. The Long Term Key Request replies
-need a request outstanding, which only happens when a central starts
-encryption, so neither role on its own produces one and Command Disallowed is
-recorded as the answer they expect. Reaching the central side means the board
-connecting outward to something that advertises, which `connect` already
-does; wiring that into `probe` is not done.
+is skipped rather than sent and refused. Reaching the central side means the
+board connecting outward to something that advertises, which `connect`
+already does; wiring that into `probe` is not done.
+
+### If the peer offers to pair
+
+Tapping pair rather than just connect makes a difference. A central that
+starts encryption raises LE Long Term Key Request on the peripheral, and
+until the host answers it the link is stalled; the controller drops it on the
+encryption timeout. A run that ignores the request loses its connection and
+blames whichever command was in flight when it went.
+
+`probe` waits `--wait-ltk` seconds after connecting, five by default, and
+says whether a request arrived. With one outstanding the two reply rows stop
+being a check that the opcode is routed and become a real exchange.
+
+The negative reply goes first, and that ordering is deliberate. The key in
+the table is zeros. Answering a real request with the positive reply
+completes encryption against a peer that used a different key, and the link
+drops on the message integrity check, taking every row after it. The negative
+reply refuses cleanly and leaves the connection up, and the positive reply
+then correctly answers Command Disallowed because the request has been dealt
+with.
+
+### A cancelled initiator leaves an event behind
+
+`LE Extended Create Connection` runs under `--consent` and is cancelled at
+once, and a cancelled initiator completes with Unknown Connection Identifier.
+That event is queued when the advertising starts, and read as a connection
+complete it looks like a failed connection. `probe` drains it and says how
+many it cleared.
 
 Five commands are still out of reach from one board. They need a periodic
 advertising sync, which needs a second radio transmitting a periodic train,

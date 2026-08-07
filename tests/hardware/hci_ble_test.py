@@ -262,6 +262,8 @@ class Hci:
         time.sleep(0.1)
         self.ser.reset_input_buffer()
         self.pending = []
+        # Set by on_event when a central asks for the long term key.
+        self.ltk_request = None
         self.acl_credits = 0
         self.acl_advertised = 0
         self.acl_completed = 0
@@ -344,6 +346,15 @@ class Hci:
             # unnoticed drop reads as the controller losing data.
             self.link_down = (body[0], struct.unpack("<H", body[1:3])[0],
                               body[3])
+
+        if code == EVT_LE_META and len(body) >= 3 and \
+                body[0] == LE_LONG_TERM_KEY_REQUEST:
+            # A central starting encryption asks the peripheral for the key.
+            # The link stalls until this is answered and the controller will
+            # drop it on the encryption timeout, so a run that ignores the
+            # request loses the connection and blames whatever command was in
+            # flight when it went. Recorded so the caller can answer it.
+            self.ltk_request = struct.unpack("<H", body[1:3])[0]
 
         if code == EVT_NUM_COMPLETED_PACKETS and len(body) >= 1:
             count = body[0]
@@ -1474,7 +1485,19 @@ def probe_wait_for_peer(hci, ctx, args):
     name = b"HCI-PROBE"
     adv = bytes([2, 0x01, 0x06, len(name) + 1, 0x09]) + name
 
+    # LE Extended Create Connection was cancelled a moment ago, and a
+    # cancelled initiator completes with Unknown Connection Identifier. That
+    # event is still queued and is not a failed connection, so it goes before
+    # anything here reads a connection complete.
+    stale = 0
+    while hci.read_packet(0.1) is not None:
+        stale += 1
+    hci.pending = []
+
     print()
+    if stale:
+        print("Cleared %d event(s) left by the initiator that was cancelled."
+              % stale)
     print("Advertising as HCI-PROBE for %d seconds. Connect to it with a"
           % args.wait_connect)
     print("phone, nRF Connect or LightBlue, to unlock the commands that need")
@@ -1520,6 +1543,39 @@ def probe_wait_for_peer(hci, ctx, args):
         print("Nothing connected. The commands that need a link stay "
               "skipped.")
     return conn_handle
+
+
+def probe_wait_for_ltk(hci, args):
+    """
+    Give a pairing peer time to ask for the long term key, and say so.
+
+    A central that offers to pair starts encryption, and the peripheral's
+    controller raises LE Long Term Key Request. Until the host answers it the
+    link is stalled, and the controller drops it on the encryption timeout.
+    A probe run that ignores the request therefore loses its connection and
+    blames whichever command happened to be in flight.
+
+    It also matters for what the run is worth. The two Long Term Key Request
+    rows are Command Disallowed with nothing outstanding, which says only
+    that the opcode is routed. With a request outstanding they do the thing
+    they exist for.
+    """
+    if hci.ltk_request is not None:
+        return
+
+    deadline = time.time() + args.wait_ltk
+    while time.time() < deadline and hci.ltk_request is None:
+        hci.read_packet(0.2)
+
+    if hci.ltk_request is None:
+        print("No key request in %d seconds. The Long Term Key Request rows"
+              % args.wait_ltk)
+        print("check only that the opcode is routed. Tap pair rather than")
+        print("just connect to make them mean more.")
+    else:
+        print("The peer asked for the long term key on handle 0x%04X."
+              % hci.ltk_request)
+        print("The reply rows below answer a real request.")
 
 
 def cmd_probe(hci, args):
@@ -1725,10 +1781,31 @@ def cmd_probe(hci, args):
             print("Running the commands that need a link, on handle 0x%04X."
                   % handle)
             print()
+            # A phone that offers to pair starts encryption, and the
+            # peripheral has to answer the key request or the link dies on
+            # the encryption timeout. Waiting for it also turns the two Long
+            # Term Key Request rows from a shape check into a real exchange.
+            if args.wait_ltk:
+                probe_wait_for_ltk(hci, args)
+
             # Disconnect ends the link every other row here needs, so it
             # goes last whatever order the table is in.
             linked = [c for c in hci_commands.COMMANDS
                       if hci_commands.NEEDS_CONN in c.needs]
+
+            if hci.ltk_request is not None:
+                ctx.handle = hci.ltk_request
+                # The negative reply goes first. Answering a real request
+                # with the positive reply hands the link layer a key of
+                # zeros, encryption completes against a peer that used a
+                # different one, and the link drops on the message integrity
+                # check, taking every row after it. The negative reply
+                # refuses cleanly and leaves the connection up. The positive
+                # reply then correctly answers Command Disallowed, since the
+                # request has been dealt with.
+                order = {0x201B: 0, 0x201A: 1}
+                linked.sort(key=lambda c: order.get(c.opcode, -1))
+
             linked.sort(key=lambda c: c.opcode == 0x0406)
             for command in linked:
                 send(command)
@@ -1835,6 +1912,11 @@ def main():
                         "and let a phone connect, then send the commands "
                         "that need a link. A dongle cannot connect to "
                         "itself, and this needs no second board")
+    p.add_argument("--wait-ltk", type=int, default=5, metavar="SECONDS",
+                   help="once connected, wait this long for a pairing peer "
+                        "to ask for the long term key. Answering it is what "
+                        "keeps the link alive, and it turns the two reply "
+                        "rows into a real exchange. 0 skips the wait")
     p.add_argument("--settle-ms", type=int, default=100, metavar="MS",
                    help="wait this long before undoing a command that puts "
                         "the radio to work, so a direct test mode test is "
