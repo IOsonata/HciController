@@ -1584,6 +1584,33 @@ def probe_feed(att, packet):
     att.feed(l2cap[4:4 + plen], cid)
 
 
+def probe_answer_ltk(hci, answered):
+    """
+    Answer a key request that turned up after the waiting was over.
+
+    Tapping Bond a moment late puts the request in the middle of the command
+    rows, where nothing is looking for it. Unanswered, the link stalls and
+    the controller drops it on the encryption timeout, and the rows after
+    that point fail for a reason that has nothing to do with them.
+
+    The negative reply, not the positive one. The key here is zeros, so
+    completing encryption with it drops the link on the integrity check,
+    which is the outcome this exists to avoid.
+    """
+    if hci.ltk_request is None or answered:
+        return
+
+    handle = hci.ltk_request
+    answered.append(handle)
+    print("     key request arrived on handle 0x%04X, refusing it so the "
+          "link survives" % handle)
+    try:
+        hci.command(0x201B, struct.pack("<H", handle), timeout=1.0,
+                    allow_fail=True)
+    except HciError:
+        pass
+
+
 def probe_wait_for_ltk(hci, att, args):
     """
     Give a pairing peer time to ask for the long term key, and say so.
@@ -1602,6 +1629,13 @@ def probe_wait_for_ltk(hci, att, args):
     if hci.ltk_request is not None:
         return
 
+    # The prompt has to come before the wait. Telling someone to tap pair
+    # after the window has closed is not a prompt, it is a postmortem.
+    print()
+    print("Tap Bond or Pair on the phone now if you want the two Long Term")
+    print("Key Request rows to mean anything. In nRF Connect it is in the")
+    print("menu next to Disconnect. Waiting %d seconds." % args.wait_ltk)
+
     deadline = time.time() + args.wait_ltk
     while time.time() < deadline and hci.ltk_request is None:
         queued = hci.pending
@@ -1613,10 +1647,9 @@ def probe_wait_for_ltk(hci, att, args):
             probe_feed(att, packet)
 
     if hci.ltk_request is None:
-        print("No key request in %d seconds. The Long Term Key Request rows"
-              % args.wait_ltk)
-        print("check only that the opcode is routed. Tap pair rather than")
-        print("just connect to make them mean more.")
+        print("Nothing asked. The two reply rows below check that the opcode")
+        print("is routed and no more, which is worth having but is not the")
+        print("same as answering a request.")
     else:
         print("The peer asked for the long term key on handle 0x%04X."
               % hci.ltk_request)
@@ -1831,6 +1864,7 @@ def cmd_probe(hci, args):
             # it gives up. Serve the same small attribute table the
             # advertise command does, so the peer gets its answers and stays
             # long enough to be worth talking to.
+            answered = []
             att = AttServer(hci, handle, "HCI-PROBE")
             probe_service_att(hci, att, args.discover_secs)
             print("Peer asked %d question(s), answered %d."
@@ -1871,6 +1905,7 @@ def cmd_probe(hci, args):
                 hci.pending = []
                 for packet in queued:
                     probe_feed(att, packet)
+                probe_answer_ltk(hci, answered)
             unwind()
 
             # Leave nothing connected, whether or not Disconnect was one of
@@ -1978,11 +2013,13 @@ def main():
                    help="serve the attribute table for this long after "
                         "connecting, so a phone can finish discovery instead "
                         "of stalling on a peripheral that answers nothing")
-    p.add_argument("--wait-ltk", type=int, default=5, metavar="SECONDS",
+    p.add_argument("--wait-ltk", type=int, default=20, metavar="SECONDS",
                    help="once connected, wait this long for a pairing peer "
-                        "to ask for the long term key. Answering it is what "
-                        "keeps the link alive, and it turns the two reply "
-                        "rows into a real exchange. 0 skips the wait")
+                        "to ask for the long term key. Long enough to find "
+                        "and tap Bond on a phone, which is the point. "
+                        "Answering the request is what keeps the link "
+                        "alive, and it turns the two reply rows into a real "
+                        "exchange. 0 skips the wait")
     p.add_argument("--settle-ms", type=int, default=100, metavar="MS",
                    help="wait this long before undoing a command that puts "
                         "the radio to work, so a direct test mode test is "

@@ -277,9 +277,17 @@ until the host answers it the link is stalled; the controller drops it on the
 encryption timeout. A run that ignores the request loses its connection and
 blames whichever command was in flight when it went.
 
-`probe` waits `--wait-ltk` seconds after connecting, five by default, and
-says whether a request arrived. With one outstanding the two reply rows stop
-being a check that the opcode is routed and become a real exchange.
+`probe` prompts for it and then waits `--wait-ltk` seconds, twenty by
+default, which is long enough to find Bond in a phone's menu. The prompt
+comes before the wait: telling someone to tap pair after the window has
+closed is a postmortem, not a prompt. With a request outstanding the two
+reply rows stop being a check that the opcode is routed and become a real
+exchange.
+
+A request that turns up later, because Bond was tapped a moment after the
+wait ended, lands in the middle of the command rows where nothing is looking
+for it. It is answered there too, so the link survives and the rows after it
+fail for their own reasons or not at all.
 
 The negative reply goes first, and that ordering is deliberate. The key in
 the table is zeros. Answering a real request with the positive reply
