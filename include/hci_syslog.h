@@ -94,6 +94,21 @@ typedef struct {
 typedef size_t (*HciSyslogWrite_t)(void *pContext, const uint8_t *pData,
                                    size_t Len);
 
+/*
+ * The one log the image has, and where trace goes unless something says
+ * otherwise.
+ *
+ * It needs no initialising and cannot be written to too early: it is in BSS
+ * and a zeroed ring is an empty one. That is deliberate, because the lines
+ * worth reading are the ones from a start up that did not get far enough to
+ * initialise anything.
+ */
+HciSyslog_t *HciSyslogDefault(void);
+
+/*
+ * Empty a log. Not needed for the default one, which starts empty. Here for a
+ * caller that keeps its own, which is what the tests do.
+ */
 void HciSyslogInit(HciSyslog_t *pLog);
 
 /*
@@ -113,13 +128,11 @@ void HciSyslogPrintV(HciSyslog_t *pLog, const char *pFormat, va_list Args);
 void HciSyslogDrain(HciSyslog_t *pLog, HciSyslogWrite_t Write, void *pContext);
 
 /*
- * Send trace here as well as wherever it already goes.
+ * Point trace at a different log than the default one.
  *
- * hci_trace.h writes through a semihosting call, which needs a debugger
- * attached and reaches nobody without one. Attaching a log makes the same
- * lines reach a port instead, which is the only thing observable on a sealed
- * board. Attach once at start up; before that, and if nothing is attached,
- * HciSyslogTraceLine does nothing at all.
+ * The firmware does not need this: trace reaches HciSyslogDefault with nothing
+ * called. It is here so a test can take the lines for itself and read them
+ * back.
  */
 void HciSyslogAttachTrace(HciSyslog_t *pLog);
 

@@ -9,40 +9,48 @@
  */
 
 /*
- * Bring up trace over semihosting. Build with HCI_TRACE=1.
+ * Bring up trace. It goes to two places and they are reached differently.
  *
- * Output goes out through the SYS_WRITE0 semihosting call, so nothing has to
- * be linked in beyond vsnprintf. No rdimon specs, no syscall stubs, no change
- * to the link line, which keeps this from colliding with the IOsonata and
- * TaktOS libraries.
+ * The log always gets it. hci_syslog.cpp holds a ring that is a valid empty
+ * ring the moment BSS is cleared, so a trace call works before anything has
+ * been initialised and needs no start up of its own. That is the copy a
+ * person can read on a board with no debugger on it, which is every board
+ * once it leaves a bench.
  *
- * A debugger with semihosting enabled must be attached. Without one the BKPT
- * is an undefined instruction and takes the HardFault handler, so this must
- * stay off in anything that ships.
+ * Semihosting only when HCI_TRACE=1. Output goes through the SYS_WRITE0 call,
+ * so nothing has to be linked in beyond vsnprintf: no rdimon specs, no
+ * syscall stubs, no change to the link line, which keeps this from colliding
+ * with the IOsonata and TaktOS libraries. A debugger with semihosting enabled
+ * must be attached. Without one the BKPT is an undefined instruction and takes
+ * the HardFault handler, so this half must stay off in anything that ships.
  *   SEGGER J-Link  : monitor semihosting enable
  *   OpenOCD        : arm semihosting enable
  *   pyOCD          : on by default
  *
- * Every call halts the core for the duration of the transfer, so trace points
- * belong in start up paths only, never in the packet path.
+ * The two used to be one, both behind HCI_TRACE, and that made the log
+ * unreachable: with tracing off nothing was written to it, and with tracing on
+ * a board without a debugger faulted on the first call. So every build had an
+ * empty log port and no build could have filled it.
+ *
+ * A semihosting call halts the core for the duration of the transfer and a log
+ * call formats a line, so trace points belong in start up paths and the
+ * runtime thread, never in the packet path and never in an interrupt: the ring
+ * has one writer and no lock.
  */
 
 #ifndef HCI_TRACE_H
 #define HCI_TRACE_H
 
+#include <stdarg.h>
+#include <stdio.h>
+
 /*
- * Off unless the build asks for it. The Debug and Debug_MBR configurations in
- * IOcomposer/.cproject define HCI_TRACE=1, and the make build takes it on the
- * command line or in local.mk.
+ * The semihosting half, off unless the build asks for it. The log half does
+ * not read this and is always there.
  */
 #ifndef HCI_TRACE
 #define HCI_TRACE 0
 #endif
-
-#if HCI_TRACE
-
-#include <stdarg.h>
-#include <stdio.h>
 
 #ifndef HCI_TRACE_LINE_SIZE
 #define HCI_TRACE_LINE_SIZE 160
@@ -55,12 +63,12 @@ extern "C" {
 #endif
 
 /*
- * The log, if one has been attached. Declared rather than included, so this
- * header keeps no dependency on hci_syslog.h and every file that traces does
- * not acquire one. Does nothing until something attaches a log, so a build
- * that has no log still links and still traces.
+ * Where the line goes. Declared rather than included, so this header keeps no
+ * dependency on hci_syslog.h and every file that traces does not acquire one.
  */
 void HciSyslogTraceLine(const char *pLine);
+
+#if HCI_TRACE
 
 __attribute__((unused))
 static void HciTraceWrite0(const char *pStr)
@@ -87,6 +95,24 @@ static void HciTraceWrite0(const char *pStr)
 #endif
 }
 
+#else
+
+/*
+ * Nothing, and not a macro, so the line still reaches the log below and the
+ * call site is the same shape either way.
+ */
+__attribute__((unused))
+static void HciTraceWrite0(const char *pStr)
+{
+    (void)pStr;
+}
+
+#endif
+
+/*
+ * Formatted once and handed to both. A bench with a debugger attached does not
+ * lose the trace it has always had, and a sealed board still gets the line.
+ */
 __attribute__((format(printf, 1, 2), unused))
 static void HciTrace(const char *pFmt, ...)
 {
@@ -98,30 +124,17 @@ static void HciTrace(const char *pFmt, ...)
     va_end(args);
 
     HciTraceWrite0(line);
-
-    /*
-     * And to the log, which is the copy that reaches a port rather than a
-     * debugger. Both, not one or the other: a bench with a debugger attached
-     * should not lose the trace it has always had.
-     */
     HciSyslogTraceLine(line);
 }
 
 __attribute__((unused))
 static void HciTraceInit(void)
 {
-    HciTraceWrite0("\r\n--- HciController trace ---\r\n");
+    HciTrace("\r\n--- HciController trace ---\r\n");
 }
 
 #ifdef __cplusplus
 }
-#endif
-
-#else
-
-#define HciTraceInit() do { } while (0)
-#define HciTrace(...)  do { } while (0)
-
 #endif
 
 #endif /* HCI_TRACE_H */

@@ -96,7 +96,17 @@ drains. It never blocks and it cannot fail a caller, because the first thing
 anyone logs is a path that is already going wrong and a log that stalls that
 path turns one fault into two. A full ring gives up whole lines from the oldest
 end and says how many octets it lost, so what survives can still be read.
-Everything `HciTrace` writes goes here as well as to semihosting.
+Everything `HciTrace` writes goes here, in every build. `HCI_TRACE=1` adds the
+semihosting copy on top and nothing else; it is not what turns the log on. The
+two were one switch at first, which meant an ordinary build wrote nothing to
+the log and the build that would have written to it faults on the first line
+without a debugger attached, so the port enumerated and stayed empty either
+way.
+
+The ring is in BSS and needs no initialising, so it is taking lines from the
+first instruction that runs. Lines written before the HCI layer exists, or by a
+start up that never reaches it, are still in there to be read when a terminal
+opens the port.
 
 The second function is present whichever port the HCI stream is on. That is the
 point of it: on a board whose host is another part on the same PCB, the UART

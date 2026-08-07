@@ -55,11 +55,13 @@ typedef struct {
     HciCounters_t Counters;
 
     /*
-     * The log, and where it goes. Filled by trace and by anything else worth
-     * saying, drained on the second CDC function whenever the device stack is
-     * running. Not the HCI stream and never mixed with it.
+     * The log is not here. It is HciSyslogDefault, outside this structure, so
+     * that the memset below does not clear what was written before this layer
+     * existed and so that a start up that never reaches this layer still has
+     * somewhere to have said why. This layer only drains it, on the second CDC
+     * function, whenever the device stack is running. Not the HCI stream and
+     * never mixed with it.
      */
-    HciSyslog_t Log;
 
     UARTDev_t Uart;
     UsbdCdcDevIntrf_t UsbIntrf;

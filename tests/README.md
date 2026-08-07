@@ -88,10 +88,15 @@ the member names, the driver callback signatures and the configuration fields
 it fills in.
 
 Every source that does not need the vendor headers is also compiled a second
-time with `HCI_TRACE=1`. With tracing off the macro discards its arguments, so
-an argument naming a field that no longer exists is invisible until an ARM
-build with tracing on. `HciTrace` has the printf format attribute, so the
-second build checks every trace call against its format string.
+time with `HCI_TRACE=1`, which is the build that reaches the semihosting call.
+`HciTrace` formats its arguments either way now, so both builds check every
+trace call against its format string; the second one checks the semihosting
+path itself compiles.
+
+`src/hci_app.cpp` is compiled a third time with `HCI_USB_SOCKET=1`. That is the
+board saying its USB socket is its own, and it is the only way the log port
+path is compiled by anything: the stub `board.h` does not say so, and the
+boards that do are built by `arm-none-eabi` and by nothing here.
 
 That second build is why `hci_trace.h` has a non-ARM path. Semihosting is an
 ARM debug call; off target the line goes to stderr, which is not useful on a

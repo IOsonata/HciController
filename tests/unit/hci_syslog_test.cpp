@@ -12,6 +12,7 @@
  */
 
 #include "hci_syslog.h"
+#include "hci_trace.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -184,6 +185,42 @@ int main(void)
         assert(gSink[gSinkLen - 1U] == '\n');
         printf("[ok] %-42s %zu octets, counted, still ended\n",
                "an over long line is truncated", gSinkLen);
+    }
+
+    /*
+     * The default log takes lines with nothing called first, because it is in
+     * BSS and a zeroed ring is an empty one. A start up that fails before it
+     * initialises anything still has somewhere to have said why.
+     */
+    {
+        gSinkLen = 0U;
+        gSink[0] = '\0';
+        HciSyslogPrint(HciSyslogDefault(), "before anything");
+        HciSyslogDrain(HciSyslogDefault(), SinkAll, NULL);
+        assert(strcmp(gSink, "before anything\n") == 0);
+        printf("[ok] %-42s no init needed\n",
+               "the default log is ready at reset");
+    }
+
+    /*
+     * And trace reaches it, whatever HCI_TRACE says.
+     *
+     * This is the case the whole port exists for and the one that was broken:
+     * the log was fed only from inside HciTrace, and HciTrace was compiled
+     * away unless the build asked for semihosting. Every ordinary build
+     * therefore had a log port that enumerated, opened, and stayed empty
+     * forever, and the only build that would have filled it faults on the
+     * first line without a debugger attached. Nothing tested the path from a
+     * trace call to the ring, so nothing said so.
+     */
+    {
+        gSinkLen = 0U;
+        gSink[0] = '\0';
+        HciTrace("boot: host=%s\r\n", "uart");
+        HciSyslogDrain(HciSyslogDefault(), SinkAll, NULL);
+        assert(strstr(gSink, "boot: host=uart") != NULL);
+        printf("[ok] %-42s trace=%d and the line still arrives\n",
+               "trace reaches the log", HCI_TRACE);
     }
 
     /* A null log and a null port are not a caller's problem. */

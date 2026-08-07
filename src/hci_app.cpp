@@ -405,7 +405,7 @@ static size_t HciAppLogWrite(void *, const uint8_t *pData, size_t Len)
 
 static void HciAppDrainLog(HciApp_t *pApp)
 {
-    HciSyslogDrain(&pApp->Log, HciAppLogWrite, pApp);
+    HciSyslogDrain(HciSyslogDefault(), HciAppLogWrite, pApp);
 }
 
 static void HciAppHostProcess(void *pContext)
@@ -474,14 +474,11 @@ bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType, HciTarget_t Target)
      * before anything else needs it.
      */
     /*
-     * The log before anything else, and trace attached to it straight away,
-     * so every line the rest of bring up produces is kept rather than lost
-     * for want of somewhere to put it. Nothing drains it until the device
-     * stack runs; the ring holds it until then, which is the whole point of a
-     * ring.
+     * Nothing to do for the log. It has been taking lines since before this
+     * function was called, including the ones main wrote about which port was
+     * chosen and why, and nothing drains it until the device stack runs. The
+     * ring holds them until then, which is the whole point of a ring.
      */
-    HciSyslogInit(&pApp->Log);
-    HciSyslogAttachTrace(&pApp->Log);
 
     HciCountersInit(&pApp->Counters, &pApp->Sdc, &pApp->Controller);
 

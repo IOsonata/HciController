@@ -61,7 +61,13 @@ hci_nrf52840_usb_SRC   := $(SRC)/hci_nrf52840.cpp \
                           $(SRC)/hci_sdc_resources.cpp
 hci_taktos_poll_SRC    := $(SRC)/hci_taktos.cpp
 hci_tinyusb_init_SRC   := $(SRC)/hci_tinyusb.cpp
-hci_syslog_SRC         := $(SRC)/hci_syslog.cpp
+hci_syslog_SRC         :=
+
+# Every file that traces needs the sink that trace goes to, because a line
+# reaches the log whether or not the build asked for semihosting. Linked into
+# every test rather than named per test, so a file that gains its first trace
+# call does not also gain a link error in a Makefile.
+COMMON_SRC             := $(SRC)/hci_syslog.cpp
 
 TARGETS := $(addprefix $(BUILD_DIR)/,$(addsuffix _test,$(TESTS)))
 
@@ -123,16 +129,34 @@ check-root:
 	@test -f "$(SRC)/hci_h4.cpp" || { \
 	  echo "Missing $(SRC)/hci_h4.cpp"; exit 1; }
 
-.SECONDEXPANSION:
-$(BUILD_DIR)/%_test: $(UNIT)/%_test.cpp $$($$*_SRC) | check-root
-	@mkdir -p $(dir $@)
-	$(CXX) $(MOCK_INCLUDES) $(MOCK_DEFINES) -DHCI_TRACE=0 $(CXXFLAGS) $^ -o $@
+# Every header, as a prerequisite of everything.
+#
+# The rules below name only .cpp files, so a change to a header rebuilt
+# nothing and whatever ran was built from the header as it stood before the
+# edit. That is worse than a stale build, because it reports pass. Editing
+# hci_trace.h so that trace reaches the log left every executable untouched and
+# a link error unfound until the next clean, which is exactly the kind of
+# silence this suite exists to break.
+#
+# Broad rather than exact, on purpose. Generated dependency files would rebuild
+# less, and the whole suite builds in seconds, so the accuracy would buy
+# nothing and the .d handling would be one more thing to get wrong.
+HEADERS := $(wildcard $(ROOT)/include/*.h) $(wildcard $(STUBS)/*.h) \
+           $(wildcard $(STUBS)/sdc/*.h) $(wildcard $(STUBS)/sdclink/*.h) \
+           $(wildcard $(STUBS)/nrfficr/*.h)
 
-$(BUILD_DIR)/trace/%.o: $(SRC)/%.cpp | check-root
+.SECONDEXPANSION:
+$(BUILD_DIR)/%_test: $(UNIT)/%_test.cpp $$($$*_SRC) $(COMMON_SRC) $(HEADERS) \
+                     | check-root
+	@mkdir -p $(dir $@)
+	$(CXX) $(MOCK_INCLUDES) $(MOCK_DEFINES) -DHCI_TRACE=0 $(CXXFLAGS) \
+	  $(filter %.cpp,$^) -o $@
+
+$(BUILD_DIR)/trace/%.o: $(SRC)/%.cpp $(HEADERS) | check-root
 	@mkdir -p $(dir $@)
 	$(CXX) $(MOCK_INCLUDES) $(MOCK_DEFINES) -DHCI_TRACE=1 $(CXXFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/notrace/%.o: $(SRC)/%.cpp | check-root
+$(BUILD_DIR)/notrace/%.o: $(SRC)/%.cpp $(HEADERS) | check-root
 	@mkdir -p $(dir $@)
 	$(CXX) $(MOCK_INCLUDES) $(MOCK_DEFINES) -DHCI_TRACE=0 $(CXXFLAGS) -c $< -o $@
 
@@ -141,7 +165,7 @@ $(BUILD_DIR)/notrace/%.o: $(SRC)/%.cpp | check-root
 # does not say so, and the boards that do are built by arm-none-eabi and by
 # nothing here, so without this the branch the Thingy:91 runs is checked by no
 # host build at all.
-$(BUILD_DIR)/logport/%.o: $(SRC)/%.cpp | check-root
+$(BUILD_DIR)/logport/%.o: $(SRC)/%.cpp $(HEADERS) | check-root
 	@mkdir -p $(dir $@)
 	$(CXX) $(MOCK_INCLUDES) $(MOCK_DEFINES) -DHCI_TRACE=1 -DHCI_USB_SOCKET=1 \
 	  $(CXXFLAGS) -c $< -o $@

@@ -87,11 +87,31 @@ static void HciSyslogPut(HciSyslog_t *pLog, const char *pData, size_t Len)
 }
 
 /*
- * The log trace goes to, or nothing. A single pointer rather than an argument
- * on every call, because trace is written from files that have no reason to
- * know a log exists and every reason not to take one as a parameter.
+ * The one log the image has.
+ *
+ * It lives here rather than inside the application structure, and that is the
+ * point of it. Everything in BSS starts zeroed, and a zeroed ring is a valid
+ * empty ring, so this one works from the first instruction that runs. Nothing
+ * has to initialise it and nothing can be too early to write to it, which
+ * matters because the lines worth having are the ones from a start up that did
+ * not finish. Held inside the application it was cleared by that structure's
+ * own memset, so every line written before then was lost, and a failure to
+ * initialise at all left nothing to read.
  */
-static HciSyslog_t *s_pTraceLog;
+static HciSyslog_t s_DefaultLog;
+
+HciSyslog_t *HciSyslogDefault(void)
+{
+    return &s_DefaultLog;
+}
+
+/*
+ * The log trace goes to. A single pointer rather than an argument on every
+ * call, because trace is written from files that have no reason to know a log
+ * exists and every reason not to take one as a parameter. Pointed at the
+ * default from the start, so tracing needs no attaching either.
+ */
+static HciSyslog_t *s_pTraceLog = &s_DefaultLog;
 
 void HciSyslogAttachTrace(HciSyslog_t *pLog)
 {
