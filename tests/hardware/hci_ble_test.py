@@ -1611,6 +1611,10 @@ class ProbeContext(object):
     peer_addr = None
     peer_type = None
 
+    # What Read BD_ADDR answered before the run touched anything. Six zero
+    # octets on a board with no public address, which is most of them.
+    public_addr = b"\x00" * 6
+
     def __init__(self, handle=None, addr_type=0x01):
         self.handle = handle if handle is not None else \
             hci_commands.UNUSED_HANDLE
@@ -1974,6 +1978,8 @@ def cmd_probe(hci, args):
 
     ctx = ProbeContext(handle=args.handle, addr_type=addr_type)
     ctx.identity = identity
+    _, bd_addr = hci.command(OP_READ_BD_ADDR)
+    ctx.public_addr = bd_addr[:6]
     undo = []
     counts = {"ok": 0, "expected": 0, "silent": 0, "refused": 0,
               "unknown": 0}
@@ -2052,8 +2058,8 @@ def cmd_probe(hci, args):
             if args.settle_ms:
                 time.sleep(args.settle_ms / 1000.0)
             try:
-                hci.command(command.undo[0], command.undo[1], timeout=1.0,
-                            allow_fail=True)
+                hci.command(command.undo[0], undo_payload(command.undo), 
+                            timeout=1.0, allow_fail=True)
             except HciGone:
                 report(command, "!!",
                        "the port disappeared while undoing this")
@@ -2063,6 +2069,14 @@ def cmd_probe(hci, args):
         else:
             undo.append(command.undo)
 
+    def undo_payload(entry):
+        """
+        An undo payload may be a callable, for the same reason a command's
+        payload may be: putting the board's own address back needs to know
+        what it was, and that is only known at run time.
+        """
+        return entry[1](ctx) if callable(entry[1]) else entry[1]
+
     def unwind():
         """
         Put the controller back, most recent first, so an advertising set
@@ -2070,9 +2084,10 @@ def cmd_probe(hci, args):
         are not interesting: most of these are only needed if the command
         that registered them worked.
         """
-        for opcode, payload in reversed(undo):
+        for entry in reversed(undo):
             try:
-                hci.command(opcode, payload, timeout=1.0, allow_fail=True)
+                hci.command(entry[0], undo_payload(entry), timeout=1.0,
+                            allow_fail=True)
             except HciError:
                 pass
         del undo[:]

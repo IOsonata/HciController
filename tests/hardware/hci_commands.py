@@ -755,8 +755,7 @@ _ISO = [
             + bytes([1, 0, 0, 1, 1, 0, 0]) + bytes(16),
             needs=(NEEDS_ADV_SET, NEEDS_CONSENT),
             undo=(0x206A, bytes([PROBE_BIG_TEST_HANDLE, 0x16])),
-            expect=(STATUS_UNKNOWN_ADV_ID, STATUS_COMMAND_DISALLOWED,
-                    STATUS_INVALID_PARAMS),
+            expect=(STATUS_UNKNOWN_ADV_ID,),
             note="the same group stated rather than derived: ISO interval 8 "
                  "in 1.25 ms units, one subevent, 40 octet service and "
                  "protocol units, one burst, one repeated transmission, no "
@@ -766,13 +765,15 @@ _ISO = [
                  "one burst and one repetition leaves a subevent nothing "
                  "fills.\n"
                  "\n"
-                 "This row is provisional. LE Create BIG above it succeeds "
-                 "and takes both the group handle and the periodic train, "
-                 "and a train can hold one group only, so a second one on "
-                 "the same train is refused whatever the parameters say. "
-                 "The handle here is a different one, which is what tells "
-                 "the two causes apart on the next run: still refused means "
-                 "the train, accepted means it was the handle",
+                 "It is refused, and the refusal is the answer this row "
+                 "wants. LE Create BIG above it succeeds and takes the "
+                 "periodic train, and a train holds one group only. The "
+                 "group handle here is a free one, so a run that still "
+                 "refused told the two causes apart: it did, with Unknown "
+                 "Advertising Identifier, which names the train rather than "
+                 "the handle. Reaching this one with a train of its own "
+                 "would need a second periodic advertising set, and "
+                 "HCI_SDC_PERIODIC_ADV_COUNT is one",
             phase=PHASE_EXTENDED),
     Command(0x206A, "LE Terminate BIG", STATUS,
             bytes([PROBE_BIG_HANDLE, 0x16]),
@@ -849,7 +850,25 @@ _VENDOR = [
                  "set here is a promise the coverage check holds it to"),
     Command(0xFC06, "VS Zephyr Write BD_ADDR", COMPLETE,
             bytes.fromhex("0102030405c0"), needs=NEEDS_CONSENT,
-            note="changes the identity of the board until it is reset"),
+            undo=(0xFC06, lambda ctx: ctx.public_addr), undo_now=True,
+            note="changes the public address of the board. The note here "
+                 "said until it is reset, and the header says otherwise: "
+                 "the address is written to volatile memory, does not change "
+                 "during an HCI Reset, and is cleared only by a system "
+                 "reset. So a run without an undo left the board answering a "
+                 "different identity to everything, across resets and across "
+                 "later runs, until it was unplugged.\n"
+                 "\n"
+                 "That is not only untidy. A board with no public address "
+                 "advertises with the random one, and a board that this "
+                 "command has given a public address advertises with that "
+                 "instead, so the run after it exercises a different path "
+                 "and a failure on the first path stops being reachable. "
+                 "The undo puts back whatever Read BD_ADDR answered before "
+                 "the run started, which is six zero octets on a board that "
+                 "never had one. Immediate, because every row below it in "
+                 "this phase would otherwise run against the wrong "
+                 "identity"),
     Command(0xFC09, "VS Zephyr Read Static Addresses", COMPLETE, b""),
     Command(0xFC0A, "VS Zephyr Read Key Hierarchy Roots", COMPLETE, b"",
             note="returns the identity and encryption roots, which is why "
