@@ -165,16 +165,17 @@ seconds with the link otherwise correct.
 With `CONFIG_BT_WAIT_NOP=y` the host holds its command semaphore at zero
 until a Command Complete for the No Operation opcode arrives. This firmware
 queues exactly that at startup and sends it first, so the host waits for the
-controller rather than racing it.
+controller rather than racing it. A host that cannot be configured cannot be
+told to do this, and whether the race is real on such a host has not been
+measured.
 
-Where the host cannot be changed, this firmware closes the window itself. A
-board that asks for hardware flow control has its RTS pin driven high, not
-ready to receive, in the first instruction of `main`, before anything that
-takes time. Out of reset that pin is an input with no pull, so the peer's CTS
-floats and a peer that reads it as asserted transmits into a part with no
-UART yet. Driving it high holds the peer off until `UARTInit` hands the pin
-to the peripheral, which asserts it when the receiver is genuinely listening.
-One pin write, and it closes the window rather than making it smaller.
+The rest of the board has been checked against `sdk-nrf` and the Thingy:91
+hardware guide: the pins and rate above, the low frequency crystal on P0.00
+and P0.01 so the default clock configuration is right, and that every command
+a Zephyr host sends during `bt_enable` is dispatched here. Note also that the
+stock nRF52840 image on that board boots through MCUboot, so how a
+replacement image is programmed decides whether it runs at all.
+
 
 Other hardware is a port, and it is a small one. A board says four things
 beyond its pins:

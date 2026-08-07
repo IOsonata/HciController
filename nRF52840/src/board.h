@@ -308,11 +308,18 @@
  * nothing retries them. The symptom is a Reset that times out after ten
  * seconds with the link otherwise correct.
  *
- * The host side answer is CONFIG_BT_WAIT_NOP=y. Zephyr then holds its command
- * semaphore at zero until a Command Complete for the No Operation opcode
- * arrives, which is exactly what HciSdcNrfxlibQueueStartupNop queues here and
- * what goes out first when the runtime thread starts. See hci_core.c, the
- * comment above the ncmd_sem initialisation.
+ * Where the host can be configured, Zephyr's CONFIG_BT_WAIT_NOP=y holds its
+ * command semaphore at zero until a Command Complete for the No Operation
+ * opcode arrives, which is what HciSdcNrfxlibQueueStartupNop queues here.
+ * That turns the race into a handshake. A proprietary host cannot be told to
+ * do it, and whether the race is real on such a host has not been measured,
+ * so this is written down as something to check rather than as the cause.
+ *
+ * What has been checked, against sdk-nrf and the Thingy:91 hardware guide:
+ * the four pins above and their rate, that the low frequency crystal is on
+ * P0.00 and P0.01 so the default LFXO clock configuration is right for this
+ * board, and that the commands a Zephyr host sends during bt_enable are all
+ * dispatched here.
  */
 #define UART_TX_PORT            0
 #define UART_TX_PIN             25
