@@ -292,69 +292,30 @@ _LE_BASIC = [
                  "refused.\n"
                  "\n"
                  "--bisect 0x200A named the row, twice, identically: "
-                 "LE Read Maximum Advertising Data Length, 0x203A. Sending "
-                 "it makes this one refuse and skipping it does not.\n"
+                 "LE Read Maximum Advertising Data Length, 0x203A. Five "
+                 "commands reproduced it. It was not the controller.\n"
                  "\n"
-                 "Five commands reproduce it from a reset:\n"
-                 "  --only 0x203A,0x2006,0x2008,0x2009,0x200A\n"
+                 "sdk-nrf answers it. subsys/bluetooth/controller/"
+                 "hci_internal.c holds the switch that tracks which "
+                 "advertising command set a host has used since reset, and "
+                 "0x203A is in it, marked ADV_COMMAND_TYPE_EXTENDED, beside "
+                 "Set Extended Advertising Parameters. So it is an extended "
+                 "advertising command and this table had it in the phase "
+                 "that means neither. That is fixed where the row is "
+                 "defined.\n"
                  "\n"
-                 "What is established. 0x203A is a read: Vol 4 Part E 7.8.57 "
-                 "gives it no parameters, no error conditions and no side "
-                 "effects, and the nrfxlib header repeats that. This "
-                 "firmware passes it straight to the controller and does "
-                 "nothing else with it. Without it the four legacy rows are "
-                 "accepted; with it the enable is refused. Both reproduced.\n"
+                 "What is left is a real gap, and it is ours. That file "
+                 "answers a host mixing the two sets with Command "
+                 "Disallowed, before the command reaches the controller. "
+                 "This firmware calls the SoftDevice Controller directly and "
+                 "has no such state, so a host that mixes them gets whatever "
+                 "the controller does about it, which here was Invalid HCI "
+                 "Command Parameters on the enable and nothing on the three "
+                 "rows before it. The specification asks for 0x0C and we "
+                 "pass through 0x12.\n"
                  "\n"
-                 "What is not established. Whether 0x203A appears in the "
-                 "table of extended advertising commands in Vol 4 Part E "
-                 "3.1.1, the one whose use makes the legacy commands "
-                 "Command Disallowed. That table has not been read, only "
-                 "referred to, so whether this is the controller misbehaving "
-                 "or this table putting the row in the wrong phase is open.\n"
-                 "\n"
-                 "What argues against it being that lockout: the lockout "
-                 "answers Command Disallowed and this answers Invalid HCI "
-                 "Command Parameters, and it would take LE Set Advertising "
-                 "Parameters, Data and Scan Response Data with it, which are "
-                 "all accepted here. Only the enable is refused.\n"
-                 "\n"
-                 "The sdk-nrfxlib documentation was read for this and says "
-                 "nothing about it. limitations.rst does not mention it, the "
-                 "isochronous and scheduling documents do not touch it, and "
-                 "the two read commands appear nowhere outside the header. "
-                 "The pinned revision is already the current one, so there "
-                 "is no newer controller to move to.\n"
-                 "\n"
-                 "What the changelog does show is that mixing the two "
-                 "advertising command sets has been a source of defects "
-                 "here before: an MPU fault when switching between extended "
-                 "and legacy in 1.8.0 (NCSIDB-572), an assert when a legacy "
-                 "advertiser is used after LE Clear Advertising Sets in "
-                 "1.7.0 (DRGN-15993), and a legacy advertiser's scan "
-                 "response data corrupted by extended commands in 1.6.0 "
-                 "(DRGN-15465). All three are the same shape as this.\n"
-                 "\n"
-                 "IOsonata was read for this too, and it does not settle "
-                 "the question but it does size it. Its host stack sends "
-                 "only the extended advertising commands: Set Extended "
-                 "Advertising Parameters, Data, Scan Response Data and "
-                 "Enable, plus Set Advertising Set Random Address. The four "
-                 "legacy commands are never sent at all, and legacy "
-                 "advertising packets are obtained through the legacy event "
-                 "property bit on an extended set. So the path this row "
-                 "walks is one I-SYST's own host never walks, and it matters "
-                 "for the third party hosts this firmware exists to serve "
-                 "rather than for IOsonata.\n"
-                 "\n"
-                 "src/bluetooth/bt_adv_hci.cpp also records this controller "
-                 "answering Invalid HCI Command Parameters for an event "
-                 "property combination that is not one of the fixed legacy "
-                 "values in Vol 4 Part E 7.8.53. Same error, same area, "
-                 "already met once from the other side.\n"
-                 "\n"
-                 "The row stays where it is until that table has been read. "
-                 "Moving it to the extended phase would make the run green "
-                 "and would settle nothing",
+                 "The undo below is still worth having, since a run that "
+                 "walks away advertising is a run that leaves the radio on",
             phase=PHASE_LEGACY),
     Command(0x200B, "LE Set Scan Parameters", COMPLETE,
             lambda ctx: struct.pack("<BHHBB", 0x00, 0x0060, 0x0030,
@@ -402,12 +363,26 @@ _LE_BASIC = [
     Command(0x2031, "LE Set Default PHY", COMPLETE, b"\x00\x07\x07",
             undo=(0x2031, b"\x03\x00\x00"),
             note="all PHYs allowed both ways, then back to no preference"),
-    Command(0x203A, "LE Read Maximum Advertising Data Length", COMPLETE, b""),
+    # These three read nothing and change nothing, and all three are extended
+    # advertising commands. sdk-nrf says so itself, in
+    # subsys/bluetooth/controller/hci_internal.c, where the switch that tracks
+    # which set the host has used since reset lists LE_READ_MAX_ADV_DATA_LENGTH,
+    # LE_READ_NUMBER_OF_SUPPORTED_ADV_SETS and LE_READ_PERIODIC_ADV_LIST_SIZE
+    # alongside Set Extended Advertising Parameters, and marks them
+    # ADV_COMMAND_TYPE_EXTENDED.
+    #
+    # They sat in the phase that means neither set for as long as this table
+    # existed, and sending one made every legacy advertising row below it
+    # fail. Six guesses and eight hardware runs went to that before the
+    # sdk-nrf source was read.
+    Command(0x203A, "LE Read Maximum Advertising Data Length", COMPLETE, b"",
+            phase=PHASE_EXTENDED),
     Command(0x203B, "LE Read Number Of Supported Advertising Sets", COMPLETE,
-            b""),
+            b"", phase=PHASE_EXTENDED),
     Command(0x203D, "LE Clear Advertising Sets", COMPLETE, b"",
             phase=PHASE_EXTENDED),
-    Command(0x204A, "LE Read Periodic Advertiser List Size", COMPLETE, b""),
+    Command(0x204A, "LE Read Periodic Advertiser List Size", COMPLETE, b"",
+            phase=PHASE_EXTENDED),
     Command(0x204B, "LE Read Transmit Power", COMPLETE, b""),
     Command(0x204C, "LE Read RF Path Compensation", COMPLETE, b""),
     Command(0x204D, "LE Write RF Path Compensation", COMPLETE,
