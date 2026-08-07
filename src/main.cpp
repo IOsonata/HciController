@@ -155,8 +155,55 @@ static HciAppHost_t HciSelectHost(void)
 #endif
 }
 
+/*
+ * Hold the host off until the port exists.
+ *
+ * RTS is an output and it means "ready to receive", asserted low. Out of
+ * reset it is not an output at all: it is a plain input with no pull, so the
+ * peer's CTS floats and reads whatever the board leaks. A peer that reads it
+ * as asserted starts transmitting into a part that has no UART yet, and those
+ * octets are gone. Nothing in HCI retries a command.
+ *
+ * That is not hypothetical. A Nordic Thingy:91 holds this part in reset while
+ * it opens its HCI transport, releases it, and sends HCI Reset at once. This
+ * firmware cannot come out of reset, start TaktOS, the radio and the port in
+ * the ten milliseconds that host allows, so the first command it ever sends
+ * is lost and it asserts ten seconds later on a command this part never saw.
+ *
+ * A host that can be configured has an answer for this: Zephyr's
+ * CONFIG_BT_WAIT_NOP makes it wait for the controller's startup No Operation
+ * before sending anything. A host that cannot be changed has none, so the
+ * answer has to be here.
+ *
+ * So the pin is driven high, not ready, in the first instruction of main,
+ * before anything that takes time. The peer then holds its transmission until
+ * UARTInit hands the pin to the peripheral, which asserts it when the
+ * receiver is genuinely listening. Costs one pin write and closes the window
+ * completely rather than making it smaller.
+ *
+ * Only for a board that asked for flow control. Without it the peer is not
+ * watching this wire and driving it would put a signal on a pin the board may
+ * be using for something else.
+ */
+#if defined(UART_HW_FLOWCTRL) && UART_HW_FLOWCTRL
+static const IOPinCfg_t s_RtsHoldOff = {
+    UART_RTS_PORT, UART_RTS_PIN, UART_RTS_PINOP,
+    IOPINDIR_OUTPUT, IOPINRES_NONE, IOPINTYPE_NORMAL
+};
+
+static void HciHoldHostOff(void)
+{
+    IOPinCfg(&s_RtsHoldOff, 1);
+    IOPinSet(UART_RTS_PORT, UART_RTS_PIN);
+}
+#else
+static void HciHoldHostOff(void) {}
+#endif
+
 int main(void)
 {
+    HciHoldHostOff();
+
 #if HCI_STATUS_LEDS
     IOPinCfg(s_LedPins, sizeof(s_LedPins) / sizeof(s_LedPins[0]));
 #endif

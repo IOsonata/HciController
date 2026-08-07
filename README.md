@@ -167,6 +167,15 @@ until a Command Complete for the No Operation opcode arrives. This firmware
 queues exactly that at startup and sends it first, so the host waits for the
 controller rather than racing it.
 
+Where the host cannot be changed, this firmware closes the window itself. A
+board that asks for hardware flow control has its RTS pin driven high, not
+ready to receive, in the first instruction of `main`, before anything that
+takes time. Out of reset that pin is an input with no pull, so the peer's CTS
+floats and a peer that reads it as asserted transmits into a part with no
+UART yet. Driving it high holds the peer off until `UARTInit` hands the pin
+to the peripheral, which asserts it when the receiver is genuinely listening.
+One pin write, and it closes the window rather than making it smaller.
+
 Other hardware is a port, and it is a small one. A board says four things
 beyond its pins:
 
