@@ -145,7 +145,25 @@ static int HciAppUartEvent(UARTDev_t * const,
     return BufferLen;
 }
 
-static bool HciAppInitUsb(HciApp_t *pApp)
+/*
+ * Whether the USB socket on the board is wired to this part. board.h says,
+ * because it is a property of the PCB and nothing here can read it.
+ *
+ * It decides one thing: whether a board whose HCI stream is on the UART brings
+ * the device stack up anyway, so the log has a port to reach a person on.
+ * Where the socket belongs to another part, bringing it up would enumerate a
+ * device on somebody else's bus.
+ */
+#ifndef HCI_USB_SOCKET
+#define HCI_USB_SOCKET 0
+#endif
+
+/*
+ * Bring up the CDC interface and the device stack, without saying what the
+ * ports are for. The caller decides whether the first function is the HCI
+ * stream or is left unused with only the log on the second.
+ */
+static bool HciAppUsbSetup(HciApp_t *pApp)
 {
     UsbdCdcIntrfCfg_t cfg = {};
     cfg.bBlocking = true;
@@ -169,7 +187,7 @@ static bool HciAppInitUsb(HciApp_t *pApp)
         return false;
     }
 
-    pApp->pHostIntrf = &pApp->UsbIntrf.DevIntrf;
+    pApp->UsbRunning = true;
     return true;
 }
 
@@ -238,6 +256,42 @@ static void HciAppSetHostOpen(HciApp_t *pApp, bool Open)
     {
         HciControllerPortClose(&pApp->Controller);
     }
+}
+
+/*
+ * Bring the port up for the log alone, with the HCI stream on the UART.
+ *
+ * No settling loop here, unlike the path below. A host on the UART may send
+ * its first command in the first millisecond, and spending a hundred of them
+ * waiting for a terminal that may never be plugged in would lose it. The stack
+ * enumerates in the background instead, pumped from the same place as
+ * everything else, and the ring holds the log until it does.
+ *
+ * A failure to start is not one. With no cable there is no VBUS and the
+ * peripheral cannot come up at all, which is the ordinary state of a board on
+ * a battery. It is recorded, the pumping stops, and the HCI link is untouched.
+ * A cable arriving after this point does not bring it back: the port clears
+ * the power interrupt when it gives up, so a log wanted on a board already
+ * running means plugging in and resetting.
+ */
+static void HciAppStartLogPort(HciApp_t *pApp)
+{
+    if (!HciTinyUsbStart(&pApp->Usb))
+    {
+        HciTrace("log: HciTinyUsbStart failed\r\n");
+        pApp->UsbRunning = false;
+        return;
+    }
+
+    if (!pApp->Target.pOps->UsbStart(pApp->Target.pContext))
+    {
+        HciTrace("log: target UsbStart failed err=%ld\r\n",
+                 (long)HciTargetLastError(&pApp->Target));
+        pApp->UsbRunning = false;
+        return;
+    }
+
+    HciTrace("log: usb up on cdc %u\r\n", (unsigned)HCI_APP_LOG_INTERFACE);
 }
 
 static bool HciAppHostStart(void *pContext)
@@ -327,10 +381,31 @@ static bool HciAppHostStart(void *pContext)
     }
     else
     {
+        if (pApp->UsbRunning)
+        {
+            HciAppStartLogPort(pApp);
+        }
+
         HciAppSetHostOpen(pApp, true);
     }
 
     return true;
+}
+
+/*
+ * Hand the log to the second CDC function.
+ *
+ * Only from here, which is the thread that pumps the device stack, because
+ * the TinyUSB event queue is protected against this context and no other.
+ */
+static size_t HciAppLogWrite(void *, const uint8_t *pData, size_t Len)
+{
+    return HciTinyUsbWrite(HCI_APP_LOG_INTERFACE, pData, Len);
+}
+
+static void HciAppDrainLog(HciApp_t *pApp)
+{
+    HciSyslogDrain(&pApp->Log, HciAppLogWrite, pApp);
 }
 
 static void HciAppHostProcess(void *pContext)
@@ -341,7 +416,7 @@ static void HciAppHostProcess(void *pContext)
         return;
     }
 
-    if (pApp->HostType == HCI_APP_HOST_USB)
+    if (pApp->UsbRunning)
     {
         /*
          * Cable attach and detach are recorded by POWER_CLOCK and applied
@@ -351,12 +426,24 @@ static void HciAppHostProcess(void *pContext)
         pApp->Target.pOps->UsbPowerProcess(pApp->Target.pContext);
 
         HciTinyUsbProcess(&pApp->Usb);
-        HciAppSetHostOpen(pApp, HciTinyUsbIsOpen(&pApp->Usb));
+
+        /*
+         * Only where the HCI stream is on this port does opening it mean the
+         * host is there. With the stream on the UART the port is the log's
+         * alone, and whether a terminal is attached to it says nothing about
+         * the host, which is another part on the same PCB.
+         */
+        if (pApp->HostType == HCI_APP_HOST_USB)
+        {
+            HciAppSetHostOpen(pApp, HciTinyUsbIsOpen(&pApp->Usb));
+        }
+
+        HciAppDrainLog(pApp);
     }
 
     HciControllerProcess(&pApp->Controller);
 
-    if (pApp->HostType == HCI_APP_HOST_USB)
+    if (pApp->UsbRunning)
     {
         HciTinyUsbProcess(&pApp->Usb);
     }
@@ -386,6 +473,16 @@ bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType, HciTarget_t Target)
      * whatever order those layers are brought up in, so it is wired here
      * before anything else needs it.
      */
+    /*
+     * The log before anything else, and trace attached to it straight away,
+     * so every line the rest of bring up produces is kept rather than lost
+     * for want of somewhere to put it. Nothing drains it until the device
+     * stack runs; the ring holds it until then, which is the whole point of a
+     * ring.
+     */
+    HciSyslogInit(&pApp->Log);
+    HciSyslogAttachTrace(&pApp->Log);
+
     HciCountersInit(&pApp->Counters, &pApp->Sdc, &pApp->Controller);
 
     if (!HciSdcNrfxlibInit(&pApp->Sdc,
@@ -409,8 +506,34 @@ bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType, HciTarget_t Target)
     HciSdcNrfxlibQueueStartupNop(&pApp->Sdc);
 #endif
 
-    bool hostReady = HostType == HCI_APP_HOST_USB ?
-                     HciAppInitUsb(pApp) : HciAppInitUart(pApp);
+    bool hostReady;
+    if (HostType == HCI_APP_HOST_USB)
+    {
+        hostReady = HciAppUsbSetup(pApp);
+        if (hostReady)
+        {
+            pApp->pHostIntrf = &pApp->UsbIntrf.DevIntrf;
+        }
+    }
+    else
+    {
+        hostReady = HciAppInitUart(pApp);
+
+        /*
+         * The HCI stream is on the UART and the socket is this part's, so the
+         * port is free and the log goes on it. Not being able to set it up is
+         * not a bring up failure: an HCI controller that refused to run
+         * because it had nowhere to print would be worse than one that runs
+         * silently, which is what every build did until now.
+         */
+        if (hostReady && HCI_USB_SOCKET && HciTargetHasUsb(&pApp->Target) &&
+            !HciAppUsbSetup(pApp))
+        {
+            HciTrace("init: log port setup failed, running without it\r\n");
+            pApp->UsbRunning = false;
+        }
+    }
+
     if (!hostReady)
     {
         HciTrace("init: host interface failed type=%u\r\n", (unsigned)HostType);
@@ -439,7 +562,7 @@ bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType, HciTarget_t Target)
                          &pApp->Runtime,
                          reinterpret_cast<uint8_t *>(pApp->SdcMem),
                          sizeof(pApp->SdcMem),
-                         HostType == HCI_APP_HOST_USB))
+                         pApp->UsbRunning))
     {
         HciTrace("init: target Init failed\r\n");
         pApp->LastError = -4;
@@ -464,8 +587,13 @@ bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType, HciTarget_t Target)
     hostOps.Start = HciAppHostStart;
     hostOps.Process = HciAppHostProcess;
     hostOps.pContext = pApp;
-    hostOps.PollIntervalMs = HostType == HCI_APP_HOST_USB ?
-                             HCI_APP_USB_POLL_MS : 0U;
+    /*
+     * A port with no interrupt that reaches this thread has to be looked at on
+     * a tick, and the device stack is one whichever stream is on it. A UART
+     * host wakes this thread from its own interrupt as well, so the tick costs
+     * it nothing but the passes.
+     */
+    hostOps.PollIntervalMs = pApp->UsbRunning ? HCI_APP_USB_POLL_MS : 0U;
 
     if (!HciTaktOsInit(&pApp->Runtime, &runtimeOps, &hostOps))
     {

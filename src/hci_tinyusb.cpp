@@ -23,6 +23,37 @@
 
 static HciTinyUsb_t *s_pUsb;
 
+/*
+ * Whether a callback is about the interface this file owns, and if not,
+ * whether that is worth counting.
+ *
+ * The device has more than one CDC function and this file drives one of them.
+ * A callback for the other is ordinary and means a terminal is attached to the
+ * log, so counting it as an error made the counter climb whenever somebody
+ * opened it. A callback for an interface the device does not have at all is a
+ * different thing and still counted, because it can only come from a
+ * descriptor and a configuration that disagree.
+ */
+static bool HciTinyUsbCallbackIsOurs(uint8_t Interface)
+{
+    if (s_pUsb == nullptr)
+    {
+        return false;
+    }
+
+    if (Interface == s_pUsb->Interface)
+    {
+        return true;
+    }
+
+    if (Interface >= CFG_TUD_CDC)
+    {
+        s_pUsb->CallbackInterfaceErrorCount++;
+    }
+
+    return false;
+}
+
 static void HciTinyUsbWake(HciTinyUsb_t *pUsb)
 {
     if (pUsb != nullptr && pUsb->Wake != nullptr)
@@ -207,14 +238,45 @@ bool HciTinyUsbIsMounted(const HciTinyUsb_t *pUsb)
     return pUsb != nullptr && pUsb->Started && tud_mounted();
 }
 
+size_t HciTinyUsbWrite(uint8_t Interface, const uint8_t *pData, size_t Len)
+{
+    if (pData == NULL || Len == 0U || !tud_mounted())
+    {
+        return 0U;
+    }
+
+    /*
+     * Nothing opened means nobody is reading. Writing anyway fills the
+     * endpoint buffer once and then blocks every later write, so the log
+     * would stop at the first line and stay stopped even after a terminal
+     * arrived.
+     */
+    if ((tud_cdc_n_get_line_state(Interface) & 0x01U) == 0U)
+    {
+        return 0U;
+    }
+
+    const uint32_t room = tud_cdc_n_write_available(Interface);
+    if (room == 0U)
+    {
+        return 0U;
+    }
+
+    size_t len = Len;
+    if (len > room)
+    {
+        len = room;
+    }
+
+    const uint32_t written = tud_cdc_n_write(Interface, pData, (uint32_t)len);
+    (void)tud_cdc_n_write_flush(Interface);
+    return (size_t)written;
+}
+
 extern "C" void tud_cdc_rx_cb(uint8_t itf)
 {
-    if (s_pUsb == nullptr || itf != s_pUsb->Interface)
+    if (!HciTinyUsbCallbackIsOurs(itf))
     {
-        if (s_pUsb != nullptr)
-        {
-            s_pUsb->CallbackInterfaceErrorCount++;
-        }
         return;
     }
 
@@ -223,12 +285,8 @@ extern "C" void tud_cdc_rx_cb(uint8_t itf)
 
 extern "C" void tud_cdc_tx_complete_cb(uint8_t itf)
 {
-    if (s_pUsb == nullptr || itf != s_pUsb->Interface)
+    if (!HciTinyUsbCallbackIsOurs(itf))
     {
-        if (s_pUsb != nullptr)
-        {
-            s_pUsb->CallbackInterfaceErrorCount++;
-        }
         return;
     }
 
@@ -239,12 +297,14 @@ extern "C" void tud_cdc_line_state_cb(uint8_t itf, bool dtr, bool rts)
 {
     (void)rts;
 
-    if (s_pUsb == nullptr || itf != s_pUsb->Interface)
+    if (!HciTinyUsbCallbackIsOurs(itf))
     {
-        if (s_pUsb != nullptr)
-        {
-            s_pUsb->CallbackInterfaceErrorCount++;
-        }
+        /*
+         * The other function is the log. A drain that had nothing to write
+         * when it was last called stops until something wakes this thread, so
+         * a terminal opening the port has to be one of the things that does.
+         */
+        HciTinyUsbWake(s_pUsb);
         return;
     }
 

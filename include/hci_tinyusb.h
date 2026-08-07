@@ -43,6 +43,20 @@ typedef struct {
     uint32_t CallbackInterfaceErrorCount;
 } HciTinyUsb_t;
 
+/*
+ * Write to a CDC interface directly, for the log.
+ *
+ * The HCI stream goes through an IOsonata UsbdCdcIntrf with its own buffers
+ * in both directions, because it is a transport. The log is one direction,
+ * already buffered by its own ring, and nothing reads from it, so it needs
+ * none of that and takes the device stack call instead.
+ *
+ * Returns how many octets the endpoint took, which is zero when the device
+ * is not mounted or nothing has opened the port. A log with nobody listening
+ * queues rather than blocks, which is the caller's business, not this one's.
+ */
+size_t HciTinyUsbWrite(uint8_t Interface, const uint8_t *pData, size_t Len);
+
 bool HciTinyUsbInit(HciTinyUsb_t *pUsb,
                     UsbdCdcDevIntrf_t *pIntrf,
                     uint8_t Interface,

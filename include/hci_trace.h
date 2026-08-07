@@ -54,6 +54,14 @@
 extern "C" {
 #endif
 
+/*
+ * The log, if one has been attached. Declared rather than included, so this
+ * header keeps no dependency on hci_syslog.h and every file that traces does
+ * not acquire one. Does nothing until something attaches a log, so a build
+ * that has no log still links and still traces.
+ */
+void HciSyslogTraceLine(const char *pLine);
+
 __attribute__((unused))
 static void HciTraceWrite0(const char *pStr)
 {
@@ -90,6 +98,13 @@ static void HciTrace(const char *pFmt, ...)
     va_end(args);
 
     HciTraceWrite0(line);
+
+    /*
+     * And to the log, which is the copy that reaches a port rather than a
+     * debugger. Both, not one or the other: a bench with a debugger attached
+     * should not lose the trace it has always had.
+     */
+    HciSyslogTraceLine(line);
 }
 
 __attribute__((unused))

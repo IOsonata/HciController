@@ -42,7 +42,8 @@
  * Nordic Thingy:91. Not I-SYST hardware, so its id sits well clear of the
  * IOsonata range rather than pretending to belong to it. The nRF52840 on that
  * board reaches its host over the interconnect UART to the nRF9160, never over
- * USB, so it is the one board here that has no use for VBUS.
+ * USB, so it is the one board here where VBUS decides nothing about the host.
+ * The socket is still this part's and is where the log goes.
  */
 #define THINGY91_NRF52840	100
 
@@ -97,6 +98,8 @@
 #define BOARD_MODULE_NAME               "I-SYST BLYST840"
 
 /* The USB socket is this part's own, so VBUS is worth reading. */
+#define HCI_USB_SOCKET                  1
+
 #ifndef HCI_HOST_SELECT
 #define HCI_HOST_SELECT                 HCI_HOST_SELECT_AUTO
 #endif
@@ -173,6 +176,8 @@
 #elif BOARD == IBK_NRF52840
 
 /* The USB socket is this part's own, so VBUS is worth reading. */
+#define HCI_USB_SOCKET                  1
+
 #ifndef HCI_HOST_SELECT
 #define HCI_HOST_SELECT                 HCI_HOST_SELECT_AUTO
 #endif
@@ -254,7 +259,14 @@
  * USB socket on this board belongs to the nRF52840, but nothing on the far
  * side of it speaks HCI, so VBUS decides nothing here and AUTO would come up
  * talking to a host that is not there.
+ *
+ * The socket is still this part's, so it is where the log goes. That is the
+ * only way anything on this board can be observed: no LED reaches this part,
+ * the UART is the host's, and semihosting needs a debugger on a board that is
+ * usually sealed.
  */
+#define HCI_USB_SOCKET                  1
+
 #ifndef HCI_HOST_SELECT
 #define HCI_HOST_SELECT                 HCI_HOST_SELECT_UART
 #endif
@@ -346,6 +358,28 @@
 
 #else
 #error "No pins defined. Define the pins used by your board."
+#endif
+
+//=============================================================================
+// USB socket
+//=============================================================================
+
+/*
+ * Whether the USB socket on the board is wired to this part.
+ *
+ * A separate question from which port the HCI stream is on, and the Thingy:91
+ * is why: the socket there is the nRF52840's and the host is the nRF9160 on
+ * the other end of the interconnect UART. The socket has no HCI stream on it
+ * and is where the log goes instead.
+ *
+ * A board that says nothing gets 0, and a UART host on it brings no USB up.
+ * That is the right way round: where the socket belongs to another part,
+ * enabling the peripheral would put a device on a bus that is not this one's
+ * to enumerate on, and the cost of the default being wrong the other way is
+ * only a log nobody reads.
+ */
+#ifndef HCI_USB_SOCKET
+#define HCI_USB_SOCKET		0
 #endif
 
 //=============================================================================

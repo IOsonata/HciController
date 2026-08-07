@@ -33,8 +33,12 @@ CXXFLAGS ?= -std=c++14 -O0 -g3 -Wall -Wextra -Werror -Wshadow -Wundef
 # nrfxlib checkout that may also be on the path, and it is left out of the
 # dispatch test, which wants the real headers.
 MOCK_INCLUDES := -I$(STUBS)/sdc -I$(STUBS) -I$(ROOT)/include
+# CFG_TUSB_MCU is what the firmware build passes and what tusb_config.h refuses
+# to be included without. The stub tusb.h includes the real config so a test
+# sees the real function count rather than a copy of it that can drift.
 MOCK_DEFINES := -DHCI_NRF52840_HFCLK_WAIT_LOOPS=1000 \
-                -DHCI_NRF52840_USBREG_WAIT_LOOPS=1000
+                -DHCI_NRF52840_USBREG_WAIT_LOOPS=1000 \
+                -DCFG_TUSB_MCU=OPT_MCU_NRF5X
 
 # name : test source : firmware sources under test
 TESTS := hci_h4 \
@@ -76,7 +80,8 @@ TARGETS := $(addprefix $(BUILD_DIR)/,$(addsuffix _test,$(TESTS)))
 COMPILE_SRC := $(filter-out $(SRC)/hci_sdc_nrfxlib.cpp,$(wildcard $(SRC)/hci_*.cpp))
 
 OBJECTS := $(patsubst $(SRC)/%.cpp,$(BUILD_DIR)/trace/%.o,$(COMPILE_SRC)) \
-           $(BUILD_DIR)/notrace/hci_app.o
+           $(BUILD_DIR)/notrace/hci_app.o \
+           $(BUILD_DIR)/logport/hci_app.o
 
 # The dispatch test compiles the real command table against the real
 # SoftDevice Controller headers, with only the SDC entry points stubbed. It is
@@ -130,6 +135,16 @@ $(BUILD_DIR)/trace/%.o: $(SRC)/%.cpp | check-root
 $(BUILD_DIR)/notrace/%.o: $(SRC)/%.cpp | check-root
 	@mkdir -p $(dir $@)
 	$(CXX) $(MOCK_INCLUDES) $(MOCK_DEFINES) -DHCI_TRACE=0 $(CXXFLAGS) -c $< -o $@
+
+# The same file again with the board saying the USB socket is its own, which
+# is the only way the log port path is compiled by anything. The stub board.h
+# does not say so, and the boards that do are built by arm-none-eabi and by
+# nothing here, so without this the branch the Thingy:91 runs is checked by no
+# host build at all.
+$(BUILD_DIR)/logport/%.o: $(SRC)/%.cpp | check-root
+	@mkdir -p $(dir $@)
+	$(CXX) $(MOCK_INCLUDES) $(MOCK_DEFINES) -DHCI_TRACE=1 -DHCI_USB_SOCKET=1 \
+	  $(CXXFLAGS) -c $< -o $@
 
 ifneq ($(strip $(SDC_INCLUDE)),)
 $(SDC_TARGET): $(SDC_SOURCES) | check-root

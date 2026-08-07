@@ -20,6 +20,7 @@
 #include "hci_sdc_resources.h"
 #include "hci_target.h"
 #include "hci_sdc_nrfxlib.h"
+#include "hci_syslog.h"
 #include "hci_taktos.h"
 #include "hci_tinyusb.h"
 #include "usb/usbd_cdc_intrf.h"
@@ -31,6 +32,13 @@ extern "C" {
 #define HCI_APP_PACKET_SIZE         1024U
 #define HCI_APP_COMMAND_EVENT_SIZE  260U
 #define HCI_APP_CDC_INTERFACE       0U
+
+/*
+ * The second CDC function, where the log goes. Present whichever port the HCI
+ * stream is on: with HCI over UART the first function is simply unused and
+ * this one still reaches a terminal.
+ */
+#define HCI_APP_LOG_INTERFACE       1U
 #define HCI_APP_FIFO_DATA_SIZE      4096U
 #define HCI_APP_FIFO_MEM_SIZE       CFIFO_MEMSIZE(HCI_APP_FIFO_DATA_SIZE)
 
@@ -46,12 +54,30 @@ typedef struct {
     /* Which layers the vendor specific counter readout reports. */
     HciCounters_t Counters;
 
+    /*
+     * The log, and where it goes. Filled by trace and by anything else worth
+     * saying, drained on the second CDC function whenever the device stack is
+     * running. Not the HCI stream and never mixed with it.
+     */
+    HciSyslog_t Log;
+
     UARTDev_t Uart;
     UsbdCdcDevIntrf_t UsbIntrf;
     HciTinyUsb_t Usb;
     DevIntrf_t *pHostIntrf;
     HciAppHost_t HostType;
     bool HostOpen;
+
+    /*
+     * The USB device stack is up and worth pumping. Always so when the HCI
+     * stream is on USB. Also so when the HCI stream is on the UART and the
+     * board says the socket is this part's, which is how a board whose host is
+     * another part on the same PCB still has somewhere to put a log.
+     *
+     * Cleared if the peripheral cannot be brought up, which on a board running
+     * off a battery with no cable in is the ordinary case and not a fault.
+     */
+    bool UsbRunning;
 
     HciTaktOs_t Runtime;
     /*

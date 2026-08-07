@@ -112,6 +112,24 @@ void HciSyslogPrintV(HciSyslog_t *pLog, const char *pFormat, va_list Args);
  */
 void HciSyslogDrain(HciSyslog_t *pLog, HciSyslogWrite_t Write, void *pContext);
 
+/*
+ * Send trace here as well as wherever it already goes.
+ *
+ * hci_trace.h writes through a semihosting call, which needs a debugger
+ * attached and reaches nobody without one. Attaching a log makes the same
+ * lines reach a port instead, which is the only thing observable on a sealed
+ * board. Attach once at start up; before that, and if nothing is attached,
+ * HciSyslogTraceLine does nothing at all.
+ */
+void HciSyslogAttachTrace(HciSyslog_t *pLog);
+
+/*
+ * Called by the trace macro with one already formatted line. Separate from
+ * HciSyslogPrint so hci_trace.h needs no type from this header and the two
+ * can stay independent.
+ */
+void HciSyslogTraceLine(const char *pLine);
+
 /* What is waiting, for a caller that wants to know before draining. */
 size_t HciSyslogPending(const HciSyslog_t *pLog);
 

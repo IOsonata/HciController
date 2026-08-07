@@ -2,6 +2,14 @@
 #define STUB_TUSB_H
 #include <stdint.h>
 #include <stdbool.h>
+
+/*
+ * The real tusb.h reaches tusb_config.h through tusb_option.h, so a file that
+ * includes tusb.h sees CFG_TUD_CDC and the rest. Pulling in the real config
+ * here keeps that true for a test, and keeps the function count one number
+ * rather than one here and another in the firmware.
+ */
+#include "tusb_config.h"
 typedef enum { TUSB_ROLE_INVALID = 0, TUSB_ROLE_DEVICE = 1, TUSB_ROLE_HOST = 2 } tusb_role_t;
 typedef enum { TUSB_SPEED_FULL = 0, TUSB_SPEED_HIGH = 1, TUSB_SPEED_AUTO = 2 } tusb_speed_t;
 

@@ -16,6 +16,9 @@ supports two host connections:
 The HCI controller, the H:4 parser, the SDC binding and the TaktOS execution
 path are identical for both.
 
+A second USB CDC function is a plain text log, present whichever port the HCI
+stream is on. See [The log port](#the-log-port).
+
 ## Host interface selection
 
 Which port the controller talks to its host on is a build option,
@@ -70,6 +73,52 @@ The UART connection is crossed at the product level:
 BLYST840 P0.24 TXD -> nRF9151 RXD
 BLYST840 P0.23 RXD <- nRF9151 TXD
 ```
+
+## The log port
+
+The device presents two USB CDC functions. The first is the HCI byte stream.
+The second is a plain text log, and it exists because up to now the only way to
+see what the firmware was doing was semihosting, which needs a debugger
+attached and reaches nobody without one. On a sealed dongle, on a customer's
+board, or on somebody else's product, that meant a controller that could not be
+observed at all.
+
+Open the second port with any terminal. Nothing on it is framed and nothing
+parses it.
+
+```text
+CDC 0   HCI H:4 byte stream
+CDC 1   text log
+```
+
+The log is a ring in RAM that the firmware writes into and the runtime thread
+drains. It never blocks and it cannot fail a caller, because the first thing
+anyone logs is a path that is already going wrong and a log that stalls that
+path turns one fault into two. A full ring gives up whole lines from the oldest
+end and says how many octets it lost, so what survives can still be read.
+Everything `HciTrace` writes goes here as well as to semihosting.
+
+The second function is present whichever port the HCI stream is on. That is the
+point of it: on a board whose host is another part on the same PCB, the UART
+belongs to the host and the socket is free.
+
+`nRF52840/src/board.h` says whether the USB socket is wired to the nRF52840,
+with `HCI_USB_SOCKET`. Where it is, a UART host image still brings the device
+stack up so the log has somewhere to go. Where it is not, the board leaves
+`HCI_USB_SOCKET` at 0 and no USB comes up, because enabling the peripheral
+would put a device on a bus that is not this part's to enumerate on.
+
+The Nordic Thingy:91 is the case this was built for. Its nRF52840 answers to
+the nRF9160 over the interconnect UART, no LED on that board reaches this part,
+and the enclosure is sealed, so the USB socket is the only thing about it that
+can be observed.
+
+Bring up for the log runs without the settling loop the USB host path uses. A
+host on the UART can send its first command in the first millisecond, and
+waiting a hundred of them for a terminal that may never be plugged in would
+lose it. With no cable there is no VBUS, the peripheral does not come up at
+all, and a cable plugged in afterwards does not change that until the next
+reset.
 
 ## The dongle
 

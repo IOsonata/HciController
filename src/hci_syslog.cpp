@@ -86,6 +86,33 @@ static void HciSyslogPut(HciSyslog_t *pLog, const char *pData, size_t Len)
     }
 }
 
+/*
+ * The log trace goes to, or nothing. A single pointer rather than an argument
+ * on every call, because trace is written from files that have no reason to
+ * know a log exists and every reason not to take one as a parameter.
+ */
+static HciSyslog_t *s_pTraceLog;
+
+void HciSyslogAttachTrace(HciSyslog_t *pLog)
+{
+    s_pTraceLog = pLog;
+}
+
+extern "C" void HciSyslogTraceLine(const char *pLine)
+{
+    if (s_pTraceLog == NULL || pLine == NULL)
+    {
+        return;
+    }
+
+    /*
+     * Already formatted, so it goes in as text rather than through the
+     * formatter again. A line arriving with a percent sign in it would
+     * otherwise be read as a format and take arguments that are not there.
+     */
+    HciSyslogPrint(s_pTraceLog, "%s", pLine);
+}
+
 void HciSyslogInit(HciSyslog_t *pLog)
 {
     if (pLog == NULL)
