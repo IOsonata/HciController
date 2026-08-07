@@ -381,11 +381,24 @@ The pool is that total plus a 512 octet margin, because sdk-nrfxlib says the
 memory macros may move between minor releases and the number that decides
 whether the controller starts is the one `sdc_cfg_set` answers at run time.
 
-Isochronous channels are the largest single item, 17084 of the total, and the
-part places one limit on them: nRF52840 has no hardware for isochronous
-encryption. Connected and broadcast streams, the scheduling and the data path
-are all there; a host that asks for an encrypted broadcast gets the
-controller's own refusal rather than a missing opcode. The receive SDU size is
+Isochronous channels are the largest single item, 17084 of the total.
+Connected and broadcast streams, the scheduling and the data path are all
+supported on this part.
+
+Isochronous link layer encryption is a separate question, and one this part
+answers differently from its siblings. sdk-nrfxlib `README.rst` says nRF52820
+and nRF52833 are the nRF52 Series devices that encrypt and decrypt
+isochronous packets, which leaves nRF52840 out. The difference is one
+register: CCM authenticates the PDU header octet, and which bits of it are
+authenticated differs between an ACL data PDU and an isochronous one.
+nRF52833 and nRF52820 have `CCM.HEADERMASK`, their reference manuals call it
+the header (S0) mask, and nRF52840 does not. It is worth being clear that
+this is not the part being short of ciphers, since nRF52840 is the one of the
+three with a CryptoCell. It is the CCM accelerator in the radio datapath
+being one register short of the isochronous header layout. What this firmware
+answers to an encrypted request has not been measured on hardware.
+
+The receive SDU size is
 what the packet buffer above the controller is sized against, not the 4095
 octet ceiling the specification allows, because `sdc_hci_get` ties its
 requirement to the configured value. 251 plus the 12 octet isochronous header

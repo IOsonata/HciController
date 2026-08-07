@@ -598,9 +598,12 @@ _LE_CONN = [
 # looked the handle up, which is the whole of what can be tested from one
 # board.
 #
-# nRF52840 has no isochronous encryption, so every broadcast row below asks
-# for an unencrypted one. An encrypted request would be refused by the part
-# rather than by the parameter block, which tests nothing about the block.
+# Every broadcast row below asks for an unencrypted group. Not because the
+# rows are about encryption, but because they are not: an encrypted request
+# on this part would be answered by whatever the controller does about
+# nRF52840 not being one of the nRF52 devices sdk-nrfxlib lists as
+# encrypting isochronous packets, and that answer says nothing about whether
+# the parameter block was parsed, which is what these rows measure.
 # ---------------------------------------------------------------------------
 
 # The group and the stream the CIG rows build. Removing the group is what

@@ -1512,11 +1512,23 @@ HCI_SDC_CMD_VP(HciSdcCmdLeExtCreateConn, sdc_hci_cmd_le_ext_create_conn,
 /*
  * Isochronous channels, connected and broadcast.
  *
- * nRF52840 has no hardware for isochronous encryption, so what these reach is
- * unencrypted CIS and BIS. Every command below is real, the scheduling is
- * real and the data path is real; the cipher is what the part does not have.
- * A host that asks for an encrypted broadcast gets the controller's own
- * refusal rather than a missing opcode, which is the more useful answer.
+ * Every command below is dispatched on this part. Isochronous transport and
+ * isochronous link layer encryption are separate questions, and the second
+ * one has a part specific answer: sdk-nrfxlib README.rst says nRF52820 and
+ * nRF52833 are the nRF52 Series devices that encrypt and decrypt
+ * isochronous packets, which leaves nRF52840 out.
+ *
+ * The reason is one register. CCM authenticates the PDU header octet, and
+ * which bits of it are authenticated differs between an ACL data PDU and an
+ * isochronous one. nRF52833 and nRF52820 have CCM.HEADERMASK, described in
+ * their reference manuals as the header (S0) mask, and nRF52840 does not:
+ * its CCM applies the fixed ACL mask. This is not a shortage of ciphers on
+ * the part, which has a CryptoCell the other two lack. It is the radio CCM
+ * accelerator being one register short of the isochronous header layout.
+ *
+ * So the commands, the scheduling and the data path are all here, and what
+ * the controller answers to an encrypted request has not been measured on
+ * this part. The test table asks for unencrypted groups.
  *
  * The four test commands are the ones worth having on an instrument. They
  * measure an isochronous link with no codec anywhere, which is exactly what
