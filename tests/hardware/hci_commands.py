@@ -38,11 +38,13 @@ Fields
                 this parameter block, so a probe run can tell a controller
                 behaving properly from one that is not
     note        why the payload is what it is, where that is not obvious
-    retry_after an (opcode, payload) pair to send and retry once with, when
-                this row is refused unexpectedly. For a refusal whose error
-                code names a piece of missing state, this is what puts that
-                state back, so the run reports whether the diagnosis holds
-                rather than ending at the error code
+    retry_after a list of (opcode, payload, why) candidates. When the row is
+                refused for a reason it did not predict, each is applied in
+                turn and the row sent again, and the run reports which one
+                made it work. One run separates several explanations, rather
+                than one run per guess. State accumulates on purpose: a
+                candidate that only works with an earlier one in place is an
+                answer too, and the report names all of them
 """
 
 import struct
@@ -106,6 +108,20 @@ STATUS_UNKNOWN_ADV_ID = 0x42
 
 def _conn(ctx, tail=b""):
     return struct.pack("<H", ctx.handle) + tail
+
+
+def _LEGACY_ADV_PARAMS(ctx):
+    """
+    Fifteen octets, not sixteen: there is no trailing field after the filter
+    policy. Type 3 is non connectable undirected, so enabling it later cannot
+    let anything in.
+
+    Named rather than inline because LE Set Advertising Enable sends it again
+    as one of its retry candidates, and the retry has to be the same block
+    the row was refused after rather than a second copy of it.
+    """
+    return struct.pack("<HHBBB6sBB", 0x00A0, 0x00F0, 0x03,
+                       ctx.addr_type, 0x00, b"\x00" * 6, 0x07, 0x00)
 
 
 class Command(object):
@@ -221,9 +237,7 @@ _LE_BASIC = [
             bytes.fromhex("0102030405c0"),
             note="the top two bits set makes it a static random address"),
     Command(0x2006, "LE Set Advertising Parameters", COMPLETE,
-            lambda ctx: struct.pack("<HHBBB6sBB", 0x00A0, 0x00F0, 0x03,
-                                    ctx.addr_type, 0x00, b"\x00" * 6,
-                                    0x07, 0x00),
+            _LEGACY_ADV_PARAMS,
             note="fifteen octets, not sixteen: there is no trailing field "
                  "after the filter policy. Type 3 is non connectable "
                  "undirected, so enabling it later cannot let anything in",
@@ -236,24 +250,40 @@ _LE_BASIC = [
             phase=PHASE_LEGACY),
     Command(0x200A, "LE Set Advertising Enable", COMPLETE, b"\x01",
             undo=(0x200A, b"\x00"),
-            retry_after=(0x2005, lambda ctx: ctx.identity),
+            retry_after=[
+                (0x202D, b"\x00", "address resolution off"),
+                (0x2065, lambda ctx: bytes([PROBE_CIG_TEST_ID]),
+                 "the test CIG removed"),
+                (0x2006, _LEGACY_ADV_PARAMS, "the parameters sent again"),
+                (0x2005, lambda ctx: ctx.identity,
+                 "the random address set again"),
+            ],
             note="turned back off by undo, so the probe does not walk away "
                  "with the radio transmitting.\n"
                  "\n"
-                 "This row is refused with Invalid HCI Command Parameters on "
-                 "a board whose identity is a static random address, "
-                 "repeatably. The header gives one condition for that error "
-                 "with Own_Address_Type set to random, which is that the "
-                 "random address was never initialised. It was, twice, in "
-                 "the preamble and again at LE Set Random Address, so "
-                 "something between there and here takes it away. The "
-                 "restart detector stays quiet, so the firmware is not "
-                 "restarting.\n"
+                 "This row is refused with Invalid HCI Command Parameters "
+                 "on a board whose identity is a static random address, "
+                 "repeatably, with and without consent.\n"
                  "\n"
-                 "retry_after sets the address again and sends this once "
-                 "more. If that works the diagnosis holds and what remains "
-                 "is which row clears it; if it does not, the error is "
-                 "something the header does not list",
+                 "The header gives four conditions for that error and all "
+                 "four are about the address. The one that fits, "
+                 "Own_Address_Type random and the random address never "
+                 "initialised, has been ruled out twice over: sending "
+                 "LE Set Random Address again changes nothing, and "
+                 "LE Set Scan Enable two rows below succeeds with the same "
+                 "Own_Address_Type, which the header says needs that same "
+                 "address. So the address is there and the error is not the "
+                 "one the header names.\n"
+                 "\n"
+                 "Running without consent still fails, so the direct test "
+                 "mode rows, VS Zephyr Write BD_ADDR and the broadcast rows "
+                 "are all out. What is left in front of it is the privacy "
+                 "group, which leaves address resolution enabled over an "
+                 "empty resolving list, and the isochronous group, which "
+                 "builds two connected groups and removes them. The "
+                 "candidates below are those, then the parameters again in "
+                 "case something invalidated them after they were accepted, "
+                 "then the address once more as a control",
             phase=PHASE_LEGACY),
     Command(0x200B, "LE Set Scan Parameters", COMPLETE,
             lambda ctx: struct.pack("<BHHBB", 0x00, 0x0060, 0x0030,

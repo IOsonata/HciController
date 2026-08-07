@@ -2005,34 +2005,43 @@ def cmd_probe(hci, args):
         report(command, "  ", text)
         if args.verbose and command.note:
             print("     what the row assumed: %s" % command.note)
-        if command.retry_after is None:
+        if not command.retry_after:
             return
 
-        # The row names the state its refusal points at. Put that back and
-        # send it once more, so the run says whether the diagnosis holds
-        # instead of leaving it to be argued about between runs.
-        opcode, payload = command.retry_after
-        payload = payload(ctx) if callable(payload) else payload
-        try:
-            fix, _ = hci.command(opcode, payload, timeout=1.0,
-                                 allow_fail=True)
-            if fix != 0:
-                print("     could not retry, 0x%04X was itself refused 0x%02X"
-                      % (opcode, fix))
+        # The row names the state its refusal points at, as one candidate or
+        # several. Each is applied in turn and the row sent again, so one run
+        # separates several explanations instead of one run testing one guess
+        # and the next one testing the next.
+        #
+        # State accumulates deliberately. A candidate that only works with an
+        # earlier one already applied is a real answer too, and the report
+        # says which ones were in place when it started working.
+        applied = []
+        for opcode, payload, why in command.retry_after:
+            payload = payload(ctx) if callable(payload) else payload
+            try:
+                fix, _ = hci.command(opcode, payload, timeout=1.0,
+                                     allow_fail=True)
+                if fix != 0:
+                    print("     0x%04X (%s) was itself refused 0x%02X"
+                          % (opcode, why, fix))
+                    continue
+                applied.append(why)
+                again, _ = hci.command(command.opcode, command.build(ctx),
+                                       timeout=3.0, allow_fail=True)
+            except (HciError, HciGone):
+                print("     the retry did not complete")
                 return
-            again, _ = hci.command(command.opcode, command.build(ctx),
-                                   timeout=3.0, allow_fail=True)
-        except (HciError, HciGone):
-            print("     the retry did not complete")
-            return
-        if again == 0:
-            print("     sending 0x%04X first makes this work, so that state"
-                  % opcode)
-            print("     was missing and something above took it away")
-        else:
-            print("     sending 0x%04X first changes nothing, still 0x%02X,"
-                  % (opcode, again))
-            print("     so that state is not what the refusal was about")
+            if again == 0:
+                print("     it works after: %s" % ", ".join(applied))
+                print("     so that is what the refusal was about")
+                # Put the row back where the rest of the run expects it.
+                hci.command(command.opcode, b"\x00", timeout=1.0,
+                            allow_fail=True)
+                return
+        if applied:
+            print("     still 0x%02X after: %s" % (again, ", ".join(applied)))
+            print("     so none of those is what the refusal was about")
 
     def send(command):
         available, reason = probe_available(command, args, live_handle, ctx)
