@@ -56,6 +56,7 @@ H4_EVENT = 0x04
 EVT_DISCONNECTION_COMPLETE = 0x05
 EVT_COMMAND_COMPLETE = 0x0E
 EVT_COMMAND_STATUS = 0x0F
+EVT_ENCRYPTION_CHANGE = 0x08
 EVT_NUM_COMPLETED_PACKETS = 0x13
 EVT_LE_META = 0x3E
 
@@ -148,6 +149,7 @@ POOL_NAMES = ["SDC pool required", "SDC pool reserved"]
 
 CID_ATT = 0x0004
 CID_SIGNALING = 0x0005
+CID_SMP = 0x0006
 
 ATT_ERROR_RSP = 0x01
 ATT_EXCHANGE_MTU_REQ = 0x02
@@ -264,6 +266,9 @@ class Hci:
         self.pending = []
         # Set by on_event when a central asks for the long term key.
         self.ltk_request = None
+        # (status, enabled) from Encryption Change, which is the controller
+        # saying the pairing above it reached the link layer.
+        self.encryption = None
         self.acl_credits = 0
         self.acl_advertised = 0
         self.acl_completed = 0
@@ -355,6 +360,9 @@ class Hci:
             # request loses the connection and blames whatever command was in
             # flight when it went. Recorded so the caller can answer it.
             self.ltk_request = struct.unpack("<H", body[1:3])[0]
+
+        if code == EVT_ENCRYPTION_CHANGE and len(body) >= 4:
+            self.encryption = (body[0], body[3])
 
         if code == EVT_NUM_COMPLETED_PACKETS and len(body) >= 1:
             count = body[0]
@@ -525,6 +533,166 @@ class Attribute:
         self.uuid = uuid          # bytes, 2 or 16, little endian
         self.value = value
         self.group_end = group_end
+
+
+SMP_PAIRING_REQUEST = 0x01
+SMP_PAIRING_RESPONSE = 0x02
+SMP_PAIRING_CONFIRM = 0x03
+SMP_PAIRING_RANDOM = 0x04
+SMP_PAIRING_FAILED = 0x05
+
+SMP_ERR_CONFIRM_FAILED = 0x04
+
+SMP_IO_NO_INPUT_NO_OUTPUT = 0x03
+SMP_MAX_KEY_SIZE = 16
+
+
+def xor16(a, b):
+    return bytes(x ^ y for x, y in zip(a, b))
+
+
+class SmpPeripheral:
+    """
+    Enough of the Security Manager to let a phone pair, Just Works, legacy.
+
+    Tapping Bond sends a Pairing Request on L2CAP channel 0x0006. A host that
+    answers only ATT drops it, pairing never starts, the central never starts
+    encryption, and the controller never raises LE Long Term Key Request. So
+    the two commands that answer that request could only ever be checked for
+    being routed, and link layer encryption was never exercised at all.
+
+    Just Works and legacy on purpose. The temporary key is sixteen zeros,
+    which is what Just Works means, and answering with no Secure Connections
+    bit keeps the pairing legacy whatever the phone offered. Nothing is
+    bonded and no keys are distributed: the point is to reach encryption,
+    not to be a security manager anyone should copy.
+
+    AES comes from the controller. LE Encrypt is an AES-128 block on the
+    other side of the transport, which is exactly what c1 and s1 need, so
+    the crypto here is the firmware's own and this file has none. That also
+    means the command gets used for the job it exists for rather than
+    checked with a zero key and a zero block.
+
+    The layout of p1, p2 and the s1 input follows Zephyr's smp.c, because
+    the specification writes them most significant octet first and every
+    field here is on the wire least significant octet first, and getting
+    that backwards produces a confirm value that is wrong in a way nothing
+    reports except a failed pairing.
+    """
+
+    def __init__(self, hci, conn, local_addr, local_type, peer_addr,
+                 peer_type):
+        self.hci = hci
+        self.conn = conn
+        # Initiator is the central, which is the peer. Responder is this
+        # board, which advertised.
+        self.ia = peer_addr
+        self.iat = peer_type
+        self.ra = local_addr
+        self.rat = local_type
+        self.tk = bytes(16)
+        self.preq = None
+        self.pres = None
+        self.own_random = None
+        self.peer_random = None
+        self.peer_confirm = None
+        self.stk = None
+        self.failed = None
+        self.started = False
+
+    def send(self, payload):
+        self.hci.send_acl(self.conn, CID_SMP, payload)
+
+    def encrypt(self, key, plaintext):
+        """One AES-128 block, done by the controller.
+
+        LE Encrypt takes its key and block most significant octet first, and
+        everything here is least significant octet first, so both go in
+        reversed and the answer comes back reversed.
+        """
+        _, data = self.hci.command(0x2017, key[::-1] + plaintext[::-1])
+        return data[:16][::-1]
+
+    def random16(self):
+        """Sixteen random octets, from the controller's LE Rand."""
+        out = b""
+        while len(out) < 16:
+            _, data = self.hci.command(0x2018)
+            out += data[:8]
+        return out[:16]
+
+    def c1(self, key, rand):
+        """The confirm value. Vol 3 Part H 2.2.3."""
+        p1 = bytes([self.iat, self.rat]) + self.preq + self.pres
+        first = self.encrypt(key, xor16(rand, p1))
+        p2 = self.ra + self.ia + bytes(4)
+        return self.encrypt(key, xor16(first, p2))
+
+    def s1(self, key, own_rand, peer_rand):
+        """The short term key. Vol 3 Part H 2.2.4.
+
+        The specification writes s1(k, r1, r2) = e(k, r1' || r2') with r1'
+        the least significant half of r1 and || putting r1' in the most
+        significant half of the result. Every value here is on the wire the
+        other way round, so the most significant half is the tail, and the
+        octets go in as r2 then r1. Written the way it reads, the answer is
+        the right length and wrong, and the only symptom is a pairing that
+        never completes. tests/smp_vectors.py runs the worked example from
+        Vol 3 Part H D.3 against this, which is how the order was settled.
+
+        For a peripheral the specification calls it s1(TK, Srand, Mrand), so
+        r1 is this board's random and r2 is the peer's.
+        """
+        return self.encrypt(key, peer_rand[:8] + own_rand[:8])
+
+    def feed(self, payload, cid):
+        if cid != CID_SMP or not payload:
+            return
+
+        code = payload[0]
+
+        if code == SMP_PAIRING_REQUEST and len(payload) >= 7:
+            self.started = True
+            self.preq = payload[:7]
+            # No output and no input, so Just Works. No out of band data,
+            # no bonding, no man in the middle protection, no Secure
+            # Connections, and nothing distributed either way.
+            self.pres = bytes([SMP_PAIRING_RESPONSE,
+                               SMP_IO_NO_INPUT_NO_OUTPUT, 0x00, 0x00,
+                               SMP_MAX_KEY_SIZE, 0x00, 0x00])
+            print("   SMP pairing request, answering Just Works")
+            self.send(self.pres)
+            return
+
+        if code == SMP_PAIRING_CONFIRM and len(payload) >= 17:
+            if self.preq is None:
+                return
+            self.peer_confirm = payload[1:17]
+            self.own_random = self.random16()
+            self.send(bytes([SMP_PAIRING_CONFIRM])
+                      + self.c1(self.tk, self.own_random))
+            return
+
+        if code == SMP_PAIRING_RANDOM and len(payload) >= 17:
+            if self.own_random is None:
+                return
+            self.peer_random = payload[1:17]
+            if self.c1(self.tk, self.peer_random) != self.peer_confirm:
+                # The peer's confirm does not match the random it just sent,
+                # so one of the two is not who it said it was, or this
+                # implementation has the octet order wrong.
+                self.failed = "the confirm value did not match"
+                print("   SMP confirm mismatch, refusing")
+                self.send(bytes([SMP_PAIRING_FAILED, SMP_ERR_CONFIRM_FAILED]))
+                return
+            self.stk = self.s1(self.tk, self.own_random, self.peer_random)
+            print("   SMP confirm matched, short term key derived")
+            self.send(bytes([SMP_PAIRING_RANDOM]) + self.own_random)
+            return
+
+        if code == SMP_PAIRING_FAILED and len(payload) >= 2:
+            self.failed = "the peer sent Pairing Failed 0x%02X" % payload[1]
+            print("   SMP %s" % self.failed)
 
 
 class AttServer:
@@ -1437,6 +1605,11 @@ class ProbeContext(object):
     # 0 central, 1 peripheral. A link the probe got by advertising makes it
     # the peripheral, which puts the central only commands out of reach.
     role = None
+    # The peer's address as the connection reported it. The pairing confirm
+    # is computed over both addresses, so a guess here fails the pairing and
+    # nothing says why.
+    peer_addr = None
+    peer_type = None
 
     def __init__(self, handle=None, addr_type=0x01):
         self.handle = handle if handle is not None else \
@@ -1532,6 +1705,8 @@ def probe_wait_for_peer(hci, ctx, args):
             conn_handle = None
             continue
         ctx.role = role
+        ctx.peer_addr = peer
+        ctx.peer_type = body[5]
         print("Connected to %s, handle 0x%04X, this board is the %s."
               % (addr_str(peer), conn_handle,
                  "peripheral" if role == 1 else "central"))
@@ -1545,7 +1720,7 @@ def probe_wait_for_peer(hci, ctx, args):
     return conn_handle
 
 
-def probe_service_att(hci, att, seconds):
+def probe_service(hci, handlers, seconds):
     """
     Answer whatever the peer asks for, for a while.
 
@@ -1564,15 +1739,15 @@ def probe_service_att(hci, att, seconds):
         queued = hci.pending
         hci.pending = []
         for packet in queued:
-            probe_feed(att, packet)
+            probe_feed(handlers, packet)
 
         packet = hci.read_packet(0.2)
         if packet is not None:
-            probe_feed(att, packet)
+            probe_feed(handlers, packet)
 
 
-def probe_feed(att, packet):
-    """Hand one ACL packet to the attribute server, ignore anything else."""
+def probe_feed(handlers, packet):
+    """Hand one ACL packet to whichever handler owns its channel."""
     kind, _, body = packet
     if kind != H4_ACL or len(body) < 8:
         return
@@ -1581,7 +1756,9 @@ def probe_feed(att, packet):
     if len(l2cap) < 4:
         return
     plen, cid = struct.unpack("<HH", l2cap[0:4])
-    att.feed(l2cap[4:4 + plen], cid)
+    payload = l2cap[4:4 + plen]
+    for handler in handlers:
+        handler.feed(payload, cid)
 
 
 def probe_answer_ltk(hci, answered):
@@ -1611,7 +1788,7 @@ def probe_answer_ltk(hci, answered):
         pass
 
 
-def probe_wait_for_ltk(hci, att, args):
+def probe_wait_for_ltk(hci, handlers, smp, args):
     """
     Give a pairing peer time to ask for the long term key, and say so.
 
@@ -1632,28 +1809,68 @@ def probe_wait_for_ltk(hci, att, args):
     # The prompt has to come before the wait. Telling someone to tap pair
     # after the window has closed is not a prompt, it is a postmortem.
     print()
-    print("Tap Bond or Pair on the phone now if you want the two Long Term")
-    print("Key Request rows to mean anything. In nRF Connect it is in the")
-    print("menu next to Disconnect. Waiting %d seconds." % args.wait_ltk)
+    print("Tap Bond or Pair on the phone now. It is answered Just Works,")
+    print("with no bonding and nothing kept, and the link ends up encrypted")
+    print("with a key derived here. In nRF Connect it is in the menu next to")
+    print("Disconnect. Waiting %d seconds." % args.wait_ltk)
 
     deadline = time.time() + args.wait_ltk
     while time.time() < deadline and hci.ltk_request is None:
         queued = hci.pending
         hci.pending = []
         for packet in queued:
-            probe_feed(att, packet)
+            probe_feed(handlers, packet)
         packet = hci.read_packet(0.2)
         if packet is not None:
-            probe_feed(att, packet)
+            probe_feed(handlers, packet)
 
     if hci.ltk_request is None:
-        print("Nothing asked. The two reply rows below check that the opcode")
-        print("is routed and no more, which is worth having but is not the")
-        print("same as answering a request.")
+        if smp.failed:
+            print("Pairing did not finish: %s." % smp.failed)
+        elif smp.started:
+            print("Pairing started but no key request came.")
+        else:
+            print("Nothing asked. The two reply rows below check that the")
+            print("opcode is routed and no more, which is worth having but")
+            print("is not the same as answering a request.")
+        return
+
+    print("The peer asked for the long term key on handle 0x%04X."
+          % hci.ltk_request)
+
+    if smp.stk is None:
+        print("No short term key here, so the request is refused. The link")
+        print("survives; encryption does not start.")
+        hci.command(0x201B, struct.pack("<H", hci.ltk_request),
+                    timeout=1.0, allow_fail=True)
+        return
+
+    # This is the command doing its job rather than being checked for its
+    # shape: a real key, derived from a real pairing, answering a real
+    # request.
+    status, _ = hci.command(0x201A,
+                            struct.pack("<H", hci.ltk_request) + smp.stk,
+                            timeout=2.0, allow_fail=True)
+    if status != 0:
+        print("The key reply was refused, 0x%02X %s."
+              % (status, ERROR_NAMES.get(status, "")))
+        return
+
+    # Encryption Change is the controller saying the link layer took it.
+    deadline = time.time() + 3.0
+    while time.time() < deadline and hci.encryption is None:
+        packet = hci.read_packet(0.2)
+        if packet is not None:
+            probe_feed(handlers, packet)
+
+    if hci.encryption is None:
+        print("The key was accepted but no Encryption Change arrived.")
+    elif hci.encryption[0] == 0 and hci.encryption[1]:
+        print("Encryption is on. The link is encrypted with a key this run")
+        print("derived, which is the first time that path has been used.")
     else:
-        print("The peer asked for the long term key on handle 0x%04X."
-              % hci.ltk_request)
-        print("The reply rows below answer a real request.")
+        print("Encryption Change said status 0x%02X, enabled %d."
+              % hci.encryption)
 
 
 def cmd_probe(hci, args):
@@ -1866,7 +2083,10 @@ def cmd_probe(hci, args):
             # long enough to be worth talking to.
             answered = []
             att = AttServer(hci, handle, "HCI-PROBE")
-            probe_service_att(hci, att, args.discover_secs)
+            smp = SmpPeripheral(hci, handle, identity, addr_type,
+                                ctx.peer_addr, ctx.peer_type)
+            handlers = [att, smp]
+            probe_service(hci, handlers, args.discover_secs)
             print("Peer asked %d question(s), answered %d."
                   % (att.requests, att.responses))
 
@@ -1875,7 +2095,7 @@ def cmd_probe(hci, args):
             # the encryption timeout. Waiting for it also turns the two Long
             # Term Key Request rows from a shape check into a real exchange.
             if args.wait_ltk:
-                probe_wait_for_ltk(hci, att, args)
+                probe_wait_for_ltk(hci, handlers, smp, args)
 
             # Disconnect ends the link every other row here needs, so it
             # goes last whatever order the table is in.
@@ -1904,7 +2124,7 @@ def cmd_probe(hci, args):
                 queued = hci.pending
                 hci.pending = []
                 for packet in queued:
-                    probe_feed(att, packet)
+                    probe_feed(handlers, packet)
                 probe_answer_ltk(hci, answered)
             unwind()
 

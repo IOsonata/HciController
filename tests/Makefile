@@ -100,7 +100,8 @@ RESOURCES_TARGET := $(BUILD_DIR)/hci_sdc_resources_test
 TARGETS += $(RESOURCES_TARGET)
 endif
 
-.PHONY: all run clean check-root check-project check-commands print-config
+.PHONY: all run clean check-root check-project check-commands check-smp \
+        print-config
 
 PYTHON ?= python3
 
@@ -159,7 +160,19 @@ check-commands:
 	@echo "[TEST] command_coverage.py"
 	@NRFXLIB_DIR=$(NRFXLIB_DIR) $(PYTHON) $(THIS_DIR)/command_coverage.py
 
-run: all check-project check-commands
+# The pairing crypto against the specification's worked examples. Every
+# field in c1 and s1 is on the wire least significant octet first and the
+# specification writes them the other way round, so an implementation with
+# the order reversed produces values of the right length that are useless,
+# and the only symptom is a pairing that does not complete on a bench. s1
+# was written the wrong way round and this is what caught it.
+check-smp:
+	@command -v $(PYTHON) >/dev/null 2>&1 || { \
+	  echo "[TEST] smp_vectors.py skipped, no $(PYTHON)"; exit 0; }
+	@echo "[TEST] smp_vectors.py"
+	@$(PYTHON) $(THIS_DIR)/smp_vectors.py
+
+run: all check-project check-commands check-smp
 	@set -e; for t in $(TARGETS); do \
 	  echo "[TEST] $$(basename $$t)"; $$t; done
 	@echo

@@ -11,6 +11,7 @@ tests/
   stubs/                fake target headers, see below
   project_files.py      the Eclipse project against the tree
   command_coverage.py   the Python tooling against the dispatch table
+  smp_vectors.py        the pairing crypto against the specification
   hardware/             Python tools that talk to a board
 ```
 
@@ -270,6 +271,30 @@ never gets a chance to start. The run reports how many questions the peer
 asked and how many were answered.
 
 ### If the peer offers to pair
+
+`probe` implements enough of the Security Manager to answer it: legacy
+pairing, Just Works, no bonding, nothing distributed. Tapping Bond sends a
+Pairing Request on L2CAP channel 0x0006, and a host that answers only ATT
+drops it, so pairing never starts, the central never starts encryption, and
+the controller never raises the request. That is why the two Long Term Key
+Request commands could previously only be checked for being routed, and why
+link layer encryption had never been exercised at all.
+
+The AES comes from the controller. `LE Encrypt` is an AES-128 block on the
+other side of the transport, which is what the confirm value c1 and the key
+derivation s1 need, so there is no cipher in the tool and the command gets
+used for the job it exists for rather than checked with a zero key on a zero
+block.
+
+`tests/smp_vectors.py` runs c1 and s1 against the worked examples in Vol 3
+Part H Appendix D, and the cipher against the FIPS 197 example first so a
+fault in one is not read as a fault in the other. It runs in `make -C tests
+run` and it earned its place immediately: s1 was written with its two halves
+the wrong way round. Every field here is on the wire least significant octet
+first and the specification writes them the other way, so the result was the
+right length, the right type and useless, and the only symptom would have
+been a phone that would not pair.
+
 
 Tapping pair rather than just connect makes a difference. A central that
 starts encryption raises LE Long Term Key Request on the peripheral, and
