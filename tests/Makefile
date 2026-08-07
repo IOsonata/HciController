@@ -23,6 +23,7 @@ SRC := $(ROOT)/src
 UNIT := $(THIS_DIR)/unit
 STUBS := $(THIS_DIR)/stubs
 
+CC ?= cc
 CXX ?= c++
 BUILD_DIR ?= $(THIS_DIR)/build
 
@@ -101,7 +102,7 @@ TARGETS += $(RESOURCES_TARGET)
 endif
 
 .PHONY: all run clean check-root check-project check-boards \
-        check-commands check-smp print-config
+        check-usb-desc check-commands check-smp print-config
 
 PYTHON ?= python3
 
@@ -143,6 +144,28 @@ $(RESOURCES_TARGET): $(UNIT)/hci_sdc_resources_test.cpp \
 	  $(UNIT)/hci_sdc_resources_test.cpp -o $@
 endif
 
+# The USB descriptors against the real TinyUSB headers. src/usb_descriptors.c
+# is compiled by the target build and by nothing else, and the thing most
+# likely to be wrong in it, the declared configuration length against the
+# bytes that follow, is not an error until a host refuses to enumerate. The
+# file carries a _Static_assert for exactly that; this is what runs it.
+#
+# Built when a TinyUSB checkout can be found and skipped otherwise, the same
+# way the SDC tests are.
+TINYUSB_DIR ?= $(ROOT)/../external/tinyusb
+TINYUSB_SRC := $(wildcard $(TINYUSB_DIR)/src/tusb.h)
+
+check-usb-desc:
+ifneq ($(strip $(TINYUSB_SRC)),)
+	@echo "[TEST] usb_descriptors.c against TinyUSB"
+	@$(CC) -fsyntax-only -I$(STUBS)/nrfficr -I$(ROOT)/include \
+	  -I$(TINYUSB_DIR)/src -DCFG_TUSB_MCU=OPT_MCU_NRF5X \
+	  -std=c11 -Wall -Wextra -Werror $(SRC)/usb_descriptors.c
+	@echo "[ok] descriptor length matches what it declares"
+else
+	@echo "[TEST] usb_descriptors.c skipped, set TINYUSB_DIR to a checkout"
+endif
+
 # The Eclipse project names every file individually, so one added to src/ and
 # not added there is not compiled, and the target build fails at link time
 # naming a symbol rather than a file. Nothing a C++ test can see.
@@ -181,7 +204,7 @@ check-boards:
 	@echo "[TEST] board_pins.py"
 	@$(PYTHON) $(THIS_DIR)/board_pins.py $(ROOT)
 
-run: all check-project check-boards check-commands check-smp
+run: all check-project check-boards check-usb-desc check-commands check-smp
 	@set -e; for t in $(TARGETS); do \
 	  echo "[TEST] $$(basename $$t)"; $$t; done
 	@echo
