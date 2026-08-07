@@ -160,11 +160,17 @@ extern "C" {
  * be. Two connected groups of four streams between them, and two broadcast
  * groups with two streams out and two in.
  *
- * nRF52840 cannot encrypt or decrypt isochronous data in hardware, so what
- * this gives is unencrypted CIS and BIS. That is enough to develop against
- * and enough to test another device's isochronous handling, and it is not
- * enough to call the product LE Audio. If LE Audio is the goal the part is
- * wrong rather than this configuration.
+ * These counts decide the pool and nothing else. Whether the streams can be
+ * encrypted is a separate question, answered by the part rather than by any
+ * value here, and the README section on isochronous channels is where that
+ * is written down. In short: sdk-nrfxlib lists nRF52820 and nRF52833 as the
+ * nRF52 devices that encrypt isochronous packets and nRF52840 is not among
+ * them, so raising or lowering these numbers changes what fits and never
+ * changes that.
+ *
+ * Unencrypted broadcast is a real configuration rather than a degraded one,
+ * since a public broadcast is unencrypted by design. Unencrypted connected
+ * streams are the ones with something still to establish on hardware.
  */
 #define HCI_SDC_CIG_COUNT           2U
 #define HCI_SDC_CIS_COUNT           4U

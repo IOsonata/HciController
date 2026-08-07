@@ -140,10 +140,10 @@ int32_t HciSdcResourcesApply(void)
      * which side of a stream someone wants to be, any more than it decides
      * whether a link is central or peripheral.
      *
-     * All four are available in the nRF52 library. Whether the streams they
-     * carry can be encrypted is a separate question with a part specific
-     * answer, and nothing here decides it: see the comment above the
-     * isochronous table in hci_sdc_nrfxlib.cpp.
+     * All four are available in the nRF52 library. Whether the streams can
+     * be encrypted is a separate question with a part specific answer, and
+     * nothing here decides it: see the comment above the isochronous table
+     * in hci_sdc_nrfxlib.cpp.
      */
     sdc_support_cis_central();
     sdc_support_cis_peripheral();

@@ -336,10 +336,10 @@ static HciCmdResult_t HciSdcCmdReadSupportedCommands(void *,
     supported.params.hci_le_set_data_related_address_changes = 1U;
 
     /*
-     * Isochronous channels. Unencrypted on this part, which the bitmap has
-     * no way to say: a bit here means the command is dispatched, and a host
-     * that asks for an encrypted broadcast is refused by the controller when
-     * it asks, not by a missing bit now.
+     * Isochronous channels. A bit here says the command is dispatched and
+     * nothing more. Whether the streams it sets up can be encrypted is a
+     * property of the part, and the bitmap has no way to express that, so a
+     * host learns it from the answer to the command rather than from here.
      */
     supported.params.hci_le_read_buffer_size_v2 = 1U;
     supported.params.hci_le_read_iso_tx_sync = 1U;
@@ -2147,9 +2147,9 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
      * is written out field by field and owes nothing to a struct layout.
      */
     /*
-     * Isochronous channels. Unencrypted only on this part, see the handlers
-     * above. The four test commands need no codec and are what an instrument
-     * uses to measure an isochronous link.
+     * Isochronous channels. The part specific note about encryption is above
+     * the handlers. The four test commands need no codec and are what an
+     * instrument uses to measure an isochronous link.
      */
     HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_READ_BUFFER_SIZE_V2, 0U,
                      HciSdcCmdLeReadBufferSizeV2,

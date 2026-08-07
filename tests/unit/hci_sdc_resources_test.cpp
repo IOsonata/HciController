@@ -122,8 +122,9 @@ int main(void)
           EXPECT_PERIODIC_ADV_RSP);
 
     /*
-     * Isochronous channels. Unencrypted on this part, which costs nothing
-     * here: the pool pays for the streams and the buffers either way.
+     * Isochronous channels. Encryption does not enter into these figures:
+     * the pool pays for the streams and the buffers whether or not the part
+     * can encrypt what goes over them.
      */
     Check("iso connected group", SDC_MEM_PER_CIG(HCI_SDC_CIG_COUNT),
           EXPECT_ISO_CIG);
