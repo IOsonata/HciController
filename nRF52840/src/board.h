@@ -297,6 +297,22 @@
  * RTS, and a host that has flow control on never sees its CTS asserted and so
  * never transmits: the first command times out with nothing on the wire in
  * either direction, and no side can tell why.
+ *
+ * One more thing the host has to do, and it is not about pins. The nRF9160
+ * holds this part in reset and releases it as part of bringing the HCI
+ * transport up: sdk-nrf boards/nordic/thingy91/nrf52840_reset.c drives
+ * nRF9160 P0.10 low, waits ten milliseconds, drains the port and lets go.
+ * Zephyr then sends HCI Reset at once. Ten milliseconds is not enough for
+ * this firmware to come out of reset, bring up TaktOS, the radio and the
+ * port, so those four octets arrive at a part that is not listening yet, and
+ * nothing retries them. The symptom is a Reset that times out after ten
+ * seconds with the link otherwise correct.
+ *
+ * The host side answer is CONFIG_BT_WAIT_NOP=y. Zephyr then holds its command
+ * semaphore at zero until a Command Complete for the No Operation opcode
+ * arrives, which is exactly what HciSdcNrfxlibQueueStartupNop queues here and
+ * what goes out first when the runtime thread starts. See hci_core.c, the
+ * comment above the ncmd_sem initialisation.
  */
 #define UART_TX_PORT            0
 #define UART_TX_PIN             25

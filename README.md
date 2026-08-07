@@ -147,6 +147,26 @@ nothing behind it that speaks HCI and AUTO would come up talking to a host
 that is not there. It also sets `HCI_STATUS_LEDS 0`, since the Thingy:91 LEDs
 are driven from the nRF9160.
 
+The nRF9160 side needs one Kconfig setting beyond the pins:
+
+```text
+CONFIG_BT_WAIT_NOP=y
+```
+
+The nRF9160 holds this part in reset and releases it while bringing the HCI
+transport up. `sdk-nrf`, `boards/nordic/thingy91/nrf52840_reset.c`, drives
+nRF9160 P0.10 low, waits 10 ms, drains the port and lets go, and Zephyr then
+sends HCI Reset at once. Ten milliseconds is not enough for this firmware to
+come out of reset and bring up TaktOS, the radio and the port, so those four
+octets reach a part that is not listening and nothing retries them. The
+symptom is an `hci_core.c` assertion on opcode `0x0c03` timing out after ten
+seconds with the link otherwise correct.
+
+With `CONFIG_BT_WAIT_NOP=y` the host holds its command semaphore at zero
+until a Command Complete for the No Operation opcode arrives. This firmware
+queues exactly that at startup and sends it first, so the host waits for the
+controller rather than racing it.
+
 Other hardware is a port, and it is a small one. A board says four things
 beyond its pins:
 
