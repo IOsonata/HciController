@@ -14,6 +14,7 @@
 #include <stdint.h>
 
 #include "sdc.h"
+#include "sdc_hci.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -153,6 +154,67 @@ extern "C" {
          HCI_SDC_PERIODIC_ADV_RSP_FAILURE_REPORTING) *                   \
      HCI_SDC_PERIODIC_ADV_RSP_COUNT)
 
+/*
+ * Isochronous channels. Four roles, because this is a controller and a
+ * controller does not get to decide which side of a stream someone wants to
+ * be. Two connected groups of four streams between them, and two broadcast
+ * groups with two streams out and two in.
+ *
+ * nRF52840 cannot encrypt or decrypt isochronous data in hardware, so what
+ * this gives is unencrypted CIS and BIS. That is enough to develop against
+ * and enough to test another device's isochronous handling, and it is not
+ * enough to call the product LE Audio. If LE Audio is the goal the part is
+ * wrong rather than this configuration.
+ */
+#define HCI_SDC_CIG_COUNT           2U
+#define HCI_SDC_CIS_COUNT           4U
+#define HCI_SDC_BIG_COUNT           2U
+#define HCI_SDC_BIS_SOURCE_COUNT    2U
+#define HCI_SDC_BIS_SINK_COUNT      2U
+
+/*
+ * The service data unit sizes decide how large a buffer the application has
+ * to hand sdc_hci_get. Vol 4 Part E allows an isochronous packet of 4095
+ * octets, but sdc.h ties the requirement to the configured size rather than
+ * that ceiling, so a modest number here keeps HCI_APP_PACKET_SIZE where it
+ * is. 247 octets covers an LC3 frame at every bit rate the codec defines.
+ */
+#define HCI_SDC_ISO_TX_SDU_SIZE     247U
+#define HCI_SDC_ISO_RX_SDU_SIZE     251U
+#define HCI_SDC_ISO_TX_SDU_COUNT    4U
+#define HCI_SDC_ISO_RX_SDU_COUNT    4U
+
+/* Protocol data units per stream, each side. */
+#define HCI_SDC_ISO_TX_PDU_PER_STREAM 3U
+#define HCI_SDC_ISO_RX_PDU_PER_STREAM 3U
+
+/* Every term the four roles above add to the pool, in one place. */
+#define HCI_SDC_MEM_ISO                                                  \
+    (SDC_MEM_PER_CIG(HCI_SDC_CIG_COUNT) +                                \
+     SDC_MEM_PER_CIS(HCI_SDC_CIS_COUNT) +                                \
+     SDC_MEM_PER_BIG(HCI_SDC_BIG_COUNT) +                                \
+     SDC_MEM_PER_BIS(HCI_SDC_BIS_SOURCE_COUNT +                          \
+                     HCI_SDC_BIS_SINK_COUNT) +                           \
+     SDC_MEM_ISO_RX_PDU_POOL_PER_STREAM_SIZE(                            \
+         HCI_SDC_ISO_RX_PDU_PER_STREAM, HCI_SDC_CIS_COUNT,               \
+         HCI_SDC_BIS_SINK_COUNT) +                                       \
+     SDC_MEM_ISO_RX_SDU_POOL_SIZE(HCI_SDC_ISO_RX_SDU_COUNT,              \
+                                  HCI_SDC_ISO_RX_SDU_SIZE) +             \
+     SDC_MEM_ISO_TX_PDU_POOL_SIZE(HCI_SDC_ISO_TX_PDU_PER_STREAM,         \
+                                  HCI_SDC_CIS_COUNT,                     \
+                                  HCI_SDC_BIS_SOURCE_COUNT) +            \
+     SDC_MEM_ISO_TX_SDU_POOL_SIZE(HCI_SDC_ISO_TX_SDU_COUNT,              \
+                                  HCI_SDC_ISO_TX_SDU_SIZE))
+
+/*
+ * The largest isochronous packet sdc_hci_get can hand back, so the packet
+ * buffer above it can be checked against something true rather than against
+ * the 4095 octet ceiling the specification allows. sdc_hci.h ties the
+ * requirement to rx_sdu_buffer_size, not to that ceiling.
+ */
+#define HCI_SDC_ISO_PACKET_SIZE                                          \
+    (HCI_SDC_ISO_RX_SDU_SIZE + HCI_ISO_DATA_HEADER_SIZE)
+
 #define HCI_SDC_MEM_REQUIRED                                         \
     (SDC_MEM_PER_PERIPHERAL_LINK(HCI_SDC_ACL_PACKET_SIZE,                \
                                  HCI_SDC_ACL_PACKET_SIZE,                \
@@ -184,7 +246,8 @@ extern "C" {
      SDC_MEM_PERIODIC_ADV_LIST(HCI_SDC_PERIODIC_ADV_LIST_SIZE) +         \
      SDC_MEM_SYNC_TRANSFER(HCI_SDC_PERIPHERAL_COUNT +                    \
                            HCI_SDC_CENTRAL_COUNT) +                      \
-     HCI_SDC_MEM_PERIODIC_ADV_RSP)
+     HCI_SDC_MEM_PERIODIC_ADV_RSP +                                      \
+     HCI_SDC_MEM_ISO)
 
 /*
  * sdc.h says the memory requirement defines "may change between minor

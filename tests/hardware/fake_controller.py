@@ -328,7 +328,12 @@ class Controller:
         if hci_commands.NEEDS_SYNC in command.needs:
             # Nothing here ever has a periodic sync, and Unknown Advertising
             # Identifier is what a controller answers to a handle it never
-            # issued.
+            # issued. The reply shape still has to be the one the table
+            # names: LE BIG Create Sync is refused in a Command Status, and
+            # answering it with a Command Complete would be a fake failure
+            # that reads like a firmware one.
+            if command.reply == hci_commands.STATUS:
+                return self.emit(command_status(opcode, 0x42))
             return self.emit(command_complete(opcode, 0x42))
 
         if command.reply == hci_commands.NONE:

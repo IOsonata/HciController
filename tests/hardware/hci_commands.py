@@ -2,7 +2,7 @@
 """
 Every HCI command the firmware dispatches, with a payload that can be sent.
 
-The firmware answers 126 opcodes. Before this file the Python tooling drove
+The firmware answers 150 opcodes. Before this file the Python tooling drove
 29 of them, so everything added after the ACL credit fix had only ever met a
 compiled stub. This is the table that closes that: one entry per opcode, with
 a parameter block that is valid, a note on what answer to expect, and what
@@ -15,7 +15,7 @@ Three tools read it:
     fake_controller.py          answers each one with no board attached
 
 What is deliberately not here: the length of each return block. The C++ test
-tests/unit/hci_sdc_dispatch_test.cpp already checks all 126 against the
+tests/unit/hci_sdc_dispatch_test.cpp already checks all 150 against the
 vendor headers, and a second copy of those numbers in Python would be a
 second thing to keep right. This file answers a different question, which is
 whether the command works on a radio.
@@ -587,6 +587,188 @@ _LE_CONN = [
 ]
 
 # ---------------------------------------------------------------------------
+# Isochronous channels, connected and broadcast.
+#
+# Only two things here can be reached without a second radio: the group
+# configuration commands, which build a CIG out of nothing and take it away
+# again, and the three vendor settings. Everything else wants a stream, and a
+# stream wants a peer, so those rows are sent at a handle no stream will ever
+# have and are checked for their reply shape. A controller that answers
+# Unknown Connection Identifier has parsed the block, found the field and
+# looked the handle up, which is the whole of what can be tested from one
+# board.
+#
+# nRF52840 has no isochronous encryption, so every broadcast row below asks
+# for an unencrypted one. An encrypted request would be refused by the part
+# rather than by the parameter block, which tests nothing about the block.
+# ---------------------------------------------------------------------------
+
+# The group and the stream the CIG rows build. Removing the group is what
+# takes the stream with it.
+PROBE_CIG_ID = 0x00
+PROBE_CIG_TEST_ID = 0x01
+PROBE_CIS_ID = 0x00
+
+# The broadcast group the BIG rows name. Nothing creates one without periodic
+# advertising running, so this is the handle they are refused at.
+PROBE_BIG_HANDLE = 0x00
+
+
+def _u24(value):
+    return struct.pack("<I", value)[:3]
+
+
+_ISO = [
+    Command(0x2060, "LE Read Buffer Size v2", COMPLETE, b"",
+            note="version 1 reports the ACL length and count and says "
+                 "nothing about isochronous packets, so a host cannot flow "
+                 "control a stream without this one"),
+    Command(0xFD19, "VS CIG Reserved Time Set", COMPLETE,
+            struct.pack("<I", 1300), undo=(0xFD19, struct.pack("<I", 1300)),
+            note="1300 us is the default the header states. Sent before any "
+                 "CIG is built, because the header says it applies to groups "
+                 "created after it and is kept across an HCI Reset, so a "
+                 "value left behind here outlives the run"),
+    Command(0xFD1A, "VS CIS Subevent Length Set", COMPLETE,
+            struct.pack("<I", 0), undo=(0xFD1A, struct.pack("<I", 0)),
+            note="zero leaves the length to the controller, which is the "
+                 "default. Also kept across a reset"),
+    Command(0xFD18, "VS BIG Reserved Time Set", COMPLETE,
+            struct.pack("<I", 1600), undo=(0xFD18, struct.pack("<I", 1600)),
+            note="1600 us is the default the header states"),
+    Command(0x2062, "LE Set CIG Parameters", COMPLETE,
+            bytes([PROBE_CIG_ID]) + _u24(10000) + _u24(10000)
+            + bytes([0, 0, 0]) + struct.pack("<HH", 20, 20)
+            + bytes([1])
+            + bytes([PROBE_CIS_ID]) + struct.pack("<HH", 40, 40)
+            + bytes([1, 1, 2, 2]),
+            note="fifteen octets then one nine octet stream. Both SDU "
+                 "intervals are 10 ms in a 24 bit field, worst case clock "
+                 "accuracy 0, sequential packing, unframed, 20 ms of "
+                 "transport latency either way. The stream is 40 octets each "
+                 "way on LE 1M with two retransmissions. Latency below the "
+                 "ISO interval is unschedulable for an unframed group, so it "
+                 "is twice the SDU interval rather than equal to it"),
+    Command(0x2064, "LE Create CIS", STATUS,
+            lambda ctx: bytes([1]) + struct.pack("<HH", UNUSED_HANDLE,
+                                                 ctx.handle),
+            needs=(NEEDS_CONN, NEEDS_CENTRAL),
+            expect=(STATUS_UNKNOWN_CONNECTION,),
+            note="only the central may start a stream, and the stream handle "
+                 "comes back from Set CIG Parameters, which this table does "
+                 "not read. So the ACL handle is real and the stream handle "
+                 "is not: what is tested is that the array is walked and "
+                 "both handles are looked up"),
+    Command(0x2065, "LE Remove CIG", COMPLETE, bytes([PROBE_CIG_ID]),
+            note="takes away the group Set CIG Parameters built, so the "
+                 "configuration does not outlive the run"),
+    Command(0x2063, "LE Set CIG Parameters Test", COMPLETE,
+            bytes([PROBE_CIG_TEST_ID]) + _u24(10000) + _u24(10000)
+            + bytes([1, 1]) + struct.pack("<H", 8) + bytes([0, 0, 0])
+            + bytes([1])
+            + bytes([PROBE_CIS_ID, 2]) + struct.pack("<HHHH", 40, 40, 40, 40)
+            + bytes([1, 1, 1, 1]),
+            undo=(0x2065, bytes([PROBE_CIG_TEST_ID])), undo_now=True,
+            note="a second group, so it does not collide with the one above. "
+                 "The test form states what the other form derives: flush "
+                 "timeout 1 either way, ISO interval 8 in 1.25 ms units which "
+                 "is the 10 ms the SDU interval asks for, two subevents, one "
+                 "burst either way. Removed at once, since a group left "
+                 "configured is Command Disallowed for the next thing that "
+                 "wants the same identifier"),
+    Command(0x2066, "LE Accept CIS Request", STATUS,
+            struct.pack("<H", UNUSED_HANDLE),
+            expect=(STATUS_UNKNOWN_CONNECTION, STATUS_COMMAND_DISALLOWED),
+            note="the peripheral half. Answering a request that was never "
+                 "made is the only form of it reachable from one board"),
+    Command(0x2067, "LE Reject CIS Request", COMPLETE,
+            struct.pack("<HB", UNUSED_HANDLE, 0x0D),
+            expect=(STATUS_UNKNOWN_CONNECTION, STATUS_COMMAND_DISALLOWED),
+            note="reason 0x0D, rejected due to limited resources"),
+    Command(0x2061, "LE Read ISO TX Sync", COMPLETE,
+            struct.pack("<H", UNUSED_HANDLE),
+            expect=(STATUS_UNKNOWN_CONNECTION, STATUS_COMMAND_DISALLOWED)),
+    Command(0x2075, "LE Read ISO Link Quality", COMPLETE,
+            struct.pack("<H", UNUSED_HANDLE),
+            expect=(STATUS_UNKNOWN_CONNECTION, STATUS_COMMAND_DISALLOWED)),
+    Command(0xFD17, "VS ISO Read Tx Timestamp", COMPLETE,
+            struct.pack("<H", UNUSED_HANDLE),
+            expect=(STATUS_UNKNOWN_CONNECTION, STATUS_COMMAND_DISALLOWED),
+            note="the vendor form of LE Read ISO TX Sync, without the time "
+                 "offset"),
+    Command(0x206E, "LE Setup ISO Data Path", COMPLETE,
+            struct.pack("<H", UNUSED_HANDLE) + bytes([0, 0])
+            + bytes(5) + _u24(0) + bytes([0]),
+            expect=(STATUS_UNKNOWN_CONNECTION, STATUS_COMMAND_DISALLOWED),
+            note="input direction, HCI data path, transparent codec, no "
+                 "controller delay, no codec configuration. The trailing "
+                 "length is what makes the block variable, so a zero there "
+                 "is the shortest legal form of it"),
+    Command(0x206F, "LE Remove ISO Data Path", COMPLETE,
+            struct.pack("<HB", UNUSED_HANDLE, 0x01),
+            expect=(STATUS_UNKNOWN_CONNECTION, STATUS_COMMAND_DISALLOWED),
+            note="a bit mask of directions, not a direction, so 0x01 is the "
+                 "input path alone"),
+    Command(0x2070, "LE ISO Transmit Test", COMPLETE,
+            struct.pack("<HB", UNUSED_HANDLE, 0),
+            expect=(STATUS_UNKNOWN_CONNECTION, STATUS_COMMAND_DISALLOWED),
+            note="payload type 0, zero length. These four are the ones worth "
+                 "having on an instrument: they measure a stream with no "
+                 "codec anywhere"),
+    Command(0x2071, "LE ISO Receive Test", COMPLETE,
+            struct.pack("<HB", UNUSED_HANDLE, 0),
+            expect=(STATUS_UNKNOWN_CONNECTION, STATUS_COMMAND_DISALLOWED)),
+    Command(0x2072, "LE ISO Read Test Counters", COMPLETE,
+            struct.pack("<H", UNUSED_HANDLE),
+            expect=(STATUS_UNKNOWN_CONNECTION, STATUS_COMMAND_DISALLOWED)),
+    Command(0x2073, "LE ISO Test End", COMPLETE,
+            struct.pack("<H", UNUSED_HANDLE),
+            expect=(STATUS_UNKNOWN_CONNECTION, STATUS_COMMAND_DISALLOWED)),
+    Command(0x2068, "LE Create BIG", STATUS,
+            bytes([PROBE_BIG_HANDLE, PROBE_ADV_HANDLE, 1]) + _u24(10000)
+            + struct.pack("<HH", 40, 20) + bytes([2, 1, 0, 0, 0]) + bytes(16),
+            needs=(NEEDS_ADV_SET, NEEDS_CONSENT),
+            expect=(STATUS_UNKNOWN_ADV_ID, STATUS_COMMAND_DISALLOWED),
+            note="one broadcast stream of 40 octets every 10 ms, LE 1M, two "
+                 "retransmissions, unencrypted, so the broadcast code is "
+                 "sixteen zero octets that are still sent. A group needs "
+                 "periodic advertising running on the set, which nothing "
+                 "here leaves running, so being refused is the answer this "
+                 "row expects",
+            phase=PHASE_EXTENDED),
+    Command(0x2069, "LE Create BIG Test", STATUS,
+            bytes([PROBE_BIG_HANDLE, PROBE_ADV_HANDLE, 1]) + _u24(10000)
+            + struct.pack("<H", 8) + bytes([2]) + struct.pack("<HH", 40, 40)
+            + bytes([1, 0, 0, 1, 1, 0, 0]) + bytes(16),
+            needs=(NEEDS_ADV_SET, NEEDS_CONSENT),
+            expect=(STATUS_UNKNOWN_ADV_ID, STATUS_COMMAND_DISALLOWED),
+            note="the same group stated rather than derived: ISO interval 8 "
+                 "in 1.25 ms units, two subevents, 40 octet service and "
+                 "protocol units, one burst, one repeated transmission, no "
+                 "pre transmission offset",
+            phase=PHASE_EXTENDED),
+    Command(0x206A, "LE Terminate BIG", STATUS,
+            bytes([PROBE_BIG_HANDLE, 0x16]),
+            expect=(STATUS_UNKNOWN_ADV_ID, STATUS_COMMAND_DISALLOWED),
+            note="reason 0x16, terminated by local host",
+            phase=PHASE_EXTENDED),
+    Command(0x206B, "LE BIG Create Sync", STATUS,
+            bytes([PROBE_BIG_HANDLE]) + struct.pack("<H", UNUSED_HANDLE)
+            + bytes([0]) + bytes(16) + bytes([0])
+            + struct.pack("<H", 100) + bytes([1, 1]),
+            needs=NEEDS_SYNC,
+            note="the receiving half, which needs a periodic sync to a "
+                 "broadcaster and so needs a second radio. Timeout 100 in "
+                 "10 ms units, one stream requested, which is index 1: the "
+                 "list is one based and a zero there is rejected",
+            phase=PHASE_EXTENDED),
+    Command(0x206C, "LE BIG Terminate Sync", COMPLETE,
+            bytes([PROBE_BIG_HANDLE]),
+            expect=(STATUS_UNKNOWN_ADV_ID, STATUS_COMMAND_DISALLOWED),
+            phase=PHASE_EXTENDED),
+]
+
+# ---------------------------------------------------------------------------
 # Direct test mode. Every entry leaves the radio transmitting or receiving,
 # so the probe pairs each with LE Test End.
 # ---------------------------------------------------------------------------
@@ -693,7 +875,7 @@ _VENDOR = [
 
 # The order matters. Everything that creates state comes before what uses it.
 COMMANDS = (_CB + _LC + _INFO + _LE_BASIC + _LE_PRIVACY + _LE_EXT
-            + _LE_PERIODIC + _LE_CONN + _DTM + _VENDOR)
+            + _LE_PERIODIC + _LE_CONN + _ISO + _DTM + _VENDOR)
 
 # Run after everything above, and after the undo entries have been replayed.
 #

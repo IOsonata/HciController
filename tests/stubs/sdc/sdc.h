@@ -20,6 +20,12 @@
 #define SDC_CFG_TYPE_PERIODIC_ADV_RSP_BUFFER_CFG 14
 #define SDC_CFG_TYPE_PERIODIC_ADV_RSP_FAILURE_REPORTING_CFG 15
 #define SDC_CFG_TYPE_PERIODIC_SYNC_RSP_TX_BUFFER_CFG 16
+#define SDC_CFG_TYPE_CIG_COUNT                  17
+#define SDC_CFG_TYPE_CIS_COUNT                  18
+#define SDC_CFG_TYPE_BIG_COUNT                  19
+#define SDC_CFG_TYPE_BIS_SOURCE_COUNT           20
+#define SDC_CFG_TYPE_BIS_SINK_COUNT             21
+#define SDC_CFG_TYPE_ISO_BUFFER_CFG             22
 typedef struct { uint8_t count; } sdc_cfg_role_count_t;
 typedef struct { uint8_t rx_packet_size; uint8_t tx_packet_size;
                  uint8_t rx_packet_count; uint8_t tx_packet_count; } sdc_cfg_buffer_cfg_t;
@@ -27,6 +33,12 @@ typedef struct { uint16_t max_adv_data; } sdc_cfg_adv_buffer_cfg_t;
 typedef struct { uint8_t count; } sdc_cfg_scan_buffer_cfg_t;
 typedef struct { uint8_t tx_buffer_count; uint8_t max_tx_data_size;
                  uint8_t rx_buffer_count; } sdc_cfg_periodic_adv_rsp_buffer_cfg_t;
+/* Member names as the vendor header has them, sizes as it has them too. */
+typedef struct { uint8_t tx_sdu_buffer_count; uint16_t tx_sdu_buffer_size;
+                 uint8_t tx_pdu_buffer_per_stream_count;
+                 uint8_t rx_pdu_buffer_per_stream_count;
+                 uint8_t rx_sdu_buffer_count;
+                 uint16_t rx_sdu_buffer_size; } sdc_cfg_iso_buffer_cfg_t;
 typedef union {
     sdc_cfg_buffer_cfg_t buffer_cfg;
     sdc_cfg_role_count_t peripheral_count;
@@ -45,6 +57,12 @@ typedef union {
     sdc_cfg_periodic_adv_rsp_buffer_cfg_t periodic_adv_rsp_buffer_cfg;
     uint8_t periodic_adv_rsp_failure_reporting_cfg;
     sdc_cfg_scan_buffer_cfg_t periodic_sync_rsp_tx_buffer_cfg;
+    sdc_cfg_role_count_t cig_count;
+    sdc_cfg_role_count_t cis_count;
+    sdc_cfg_role_count_t big_count;
+    sdc_cfg_role_count_t bis_source_count;
+    sdc_cfg_role_count_t bis_sink_count;
+    sdc_cfg_iso_buffer_cfg_t iso_buffer_cfg;
 } sdc_cfg_t;
 typedef void (*sdc_fault_handler_t)(const char *, uint32_t);
 typedef void (*sdc_callback_t)(void);
@@ -87,6 +105,10 @@ void sdc_support_periodic_adv_sync_transfer_receiver_central(void);
 void sdc_support_periodic_adv_sync_transfer_receiver_peripheral(void);
 void sdc_support_le_periodic_adv_with_rsp(void);
 void sdc_support_le_periodic_sync_with_rsp(void);
+void sdc_support_cis_central(void);
+void sdc_support_cis_peripheral(void);
+void sdc_support_bis_source(void);
+void sdc_support_bis_sink(void);
 #ifdef __cplusplus
 }
 #endif
@@ -107,6 +129,36 @@ void sdc_support_le_periodic_sync_with_rsp(void);
  * It never did: the dispatch test does not include hci_sdc_resources.h and
  * has no opinion about memory.
  */
+/*
+ * Isochronous channels, copied verbatim from the vendor header like the rest
+ * of this file. hci_sdc_resources_test measures the real ones against the
+ * same expectations, so a copy that drifts fails there while this one still
+ * passes, and which of the two failed says which side moved.
+ */
+#define __MEM_PER_ISO_PDU_POOL(count) ((count) > 0 ? (16 + (count) * 288) : 0)
+
+#define SDC_MEM_PER_CIG(count) ((count) > 0 ? (13 + (count) * 163) : 0)
+#define SDC_MEM_PER_CIS(count) ((count) > 0 ? (13 + (count) * 547) : 0)
+#define SDC_MEM_PER_BIG(count) ((count) > 0 ? (13 + (count) * 331) : 0)
+#define SDC_MEM_PER_BIS(count) ((count) > 0 ? (13 + (count) * 259) : 0)
+
+#define SDC_MEM_ISO_RX_PDU_POOL_PER_STREAM_SIZE(                              \
+        rx_pdu_buffer_per_stream_count, cis_count, bis_sink_count)            \
+    (__MEM_PER_ISO_PDU_POOL(rx_pdu_buffer_per_stream_count) *                 \
+     ((cis_count) + (bis_sink_count)))
+
+#define SDC_MEM_ISO_RX_SDU_POOL_SIZE(count, size)                             \
+    ((count) > 0 ? (8 + (count) * ((size) + 13)) : 0)
+
+#define SDC_MEM_ISO_TX_PDU_POOL_SIZE(tx_pdu_buffer_per_stream_count,          \
+                                     cis_count, bis_source_count)             \
+    ((tx_pdu_buffer_per_stream_count) > 0 ?                                   \
+     __MEM_PER_ISO_PDU_POOL(tx_pdu_buffer_per_stream_count) *                 \
+         ((cis_count) + (bis_source_count)) : 0)
+
+#define SDC_MEM_ISO_TX_SDU_POOL_SIZE(count, size)                             \
+    ((count) > 0 ? (12 + (count) * ((size) + 49)) : 0)
+
 #define SDC_DEFAULT_EXTENDED_FEATURE_PAGE_COUNT 10
 #define SDC_DEFAULT_TX_PACKET_SIZE 27
 #define SDC_DEFAULT_RX_PACKET_SIZE 27

@@ -121,6 +121,49 @@ int main(void)
               HCI_SDC_PERIODIC_ADV_RSP_FAILURE_REPORTING),
           EXPECT_PERIODIC_ADV_RSP);
 
+    /*
+     * Isochronous channels. Unencrypted on this part, which costs nothing
+     * here: the pool pays for the streams and the buffers either way.
+     */
+    Check("iso connected group", SDC_MEM_PER_CIG(HCI_SDC_CIG_COUNT),
+          EXPECT_ISO_CIG);
+    Check("iso connected streams", SDC_MEM_PER_CIS(HCI_SDC_CIS_COUNT),
+          EXPECT_ISO_CIS);
+    Check("iso broadcast group", SDC_MEM_PER_BIG(HCI_SDC_BIG_COUNT),
+          EXPECT_ISO_BIG);
+    Check("iso broadcast streams",
+          SDC_MEM_PER_BIS(HCI_SDC_BIS_SOURCE_COUNT +
+                          HCI_SDC_BIS_SINK_COUNT),
+          EXPECT_ISO_BIS);
+    Check("iso rx pdu pool",
+          SDC_MEM_ISO_RX_PDU_POOL_PER_STREAM_SIZE(
+              HCI_SDC_ISO_RX_PDU_PER_STREAM, HCI_SDC_CIS_COUNT,
+              HCI_SDC_BIS_SINK_COUNT),
+          EXPECT_ISO_RX_PDU);
+    Check("iso rx sdu pool",
+          SDC_MEM_ISO_RX_SDU_POOL_SIZE(HCI_SDC_ISO_RX_SDU_COUNT,
+                                       HCI_SDC_ISO_RX_SDU_SIZE),
+          EXPECT_ISO_RX_SDU);
+    Check("iso tx pdu pool",
+          SDC_MEM_ISO_TX_PDU_POOL_SIZE(HCI_SDC_ISO_TX_PDU_PER_STREAM,
+                                       HCI_SDC_CIS_COUNT,
+                                       HCI_SDC_BIS_SOURCE_COUNT),
+          EXPECT_ISO_TX_PDU);
+    Check("iso tx sdu pool",
+          SDC_MEM_ISO_TX_SDU_POOL_SIZE(HCI_SDC_ISO_TX_SDU_COUNT,
+                                       HCI_SDC_ISO_TX_SDU_SIZE),
+          EXPECT_ISO_TX_SDU);
+    Check("iso all terms", HCI_SDC_MEM_ISO, EXPECT_ISO_TOTAL);
+
+    /*
+     * What the application has to hand sdc_hci_get. The specification allows
+     * an isochronous packet of 4095 octets, but sdc.h ties the requirement to
+     * the configured receive size, so this is the number that matters and it
+     * is far smaller.
+     */
+    Check("iso packet from the configured sdu", HCI_SDC_ISO_PACKET_SIZE,
+          HCI_SDC_ISO_RX_SDU_SIZE + HCI_ISO_DATA_HEADER_SIZE);
+
     Check("pool required", HCI_SDC_MEM_REQUIRED, EXPECT_REQUIRED);
     Check("pool allocated", HCI_SDC_MEM_SIZE,
           EXPECT_REQUIRED + HCI_SDC_MEM_MARGIN);
@@ -174,12 +217,28 @@ int main(void)
             HCI_SDC_PERIODIC_ADV_RSP_FAILURE_REPORTING;
         cfg.periodic_sync_rsp_tx_buffer_cfg.count =
             HCI_SDC_PERIODIC_SYNC_RSP_TX_BUFFERS;
+        cfg.cig_count.count = HCI_SDC_CIG_COUNT;
+        cfg.cis_count.count = HCI_SDC_CIS_COUNT;
+        cfg.big_count.count = HCI_SDC_BIG_COUNT;
+        cfg.bis_source_count.count = HCI_SDC_BIS_SOURCE_COUNT;
+        cfg.bis_sink_count.count = HCI_SDC_BIS_SINK_COUNT;
+        cfg.iso_buffer_cfg.tx_sdu_buffer_count = HCI_SDC_ISO_TX_SDU_COUNT;
+        cfg.iso_buffer_cfg.tx_sdu_buffer_size = HCI_SDC_ISO_TX_SDU_SIZE;
+        cfg.iso_buffer_cfg.tx_pdu_buffer_per_stream_count =
+            HCI_SDC_ISO_TX_PDU_PER_STREAM;
+        cfg.iso_buffer_cfg.rx_pdu_buffer_per_stream_count =
+            HCI_SDC_ISO_RX_PDU_PER_STREAM;
+        cfg.iso_buffer_cfg.rx_sdu_buffer_count = HCI_SDC_ISO_RX_SDU_COUNT;
+        cfg.iso_buffer_cfg.rx_sdu_buffer_size = HCI_SDC_ISO_RX_SDU_SIZE;
 
         /*
          * The tags, in the same order hci_sdc_resources.cpp uses them. Distinct
          * values, so a header that collapsed two of them would be caught.
          */
         const uint8_t tags[] = {
+            SDC_CFG_TYPE_CIG_COUNT,       SDC_CFG_TYPE_CIS_COUNT,
+            SDC_CFG_TYPE_BIG_COUNT,       SDC_CFG_TYPE_BIS_SOURCE_COUNT,
+            SDC_CFG_TYPE_BIS_SINK_COUNT,  SDC_CFG_TYPE_ISO_BUFFER_CFG,
             SDC_CFG_TYPE_BUFFER_CFG,      SDC_CFG_TYPE_PERIPHERAL_COUNT,
             SDC_CFG_TYPE_CENTRAL_COUNT,   SDC_CFG_TYPE_ADV_COUNT,
             SDC_CFG_TYPE_ADV_BUFFER_CFG,  SDC_CFG_TYPE_SCAN_BUFFER_CFG,

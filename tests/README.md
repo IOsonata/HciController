@@ -61,7 +61,7 @@ wrong.
 | `hci_nrf52840_usb_test` | `hci_nrf52840.cpp` | USB bring up order, that MPSL keeps the clock, that every wait is bounded and reports its own error code |
 | `hci_taktos_poll_test` | `hci_taktos.cpp` | the poll interval, so a lost wake cannot stall the USB transport |
 | `hci_tinyusb_init_test` | `hci_tinyusb.cpp` | that bring up goes through `tusb_rhport_init` and records the device role, which is what makes the interrupt handler dispatch |
-| `hci_sdc_dispatch_test` | `hci_sdc_nrfxlib.cpp` | all 126 opcodes reach the intended SDC call with the right response type and parameter length, and the supported commands bitmap agrees with the table in both directions |
+| `hci_sdc_dispatch_test` | `hci_sdc_nrfxlib.cpp` | all 150 opcodes reach the intended SDC call with the right response type and parameter length, and the supported commands bitmap agrees with the table in both directions |
 | `hci_sdc_resources_test` | `hci_sdc_resources.h` | every term of the SoftDevice Controller memory pool against the real nrfxlib macros, and every `sdc_cfg_t` member the firmware writes against the real union |
 
 The last two need `NRFXLIB_DIR` and are skipped without it. They are the only
@@ -122,7 +122,7 @@ python3 tests/project_files.py
 fails on either direction: a command the firmware dispatches that nothing will
 ever send at a radio, or an entry for a command that was removed.
 
-That gap was real and large. The firmware grew from 60 opcodes to 126 over
+That gap was real and large. The firmware grew from 60 opcodes to 150 over
 this branch while the Python tooling drove 29, so most of what the host tests
 pinned down had only ever met a compiled stub. Nothing said so, because the
 two halves had no reason to look at each other.
@@ -169,7 +169,7 @@ python3 tests/hardware/hci_ble_test.py /dev/ttyACM0 counters
 python3 tests/hardware/hci_ble_test.py /dev/ttyACM0 probe
 ```
 
-`probe` is the broad one, and it is what makes the 126 opcodes mean something
+`probe` is the broad one, and it is what makes the 150 opcodes mean something
 on a radio rather than in a compiled stub. It sends every command in
 `hci_commands.py`, prints what came back, and puts the controller back where
 it found it.

@@ -335,6 +335,33 @@ static HciCmdResult_t HciSdcCmdReadSupportedCommands(void *,
     supported.params.hci_le_set_privacy_mode = 1U;
     supported.params.hci_le_set_data_related_address_changes = 1U;
 
+    /*
+     * Isochronous channels. Unencrypted on this part, which the bitmap has
+     * no way to say: a bit here means the command is dispatched, and a host
+     * that asks for an encrypted broadcast is refused by the controller when
+     * it asks, not by a missing bit now.
+     */
+    supported.params.hci_le_read_buffer_size_v2 = 1U;
+    supported.params.hci_le_read_iso_tx_sync = 1U;
+    supported.params.hci_le_set_cig_parameters = 1U;
+    supported.params.hci_le_set_cig_parameters_test = 1U;
+    supported.params.hci_le_create_cis = 1U;
+    supported.params.hci_le_remove_cig = 1U;
+    supported.params.hci_le_accept_cis_request = 1U;
+    supported.params.hci_le_reject_cis_request = 1U;
+    supported.params.hci_le_create_big = 1U;
+    supported.params.hci_le_create_big_test = 1U;
+    supported.params.hci_le_terminate_big = 1U;
+    supported.params.hci_le_big_create_sync = 1U;
+    supported.params.hci_le_big_terminate_sync = 1U;
+    supported.params.hci_le_setup_iso_data_path = 1U;
+    supported.params.hci_le_remove_iso_data_path = 1U;
+    supported.params.hci_le_iso_transmit_test = 1U;
+    supported.params.hci_le_iso_receive_test = 1U;
+    supported.params.hci_le_iso_read_test_counters = 1U;
+    supported.params.hci_le_iso_test_end = 1U;
+    supported.params.hci_le_read_iso_link_quality = 1U;
+
     memcpy(pReturn, supported.raw, sizeof(supported.raw));
     return HciSdcComplete(HCI_STATUS_SUCCESS, sizeof(supported.raw));
 }
@@ -709,6 +736,45 @@ static HciCmdResult_t HciSdcCmdLeSetScanEnable(void *,
         const SdcType *pCmd = reinterpret_cast<const SdcType *>(pParams);     \
         if (ParamLen - offsetof(SdcType, ArrayField) !=                        \
             (size_t)pCmd->CountField)                                         \
+        {                                                                     \
+            return HciSdcComplete(HCI_STATUS_INVALID_HCI_PARAMETERS, 0U);     \
+        }                                                                     \
+        uint8_t status = SdcFunc(pCmd, &result);                              \
+        if (status != HCI_STATUS_SUCCESS)                                     \
+        {                                                                     \
+            return HciSdcComplete(status, 0U);                                \
+        }                                                                     \
+        memcpy(pReturn, &result, sizeof(result));                             \
+        return HciSdcComplete(status, sizeof(result));                        \
+    }
+
+/*
+ * The element counted form with a return structure. Isochronous channels are
+ * where this first occurs: LE Set CIG Parameters takes one array element per
+ * stream and answers with the connection handle of each, so neither the
+ * byte counted form nor the plain element counted one fits.
+ */
+#define HCI_SDC_CMD_VNR(Name, SdcFunc, SdcType, SdcReturn, ArrayField,        \
+                        CountField)                                           \
+    static HciCmdResult_t Name(void *,                                        \
+                               const uint8_t *pParams,                        \
+                               size_t ParamLen,                               \
+                               uint8_t *pReturn,                              \
+                               size_t ReturnCapacity)                         \
+    {                                                                         \
+        SdcReturn result;                                                     \
+        if (!HciSdcReturnFits(sizeof(result), ReturnCapacity))                \
+        {                                                                     \
+            return HciSdcComplete(HCI_STATUS_MEMORY_CAPACITY_EXCEEDED, 0U);   \
+        }                                                                     \
+        if (ParamLen < offsetof(SdcType, ArrayField))                         \
+        {                                                                     \
+            return HciSdcComplete(HCI_STATUS_INVALID_HCI_PARAMETERS, 0U);     \
+        }                                                                     \
+        const SdcType *pCmd = reinterpret_cast<const SdcType *>(pParams);     \
+        const size_t needed = (size_t)pCmd->CountField *                      \
+                              sizeof(pCmd->ArrayField[0]);                    \
+        if (ParamLen - offsetof(SdcType, ArrayField) != needed)               \
         {                                                                     \
             return HciSdcComplete(HCI_STATUS_INVALID_HCI_PARAMETERS, 0U);     \
         }                                                                     \
@@ -1443,6 +1509,160 @@ HCI_SDC_CMD_VP(HciSdcCmdLeExtCreateConn, sdc_hci_cmd_le_ext_create_conn,
 #define HCI_SDC_ENTRY_S(Opcode, ParamLen, Name)                               \
     {Opcode, (uint16_t)(ParamLen), 0U, HCI_CMD_RESPONSE_STATUS, Name}
 
+/*
+ * Isochronous channels, connected and broadcast.
+ *
+ * nRF52840 has no hardware for isochronous encryption, so what these reach is
+ * unencrypted CIS and BIS. Every command below is real, the scheduling is
+ * real and the data path is real; the cipher is what the part does not have.
+ * A host that asks for an encrypted broadcast gets the controller's own
+ * refusal rather than a missing opcode, which is the more useful answer.
+ *
+ * The four test commands are the ones worth having on an instrument. They
+ * measure an isochronous link with no codec anywhere, which is exactly what
+ * is wanted when the question is whether the radio and the scheduling work
+ * rather than whether the audio sounds right.
+ */
+/*
+ * The isochronous half of the buffer report. A host cannot flow control
+ * isochronous data without it: version 1 reports only the ACL packet length
+ * and count, and says nothing about how many isochronous packets the
+ * controller will hold. Adding the streams without this would give a host
+ * every command it needs to set one up and no way to feed it.
+ */
+HCI_SDC_CMD_NR(HciSdcCmdLeReadBufferSizeV2,
+               sdc_hci_cmd_le_read_buffer_size_v2,
+               sdc_hci_cmd_le_read_buffer_size_v2_return_t)
+
+HCI_SDC_CMD_PR(HciSdcCmdLeReadIsoTxSync,
+               sdc_hci_cmd_le_read_iso_tx_sync,
+               sdc_hci_cmd_le_read_iso_tx_sync_t,
+               sdc_hci_cmd_le_read_iso_tx_sync_return_t)
+
+/* One array element per stream, and a handle returned for each. */
+HCI_SDC_CMD_VNR(HciSdcCmdLeSetCigParams,
+                sdc_hci_cmd_le_set_cig_params,
+                sdc_hci_cmd_le_set_cig_params_t,
+                sdc_hci_cmd_le_set_cig_params_return_t,
+                array_params, cis_count)
+
+HCI_SDC_CMD_VNR(HciSdcCmdLeSetCigParamsTest,
+                sdc_hci_cmd_le_set_cig_params_test,
+                sdc_hci_cmd_le_set_cig_params_test_t,
+                sdc_hci_cmd_le_set_cig_params_test_return_t,
+                array_params, cis_count)
+
+/*
+ * Answers a Command Status and then one LE CIS Established event per stream,
+ * so there is no return structure to carry.
+ */
+HCI_SDC_CMD_VN(HciSdcCmdLeCreateCis,
+               sdc_hci_cmd_le_create_cis,
+               sdc_hci_cmd_le_create_cis_t,
+               array_params, cis_count, HciSdcStatus)
+
+HCI_SDC_CMD_PR(HciSdcCmdLeRemoveCig,
+               sdc_hci_cmd_le_remove_cig,
+               sdc_hci_cmd_le_remove_cig_t,
+               sdc_hci_cmd_le_remove_cig_return_t)
+
+HCI_SDC_CMD_P(HciSdcCmdLeAcceptCisRequest,
+              sdc_hci_cmd_le_accept_cis_request,
+              sdc_hci_cmd_le_accept_cis_request_t,
+              HciSdcStatus)
+
+HCI_SDC_CMD_PR(HciSdcCmdLeRejectCisRequest,
+               sdc_hci_cmd_le_reject_cis_request,
+               sdc_hci_cmd_le_reject_cis_request_t,
+               sdc_hci_cmd_le_reject_cis_request_return_t)
+
+HCI_SDC_CMD_P(HciSdcCmdLeCreateBig,
+              sdc_hci_cmd_le_create_big,
+              sdc_hci_cmd_le_create_big_t,
+              HciSdcStatus)
+
+HCI_SDC_CMD_P(HciSdcCmdLeCreateBigTest,
+              sdc_hci_cmd_le_create_big_test,
+              sdc_hci_cmd_le_create_big_test_t,
+              HciSdcStatus)
+
+HCI_SDC_CMD_P(HciSdcCmdLeTerminateBig,
+              sdc_hci_cmd_le_terminate_big,
+              sdc_hci_cmd_le_terminate_big_t,
+              HciSdcStatus)
+
+/* One array element per broadcast stream the host wants from the group. */
+HCI_SDC_CMD_VN(HciSdcCmdLeBigCreateSync,
+               sdc_hci_cmd_le_big_create_sync,
+               sdc_hci_cmd_le_big_create_sync_t,
+               array_params, num_bis, HciSdcStatus)
+
+HCI_SDC_CMD_PR(HciSdcCmdLeBigTerminateSync,
+               sdc_hci_cmd_le_big_terminate_sync,
+               sdc_hci_cmd_le_big_terminate_sync_t,
+               sdc_hci_cmd_le_big_terminate_sync_return_t)
+
+/*
+ * Byte counted, not element counted: the tail is a codec configuration whose
+ * length is declared in octets and whose contents this layer has no opinion
+ * about.
+ */
+HCI_SDC_CMD_VBR(HciSdcCmdLeSetupIsoDataPath,
+                sdc_hci_cmd_le_setup_iso_data_path,
+                sdc_hci_cmd_le_setup_iso_data_path_t,
+                sdc_hci_cmd_le_setup_iso_data_path_return_t,
+                codec_config, codec_config_length)
+
+HCI_SDC_CMD_PR(HciSdcCmdLeRemoveIsoDataPath,
+               sdc_hci_cmd_le_remove_iso_data_path,
+               sdc_hci_cmd_le_remove_iso_data_path_t,
+               sdc_hci_cmd_le_remove_iso_data_path_return_t)
+
+HCI_SDC_CMD_PR(HciSdcCmdLeIsoTransmitTest,
+               sdc_hci_cmd_le_iso_transmit_test,
+               sdc_hci_cmd_le_iso_transmit_test_t,
+               sdc_hci_cmd_le_iso_transmit_test_return_t)
+
+HCI_SDC_CMD_PR(HciSdcCmdLeIsoReceiveTest,
+               sdc_hci_cmd_le_iso_receive_test,
+               sdc_hci_cmd_le_iso_receive_test_t,
+               sdc_hci_cmd_le_iso_receive_test_return_t)
+
+HCI_SDC_CMD_PR(HciSdcCmdLeIsoReadTestCounters,
+               sdc_hci_cmd_le_iso_read_test_counters,
+               sdc_hci_cmd_le_iso_read_test_counters_t,
+               sdc_hci_cmd_le_iso_read_test_counters_return_t)
+
+HCI_SDC_CMD_PR(HciSdcCmdLeIsoTestEnd,
+               sdc_hci_cmd_le_iso_test_end,
+               sdc_hci_cmd_le_iso_test_end_t,
+               sdc_hci_cmd_le_iso_test_end_return_t)
+
+HCI_SDC_CMD_PR(HciSdcCmdLeReadIsoLinkQuality,
+               sdc_hci_cmd_le_read_iso_link_quality,
+               sdc_hci_cmd_le_read_iso_link_quality_t,
+               sdc_hci_cmd_le_read_iso_link_quality_return_t)
+
+HCI_SDC_CMD_PR(HciSdcCmdVsIsoReadTxTimestamp,
+               sdc_hci_cmd_vs_iso_read_tx_timestamp,
+               sdc_hci_cmd_vs_iso_read_tx_timestamp_t,
+               sdc_hci_cmd_vs_iso_read_tx_timestamp_return_t)
+
+HCI_SDC_CMD_P(HciSdcCmdVsBigReservedTimeSet,
+              sdc_hci_cmd_vs_big_reserved_time_set,
+              sdc_hci_cmd_vs_big_reserved_time_set_t,
+              HciSdcComplete)
+
+HCI_SDC_CMD_P(HciSdcCmdVsCigReservedTimeSet,
+              sdc_hci_cmd_vs_cig_reserved_time_set,
+              sdc_hci_cmd_vs_cig_reserved_time_set_t,
+              HciSdcComplete)
+
+HCI_SDC_CMD_P(HciSdcCmdVsCisSubeventLengthSet,
+              sdc_hci_cmd_vs_cis_subevent_length_set,
+              sdc_hci_cmd_vs_cis_subevent_length_set_t,
+              HciSdcComplete)
+
 static const HciCmdEntry_t s_HciSdcCommands[] = {
     /* Controller and baseband. */
     HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_CB_SET_EVENT_MASK, 8U,
@@ -1914,6 +2134,92 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
      * constant from the header instead of a sizeof(), because the wire format
      * is written out field by field and owes nothing to a struct layout.
      */
+    /*
+     * Isochronous channels. Unencrypted only on this part, see the handlers
+     * above. The four test commands need no codec and are what an instrument
+     * uses to measure an isochronous link.
+     */
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_READ_BUFFER_SIZE_V2, 0U,
+                     HciSdcCmdLeReadBufferSizeV2,
+                     sdc_hci_cmd_le_read_buffer_size_v2_return_t),
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_READ_ISO_TX_SYNC,
+                     sizeof(sdc_hci_cmd_le_read_iso_tx_sync_t),
+                     HciSdcCmdLeReadIsoTxSync,
+                     sdc_hci_cmd_le_read_iso_tx_sync_return_t),
+    {SDC_HCI_OPCODE_CMD_LE_SET_CIG_PARAMS, HCI_CMD_VARIABLE_PARAM_LEN,
+     (uint16_t)sizeof(sdc_hci_cmd_le_set_cig_params_return_t),
+     HCI_CMD_RESPONSE_COMPLETE, HciSdcCmdLeSetCigParams},
+    {SDC_HCI_OPCODE_CMD_LE_SET_CIG_PARAMS_TEST, HCI_CMD_VARIABLE_PARAM_LEN,
+     (uint16_t)sizeof(sdc_hci_cmd_le_set_cig_params_test_return_t),
+     HCI_CMD_RESPONSE_COMPLETE, HciSdcCmdLeSetCigParamsTest},
+    HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_CREATE_CIS,
+                    HCI_CMD_VARIABLE_PARAM_LEN, HciSdcCmdLeCreateCis),
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_REMOVE_CIG,
+                     sizeof(sdc_hci_cmd_le_remove_cig_t),
+                     HciSdcCmdLeRemoveCig,
+                     sdc_hci_cmd_le_remove_cig_return_t),
+    HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_ACCEPT_CIS_REQUEST,
+                    sizeof(sdc_hci_cmd_le_accept_cis_request_t),
+                    HciSdcCmdLeAcceptCisRequest),
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_REJECT_CIS_REQUEST,
+                     sizeof(sdc_hci_cmd_le_reject_cis_request_t),
+                     HciSdcCmdLeRejectCisRequest,
+                     sdc_hci_cmd_le_reject_cis_request_return_t),
+    HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_CREATE_BIG,
+                    sizeof(sdc_hci_cmd_le_create_big_t),
+                    HciSdcCmdLeCreateBig),
+    HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_CREATE_BIG_TEST,
+                    sizeof(sdc_hci_cmd_le_create_big_test_t),
+                    HciSdcCmdLeCreateBigTest),
+    HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_TERMINATE_BIG,
+                    sizeof(sdc_hci_cmd_le_terminate_big_t),
+                    HciSdcCmdLeTerminateBig),
+    HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_BIG_CREATE_SYNC,
+                    HCI_CMD_VARIABLE_PARAM_LEN, HciSdcCmdLeBigCreateSync),
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_BIG_TERMINATE_SYNC,
+                     sizeof(sdc_hci_cmd_le_big_terminate_sync_t),
+                     HciSdcCmdLeBigTerminateSync,
+                     sdc_hci_cmd_le_big_terminate_sync_return_t),
+    {SDC_HCI_OPCODE_CMD_LE_SETUP_ISO_DATA_PATH, HCI_CMD_VARIABLE_PARAM_LEN,
+     (uint16_t)sizeof(sdc_hci_cmd_le_setup_iso_data_path_return_t),
+     HCI_CMD_RESPONSE_COMPLETE, HciSdcCmdLeSetupIsoDataPath},
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_REMOVE_ISO_DATA_PATH,
+                     sizeof(sdc_hci_cmd_le_remove_iso_data_path_t),
+                     HciSdcCmdLeRemoveIsoDataPath,
+                     sdc_hci_cmd_le_remove_iso_data_path_return_t),
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_ISO_TRANSMIT_TEST,
+                     sizeof(sdc_hci_cmd_le_iso_transmit_test_t),
+                     HciSdcCmdLeIsoTransmitTest,
+                     sdc_hci_cmd_le_iso_transmit_test_return_t),
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_ISO_RECEIVE_TEST,
+                     sizeof(sdc_hci_cmd_le_iso_receive_test_t),
+                     HciSdcCmdLeIsoReceiveTest,
+                     sdc_hci_cmd_le_iso_receive_test_return_t),
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_ISO_READ_TEST_COUNTERS,
+                     sizeof(sdc_hci_cmd_le_iso_read_test_counters_t),
+                     HciSdcCmdLeIsoReadTestCounters,
+                     sdc_hci_cmd_le_iso_read_test_counters_return_t),
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_ISO_TEST_END,
+                     sizeof(sdc_hci_cmd_le_iso_test_end_t),
+                     HciSdcCmdLeIsoTestEnd,
+                     sdc_hci_cmd_le_iso_test_end_return_t),
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_READ_ISO_LINK_QUALITY,
+                     sizeof(sdc_hci_cmd_le_read_iso_link_quality_t),
+                     HciSdcCmdLeReadIsoLinkQuality,
+                     sdc_hci_cmd_le_read_iso_link_quality_return_t),
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_VS_ISO_READ_TX_TIMESTAMP,
+                     sizeof(sdc_hci_cmd_vs_iso_read_tx_timestamp_t),
+                     HciSdcCmdVsIsoReadTxTimestamp,
+                     sdc_hci_cmd_vs_iso_read_tx_timestamp_return_t),
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_VS_BIG_RESERVED_TIME_SET,
+                    sizeof(sdc_hci_cmd_vs_big_reserved_time_set_t),
+                    HciSdcCmdVsBigReservedTimeSet),
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_VS_CIG_RESERVED_TIME_SET,
+                    sizeof(sdc_hci_cmd_vs_cig_reserved_time_set_t),
+                    HciSdcCmdVsCigReservedTimeSet),
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_VS_CIS_SUBEVENT_LENGTH_SET,
+                    sizeof(sdc_hci_cmd_vs_cis_subevent_length_set_t),
+                    HciSdcCmdVsCisSubeventLengthSet),
     {HCI_COUNTERS_OPCODE, 0U, (uint16_t)HCI_COUNTERS_RETURN_LEN,
      HCI_CMD_RESPONSE_COMPLETE, HciCountersRead},
 };

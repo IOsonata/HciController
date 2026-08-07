@@ -40,6 +40,17 @@
 #define EXPECT_SYNC_TRANSFER     1125   /* eight links */
 #define EXPECT_PERIODIC_ADV_RSP  1575   /* each, one tx and one rx buffer */
 
-#define EXPECT_REQUIRED       38860
+/* Isochronous channels, per term so a failure names which one moved. */
+#define EXPECT_ISO_CIG           339
+#define EXPECT_ISO_CIS          2201
+#define EXPECT_ISO_BIG           675
+#define EXPECT_ISO_BIS          1049
+#define EXPECT_ISO_RX_PDU       5280
+#define EXPECT_ISO_RX_SDU       1064
+#define EXPECT_ISO_TX_PDU       5280
+#define EXPECT_ISO_TX_SDU       1196
+#define EXPECT_ISO_TOTAL       17084
+
+#define EXPECT_REQUIRED       55944
 
 #endif

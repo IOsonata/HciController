@@ -1437,6 +1437,61 @@ int main(void)
                          hci_le_transmitter_test_v3),
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_TRANSMITTER_TEST_V4,
                          hci_le_transmitter_test_v4),
+            /*
+             * Isochronous channels. The bitmap says the command is
+             * dispatched and nothing about encryption, which this part
+             * cannot do for isochronous data; a host asking for an
+             * encrypted broadcast is refused when it asks.
+             */
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_READ_BUFFER_SIZE_V2,
+                         hci_le_read_buffer_size_v2),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_READ_ISO_TX_SYNC,
+                         hci_le_read_iso_tx_sync),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_CIG_PARAMS,
+                         hci_le_set_cig_parameters),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_CIG_PARAMS_TEST,
+                         hci_le_set_cig_parameters_test),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_CREATE_CIS, hci_le_create_cis),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_REMOVE_CIG, hci_le_remove_cig),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_ACCEPT_CIS_REQUEST,
+                         hci_le_accept_cis_request),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_REJECT_CIS_REQUEST,
+                         hci_le_reject_cis_request),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_CREATE_BIG, hci_le_create_big),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_CREATE_BIG_TEST,
+                         hci_le_create_big_test),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_TERMINATE_BIG,
+                         hci_le_terminate_big),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_BIG_CREATE_SYNC,
+                         hci_le_big_create_sync),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_BIG_TERMINATE_SYNC,
+                         hci_le_big_terminate_sync),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SETUP_ISO_DATA_PATH,
+                         hci_le_setup_iso_data_path),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_REMOVE_ISO_DATA_PATH,
+                         hci_le_remove_iso_data_path),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_ISO_TRANSMIT_TEST,
+                         hci_le_iso_transmit_test),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_ISO_RECEIVE_TEST,
+                         hci_le_iso_receive_test),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_ISO_READ_TEST_COUNTERS,
+                         hci_le_iso_read_test_counters),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_ISO_TEST_END,
+                         hci_le_iso_test_end),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_READ_ISO_LINK_QUALITY,
+                         hci_le_read_iso_link_quality),
+            /*
+             * Nordic vendor, so no bit in Vol 4 Part E 6.27 and none in the
+             * Zephyr bitmap either.
+             */
+            {SDC_HCI_OPCODE_CMD_VS_ISO_READ_TX_TIMESTAMP, NULL,
+             "vs_iso_read_tx_timestamp"},
+            {SDC_HCI_OPCODE_CMD_VS_BIG_RESERVED_TIME_SET, NULL,
+             "vs_big_reserved_time_set"},
+            {SDC_HCI_OPCODE_CMD_VS_CIG_RESERVED_TIME_SET, NULL,
+             "vs_cig_reserved_time_set"},
+            {SDC_HCI_OPCODE_CMD_VS_CIS_SUBEVENT_LENGTH_SET, NULL,
+             "vs_cis_subevent_length_set"},
             /* Vendor specific, so Vol 4 Part E 6.27 assigns it no bit. */
             {SDC_HCI_OPCODE_CMD_VS_TRANSMITTER_CARRIER_TEST, NULL,
              "vs_transmitter_carrier_test"},

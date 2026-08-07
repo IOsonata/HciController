@@ -368,11 +368,28 @@ configuring the controller differently means editing the value.
 | Periodic advertiser list | 8 | 64 for eight |
 | Periodic sync transfer | on | 1125 for eight links |
 | Periodic sets with responses | 1 | 1575 each |
-| | | **38860 total** |
+| Connected isochronous groups | 2 | 339 for two |
+| Connected isochronous streams | 4 | 2201 for four |
+| Broadcast isochronous groups | 2 | 675 for two |
+| Broadcast isochronous streams | 2 source, 2 sink | 1049 for four |
+| Isochronous SDU, transmit | 247 octets, 4 buffers | 1196 |
+| Isochronous SDU, receive | 251 octets, 4 buffers | 1064 |
+| Isochronous PDU, per stream | 3 each way | 5280 transmit, 5280 receive |
+| | | **55944 total** |
 
 The pool is that total plus a 512 octet margin, because sdk-nrfxlib says the
 memory macros may move between minor releases and the number that decides
 whether the controller starts is the one `sdc_cfg_set` answers at run time.
+
+Isochronous channels are the largest single item, 17084 of the total, and the
+part places one limit on them: nRF52840 has no hardware for isochronous
+encryption. Connected and broadcast streams, the scheduling and the data path
+are all there; a host that asks for an encrypted broadcast gets the
+controller's own refusal rather than a missing opcode. The receive SDU size is
+what the packet buffer above the controller is sized against, not the 4095
+octet ceiling the specification allows, because `sdc_hci_get` ties its
+requirement to the configured value. 251 plus the 12 octet isochronous header
+is 263, which the existing 1024 octet buffer holds.
 
 The ACL payload is worth calling out. 251 octets is the data length extension
 maximum, and it is what the controller reports in LE Read Buffer Size, so a

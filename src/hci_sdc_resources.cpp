@@ -135,6 +135,21 @@ int32_t HciSdcResourcesApply(void)
 
     sdc_support_le_periodic_sync_with_rsp();
 
+    /*
+     * Isochronous channels, four roles. A controller does not get to decide
+     * which side of a stream someone wants to be, any more than it decides
+     * whether a link is central or peripheral.
+     *
+     * nRF52840 has no hardware for isochronous encryption, so these are
+     * unencrypted streams. The commands, the scheduling and the data path
+     * are all real; only the cipher is missing, and no configuration here
+     * can supply it.
+     */
+    sdc_support_cis_central();
+    sdc_support_cis_peripheral();
+    sdc_support_bis_source();
+    sdc_support_bis_sink();
+
     sdc_cfg_t cfg = {};
     cfg.buffer_cfg.rx_packet_size = HCI_SDC_ACL_PACKET_SIZE;
     cfg.buffer_cfg.tx_packet_size = HCI_SDC_ACL_PACKET_SIZE;
@@ -247,6 +262,51 @@ int32_t HciSdcResourcesApply(void)
         HCI_SDC_PERIODIC_ADV_RSP_MAX_TX_DATA;
     if (!HciSdcCfgSet(SDC_CFG_TYPE_PERIODIC_ADV_RSP_BUFFER_CFG,
                            &cfg))
+    {
+        return s_Required;
+    }
+
+    cfg = {};
+    cfg.cig_count.count = HCI_SDC_CIG_COUNT;
+    if (!HciSdcCfgSet(SDC_CFG_TYPE_CIG_COUNT, &cfg)) return s_Required;
+
+    cfg = {};
+    cfg.cis_count.count = HCI_SDC_CIS_COUNT;
+    if (!HciSdcCfgSet(SDC_CFG_TYPE_CIS_COUNT, &cfg)) return s_Required;
+
+    cfg = {};
+    cfg.big_count.count = HCI_SDC_BIG_COUNT;
+    if (!HciSdcCfgSet(SDC_CFG_TYPE_BIG_COUNT, &cfg)) return s_Required;
+
+    cfg = {};
+    cfg.bis_source_count.count = HCI_SDC_BIS_SOURCE_COUNT;
+    if (!HciSdcCfgSet(SDC_CFG_TYPE_BIS_SOURCE_COUNT, &cfg))
+    {
+        return s_Required;
+    }
+
+    cfg = {};
+    cfg.bis_sink_count.count = HCI_SDC_BIS_SINK_COUNT;
+    if (!HciSdcCfgSet(SDC_CFG_TYPE_BIS_SINK_COUNT, &cfg))
+    {
+        return s_Required;
+    }
+
+    /*
+     * The receive service data unit size is what decides how large a buffer
+     * the application must hand sdc_hci_get, so it is not free to grow. See
+     * HCI_SDC_ISO_PACKET_SIZE and the assertion above HciApp_t.
+     */
+    cfg = {};
+    cfg.iso_buffer_cfg.tx_sdu_buffer_count = HCI_SDC_ISO_TX_SDU_COUNT;
+    cfg.iso_buffer_cfg.tx_sdu_buffer_size = HCI_SDC_ISO_TX_SDU_SIZE;
+    cfg.iso_buffer_cfg.tx_pdu_buffer_per_stream_count =
+        HCI_SDC_ISO_TX_PDU_PER_STREAM;
+    cfg.iso_buffer_cfg.rx_pdu_buffer_per_stream_count =
+        HCI_SDC_ISO_RX_PDU_PER_STREAM;
+    cfg.iso_buffer_cfg.rx_sdu_buffer_count = HCI_SDC_ISO_RX_SDU_COUNT;
+    cfg.iso_buffer_cfg.rx_sdu_buffer_size = HCI_SDC_ISO_RX_SDU_SIZE;
+    if (!HciSdcCfgSet(SDC_CFG_TYPE_ISO_BUFFER_CFG, &cfg))
     {
         return s_Required;
     }

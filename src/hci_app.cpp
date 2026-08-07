@@ -33,19 +33,20 @@ static_assert(HCI_APP_PACKET_SIZE + 1U <= HCI_INTRF_TX_STREAM_SIZE,
  * Isochronous Channels the provided buffer should be large enough to contain
  * the maximum supported SDU size."
  *
- * ISO is what makes the difference: 258 bytes without it, 4107 with. The
- * second assertion is what stops a future sdc_support_cis_* or
- * sdc_support_bis_* call from silently turning sdc_hci_get into an overflow of
- * HciApp_t, which no downstream length check could catch. Enabling ISO means
- * raising HCI_APP_PACKET_SIZE and defining HCI_APP_ISO_ENABLED with it.
+ * Isochronous channels are enabled, so the second sentence applies. The size
+ * that matters is the one configured in sdc_cfg_iso_buffer_cfg_t, not the 4095
+ * octet ceiling the specification allows: a controller told its receive SDU
+ * buffer is 251 octets never hands back more than that plus the isochronous
+ * data header. HCI_SDC_ISO_PACKET_SIZE is that sum, and it moves with the
+ * configuration, so raising the configured SDU size without raising
+ * HCI_APP_PACKET_SIZE stops the build instead of overflowing HciApp_t, which
+ * no downstream length check could catch.
  */
 static_assert(HCI_APP_PACKET_SIZE >= HCI_MSG_BUFFER_MAX_SIZE,
               "controller packet must hold the largest SDC message");
 
-#ifdef HCI_APP_ISO_ENABLED
-static_assert(HCI_APP_PACKET_SIZE >= HCI_MSG_BUFFER_ISO_MAX_SIZE,
-              "controller packet must hold the largest SDC ISO message");
-#endif
+static_assert(HCI_APP_PACKET_SIZE >= HCI_SDC_ISO_PACKET_SIZE,
+              "controller packet must hold the largest configured ISO SDU");
 
 /*
  * Every link the controller can hold has to be trackable, or the ACL credit
