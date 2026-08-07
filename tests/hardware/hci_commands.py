@@ -318,6 +318,22 @@ _LE_BASIC = [
                  "Parameters, Data and Scan Response Data with it, which are "
                  "all accepted here. Only the enable is refused.\n"
                  "\n"
+                 "The sdk-nrfxlib documentation was read for this and says "
+                 "nothing about it. limitations.rst does not mention it, the "
+                 "isochronous and scheduling documents do not touch it, and "
+                 "the two read commands appear nowhere outside the header. "
+                 "The pinned revision is already the current one, so there "
+                 "is no newer controller to move to.\n"
+                 "\n"
+                 "What the changelog does show is that mixing the two "
+                 "advertising command sets has been a source of defects "
+                 "here before: an MPU fault when switching between extended "
+                 "and legacy in 1.8.0 (NCSIDB-572), an assert when a legacy "
+                 "advertiser is used after LE Clear Advertising Sets in "
+                 "1.7.0 (DRGN-15993), and a legacy advertiser's scan "
+                 "response data corrupted by extended commands in 1.6.0 "
+                 "(DRGN-15465). All three are the same shape as this.\n"
+                 "\n"
                  "The row stays where it is until that table has been read. "
                  "Moving it to the extended phase would make the run green "
                  "and would settle nothing",
@@ -397,6 +413,10 @@ _LE_BASIC = [
 # LE privacy and the resolving list
 # ---------------------------------------------------------------------------
 
+# Not zeroes, deliberately. sdk-nrfxlib limitations.rst DRGN-9083 says an
+# all zero identity resolving key in the resolving list makes any resolvable
+# address that resolves against it report as that device, so a run using zero
+# keys would be testing the erratum rather than the commands.
 _PEER_IRK = bytes(range(16))
 _LOCAL_IRK = bytes(range(16, 32))
 
@@ -749,7 +769,15 @@ _ISO = [
                  "transport latency either way. The stream is 40 octets each "
                  "way on LE 1M with two retransmissions. Latency below the "
                  "ISO interval is unschedulable for an unframed group, so it "
-                 "is twice the SDU interval rather than equal to it"),
+                 "is twice the SDU interval rather than equal to it.\n"
+                 "\n"
+                 "10 ms is also chosen against sdk-nrfxlib limitations.rst, "
+                 "DRGN-21099: this controller enforces framed units unless "
+                 "the SDU interval is an integer multiple of 1250 us or an "
+                 "integer divisor of 5000 us, and once framed it refuses "
+                 "unequal intervals and anything under 5000 us. 10000 is "
+                 "eight times 1250, so unframed stands and neither of those "
+                 "applies"),
     Command(0x2064, "LE Create CIS", STATUS,
             lambda ctx: bytes([1]) + struct.pack("<HH", UNUSED_HANDLE,
                                                  ctx.handle),
@@ -840,7 +868,10 @@ _ISO = [
                  "sixteen zero octets that are still sent. A group needs "
                  "periodic advertising running on the set, which nothing "
                  "here leaves running, so being refused is the answer this "
-                 "row expects",
+                 "row expects. The 10 ms SDU interval also clears "
+                 "sdk-nrfxlib limitations.rst DRGN-21246, which says this "
+                 "command does not support an interval under 1250 us, or "
+                 "under 5000 us with framed units",
             phase=PHASE_EXTENDED),
     Command(0x2069, "LE Create BIG Test", STATUS,
             bytes([PROBE_BIG_TEST_HANDLE, PROBE_ADV_HANDLE, 1]) + _u24(10000)

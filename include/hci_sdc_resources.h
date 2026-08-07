@@ -190,6 +190,21 @@ extern "C" {
 #define HCI_SDC_ISO_TX_SDU_COUNT    4U
 #define HCI_SDC_ISO_RX_SDU_COUNT    4U
 
+/*
+ * The controller's own ceiling, from sdk-nrfxlib limitations.rst, DRGN-25316:
+ * sending and receiving isochronous units larger than 1255 octets is not
+ * supported. Vol 4 Part E allows 4095, so a size between the two is a value
+ * the specification permits and this controller does not, and the assertions
+ * below say so at build time rather than leaving it to be found on a stream
+ * that moves nothing.
+ */
+#define HCI_SDC_ISO_SDU_LIMIT       1255U
+
+static_assert(HCI_SDC_ISO_TX_SDU_SIZE <= HCI_SDC_ISO_SDU_LIMIT,
+              "transmit SDU is past what the controller supports");
+static_assert(HCI_SDC_ISO_RX_SDU_SIZE <= HCI_SDC_ISO_SDU_LIMIT,
+              "receive SDU is past what the controller supports");
+
 /* Protocol data units per stream, each side. */
 #define HCI_SDC_ISO_TX_PDU_PER_STREAM 3U
 #define HCI_SDC_ISO_RX_PDU_PER_STREAM 3U
