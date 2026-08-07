@@ -2195,11 +2195,11 @@ def cmd_probe(hci, args):
                     and probe_available(c, args, live_handle, ctx)[0]
                     and c.opcode != 0x0C03]
 
-        def attempt(count):
+        def attempt(rows):
             preamble("Resetting", quiet=True)
             quiet_run = 0
             last_answer = "the preamble"
-            for command in pool[:count] + fixed:
+            for command in list(rows) + fixed:
                 if replay(command):
                     quiet_run = 0
                     last_answer = "0x%04X %s" % (command.opcode, command.name)
@@ -2231,10 +2231,10 @@ def cmd_probe(hci, args):
         print("Each attempt resets and replays a prefix, so it takes a few")
         print("seconds per line.")
         print()
-        clean = attempt(0)
+        clean = attempt([])
         print("  with none of them:  %s"
               % ("accepted" if clean == 0 else "refused 0x%02X" % clean))
-        dirty = attempt(len(pool))
+        dirty = attempt(pool)
         print("  with all of them:   %s"
               % ("accepted" if dirty == 0 else "refused 0x%02X" % dirty))
         print()
@@ -2252,7 +2252,7 @@ def cmd_probe(hci, args):
         low, high = 0, len(pool)
         while high - low > 1:
             mid = (low + high) // 2
-            status = attempt(mid)
+            status = attempt(pool[:mid])
             print("  first %2d rows:      %s"
                   % (mid, "accepted" if status == 0
                      else "refused 0x%02X" % status))
@@ -2267,6 +2267,26 @@ def cmd_probe(hci, args):
         print("those is 0x%04X %s." % (culprit.opcode, culprit.name))
         print("Sending it makes 0x%04X refuse; skipping it does not."
               % target.opcode)
+        print()
+
+        # A prefix bisection says the row is needed, not that it is enough on
+        # its own. Sending it alone answers that, and the answer is the
+        # difference between a reproduction someone else can run in two
+        # commands and one that needs twenty six.
+        alone = attempt([culprit])
+        if alone != 0:
+            print("It is enough on its own. From a reset, 0x%04X and then"
+                  % culprit.opcode)
+            print("the %d rows this one needs is the whole reproduction:"
+                  % len(fixed))
+            print("    --only %s"
+                  % ",".join("0x%04X" % c.opcode
+                             for c in [culprit] + fixed + [target]))
+        else:
+            print("On its own it is not enough, so it needs something in the")
+            print("%d rows before it as well. The reproduction is the prefix,"
+                  % (high - 1))
+            print("not the one row.")
 
     only = None
     if args.only:

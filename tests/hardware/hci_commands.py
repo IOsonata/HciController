@@ -291,12 +291,23 @@ _LE_BASIC = [
                  "scannable and then a connectable type all leave it "
                  "refused.\n"
                  "\n"
-                 "So it is a row that runs earlier, it is not one of the "
-                 "five guessed at so far, and the guessing has cost a "
-                 "hardware run each. --bisect 0x200A replays prefixes of "
-                 "the rows before this one and halves the range, which names "
-                 "the row in one run. Whatever it names goes here, and this "
-                 "note goes away",
+                 "--bisect 0x200A named the row, twice, identically: "
+                 "LE Read Maximum Advertising Data Length, 0x203A. Sending "
+                 "it makes this one refuse and skipping it does not.\n"
+                 "\n"
+                 "0x203A is a read. Vol 4 Part E 7.8.57 gives it no "
+                 "parameters, no error conditions and no side effects, and "
+                 "the nrfxlib header repeats that. It is also not one of the "
+                 "extended commands that Vol 4 Part E 3.1.1 says locks the "
+                 "legacy ones out, and the lockout answers Command "
+                 "Disallowed rather than Invalid HCI Command Parameters "
+                 "anyway. So a host is entitled to read it at any time and "
+                 "this controller is not entitled to refuse legacy "
+                 "advertising afterwards.\n"
+                 "\n"
+                 "The row stays as it is. It describes what a controller "
+                 "should answer, the controller answers something else, and "
+                 "that is what a refused row is for",
             phase=PHASE_LEGACY),
     Command(0x200B, "LE Set Scan Parameters", COMPLETE,
             lambda ctx: struct.pack("<BHHBB", 0x00, 0x0060, 0x0030,
