@@ -38,11 +38,20 @@
  * are taken by that header, so a local one wants to sit well clear of them.
  */
 
+/*
+ * Nordic Thingy:91. Not I-SYST hardware, so its id sits well clear of the
+ * IOsonata range rather than pretending to belong to it. The nRF52840 on that
+ * board reaches its host over the interconnect UART to the nRF9160, never over
+ * USB, so it is the one board here that has no use for VBUS.
+ */
+#define THINGY91_NRF52840	100
+
 /* -DBOARD=... on the command line wins, which is how the build is checked
  * against every board without editing this file. */
 #ifndef BOARD
 #define BOARD			UDG_NRF52840
 //#define BOARD			IBK_NRF52840
+//#define BOARD			THINGY91_NRF52840
 #endif
 
 //=============================================================================
@@ -128,17 +137,24 @@
 //=============================================================================
 
 /*
- * Placeholders. This board reaches its host over USB, so nothing has ever put
- * a signal on these. They become real the moment the image is built with
- * -DHCI_HOST_SELECT=HCI_HOST_SELECT_UART, so check them against the schematic
- * before doing that.
+ * Placeholders, and they were worse than that. P0.25, P1.00, P0.19 and P0.22
+ * are not dongle pins at all: they are the Nordic Thingy:91 nRF52840
+ * interconnect, copied here and then left, with RTS and CTS crossed on the way
+ * in. The Thingy:91 board file below has the same four the right way round,
+ * taken from sdk-nrf boards/nordic/thingy91.
+ *
+ * So these are named after the header the dongle brings out rather than after
+ * another board's wiring, and they are still placeholders: this board reaches
+ * its host over USB and nothing has put a signal on them. They become real the
+ * moment the image is built with -DHCI_HOST_SELECT=HCI_HOST_SELECT_UART, so
+ * check them against the schematic before doing that.
  */
 #define UART_TX_PORT            0
-#define UART_TX_PIN             25
+#define UART_TX_PIN             24
 #define UART_TX_PINOP           0
 
-#define UART_RX_PORT            1
-#define UART_RX_PIN             0
+#define UART_RX_PORT            0
+#define UART_RX_PIN             23
 #define UART_RX_PINOP           0
 
 #define UART_RTS_PORT           0
@@ -209,6 +225,83 @@
 #define UART_CTS_PORT           0
 #define UART_CTS_PIN            22
 #define UART_CTS_PINOP          0
+
+#define UART_DEVNO			0
+
+#define UART_RATE			1000000
+
+
+#elif BOARD == THINGY91_NRF52840
+
+#define BOARD_NAME                      "Nordic Thingy:91"
+#define BOARD_MODULE_NAME               "Nordic nRF52840"
+
+/*
+ * The host is the nRF9160 on the same board, over the interconnect UART. The
+ * USB socket on this board belongs to the nRF52840, but nothing on the far
+ * side of it speaks HCI, so VBUS decides nothing here and AUTO would come up
+ * talking to a host that is not there.
+ */
+#ifndef HCI_HOST_SELECT
+#define HCI_HOST_SELECT                 HCI_HOST_SELECT_UART
+#endif
+
+/*
+ * No LED reaches this part. The Thingy:91 LEDs are driven from the nRF9160
+ * side, so anything driven from here would be driving pins that belong to
+ * something else.
+ */
+#define HCI_STATUS_LEDS                 0
+
+/* The one button this part has, from the board's own device tree. */
+#define BUTTON1_PORT					1
+#define BUTTON1_PIN						13
+#define BUTTON1_PINOP					0
+
+#define BUTTON_PINS { \
+	{BUTTON1_PORT, BUTTON1_PIN, BUTTON1_PINOP, IOPINDIR_INPUT, IOPINRES_PULLUP, IOPINTYPE_NORMAL},}
+
+//=============================================================================
+// UART Pin Definitions
+//=============================================================================
+
+/*
+ * From sdk-nrf, boards/nordic/thingy91/thingy91_nrf52840-pinctrl.dtsi, the
+ * uart1 node, which is the one wired to the nRF9160:
+ *
+ *     UART_TX  P0.25      UART_RX  P1.00
+ *     UART_RTS P0.22      UART_CTS P0.19
+ *
+ * and the far side, thingy91_nrf9160_common-pinctrl.dtsi uart1:
+ *
+ *     UART_TX  P0.22      UART_RX  P0.23
+ *     UART_RTS P0.24      UART_CTS P0.25
+ *
+ * which crosses as it should: this part's RTS meets the nRF9160's CTS and the
+ * other way round. Both board files say current-speed 1000000.
+ *
+ * All four wires exist, so flow control is on. Off, this part never asserts
+ * RTS, and a host that has flow control on never sees its CTS asserted and so
+ * never transmits: the first command times out with nothing on the wire in
+ * either direction, and no side can tell why.
+ */
+#define UART_TX_PORT            0
+#define UART_TX_PIN             25
+#define UART_TX_PINOP           0
+
+#define UART_RX_PORT            1
+#define UART_RX_PIN             0
+#define UART_RX_PINOP           0
+
+#define UART_RTS_PORT           0
+#define UART_RTS_PIN            22
+#define UART_RTS_PINOP          0
+
+#define UART_CTS_PORT           0
+#define UART_CTS_PIN            19
+#define UART_CTS_PINOP          0
+
+#define UART_HW_FLOWCTRL	1
 
 #define UART_DEVNO			0
 

@@ -126,9 +126,26 @@ tests/              host tests and hardware tools
 
 ## Boards
 
-`nRF52840/src/board.h` selects the board with `BOARD`, and carries the I-SYST
-boards this firmware is developed and tested on: the UDG-NRF52840x dongle and
-the IBK-NRF52840 breakout.
+`nRF52840/src/board.h` selects the board with `BOARD`. It holds the I-SYST
+boards this firmware is developed and tested on, the UDG-NRF52840x dongle and
+the IBK-NRF52840 breakout, and one board that is not I-SYST hardware: the
+Nordic Thingy:91, whose nRF52840 reaches its host over the interconnect UART
+to the nRF9160.
+
+The Thingy:91 pins come from `sdk-nrf`,
+`boards/nordic/thingy91/thingy91_nrf52840-pinctrl.dtsi`, the `uart1` node:
+
+```text
+nRF52840 side   TX P0.25   RX P1.00   RTS P0.22   CTS P0.19
+nRF9160 side    TX P0.22   RX P0.23   RTS P0.24   CTS P0.25
+Rate            1,000,000 bit/s, both board files
+Flow control    hardware, all four wires exist
+```
+
+That board defaults to `HCI_HOST_SELECT_UART`, because its USB socket has
+nothing behind it that speaks HCI and AUTO would come up talking to a host
+that is not there. It also sets `HCI_STATUS_LEDS 0`, since the Thingy:91 LEDs
+are driven from the nRF9160.
 
 Other hardware is a port, and it is a small one. A board says four things
 beyond its pins:

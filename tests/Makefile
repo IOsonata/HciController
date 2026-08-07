@@ -100,8 +100,8 @@ RESOURCES_TARGET := $(BUILD_DIR)/hci_sdc_resources_test
 TARGETS += $(RESOURCES_TARGET)
 endif
 
-.PHONY: all run clean check-root check-project check-commands check-smp \
-        print-config
+.PHONY: all run clean check-root check-project check-boards \
+        check-commands check-smp print-config
 
 PYTHON ?= python3
 
@@ -172,7 +172,16 @@ check-smp:
 	@echo "[TEST] smp_vectors.py"
 	@$(PYTHON) $(THIS_DIR)/smp_vectors.py
 
-run: all check-project check-commands check-smp
+# The real board.h is compiled by the target build and by nothing else, so
+# every pin number in it has only ever been checked by an ARM build for one
+# board. That is how the dongle came to hold another board's pin map.
+check-boards:
+	@command -v $(PYTHON) >/dev/null 2>&1 || { \
+	  echo "[TEST] board_pins.py skipped, no $(PYTHON)"; exit 0; }
+	@echo "[TEST] board_pins.py"
+	@$(PYTHON) $(THIS_DIR)/board_pins.py $(ROOT)
+
+run: all check-project check-boards check-commands check-smp
 	@set -e; for t in $(TARGETS); do \
 	  echo "[TEST] $$(basename $$t)"; $$t; done
 	@echo
