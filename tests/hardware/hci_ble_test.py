@@ -1924,8 +1924,11 @@ def cmd_probe(hci, args):
     print("Identity %s (%s)" % (addr_str(identity), source))
 
     # The command counter only ever rises within one controller lifetime, so
-    # a lower reading than the last one means the controller restarted under
-    # the run. That has happened here: a direct test mode test torn down too
+    # a lower reading than the last one means the firmware restarted under
+    # the run. What it does not catch is the SoftDevice Controller putting
+    # its own link layer state back to defaults while the firmware above it
+    # keeps running and keeps counting, so a quiet detector rules out one of
+    # the two and not the other. That has happened here: a direct test mode test torn down too
     # quickly resets this part, and the first symptom was the USB port
     # vanishing. With the settle wait it survives, and what was left was a
     # controller that had quietly forgotten its random address, so
@@ -1997,11 +2000,39 @@ def cmd_probe(hci, args):
         if status in command.expect:
             counts["expected"] += 1
             report(command, "ok", text + ", as the row expects")
+            return
+        counts["refused"] += 1
+        report(command, "  ", text)
+        if args.verbose and command.note:
+            print("     what the row assumed: %s" % command.note)
+        if command.retry_after is None:
+            return
+
+        # The row names the state its refusal points at. Put that back and
+        # send it once more, so the run says whether the diagnosis holds
+        # instead of leaving it to be argued about between runs.
+        opcode, payload = command.retry_after
+        payload = payload(ctx) if callable(payload) else payload
+        try:
+            fix, _ = hci.command(opcode, payload, timeout=1.0,
+                                 allow_fail=True)
+            if fix != 0:
+                print("     could not retry, 0x%04X was itself refused 0x%02X"
+                      % (opcode, fix))
+                return
+            again, _ = hci.command(command.opcode, command.build(ctx),
+                                   timeout=3.0, allow_fail=True)
+        except (HciError, HciGone):
+            print("     the retry did not complete")
+            return
+        if again == 0:
+            print("     sending 0x%04X first makes this work, so that state"
+                  % opcode)
+            print("     was missing and something above took it away")
         else:
-            counts["refused"] += 1
-            report(command, "  ", text)
-            if args.verbose and command.note:
-                print("     what the row assumed: %s" % command.note)
+            print("     sending 0x%04X first changes nothing, still 0x%02X,"
+                  % (opcode, again))
+            print("     so that state is not what the refusal was about")
 
     def send(command):
         available, reason = probe_available(command, args, live_handle, ctx)

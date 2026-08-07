@@ -38,6 +38,11 @@ Fields
                 this parameter block, so a probe run can tell a controller
                 behaving properly from one that is not
     note        why the payload is what it is, where that is not obvious
+    retry_after an (opcode, payload) pair to send and retry once with, when
+                this row is refused unexpectedly. For a refusal whose error
+                code names a piece of missing state, this is what puts that
+                state back, so the run reports whether the diagnosis holds
+                rather than ending at the error code
 """
 
 import struct
@@ -105,11 +110,11 @@ def _conn(ctx, tail=b""):
 
 class Command(object):
     __slots__ = ("opcode", "name", "reply", "payload", "needs", "undo",
-                 "undo_now", "expect", "phase", "note")
+                 "undo_now", "expect", "phase", "note", "retry_after")
 
     def __init__(self, opcode, name, reply, payload, needs=NEEDS_NOTHING,
                  undo=None, undo_now=False, expect=(), phase=PHASE_ANY,
-                 note=""):
+                 note="", retry_after=None):
         self.opcode = opcode
         self.name = name
         self.reply = reply
@@ -120,6 +125,11 @@ class Command(object):
         self.expect = expect
         self.phase = phase
         self.note = note
+        # What to send and retry with when this row is refused for a reason
+        # the row did not predict. Names the state the refusal points at, so
+        # a run says whether that was what was missing instead of leaving it
+        # to be guessed at between runs.
+        self.retry_after = retry_after
 
     def build(self, ctx):
         """The parameter block to send, resolved against the probe context."""
@@ -226,8 +236,24 @@ _LE_BASIC = [
             phase=PHASE_LEGACY),
     Command(0x200A, "LE Set Advertising Enable", COMPLETE, b"\x01",
             undo=(0x200A, b"\x00"),
+            retry_after=(0x2005, lambda ctx: ctx.identity),
             note="turned back off by undo, so the probe does not walk away "
-                 "with the radio transmitting",
+                 "with the radio transmitting.\n"
+                 "\n"
+                 "This row is refused with Invalid HCI Command Parameters on "
+                 "a board whose identity is a static random address, "
+                 "repeatably. The header gives one condition for that error "
+                 "with Own_Address_Type set to random, which is that the "
+                 "random address was never initialised. It was, twice, in "
+                 "the preamble and again at LE Set Random Address, so "
+                 "something between there and here takes it away. The "
+                 "restart detector stays quiet, so the firmware is not "
+                 "restarting.\n"
+                 "\n"
+                 "retry_after sets the address again and sends this once "
+                 "more. If that works the diagnosis holds and what remains "
+                 "is which row clears it; if it does not, the error is "
+                 "something the header does not list",
             phase=PHASE_LEGACY),
     Command(0x200B, "LE Set Scan Parameters", COMPLETE,
             lambda ctx: struct.pack("<BHHBB", 0x00, 0x0060, 0x0030,
