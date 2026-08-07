@@ -1545,7 +1545,46 @@ def probe_wait_for_peer(hci, ctx, args):
     return conn_handle
 
 
-def probe_wait_for_ltk(hci, args):
+def probe_service_att(hci, att, seconds):
+    """
+    Answer whatever the peer asks for, for a while.
+
+    The probe advertises to get a link, and a phone that connects immediately
+    tries to discover services. With nothing answering, discovery stalls: the
+    packets arrive, hci.command defers them because they are not the event it
+    is waiting for, and nothing ever looks at them again. The phone sits
+    there until it gives up, and pairing, which is what makes the key request
+    rows worth anything, never gets a chance to start.
+
+    So the connection phase serves the same small attribute table the
+    advertise command does, between one command and the next.
+    """
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        queued = hci.pending
+        hci.pending = []
+        for packet in queued:
+            probe_feed(att, packet)
+
+        packet = hci.read_packet(0.2)
+        if packet is not None:
+            probe_feed(att, packet)
+
+
+def probe_feed(att, packet):
+    """Hand one ACL packet to the attribute server, ignore anything else."""
+    kind, _, body = packet
+    if kind != H4_ACL or len(body) < 8:
+        return
+    length = struct.unpack("<H", body[2:4])[0]
+    l2cap = body[4:4 + length]
+    if len(l2cap) < 4:
+        return
+    plen, cid = struct.unpack("<HH", l2cap[0:4])
+    att.feed(l2cap[4:4 + plen], cid)
+
+
+def probe_wait_for_ltk(hci, att, args):
     """
     Give a pairing peer time to ask for the long term key, and say so.
 
@@ -1565,7 +1604,13 @@ def probe_wait_for_ltk(hci, args):
 
     deadline = time.time() + args.wait_ltk
     while time.time() < deadline and hci.ltk_request is None:
-        hci.read_packet(0.2)
+        queued = hci.pending
+        hci.pending = []
+        for packet in queued:
+            probe_feed(att, packet)
+        packet = hci.read_packet(0.2)
+        if packet is not None:
+            probe_feed(att, packet)
 
     if hci.ltk_request is None:
         print("No key request in %d seconds. The Long Term Key Request rows"
@@ -1781,12 +1826,22 @@ def cmd_probe(hci, args):
             print("Running the commands that need a link, on handle 0x%04X."
                   % handle)
             print()
+            # A phone that connects starts discovering services at once,
+            # and a peripheral that answers nothing leaves it stalled until
+            # it gives up. Serve the same small attribute table the
+            # advertise command does, so the peer gets its answers and stays
+            # long enough to be worth talking to.
+            att = AttServer(hci, handle, "HCI-PROBE")
+            probe_service_att(hci, att, args.discover_secs)
+            print("Peer asked %d question(s), answered %d."
+                  % (att.requests, att.responses))
+
             # A phone that offers to pair starts encryption, and the
             # peripheral has to answer the key request or the link dies on
             # the encryption timeout. Waiting for it also turns the two Long
             # Term Key Request rows from a shape check into a real exchange.
             if args.wait_ltk:
-                probe_wait_for_ltk(hci, args)
+                probe_wait_for_ltk(hci, att, args)
 
             # Disconnect ends the link every other row here needs, so it
             # goes last whatever order the table is in.
@@ -1809,6 +1864,13 @@ def cmd_probe(hci, args):
             linked.sort(key=lambda c: c.opcode == 0x0406)
             for command in linked:
                 send(command)
+                # The peer may still be asking questions. Its packets land in
+                # the deferred queue while a command is waiting for its
+                # event, and nothing else would ever look at them again.
+                queued = hci.pending
+                hci.pending = []
+                for packet in queued:
+                    probe_feed(att, packet)
             unwind()
 
             # Leave nothing connected, whether or not Disconnect was one of
@@ -1912,6 +1974,10 @@ def main():
                         "and let a phone connect, then send the commands "
                         "that need a link. A dongle cannot connect to "
                         "itself, and this needs no second board")
+    p.add_argument("--discover-secs", type=int, default=5, metavar="SECONDS",
+                   help="serve the attribute table for this long after "
+                        "connecting, so a phone can finish discovery instead "
+                        "of stalling on a peripheral that answers nothing")
     p.add_argument("--wait-ltk", type=int, default=5, metavar="SECONDS",
                    help="once connected, wait this long for a pairing peer "
                         "to ask for the long term key. Answering it is what "

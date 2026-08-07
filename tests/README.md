@@ -256,6 +256,19 @@ is skipped rather than sent and refused. Reaching the central side means the
 board connecting outward to something that advertises, which `connect`
 already does; wiring that into `probe` is not done.
 
+### The peer discovers services first
+
+A phone that connects starts discovering services immediately. `probe` serves
+the same small attribute table `advertise` does, Generic Access and the
+Nordic UART Service, for `--discover-secs` after connecting and again between
+each connection scoped command.
+
+Without that the packets arrive, `hci.command` defers them because they are
+not the event it is waiting for, and nothing looks at them again. The phone
+sits there until it gives up, which reads as the link stalling, and pairing
+never gets a chance to start. The run reports how many questions the peer
+asked and how many were answered.
+
 ### If the peer offers to pair
 
 Tapping pair rather than just connect makes a difference. A central that
