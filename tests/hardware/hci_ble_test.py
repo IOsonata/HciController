@@ -2134,20 +2134,34 @@ def cmd_probe(hci, args):
         del undo[:]
 
     def replay(command):
-        """Send a row and its immediate undo, saying nothing about either."""
+        """
+        Send a row and its immediate undo, saying nothing about either.
+
+        Returns True if the controller answered. A replay is not interested
+        in what it answered, only in the state the row leaves behind, so the
+        timeouts are shorter than a reported send uses. A row that declares
+        it answers nothing gets the short window it deserves rather than
+        three seconds of waiting for silence.
+        """
         available, _ = probe_available(command, args, live_handle, ctx)
         if not available or command.opcode == 0x0C03:
-            return
+            return True
+        window = 0.5 if command.reply == hci_commands.NONE else 1.0
+        answered = True
         try:
-            hci.command(command.opcode, command.build(ctx), timeout=3.0,
-                        allow_fail=True)
+            status, _ = hci.command(command.opcode, command.build(ctx),
+                                    timeout=window, allow_fail=True)
+            answered = status is not None
             if command.undo is not None and command.undo_now:
                 if args.settle_ms:
                     time.sleep(args.settle_ms / 1000.0)
                 hci.command(command.undo[0], undo_payload(command.undo),
                             timeout=1.0, allow_fail=True)
         except HciError:
-            pass
+            # A row that answers nothing on success raises here, and that is
+            # the row behaving. Only silence where an answer was due counts.
+            answered = command.reply == hci_commands.NONE
+        return answered
 
     def bisect(target_opcode):
         """
@@ -2183,10 +2197,27 @@ def cmd_probe(hci, args):
 
         def attempt(count):
             preamble("Resetting", quiet=True)
-            for command in pool[:count]:
-                replay(command)
-            for command in fixed:
-                replay(command)
+            quiet_run = 0
+            last_answer = "the preamble"
+            for command in pool[:count] + fixed:
+                if replay(command):
+                    quiet_run = 0
+                    last_answer = "0x%04X %s" % (command.opcode, command.name)
+                    continue
+                # Silence where an answer was due. One is a slow row; a run
+                # of them is a controller that has stopped talking, and
+                # waiting out the rest of the list at a second each is what
+                # made this look like a hang rather than a finding.
+                quiet_run += 1
+                if quiet_run >= 3:
+                    print()
+                    print("The controller stopped answering during the")
+                    print("replay. The last row it answered was %s,"
+                          % last_answer)
+                    print("and the three after it said nothing. That is its")
+                    print("own finding and the bisection cannot go on"
+                          " through it.")
+                    raise HciGone("controller stopped answering")
             status, _ = hci.command(target.opcode, target.build(ctx),
                                     timeout=3.0, allow_fail=True)
             # Put it back before the next attempt, whatever it answered.
@@ -2197,6 +2228,8 @@ def cmd_probe(hci, args):
 
         print("Bisecting 0x%04X %s over %d rows that run before it."
               % (target.opcode, target.name, len(pool)))
+        print("Each attempt resets and replays a prefix, so it takes a few")
+        print("seconds per line.")
         print()
         clean = attempt(0)
         print("  with none of them:  %s"
@@ -2255,7 +2288,10 @@ def cmd_probe(hci, args):
             send(command)
 
     if args.bisect is not None:
-        bisect(args.bisect)
+        try:
+            bisect(args.bisect)
+        except HciGone as err:
+            print("Bisection stopped: %s." % err)
         return
 
     check_alive("start up")
