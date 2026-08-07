@@ -1919,6 +1919,41 @@ def cmd_probe(hci, args):
     preamble("Resetting the controller")
     print("Identity %s (%s)" % (addr_str(identity), source))
 
+    # The command counter only ever rises within one controller lifetime, so
+    # a lower reading than the last one means the controller restarted under
+    # the run. That has happened here: a direct test mode test torn down too
+    # quickly resets this part, and the first symptom was the USB port
+    # vanishing. With the settle wait it survives, and what was left was a
+    # controller that had quietly forgotten its random address, so
+    # LE Set Advertising Enable answered Invalid HCI Command Parameters and
+    # read like a bad parameter block.
+    #
+    # So the counter is sampled at every phase boundary and a fall is
+    # reported. A silent restart is the thing worth catching; the rows after
+    # it failing is only the symptom.
+    restart_watch = {"last": 0}
+
+    def check_alive(where):
+        values = hci.read_counters()
+        if values is None:
+            return
+        count = values[0]
+        if count < restart_watch["last"]:
+            print()
+            print("The controller restarted during %s." % where)
+            print("Its command counter fell from %d to %d, which it cannot do"
+                  % (restart_watch["last"], count))
+            print("without the controller having been through a reset. Every")
+            print("row after the restart ran against a controller that had")
+            print("lost its addresses, its event masks and its advertising")
+            print("sets, so their refusals say nothing about their own")
+            print("parameter blocks.")
+            print()
+            restart_watch["last"] = count
+            return True
+        restart_watch["last"] = count
+        return False
+
     # A handle with nothing behind it turns two dozen rows into two dozen
     # Unknown Connection Identifier lines, which says nothing about any of
     # them. Ask once with a harmless read and skip the group if it is dead.
@@ -2052,15 +2087,32 @@ def cmd_probe(hci, args):
                 continue
             send(command)
 
+    check_alive("start up")
     run_phase(hci_commands.PHASE_ANY)
+
+    # Between the two groups rather than at the end, because the direct test
+    # mode rows sit in the first group and the legacy advertising rows in the
+    # second. Re-asserting the address costs one command and means a restart
+    # that happened anyway does not turn the rows after it into a second,
+    # invented failure.
+    if check_alive("the commands that work in either advertising mode"):
+        if addr_type == 0x01:
+            hci.command(OP_LE_SET_RANDOM_ADDRESS, identity, allow_fail=True)
+            print("Random address set again, so the legacy rows below test")
+            print("themselves rather than the restart.")
+            print()
+
     run_phase(hci_commands.PHASE_LEGACY)
+    check_alive("the legacy advertising rows")
     unwind()
 
     print()
     preamble("Resetting, so the extended advertising commands are allowed")
     print()
 
+    check_alive("the reset between the two advertising modes")
     run_phase(hci_commands.PHASE_EXTENDED)
+    check_alive("the extended advertising rows")
     unwind()
 
     for command in hci_commands.TEARDOWN:

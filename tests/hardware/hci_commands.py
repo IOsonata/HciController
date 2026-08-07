@@ -612,9 +612,14 @@ PROBE_CIG_ID = 0x00
 PROBE_CIG_TEST_ID = 0x01
 PROBE_CIS_ID = 0x00
 
-# The broadcast group the BIG rows name. Nothing creates one without periodic
-# advertising running, so this is the handle they are refused at.
+# The broadcast groups the BIG rows name. Two, because LE Create BIG and
+# LE Create BIG Test both build one and a group handle holds one group.
 PROBE_BIG_HANDLE = 0x00
+PROBE_BIG_TEST_HANDLE = 0x01
+
+# Coding format 0x03 in the assigned numbers. Not zero: zero is mu-law, a
+# real codec, and a controller that does not implement it says so.
+CODING_FORMAT_TRANSPARENT = 0x03
 
 
 def _u24(value):
@@ -701,12 +706,17 @@ _ISO = [
                  "offset"),
     Command(0x206E, "LE Setup ISO Data Path", COMPLETE,
             struct.pack("<H", UNUSED_HANDLE) + bytes([0, 0])
-            + bytes(5) + _u24(0) + bytes([0]),
+            + bytes([CODING_FORMAT_TRANSPARENT]) + bytes(4)
+            + _u24(0) + bytes([0]),
             expect=(STATUS_UNKNOWN_CONNECTION, STATUS_COMMAND_DISALLOWED),
-            note="input direction, HCI data path, transparent codec, no "
+            note="input direction, HCI data path, transparent air mode, no "
                  "controller delay, no codec configuration. The trailing "
                  "length is what makes the block variable, so a zero there "
-                 "is the shortest legal form of it"),
+                 "is the shortest legal form of it. The coding format was "
+                 "five zero octets once, and zero is not transparent, it is "
+                 "mu-law: the controller answered Unsupported Feature or "
+                 "Parameter Value, which is the correct answer to a codec "
+                 "it does not implement"),
     Command(0x206F, "LE Remove ISO Data Path", COMPLETE,
             struct.pack("<HB", UNUSED_HANDLE, 0x01),
             expect=(STATUS_UNKNOWN_CONNECTION, STATUS_COMMAND_DISALLOWED),
@@ -740,15 +750,29 @@ _ISO = [
                  "row expects",
             phase=PHASE_EXTENDED),
     Command(0x2069, "LE Create BIG Test", STATUS,
-            bytes([PROBE_BIG_HANDLE, PROBE_ADV_HANDLE, 1]) + _u24(10000)
-            + struct.pack("<H", 8) + bytes([2]) + struct.pack("<HH", 40, 40)
+            bytes([PROBE_BIG_TEST_HANDLE, PROBE_ADV_HANDLE, 1]) + _u24(10000)
+            + struct.pack("<H", 8) + bytes([1]) + struct.pack("<HH", 40, 40)
             + bytes([1, 0, 0, 1, 1, 0, 0]) + bytes(16),
             needs=(NEEDS_ADV_SET, NEEDS_CONSENT),
-            expect=(STATUS_UNKNOWN_ADV_ID, STATUS_COMMAND_DISALLOWED),
+            undo=(0x206A, bytes([PROBE_BIG_TEST_HANDLE, 0x16])),
+            expect=(STATUS_UNKNOWN_ADV_ID, STATUS_COMMAND_DISALLOWED,
+                    STATUS_INVALID_PARAMS),
             note="the same group stated rather than derived: ISO interval 8 "
-                 "in 1.25 ms units, two subevents, 40 octet service and "
+                 "in 1.25 ms units, one subevent, 40 octet service and "
                  "protocol units, one burst, one repeated transmission, no "
-                 "pre transmission offset",
+                 "pre transmission offset. The subevent count was two, and "
+                 "the header says the immediate repetition count has to be "
+                 "in the range 1 to NSE divided by BN, so two subevents with "
+                 "one burst and one repetition leaves a subevent nothing "
+                 "fills.\n"
+                 "\n"
+                 "This row is provisional. LE Create BIG above it succeeds "
+                 "and takes both the group handle and the periodic train, "
+                 "and a train can hold one group only, so a second one on "
+                 "the same train is refused whatever the parameters say. "
+                 "The handle here is a different one, which is what tells "
+                 "the two causes apart on the next run: still refused means "
+                 "the train, accepted means it was the handle",
             phase=PHASE_EXTENDED),
     Command(0x206A, "LE Terminate BIG", STATUS,
             bytes([PROBE_BIG_HANDLE, 0x16]),
