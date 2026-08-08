@@ -170,6 +170,84 @@ static void TestSinglePacket(void)
     printf("[ok] single command packet reaches the handler\n");
 }
 
+/*
+ * The octets are counted and the first of them kept.
+ *
+ * Kept once and not replaced, because the question they answer is what was on
+ * the wire when this side started listening. A capture that followed the
+ * stream would show the middle of whatever is there now, which is the one
+ * thing already visible from the counts.
+ */
+static void TestFirstOctetsAreKept(void)
+{
+    ResetIntrf();
+
+    HciIntrfTransport_t transport;
+    Capture capture;
+    uint8_t packet[64];
+
+    memset(&capture, 0, sizeof(capture));
+    capture.Accept = true;
+
+    assert(HciIntrfTransportInit(&transport, &gIntrf.Base, packet,
+                                 sizeof(packet), CapturePacket, &capture));
+    HciIntrfTransportOpen(&transport);
+
+    assert(transport.RxOctetCount == 0U);
+    assert(transport.FirstRxLen == 0U);
+
+    const uint8_t wire[] = {0x01, 0x03, 0x0C, 0x00};
+    FeedRx(wire, sizeof(wire));
+    HciIntrfTransportProcess(&transport);
+
+    assert(transport.RxOctetCount == 4U);
+    assert(transport.FirstRxLen == 4U);
+    assert(memcmp(transport.FirstRx, wire, sizeof(wire)) == 0);
+
+    /* More arrives. The count moves, the first octets do not. */
+    const uint8_t more[] = {0x01, 0x01, 0x10, 0x00};
+    FeedRx(more, sizeof(more));
+    HciIntrfTransportProcess(&transport);
+
+    assert(transport.RxOctetCount == 8U);
+    assert(transport.FirstRxLen == 4U);
+    assert(memcmp(transport.FirstRx, wire, sizeof(wire)) == 0);
+
+    printf("[ok] octets are counted and the first ones kept\n");
+}
+
+/*
+ * A stream that is not H:4 at all is counted as octets and refused as packets.
+ * That pair is what separates a busy wire from a host: an unconnected pin and
+ * a console on the wrong wire both move octets and deliver nothing.
+ */
+static void TestNonH4StreamIsSeenAsSuch(void)
+{
+    ResetIntrf();
+
+    HciIntrfTransport_t transport;
+    Capture capture;
+    uint8_t packet[64];
+
+    memset(&capture, 0, sizeof(capture));
+    capture.Accept = true;
+
+    assert(HciIntrfTransportInit(&transport, &gIntrf.Base, packet,
+                                 sizeof(packet), CapturePacket, &capture));
+    HciIntrfTransportOpen(&transport);
+
+    const uint8_t text[] = "boot: hello from a console\n";
+    FeedRx(text, sizeof(text) - 1U);
+    HciIntrfTransportProcess(&transport);
+
+    assert(transport.RxOctetCount == sizeof(text) - 1U);
+    assert(capture.Count == 0U);
+    assert(transport.Parser.InvalidTypeCount > 0U);
+    assert(transport.FirstRx[0] == 'b');
+    printf("[ok] a busy wire that is not h4 says so, %lu bad indicator(s)\n",
+           (unsigned long)transport.Parser.InvalidTypeCount);
+}
+
 /* A packet split across several short reads is reassembled. */
 static void TestSplitReads(void)
 {
@@ -350,6 +428,8 @@ static void TestInitGuards(void)
 int main(void)
 {
     TestSinglePacket();
+    TestFirstOctetsAreKept();
+    TestNonH4StreamIsSeenAsSuch();
     TestSplitReads();
     TestBackpressure();
     TestSendDrains();

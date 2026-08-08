@@ -61,9 +61,14 @@ extern "C" {
  * One line's worth of formatting scratch. A line longer than this is
  * truncated rather than split, since half a line with a known end is easier
  * to read than a line that may or may not have been cut.
+ *
+ * Set by the longest line anything actually writes, which is the host link
+ * report: nine counters that can each reach ten digits comes to just over 150
+ * octets, and a counter silently losing its last digits would be a number that
+ * looks readable and is wrong.
  */
 #ifndef HCI_SYSLOG_LINE_MAX
-#define HCI_SYSLOG_LINE_MAX 160U
+#define HCI_SYSLOG_LINE_MAX 200U
 #endif
 
 typedef struct {

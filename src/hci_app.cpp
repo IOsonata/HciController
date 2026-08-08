@@ -464,9 +464,49 @@ static void HciAppLogPortOpened(HciApp_t *pApp)
 #define HCI_APP_LINK_QUIET_PASSES 2000U
 #endif
 
+/*
+ * Show the first octets that arrived, once, as hex and as text.
+ *
+ * Both, because the two readings answer different questions and the answer is
+ * usually obvious in one of them. Text reads straight out if the wire is
+ * a console on it rather than a host stack. Hex shows the H:4 indicator and
+ * length of a real packet, and shows noise for what it is.
+ */
+static void HciAppReportFirstRx(const HciIntrfTransport_t *pHost)
+{
+    static const char digits[] = "0123456789ABCDEF";
+    char line[HCI_INTRF_FIRST_RX_SIZE * 4U + 24U];
+    size_t at = 0U;
+
+    for (size_t i = 0U; i < pHost->FirstRxLen; i++)
+    {
+        line[at++] = digits[pHost->FirstRx[i] >> 4];
+        line[at++] = digits[pHost->FirstRx[i] & 0x0FU];
+        line[at++] = ' ';
+    }
+
+    line[at++] = '|';
+    for (size_t i = 0U; i < pHost->FirstRxLen; i++)
+    {
+        const uint8_t octet = pHost->FirstRx[i];
+        line[at++] = (octet >= 0x20U && octet < 0x7FU) ? (char)octet : '.';
+    }
+    line[at++] = '|';
+    line[at] = '\0';
+
+    HciSyslogPrint(HciSyslogDefault(), "rx first %u: %s",
+                   (unsigned)pHost->FirstRxLen, line);
+}
+
 static void HciAppReportLink(HciApp_t *pApp)
 {
     const HciIntrfTransport_t *pHost = &pApp->Controller.Host;
+
+    if (!pApp->LinkFirstRxReported && pHost->FirstRxLen != 0U)
+    {
+        pApp->LinkFirstRxReported = true;
+        HciAppReportFirstRx(pHost);
+    }
 
     pApp->LinkReportPasses++;
 
@@ -489,16 +529,25 @@ static void HciAppReportLink(HciApp_t *pApp)
     pApp->LinkRxOctets = pHost->RxOctetCount;
     pApp->LinkTxOctets = pHost->TxOctetCount;
 
+    /*
+     * The parser counts belong here beside the octet counts, because together
+     * they say whether the octets are a stream or just traffic. A busy link
+     * whose indicator is rejected on nearly every octet is not an H:4 stream at
+     * all, and no amount of counting octets alone would have said so.
+     */
     HciSyslogPrint(HciSyslogDefault(),
                    "link: %s open=%u rx=%lu tx=%lu rxerr=%lu txerr=%lu "
-                   "txbusy=%lu",
+                   "txbusy=%lu badtype=%lu oversize=%lu retry=%lu",
                    pApp->HostType == HCI_APP_HOST_USB ? "usb" : "uart",
                    (unsigned)pApp->HostOpen,
                    (unsigned long)pHost->RxOctetCount,
                    (unsigned long)pHost->TxOctetCount,
                    (unsigned long)pHost->RxErrorCount,
                    (unsigned long)pHost->TxErrorCount,
-                   (unsigned long)pHost->TxBusyCount);
+                   (unsigned long)pHost->TxBusyCount,
+                   (unsigned long)pHost->Parser.InvalidTypeCount,
+                   (unsigned long)pHost->Parser.OversizePacketCount,
+                   (unsigned long)pHost->Parser.DeliveryRetryCount);
 
     /*
      * And what the hardware says, which is the half this layer cannot know.
@@ -682,7 +731,7 @@ bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType, HciTarget_t Target)
     /*
      * Now that sdc_cfg_set has answered, hand the two pool figures to the
      * counter readout so a host can ask for them. On a sealed dongle the trace
-     * that carries them reaches nobody.
+     * that holds them reaches nobody.
      */
     uint32_t sdcRequired = 0U;
     uint32_t sdcCapacity = 0U;

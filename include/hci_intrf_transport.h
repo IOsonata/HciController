@@ -54,6 +54,19 @@ typedef struct {
      */
     uint32_t RxOctetCount;
     uint32_t TxOctetCount;
+
+/*
+ * The first octets that ever arrived, kept so they can be looked at.
+ *
+ * A count says something is on the wire. It cannot say what, and the answers
+ * are not close together: a host stack talking H:4, a log console on the wrong
+ * wire, and an unconnected pin picking up noise all read as a busy link. The
+ * octets themselves separate them at a glance, and only the first ones are
+ * needed, so this is captured once and never again.
+ */
+#define HCI_INTRF_FIRST_RX_SIZE 24U
+    uint8_t FirstRx[HCI_INTRF_FIRST_RX_SIZE];
+    uint8_t FirstRxLen;
 } HciIntrfTransport_t;
 
 bool HciIntrfTransportInit(HciIntrfTransport_t *pTransport,

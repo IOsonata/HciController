@@ -107,6 +107,17 @@ static void HciIntrfTransportProcessRx(HciIntrfTransport_t *pTransport)
             return;
         }
 
+        if (pTransport->FirstRxLen == 0U)
+        {
+            size_t keep = (size_t)received;
+            if (keep > sizeof(pTransport->FirstRx))
+            {
+                keep = sizeof(pTransport->FirstRx);
+            }
+            memcpy(pTransport->FirstRx, pTransport->RxChunk, keep);
+            pTransport->FirstRxLen = (uint8_t)keep;
+        }
+
         pTransport->RxOctetCount += (uint32_t)received;
         pTransport->RxChunkLen = (size_t)received;
         pTransport->RxChunkOffset = 0U;

@@ -96,6 +96,9 @@ typedef struct {
     uint32_t LinkTxOctets;
     uint32_t LinkReportPasses;
 
+    /* The first octets are shown once, not on every report. */
+    bool LinkFirstRxReported;
+
     HciTaktOs_t Runtime;
     /*
      * The part, held through its interface. The instance belongs to the port,
