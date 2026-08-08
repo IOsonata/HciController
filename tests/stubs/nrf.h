@@ -96,6 +96,34 @@ typedef struct {
     volatile uint32_t HFCLKSTAT;
 } NRF_CLOCK_Type;
 extern NRF_CLOCK_Type *NRF_CLOCK;
+
+/*
+ * Only the members the UART report reads, with the real names and the real
+ * shape of PSEL, which is a nested structure and not four separate registers.
+ * A test that set a flat PSEL would pass against a header the part does not
+ * have.
+ */
+typedef struct {
+    volatile uint32_t RXD;
+    volatile uint32_t TXD;
+    volatile uint32_t CTS;
+    volatile uint32_t RTS;
+} NRF_UARTE_PSEL_Type;
+
+typedef struct {
+    volatile uint32_t ENABLE;
+    volatile uint32_t BAUDRATE;
+    volatile uint32_t ERRORSRC;
+    NRF_UARTE_PSEL_Type PSEL;
+} NRF_UARTE_Type;
+extern NRF_UARTE_Type *NRF_UARTE0;
+extern NRF_UARTE_Type *NRF_UARTE1;
+
+typedef struct {
+    volatile uint32_t IN;
+} NRF_GPIO_Type;
+extern NRF_GPIO_Type *NRF_P0;
+extern NRF_GPIO_Type *NRF_P1;
 #define CLOCK_HFCLKSTAT_STATE_Msk (1UL << 16)
 #define CLOCK_HFCLKSTAT_SRC_Pos   (0UL)
 #define CLOCK_HFCLKSTAT_SRC_Msk   (1UL << CLOCK_HFCLKSTAT_SRC_Pos)

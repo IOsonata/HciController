@@ -73,6 +73,23 @@ typedef struct {
      */
     void (*UsbTrace)(const void *pContext, const char *pLabel, uint32_t Pass);
 
+    /*
+     * Report what the UART hardware says about the host link, for the
+     * instance the board put the host on.
+     *
+     * Same division as UsbTrace: the application knows when a report is worth
+     * making, the port knows what there is to say. What there is to say here
+     * is whether the peripheral is enabled, which pins it actually ended up
+     * on, what the error source holds, and whether the peer is asserting the
+     * clear to send line. A link that moves no octets in either direction
+     * looks identical from above whether the peer is silent, the framing is
+     * wrong, or nothing ever told the peer it could send, and only the
+     * hardware can tell those apart.
+     *
+     * Optional; a port with no UART leaves it null.
+     */
+    void (*UartTrace)(const void *pContext, uint8_t DevNo);
+
     void (*Stop)(void *pContext);
 
     /*
@@ -132,6 +149,17 @@ static inline void HciTargetUsbTrace(const HciTarget_t *pTarget,
     }
 
     pTarget->pOps->UsbTrace(pTarget->pContext, pLabel, Pass);
+}
+
+static inline void HciTargetUartTrace(const HciTarget_t *pTarget, uint8_t DevNo)
+{
+    if (pTarget == NULL || pTarget->pOps == NULL ||
+        pTarget->pOps->UartTrace == NULL)
+    {
+        return;
+    }
+
+    pTarget->pOps->UartTrace(pTarget->pContext, DevNo);
 }
 
 static inline void HciTargetGetSdcMem(const HciTarget_t *pTarget,

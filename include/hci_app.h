@@ -87,6 +87,15 @@ typedef struct {
      */
     bool LogPortOpen;
 
+    /*
+     * What the host link had moved when it was last reported, and how many
+     * pump passes ago that was. Enough to report a change rather than a total
+     * on every pass, and to keep a line coming when nothing changes at all.
+     */
+    uint32_t LinkRxOctets;
+    uint32_t LinkTxOctets;
+    uint32_t LinkReportPasses;
+
     HciTaktOs_t Runtime;
     /*
      * The part, held through its interface. The instance belongs to the port,

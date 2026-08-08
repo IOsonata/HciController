@@ -43,6 +43,17 @@ typedef struct {
     uint32_t TxErrorCount;
     uint32_t TxBusyCount;
     uint32_t TxOversizeCount;
+
+    /*
+     * Octets that crossed the port, counted here because this is the last
+     * place they are still octets rather than packets.
+     *
+     * They answer a question no packet count can: whether anything arrived at
+     * all. A host that is not talking and a host whose framing is wrong both
+     * produce zero packets, and the two want different things looked at.
+     */
+    uint32_t RxOctetCount;
+    uint32_t TxOctetCount;
 } HciIntrfTransport_t;
 
 bool HciIntrfTransportInit(HciIntrfTransport_t *pTransport,

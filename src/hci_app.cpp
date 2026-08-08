@@ -435,6 +435,83 @@ static void HciAppLogPortOpened(HciApp_t *pApp)
                    pApp->HostType == HCI_APP_HOST_USB ? "usb" : "uart");
 }
 
+/*
+ * Say what the host link has moved, from the loop that pumps it.
+ *
+ * Everything above traces once, during bring up, and then the firmware goes
+ * quiet for as long as it runs. That is right for a semihosting call, which
+ * halts the core, and the log inherited that rule without anyone asking
+ * whether it still made sense. It does not: a board that comes up and says
+ * nothing more cannot be told from a board whose host link is dead, and on a
+ * part whose host is another chip on the same PCB that is the only question
+ * worth asking.
+ *
+ * Not in the octet path, which would flood the ring and put a format call
+ * between a packet and its answer. Here instead, on the pump, reporting only
+ * when a count moved and no more often than the interval below, with a slow
+ * line when nothing moves so that silence still means something specific.
+ *
+ * Passes rather than milliseconds because this layer has no clock. A pass is
+ * one poll interval when the link is idle, which is what the intervals below
+ * are counted in, and shorter under traffic, which only makes a report that is
+ * already worth making arrive sooner.
+ */
+#ifndef HCI_APP_LINK_REPORT_PASSES
+#define HCI_APP_LINK_REPORT_PASSES 200U
+#endif
+
+#ifndef HCI_APP_LINK_QUIET_PASSES
+#define HCI_APP_LINK_QUIET_PASSES 2000U
+#endif
+
+static void HciAppReportLink(HciApp_t *pApp)
+{
+    const HciIntrfTransport_t *pHost = &pApp->Controller.Host;
+
+    pApp->LinkReportPasses++;
+
+    const bool moved = pHost->RxOctetCount != pApp->LinkRxOctets ||
+                       pHost->TxOctetCount != pApp->LinkTxOctets;
+
+    if (moved)
+    {
+        if (pApp->LinkReportPasses < HCI_APP_LINK_REPORT_PASSES)
+        {
+            return;
+        }
+    }
+    else if (pApp->LinkReportPasses < HCI_APP_LINK_QUIET_PASSES)
+    {
+        return;
+    }
+
+    pApp->LinkReportPasses = 0U;
+    pApp->LinkRxOctets = pHost->RxOctetCount;
+    pApp->LinkTxOctets = pHost->TxOctetCount;
+
+    HciSyslogPrint(HciSyslogDefault(),
+                   "link: %s open=%u rx=%lu tx=%lu rxerr=%lu txerr=%lu "
+                   "txbusy=%lu",
+                   pApp->HostType == HCI_APP_HOST_USB ? "usb" : "uart",
+                   (unsigned)pApp->HostOpen,
+                   (unsigned long)pHost->RxOctetCount,
+                   (unsigned long)pHost->TxOctetCount,
+                   (unsigned long)pHost->RxErrorCount,
+                   (unsigned long)pHost->TxErrorCount,
+                   (unsigned long)pHost->TxBusyCount);
+
+    /*
+     * And what the hardware says, which is the half this layer cannot know.
+     * Only while nothing has arrived: once octets are moving the pins and the
+     * error source have answered their question and repeating them buries the
+     * counts that are still worth reading.
+     */
+    if (pApp->HostType == HCI_APP_HOST_UART && pHost->RxOctetCount == 0U)
+    {
+        HciTargetUartTrace(&pApp->Target, HCI_APP_UART_DEVICE);
+    }
+}
+
 static void HciAppDrainLog(HciApp_t *pApp)
 {
     HciAppLogPortOpened(pApp);
@@ -475,6 +552,8 @@ static void HciAppHostProcess(void *pContext)
     }
 
     HciControllerProcess(&pApp->Controller);
+
+    HciAppReportLink(pApp);
 
     if (pApp->UsbRunning)
     {

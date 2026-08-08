@@ -107,6 +107,7 @@ static void HciIntrfTransportProcessRx(HciIntrfTransport_t *pTransport)
             return;
         }
 
+        pTransport->RxOctetCount += (uint32_t)received;
         pTransport->RxChunkLen = (size_t)received;
         pTransport->RxChunkOffset = 0U;
     }
@@ -135,6 +136,7 @@ static void HciIntrfTransportProcessTx(HciIntrfTransport_t *pTransport)
             return;
         }
 
+        pTransport->TxOctetCount += (uint32_t)sent;
         pTransport->TxStreamOffset += (size_t)sent;
         if (pTransport->TxStreamOffset >= pTransport->TxStreamLen)
         {

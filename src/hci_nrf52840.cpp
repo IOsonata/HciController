@@ -1144,6 +1144,60 @@ static void HciNrf52840TargetUsbTrace(const void *pContext,
     (void)Pass;
 }
 
+/*
+ * A PSEL register holds the pin a peripheral function ended up on, or a
+ * disconnected marker in the top bit. Bit 5 is the port and the low five bits
+ * are the pin, which is the encoding the pin map has to get right and the one
+ * place to read back what the driver actually programmed rather than what the
+ * board meant.
+ */
+#define HCI_NRF52840_PSEL_DISCONNECTED 0x80000000UL
+
+static bool HciNrf52840PselLevel(uint32_t Psel, bool *pHigh)
+{
+    if ((Psel & HCI_NRF52840_PSEL_DISCONNECTED) != 0U)
+    {
+        return false;
+    }
+
+    const uint32_t port = (Psel >> 5) & 0x01U;
+    const uint32_t pin = Psel & 0x1FU;
+    const NRF_GPIO_Type *pGpio = port == 0U ? NRF_P0 : NRF_P1;
+
+    *pHigh = (pGpio->IN & (1UL << pin)) != 0U;
+    return true;
+}
+
+static void HciNrf52840TargetUartTrace(const void *, uint8_t DevNo)
+{
+    NRF_UARTE_Type *pReg = DevNo == 0U ? NRF_UARTE0 : NRF_UARTE1;
+
+    /*
+     * Clear to send is active low and driven by the peer. Asserted means the
+     * peer is willing to receive; deasserted means this part will not
+     * transmit however much it has to say, which looks from above exactly like
+     * a controller that never answered.
+     */
+    bool ctsHigh = false;
+    const bool ctsKnown = HciNrf52840PselLevel(pReg->PSEL.CTS, &ctsHigh);
+
+    HciTrace("uart%u: enable=%lu baud=0x%08lX errsrc=0x%08lX cts=%s "
+             "psel rxd=0x%08lX txd=0x%08lX cts=0x%08lX rts=0x%08lX\r\n",
+             (unsigned)DevNo,
+             (unsigned long)pReg->ENABLE,
+             (unsigned long)pReg->BAUDRATE,
+             (unsigned long)pReg->ERRORSRC,
+             ctsKnown ? (ctsHigh ? "high, peer not ready" : "low, peer ready")
+                      : "not connected",
+             (unsigned long)pReg->PSEL.RXD,
+             (unsigned long)pReg->PSEL.TXD,
+             (unsigned long)pReg->PSEL.CTS,
+             (unsigned long)pReg->PSEL.RTS);
+
+    /* HciTrace discards its arguments when tracing is off. */
+    (void)DevNo;
+}
+
 static void HciNrf52840TargetStop(void *pContext)
 {
     HciNrf52840Stop(static_cast<HciNrf52840_t *>(pContext));
@@ -1189,6 +1243,7 @@ static const HciTargetOps_t s_Nrf52840Ops = {
     HciNrf52840TargetUsbPowerProcess,
     HciNrf52840TargetUsbStuck,
     HciNrf52840TargetUsbTrace,
+    HciNrf52840TargetUartTrace,
     HciNrf52840TargetStop,
     HciNrf52840TargetGetSdcMem,
     HciNrf52840TargetLastError,

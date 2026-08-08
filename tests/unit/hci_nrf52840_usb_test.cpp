@@ -4,6 +4,8 @@
 
 #include "hci_nrf52840.h"
 #include "hci_sdc_resources.h"
+#include "hci_syslog.h"
+#include "hci_target.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -85,6 +87,19 @@ extern "C" bool nrf52_errata_171(void) { return true; }
 extern "C" bool nrf52_errata_187(void) { return true; }
 static NRF_CLOCK_Type gClock;
 NRF_CLOCK_Type *NRF_CLOCK = &gClock;
+
+/* Drain a log into a buffer, so a trace line can be read back and checked. */
+static size_t SyslogTake(HciSyslog_t *pLog, char *pOut, size_t Capacity);
+
+static NRF_UARTE_Type gUarte0;
+static NRF_UARTE_Type gUarte1;
+NRF_UARTE_Type *NRF_UARTE0 = &gUarte0;
+NRF_UARTE_Type *NRF_UARTE1 = &gUarte1;
+
+static NRF_GPIO_Type gP0;
+static NRF_GPIO_Type gP1;
+NRF_GPIO_Type *NRF_P0 = &gP0;
+NRF_GPIO_Type *NRF_P1 = &gP1;
 
 static CryptoRngNrf gRng;
 static OscDesc_t gLfOsc = { OSC_TYPE_XTAL, 32768U, 20U, 0U };
@@ -594,6 +609,97 @@ static void TestUartModeLeavesUsbAlone(void)
     printf("[ok] uart mode leaves the usb hardware alone\n");
 }
 
+/*
+ * The UART report, and specifically the pin encoding in PSEL.
+ *
+ * Bit 5 is the port and the low five bits are the pin. Getting that wrong
+ * reads the level of some other pin entirely and reports it as clear to send,
+ * which is worse than reporting nothing: it is a confident answer to the one
+ * question the report exists to settle. The pin map on this project has
+ * already been wrong once in a way that half worked, so this one is pinned.
+ */
+static char *s_pTakeOut;
+static size_t s_TakeCapacity;
+static size_t s_TakeLen;
+
+static size_t SyslogTakeWrite(void *, const uint8_t *pData, size_t Len)
+{
+    if (s_TakeLen + Len >= s_TakeCapacity)
+    {
+        Len = s_TakeCapacity - s_TakeLen - 1U;
+    }
+    memcpy(&s_pTakeOut[s_TakeLen], pData, Len);
+    s_TakeLen += Len;
+    return Len;
+}
+
+static size_t SyslogTake(HciSyslog_t *pLog, char *pOut, size_t Capacity)
+{
+    s_pTakeOut = pOut;
+    s_TakeCapacity = Capacity;
+    s_TakeLen = 0U;
+    HciSyslogDrain(pLog, SyslogTakeWrite, NULL);
+    return s_TakeLen;
+}
+
+static void TestUartTraceReadsTheRightPin(void)
+{
+    HciSyslog_t log;
+    char text[512];
+
+    HciSyslogInit(&log);
+    HciSyslogAttachTrace(&log);
+
+    const HciTarget_t target = HciNrf52840Target();
+
+    /* Port 0 pin 19, driven low, which is the peer saying it will listen. */
+    gUarte0.PSEL.CTS = 19U;
+    gP0.IN = 0U;
+    gP1.IN = 0xFFFFFFFFU;
+    HciSyslogInit(&log);
+    HciTargetUartTrace(&target, 0U);
+    text[SyslogTake(&log, text, sizeof(text))] = '\0';
+    assert(strstr(text, "low, peer ready") != NULL);
+
+    /* Same pin, now high, which is the peer refusing. */
+    gP0.IN = 1UL << 19;
+    HciSyslogInit(&log);
+    HciTargetUartTrace(&target, 0U);
+    text[SyslogTake(&log, text, sizeof(text))] = '\0';
+    assert(strstr(text, "high, peer not ready") != NULL);
+
+    /*
+     * Port 1 pin 0 is 32, and it must not be read as port 0 pin 0. Port 0 pin
+     * 0 is held high here and port 1 pin 0 low, so an encoding that drops bit
+     * 5 gets the opposite answer.
+     */
+    gUarte0.PSEL.CTS = 32U;
+    gP0.IN = 0xFFFFFFFFU;
+    gP1.IN = 0U;
+    HciSyslogInit(&log);
+    HciTargetUartTrace(&target, 0U);
+    text[SyslogTake(&log, text, sizeof(text))] = '\0';
+    assert(strstr(text, "low, peer ready") != NULL);
+
+    /* And a pin the driver never connected is not a level at all. */
+    gUarte0.PSEL.CTS = 0x80000000UL;
+    HciSyslogInit(&log);
+    HciTargetUartTrace(&target, 0U);
+    text[SyslogTake(&log, text, sizeof(text))] = '\0';
+    assert(strstr(text, "not connected") != NULL);
+
+    /* The second instance is a different peripheral, not the first again. */
+    gUarte1.ENABLE = 8U;
+    gUarte1.PSEL.CTS = 0x80000000UL;
+    HciSyslogInit(&log);
+    HciTargetUartTrace(&target, 1U);
+    text[SyslogTake(&log, text, sizeof(text))] = '\0';
+    assert(strstr(text, "uart1: enable=8") != NULL);
+
+    HciSyslogAttachTrace(HciSyslogDefault());
+    printf("[ok] the uart report reads the pin psel names\n");
+}
+
 int main(void)
 {
     TestBringUpOrder();
@@ -604,6 +710,7 @@ int main(void)
     TestHfxoNotOnCrystal();
     TestEventCauseStormIsBroken();
     TestUartModeLeavesUsbAlone();
+    TestUartTraceReadsTheRightPin();
     printf("All nRF52840 USB bring up tests passed.\n");
     return 0;
 }
