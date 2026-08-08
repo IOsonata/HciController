@@ -711,6 +711,29 @@ static void HciAppReportLink(HciApp_t *pApp)
 
     HciAppResyncOnIdle(pApp);
 
+    /*
+     * The two bounded reports go out at once, ahead of every rate limit.
+     *
+     * They are the ones a person is waiting for, and they are the ones that
+     * cost nothing to send immediately: the first octets are shown once and
+     * the packet marks at most eight times, so neither can flood anything.
+     * Behind the rate limit they arrived up to a second after the event, or in
+     * a report the reader had already stopped waiting for, which on a link
+     * that produces one interesting moment every ten seconds is the difference
+     * between seeing it and not.
+     */
+    if (!pApp->LinkFirstRxReported && pHost->FirstRxLen != 0U)
+    {
+        pApp->LinkFirstRxReported = true;
+        HciAppReportFirstRx(pHost);
+    }
+
+    if (pApp->LinkPktMarksReported != pHost->PktMarkLen)
+    {
+        pApp->LinkPktMarksReported = pHost->PktMarkLen;
+        HciAppReportPktMarks(pHost);
+    }
+
     pApp->LinkReportPasses++;
 
     const bool moved = pHost->RxOctetCount != pApp->LinkRxOctets ||
@@ -757,24 +780,13 @@ static void HciAppReportLink(HciApp_t *pApp)
      * whatever the first read happened to return, which on a busy wire was
      * three octets out of a possible sixty four.
      */
-    if (!pApp->LinkFirstRxReported && pHost->FirstRxLen != 0U)
-    {
-        pApp->LinkFirstRxReported = true;
-        HciAppReportFirstRx(pHost);
-    }
-
     /*
-     * Which packets this side built, and what became of each. On a link that
-     * is not working this is the line that settles it: 01 03 0C is an HCI
-     * Reset, and whether it says ok or drop beside it is the difference
-     * between a command that never arrived and a command that arrived and was
-     * thrown away by the rule meant to protect the link.
+     * Which packets this side built, and what became of each, is reported
+     * above rather than here: 01 03 0C is an HCI Reset, and whether it says ok
+     * or drop beside it is the difference between a command that never arrived
+     * and one that arrived and was thrown away. Not a thing to learn a second
+     * late.
      */
-    if (pApp->LinkPktMarksReported != pHost->PktMarkLen)
-    {
-        pApp->LinkPktMarksReported = pHost->PktMarkLen;
-        HciAppReportPktMarks(pHost);
-    }
 
     /*
      * The parser counts belong here beside the octet counts, because together
