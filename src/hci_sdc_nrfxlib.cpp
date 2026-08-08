@@ -1700,9 +1700,21 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
      *
      * The controller refuses Host Buffer Size. Measured on hardware against a
      * Zephyr host, the answer is status 0x11, Unsupported Feature or Parameter
-     * Value, from sdc_hci_cmd_cb_host_buffer_size itself. There is no
-     * sdc_support call that turns it on, so there is nothing this layer can do
-     * to make it work.
+     * Value, from sdc_hci_cmd_cb_host_buffer_size itself.
+     *
+     * Not because the function is missing. NCS calls the same one, through
+     * sdc_hci_cmd_cb_host_buffer_size_wrapper in
+     * subsys/bluetooth/controller/hci_internal_wrappers.c. What NCS also does
+     * is gate the whole feature, the bitmap bits and the dispatch rows alike,
+     * behind CONFIG_BT_HCI_ACL_FLOW_CONTROL, and the controller sample for
+     * this exact board does not set it: samples/bluetooth/hci_lpuart with
+     * boards/thingy91_nrf52840.conf. So the reference firmware for the
+     * Thingy:91 neither advertises these three nor ever calls them, and never
+     * meets the 0x11 that this one did.
+     *
+     * Why the controller answers 0x11 in a configuration NCS never exercises
+     * is not established here. What is established is that advertising it and
+     * then failing is worse than not advertising it.
      *
      * Dispatching it anyway was worse than not having it. A host reads the
      * supported command bitmap first and only sends what it is told is there,

@@ -343,12 +343,20 @@
  * gives up a half built packet once the link has been quiet, which lands in
  * that gap and takes the Reset cleanly. See HCI_APP_LINK_IDLE_PASSES.
  *
- * Where the host can be configured, Zephyr's CONFIG_BT_WAIT_NOP=y holds its
- * command semaphore at zero until a Command Complete for the No Operation
- * opcode arrives, which is what HciSdcNrfxlibQueueStartupNop queues here.
- * That would make the start up a handshake rather than a race. A proprietary
- * host cannot be told to do it, so it is written down as something available
- * rather than as something in use.
+ * The start up No Operation Command Complete is sent on this board, see
+ * HCI_SDC_STARTUP_NOP below. Nordic's own controller for it sends one:
+ * samples/bluetooth/hci_lpuart, boards/thingy91_nrf52840.conf, which sets
+ * CONFIG_BT_WAIT_NOP=y in a CONFIG_BT_HCI_RAW build, where that option makes
+ * the controller emit the event rather than wait for it.
+ *
+ * A host built with the same option holds its command semaphore at zero until
+ * that event arrives, so a controller that never sends it leaves such a host
+ * silent with nothing on the wire to say why. The host on this board is not
+ * one of those, since it sends Reset about a hundred milliseconds in without
+ * being prompted, and the event costs it nothing either: Zephyr reads a
+ * Command Complete for opcode 0x0000 as unsolicited, takes the command credit
+ * from it and completes no command with it. See hci_cmd_done in
+ * subsys/bluetooth/host/hci_core.c.
  *
  * What has been checked, against sdk-nrf and the Thingy:91 hardware guide:
  * the four pins above and their rate, that the low frequency crystal is on
@@ -420,6 +428,13 @@
 #define UART_DEVNO			0
 
 #define UART_RATE			1000000
+
+/*
+ * Say the controller is ready with a No Operation Command Complete once the
+ * stack is up, because the reference controller for this board does. The UART
+ * note above has the sample it comes from and what the host makes of it.
+ */
+#define HCI_SDC_STARTUP_NOP             1
 
 
 #else
