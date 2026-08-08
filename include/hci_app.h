@@ -108,6 +108,9 @@ typedef struct {
     /* The first octets are shown once, not on every report. */
     bool LinkFirstRxReported;
 
+    /* Whether the link has given any account of itself yet. */
+    bool LinkReported;
+
     /*
      * How many packet marks have been shown. Not a flag, because they arrive
      * a few at a time and the interesting one is usually not the first.

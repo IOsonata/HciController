@@ -323,6 +323,16 @@ static bool HciAppInitUart(HciApp_t *pApp)
         return false;
     }
 
+    /*
+     * What the driver actually programmed, said once at boot rather than only
+     * when a report happens to fire. The pins in the map are what this file
+     * asked for; PSEL is what the peripheral got, and the two have disagreed
+     * before. It also lands in the part of the log everybody pastes, which the
+     * periodic report does not, so a link that moves nothing still leaves an
+     * account of itself.
+     */
+    HciTargetUartTrace(&pApp->Target, HCI_APP_UART_DEVICE);
+
     pApp->pHostIntrf = &pApp->Uart.DevIntrf;
     return true;
 #else
@@ -558,6 +568,11 @@ static void HciAppLogPortOpened(HciApp_t *pApp)
  * link that is working reports on movement instead, and this only fires when
  * there is none.
  */
+/* A tenth of a second, so the first account of the link is in the boot log. */
+#ifndef HCI_APP_LINK_FIRST_PASSES
+#define HCI_APP_LINK_FIRST_PASSES 20U
+#endif
+
 #ifndef HCI_APP_LINK_QUIET_PASSES
 #define HCI_APP_LINK_QUIET_PASSES 400U
 #endif
@@ -701,7 +716,26 @@ static void HciAppReportLink(HciApp_t *pApp)
     const bool moved = pHost->RxOctetCount != pApp->LinkRxOctets ||
                        pHost->TxOctetCount != pApp->LinkTxOctets;
 
-    if (moved)
+    /*
+     * The first one comes quickly and unconditionally.
+     *
+     * Every rule below waits for something: movement, or a stretch of quiet.
+     * Both take longer than a person takes to copy a log, so the account of a
+     * link that has done nothing at all kept arriving after the paste and read
+     * as no account at all. One line a tenth of a second in costs nothing and
+     * means the boot log is complete on its own.
+     */
+    const bool first = !pApp->LinkReported;
+
+    if (first)
+    {
+        if (pApp->LinkReportPasses < HCI_APP_LINK_FIRST_PASSES)
+        {
+            return;
+        }
+        pApp->LinkReported = true;
+    }
+    else if (moved)
     {
         if (pApp->LinkReportPasses < HCI_APP_LINK_REPORT_PASSES)
         {
