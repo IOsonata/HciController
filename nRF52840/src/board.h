@@ -395,6 +395,17 @@
  * a pin that ignores the pull is being driven and is this part's input. The
  * answer is in the log as "flow:", on every boot, without anyone having to set
  * up an experiment for it.
+ *
+ * It has now answered, on a boot where the nRF9160 happened to be up already:
+ *
+ *     flow: board says rts P0.19 follows a pull, so nothing drives it
+ *     flow: board says cts P0.22 driven from outside, so an input, high
+ *     flow: cts is the driven one, so the board file is right
+ *
+ * so these numbers are confirmed by the board and not only by the bench test
+ * that led to them. The probe says nothing when both parts leave reset
+ * together, since the peer is not driving anything yet, which is a limit of
+ * the moment and not of the method.
  */
 #define UART_RTS_PORT           0
 #define UART_RTS_PIN            19

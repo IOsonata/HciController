@@ -551,8 +551,15 @@ static void HciAppLogPortOpened(HciApp_t *pApp)
 #define HCI_APP_LINK_REPORT_PASSES 200U
 #endif
 
+/*
+ * Ten seconds of quiet before saying so was too long to wait for the first
+ * word about a link that is doing nothing, which is the case a person is most
+ * likely to be sitting there watching. Two seconds still buries nothing: a
+ * link that is working reports on movement instead, and this only fires when
+ * there is none.
+ */
 #ifndef HCI_APP_LINK_QUIET_PASSES
-#define HCI_APP_LINK_QUIET_PASSES 2000U
+#define HCI_APP_LINK_QUIET_PASSES 400U
 #endif
 
 /*
