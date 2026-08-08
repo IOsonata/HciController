@@ -380,7 +380,14 @@ static void TestTextBuiltPacketsAreLabelled(void)
     HciIntrfTransportProcess(&transport);
 
     assert(transport.Parser.InvalidTypeCount > 0U);
-    assert(HciIntrfTransportSuspect(&transport));
+
+    /*
+     * The flag itself has already lifted, because draining the port ends the
+     * burst and the burst is what suspicion is about. What was suspect at the
+     * moment the packet was built is on the packet, which is where it belongs.
+     */
+    assert(!HciIntrfTransportSuspect(&transport));
+    assert(transport.SuspectClearCount == 1U);
 
     /* Delivered, and marked as having come out of a stream that is not H:4. */
     assert(capture.Count == 1U);
@@ -388,10 +395,7 @@ static void TestTextBuiltPacketsAreLabelled(void)
     assert(transport.RxPacketCount == 1U);
     assert(transport.PktMark[0].Suspect);
 
-    /* The gap, and then the same octets are an ordinary command again. */
-    HciIntrfTransportIdle(&transport);
-    assert(!HciIntrfTransportSuspect(&transport));
-
+    /* And the same octets after it are an ordinary command again. */
     const uint8_t reset[] = {0x01, 0x03, 0x0C, 0x00};
     FeedRx(reset, sizeof(reset));
     HciIntrfTransportProcess(&transport);
@@ -450,7 +454,6 @@ static void TestSuspectFilterKeepsRealCommands(void)
     FeedRx(burst, sizeof(burst));
     HciIntrfTransportProcess(&transport);
 
-    assert(HciIntrfTransportSuspect(&transport));
     assert(transport.DroppedPacketCount == 1U);
 
     assert(capture.Count == 1U);

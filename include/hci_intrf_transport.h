@@ -105,6 +105,9 @@ typedef struct {
     uint32_t SuspectPacketCount;
     uint32_t DroppedPacketCount;
 
+    /* How often a burst ended and the stream got the benefit of the doubt. */
+    uint32_t SuspectClearCount;
+
     /*
      * Octets thrown away at open, because they arrived while the driver was
      * configured and nothing behind it could answer yet. A large number here

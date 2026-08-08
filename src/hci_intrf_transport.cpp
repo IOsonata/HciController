@@ -251,6 +251,27 @@ static void HciIntrfTransportProcessRx(HciIntrfTransport_t *pTransport)
 
         if (received == 0)
         {
+            /*
+             * The port has nothing more right now, so this burst has ended.
+             *
+             * That is the moment suspicion should lift, and waiting for pump
+             * passes to notice it was too slow. The nRF9160 stops printing
+             * about eleven milliseconds before it sends its first command, and
+             * the caller's idle rule needed twenty, so the Reset arrived while
+             * the banner in front of it still counted against it. Every real
+             * Reset after the first was labelled suspect for that reason.
+             *
+             * A drained port is a stronger signal than a count of passes and it
+             * costs nothing to read: the octets of one packet are handed over
+             * together, so a read that comes back empty at a packet boundary
+             * cannot be the middle of anything.
+             */
+            if (!HciH4ParserIsMidPacket(&pTransport->Parser) &&
+                HciIntrfTransportSuspect(pTransport))
+            {
+                pTransport->RejectedMark = pTransport->Parser.InvalidTypeCount;
+                pTransport->SuspectClearCount++;
+            }
             return;
         }
 
