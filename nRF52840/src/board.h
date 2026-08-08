@@ -302,9 +302,9 @@
  *     UART_TX  P0.22      UART_RX  P0.23
  *     UART_RTS P0.24      UART_CTS P0.25
  *
- * Both board files say current-speed 1000000. TX and RX below are those, and
- * they are not in dispute. RTS and CTS below are not those, and the note above
- * them says why.
+ * which crosses as it should: this part's RTS meets the nRF9160's CTS and the
+ * other way round. Both board files say current-speed 1000000, and all four
+ * pins below are these, confirmed on the hardware.
  *
  * The other UART on each part is that part's own console, at 115200:
  *
@@ -355,37 +355,45 @@
 #define UART_RX_PINOP           0
 
 /*
- * RTS and CTS are the customer's numbers, not sdk-nrf's, and the two disagree.
+ * RTS is P0.22 and CTS is P0.19, and that was decided by the board rather than
+ * by a document. Two statements had to be reconciled:
  *
  *     sdk-nrf thingy91_nrf52840-pinctrl.dtsi uart1:  RTS P0.22  CTS P0.19
  *     the customer, who has the schematic:           RTS P0.19  CTS P0.22
  *
- * The customer's hardware is the hardware, so their numbers are here. The
- * disagreement is probably about whose signal a net is named after rather than
- * about where a wire goes: a net called RTS at this part's P0.19 is the
- * nRF9160's RTS, which is this part's CTS. That reading makes both statements
- * true at once, and it is a reading, not a fact.
+ * Both were tried on the hardware and they do not behave the same:
  *
- * Getting this pair the wrong way round does not stop the link, which is why
- * it has been argued about for so long instead of being seen. This part drives
- * its RTS onto a line the peer is also driving, so two outputs fight, and
- * reads its CTS from a line nothing drives, which floats and usually reads as
- * permission to send. Traffic flows, no error is reported anywhere, and the
- * flow control does nothing at all.
+ *     RTS on P0.22   the peer transmits, thousands of octets a second
+ *     RTS on P0.19   the peer transmits nothing at all
  *
- * So the firmware measures it rather than believing either of us. At start up
- * it holds each of these two pins with a pull up and then a pull down: a pin
- * whose level follows the pull has nothing driving it from the far side and
- * must be this part's output, and a pin that ignores the pull is being driven
- * and must be this part's input. The result is in the log as "flow:", and it
- * settles the question with the board rather than with a document.
+ * which is decisive, and in one direction only. RTS is what tells the peer it
+ * may send. Drive the wrong pin and the peer's CTS is never asserted, so it
+ * stays silent, and that is exactly what P0.19 produced. Drive P0.22 and it
+ * talks. Nothing else in the link would make the difference fall that way.
+ *
+ * So the two statements are about naming, not about wiring. A net called RTS
+ * at this part's P0.19 is named after the nRF9160's RTS, which arrives here as
+ * this part's CTS. Both descriptions are of the same wire from opposite ends.
+ *
+ * Worth writing down because getting the pair the wrong way round is the one
+ * wiring mistake that stays quiet in the other direction. Where this part
+ * drives RTS onto a line the peer also drives, two outputs fight; where it
+ * reads CTS from a line nothing drives, the line floats and usually reads as
+ * permission to send. Octets move, nothing reports an error, and the flow
+ * control does nothing.
+ *
+ * The firmware also measures it at start up, so this never has to be argued
+ * again. Each pin is held with a pull up and then a pull down before the UART
+ * takes it: a pin whose level follows the pull has nothing driving it from the
+ * far side and is this part's output, and a pin that ignores the pull is being
+ * driven and is this part's input. The answer is in the log as "flow:".
  */
 #define UART_RTS_PORT           0
-#define UART_RTS_PIN            19
+#define UART_RTS_PIN            22
 #define UART_RTS_PINOP          0
 
 #define UART_CTS_PORT           0
-#define UART_CTS_PIN            22
+#define UART_CTS_PIN            19
 #define UART_CTS_PINOP          0
 
 #define UART_HW_FLOWCTRL	1
