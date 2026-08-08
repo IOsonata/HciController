@@ -67,17 +67,15 @@ typedef struct {
     uint32_t ResyncCount;
 
     /*
-     * The stream has been shown not to be H:4, so nothing built out of it is
-     * answered until the link goes quiet.
+     * Whether the stream has shown itself not to be H:4 since it last went
+     * quiet. Recorded against every packet built out of it, and not acted on.
      *
      * A real H:4 stream never holds an octet outside the indicator range at a
      * packet boundary. One that does is either not H:4 or is being read from
      * the wrong place, and in both cases every packet that follows it in the
-     * same burst is an accident of where the reading started. Answering those
-     * is worse than dropping them: the replies are well formed H:4 going the
-     * other way, so they desynchronise the host's parser exactly as the text
-     * desynchronised this one, and the host then eats the reply it was waiting
-     * for.
+     * same burst is likely an accident of where the reading started. Refusing
+     * those was tried and cost eight real HCI Resets, so it is a label now and
+     * not a decision.
      *
      * Held as the rejected count at the last quiet moment rather than as a
      * flag, because the flag has to be right at the instant a packet is
@@ -86,7 +84,7 @@ typedef struct {
      * a flag set after the call already was.
      */
     uint32_t RejectedMark;
-    uint32_t DroppedPacketCount;
+    uint32_t SuspectPacketCount;
 
     /*
      * Octets thrown away at open, because they arrived while the driver was
@@ -101,10 +99,10 @@ typedef struct {
  * are the opcode, so 01 03 0C is an HCI Reset arriving and is the one thing
  * worth being certain about on a link that is not working.
  *
- * Dropped ones are kept for the same reason accepted ones are, and it is the
- * more important half: the rule that drops packets built out of text can throw
- * away a real command if the host sends one without a gap in front of it, and
- * nothing else would ever say that had happened.
+ * Each is flagged with whether the stream it came out of had already shown
+ * itself not to be H:4. That flag used to decide whether the packet was thrown
+ * away and now only describes it, because throwing them away threw away real
+ * HCI Resets along with the accidents.
  *
  * Three octets rather than the packet, because what is wanted here is which
  * packet it was, not what was in it.
@@ -113,7 +111,7 @@ typedef struct {
     struct {
         uint8_t Type;
         uint8_t Head[2];
-        bool Dropped;
+        bool Suspect;
     } PktMark[HCI_INTRF_PKT_MARKS];
     uint8_t PktMarkLen;
 
@@ -170,8 +168,8 @@ void HciIntrfTransportProcess(HciIntrfTransport_t *pTransport);
 void HciIntrfTransportIdle(HciIntrfTransport_t *pTransport);
 
 /*
- * Whether the stream has shown itself not to be H:4 since it last went quiet,
- * so packets built out of it are dropped rather than answered.
+ * Whether the stream has shown itself not to be H:4 since it last went quiet.
+ * Packets built out of such a stream are labelled and still delivered.
  */
 bool HciIntrfTransportSuspect(const HciIntrfTransport_t *pTransport);
 

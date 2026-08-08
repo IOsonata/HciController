@@ -688,7 +688,7 @@ static void HciAppReportPktMarks(const HciIntrfTransport_t *pHost)
             line[at++] = ' ';
         }
 
-        const char *pWhat = pHost->PktMark[i].Dropped ? "drop" : "ok";
+        const char *pWhat = pHost->PktMark[i].Suspect ? "susp" : "ok";
         for (const char *p = pWhat; *p != '\0'; p++)
         {
             line[at++] = *p;
@@ -795,7 +795,7 @@ static void HciAppReportLink(HciApp_t *pApp)
      * all, and no amount of counting octets alone would have said so.
      */
     HciSyslogPrint(HciSyslogDefault(),
-                   "link: %s open=%u rx=%lu tx=%lu pkt=%lu drop=%lu "
+                   "link: %s open=%u rx=%lu tx=%lu pkt=%lu susp=%lu "
                    "flush=%lu resync=%lu rxerr=%lu txerr=%lu txbusy=%lu "
                    "badtype=%lu oversize=%lu",
                    pApp->HostType == HCI_APP_HOST_USB ? "usb" : "uart",
@@ -803,7 +803,7 @@ static void HciAppReportLink(HciApp_t *pApp)
                    (unsigned long)pHost->RxOctetCount,
                    (unsigned long)pHost->TxOctetCount,
                    (unsigned long)pHost->RxPacketCount,
-                   (unsigned long)pHost->DroppedPacketCount,
+                   (unsigned long)pHost->SuspectPacketCount,
                    (unsigned long)pHost->FlushedOctetCount,
                    (unsigned long)pHost->ResyncCount,
                    (unsigned long)pHost->RxErrorCount,

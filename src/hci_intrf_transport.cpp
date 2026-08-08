@@ -40,7 +40,26 @@ static bool HciIntrfTransportCount(void *pContext,
     HciIntrfTransport_t *pTransport =
         static_cast<HciIntrfTransport_t *>(pContext);
 
-    const bool dropped = HciIntrfTransportSuspect(pTransport);
+    /*
+     * Suspect means the stream held something that is not H:4 since it last
+     * went quiet. It is recorded and it is not acted on, and that is a change
+     * made against evidence.
+     *
+     * Refusing suspect packets was meant to stop this side answering commands
+     * manufactured out of a bootloader banner, because those answers
+     * desynchronise the host's parser. It did that. It also refused eight real
+     * HCI Resets, which the log named one at a time: "pkt: 01 03 0C drop". A
+     * command that is thrown away is a link that never starts. Answers to
+     * accidental commands only cost the host a resynchronisation, and the host
+     * drains its own port when it opens the transport, so the ones sent before
+     * that moment reach nobody.
+     *
+     * The two failures are not the same size. This layer cannot tell an
+     * accidental command from a real one, since only the opcode table can and
+     * that is another layer up, so between refusing real commands and
+     * answering false ones it now answers.
+     */
+    const bool suspect = HciIntrfTransportSuspect(pTransport);
 
     /*
      * A refused packet is offered again on the next pass, so both the count
@@ -48,8 +67,7 @@ static bool HciIntrfTransportCount(void *pContext,
      * Counting on every attempt was the first version of this and it inflated
      * exactly the number a reader would trust most.
      */
-    if (!dropped &&
-        !pTransport->Handler(pTransport->pHandlerContext, Type, pPacket,
+    if (!pTransport->Handler(pTransport->pHandlerContext, Type, pPacket,
                              PacketLen))
     {
         return false;
@@ -61,19 +79,16 @@ static bool HciIntrfTransportCount(void *pContext,
         pTransport->PktMark[slot].Type = (uint8_t)Type;
         pTransport->PktMark[slot].Head[0] = PacketLen > 0U ? pPacket[0] : 0U;
         pTransport->PktMark[slot].Head[1] = PacketLen > 1U ? pPacket[1] : 0U;
-        pTransport->PktMark[slot].Dropped = dropped;
+        pTransport->PktMark[slot].Suspect = suspect;
         pTransport->PktMarkLen++;
     }
 
-    if (dropped)
+    if (suspect)
     {
-        pTransport->DroppedPacketCount++;
-    }
-    else
-    {
-        pTransport->RxPacketCount++;
+        pTransport->SuspectPacketCount++;
     }
 
+    pTransport->RxPacketCount++;
     return true;
 }
 

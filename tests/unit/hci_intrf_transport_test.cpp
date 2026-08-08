@@ -346,20 +346,16 @@ static void TestBannerThenIdleThenCommand(void)
 }
 
 /*
- * A packet built out of text is dropped rather than answered.
+ * A packet built out of text is labelled and still delivered.
  *
- * This is the half that mattered on the hardware and the half that was
- * missing. A reply to an accidental command is well formed H:4 going the other
- * way, so it desynchronises the host's parser exactly as the text
- * desynchronised this one, and the host then reads the answer it was waiting
- * for as the middle of something else. Measured: sixty packets built out of a
- * bootloader banner, sixty replies, and a host reporting every octet of them
- * as an unknown H:4 type, including the octets of the answer it wanted.
- *
- * An octet refused at a packet boundary is evidence about everything after it,
- * not only about itself, and the gap is the only way back.
+ * Refusing these was tried on hardware and refused eight real HCI Resets with
+ * them, which is a link that never starts. Answering an accidental command
+ * only costs the host a resynchronisation, and the host drains its own port
+ * when it opens the transport, so answers sent before that reach nobody. Since
+ * this layer cannot tell the two apart, the label travels with the packet and
+ * the decision belongs to whatever can read an opcode table.
  */
-static void TestTextBuiltPacketsAreNotAnswered(void)
+static void TestTextBuiltPacketsAreLabelled(void)
 {
     ResetIntrf();
 
@@ -385,11 +381,14 @@ static void TestTextBuiltPacketsAreNotAnswered(void)
 
     assert(transport.Parser.InvalidTypeCount > 0U);
     assert(HciIntrfTransportSuspect(&transport));
-    assert(capture.Count == 0U);
-    assert(transport.DroppedPacketCount == 1U);
-    assert(transport.RxPacketCount == 0U);
 
-    /* The gap, and then the same octets are a command again. */
+    /* Delivered, and marked as having come out of a stream that is not H:4. */
+    assert(capture.Count == 1U);
+    assert(transport.SuspectPacketCount == 1U);
+    assert(transport.RxPacketCount == 1U);
+    assert(transport.PktMark[0].Suspect);
+
+    /* The gap, and then the same octets are an ordinary command again. */
     HciIntrfTransportIdle(&transport);
     assert(!HciIntrfTransportSuspect(&transport));
 
@@ -397,22 +396,21 @@ static void TestTextBuiltPacketsAreNotAnswered(void)
     FeedRx(reset, sizeof(reset));
     HciIntrfTransportProcess(&transport);
 
-    assert(capture.Count == 1U);
-    assert(transport.RxPacketCount == 1U);
-    assert(transport.DroppedPacketCount == 1U);
+    assert(capture.Count == 2U);
+    assert(transport.RxPacketCount == 2U);
+    assert(transport.SuspectPacketCount == 1U);
+    assert(!transport.PktMark[1].Suspect);
 
-    printf("[ok] a command found inside text is dropped, not answered\n");
+    printf("[ok] a command found inside text is labelled, not lost\n");
 }
 
 /*
- * Every packet is recorded with what became of it, dropped ones included.
+ * Every packet is recorded, with whether the stream it came from was suspect.
  *
- * The dropped half is the point. The rule that refuses packets built out of
- * text will refuse a real command too if the host sends one without a gap in
- * front of it, and that failure looks exactly like a command that never
- * arrived. Recording both is the only way the two can be told apart from a
- * log, and telling them apart decides whether the idle threshold is wrong or
- * the wire is.
+ * The label is what a reader needs and the packet is what the host needs, so
+ * both survive. When this refused suspect packets instead, the record was the
+ * only thing that showed it was refusing real HCI Resets, which is how that
+ * rule came to be taken out.
  */
 static void TestPacketMarksRecordBothOutcomes(void)
 {
@@ -438,7 +436,8 @@ static void TestPacketMarksRecordBothOutcomes(void)
     assert(transport.PktMark[0].Type == HCI_H4_PACKET_COMMAND);
     assert(transport.PktMark[0].Head[0] == 0x03);
     assert(transport.PktMark[0].Head[1] == 0x0C);
-    assert(transport.PktMark[0].Dropped);
+    assert(transport.PktMark[0].Suspect);
+    assert(transport.RxPacketCount == 1U);
 
     /* The gap, then the same Reset, which is taken. */
     HciIntrfTransportIdle(&transport);
@@ -449,7 +448,7 @@ static void TestPacketMarksRecordBothOutcomes(void)
     assert(transport.PktMarkLen == 2U);
     assert(transport.PktMark[1].Head[0] == 0x03);
     assert(transport.PktMark[1].Head[1] == 0x0C);
-    assert(!transport.PktMark[1].Dropped);
+    assert(!transport.PktMark[1].Suspect);
 
     /*
      * A packet the handler refuses is offered again, and is recorded when it
@@ -465,9 +464,9 @@ static void TestPacketMarksRecordBothOutcomes(void)
     capture.Accept = true;
     HciIntrfTransportProcess(&transport);
     assert(transport.PktMarkLen == 3U);
-    assert(transport.RxPacketCount == 2U);
+    assert(transport.RxPacketCount == 3U);
 
-    printf("[ok] packets are recorded once, with what became of them\n");
+    printf("[ok] packets are recorded once, with where they came from\n");
 }
 
 /*
@@ -520,9 +519,9 @@ static void TestOpenDiscardsWhatArrivedTooEarly(void)
 
     assert(capture.Count == 1U);
     assert(transport.RxPacketCount == 1U);
-    assert(transport.DroppedPacketCount == 0U);
+    assert(transport.SuspectPacketCount == 0U);
     assert(transport.PktMarkLen == 1U);
-    assert(!transport.PktMark[0].Dropped);
+    assert(!transport.PktMark[0].Suspect);
 
     printf("[ok] opening empties the buffer rather than reading it\n");
 }
@@ -723,7 +722,7 @@ int main(void)
     TestFirstOctetsAreKept();
     TestNonH4StreamIsSeenAsSuch();
     TestBannerThenIdleThenCommand();
-    TestTextBuiltPacketsAreNotAnswered();
+    TestTextBuiltPacketsAreLabelled();
     TestPacketMarksRecordBothOutcomes();
     TestOpenDiscardsWhatArrivedTooEarly();
     TestSplitReads();
