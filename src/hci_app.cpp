@@ -203,9 +203,60 @@ static bool HciAppUsbSetup(HciApp_t *pApp)
 #define HCI_APP_UART_FLOWCTRL UART_FLOWCTRL
 #endif
 
+/*
+ * Ask the two flow control pins which of them is an input.
+ *
+ * RTS and CTS the wrong way round is the one wiring mistake that does not
+ * announce itself. This part drives its RTS onto a line the peer is also
+ * driving, so two outputs fight; it reads its CTS from a line nothing drives,
+ * which floats and usually reads as permission to send. Traffic flows, no
+ * error is reported anywhere, and the flow control does nothing.
+ *
+ * The pins have not been given to the UART yet at this point, so each can be
+ * held with a pull and watched. A pin that follows the pull has nothing on the
+ * far end driving it, which is what this part's own output looks like. A pin
+ * that ignores the pull is driven from outside, which is what an input looks
+ * like. Whichever way round the board file has them, the log says which way
+ * round the board has them.
+ */
+#if defined(UART_RTS_PORT) && defined(UART_CTS_PORT)
+static void HciAppReportFlowPin(HciApp_t *pApp,
+                                const char *pName,
+                                uint8_t Port,
+                                uint8_t Pin)
+{
+    bool level = false;
+    const bool driven = HciTargetPinIsDriven(&pApp->Target, Port, Pin, &level);
+
+    HciSyslogPrint(HciSyslogDefault(),
+                   "flow: %s P%u.%02u %s%s",
+                   pName, (unsigned)Port, (unsigned)Pin,
+                   driven ? "driven from outside, so an input" :
+                            "follows a pull, so nothing drives it",
+                   driven ? (level ? ", high" : ", low") : "");
+}
+
+static void HciAppProbeFlowPins(HciApp_t *pApp)
+{
+    if (pApp->Target.pOps->PinIsDriven == NULL)
+    {
+        return;
+    }
+
+    HciAppReportFlowPin(pApp, "board says rts", UART_RTS_PORT, UART_RTS_PIN);
+    HciAppReportFlowPin(pApp, "board says cts", UART_CTS_PORT, UART_CTS_PIN);
+}
+#else
+static void HciAppProbeFlowPins(HciApp_t *)
+{
+}
+#endif
+
 static bool HciAppInitUart(HciApp_t *pApp)
 {
 #ifdef UART_PINS
+    HciAppProbeFlowPins(pApp);
+
     UARTCfg_t cfg = {};
     cfg.DevNo = HCI_APP_UART_DEVICE;
     cfg.pIOPinMap = s_HciUartPins;

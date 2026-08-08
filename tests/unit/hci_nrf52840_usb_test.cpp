@@ -14,7 +14,9 @@
 #include "mpsl.h"
 #include "mpsl_clock.h"
 #include "sdc.h"
+#include "coredev/iopincfg.h"
 #include "coredev/system_core_clock.h"
+#include "iopinctrl.h"
 #include "crypto_rng_nrf.h"
 
 #include "hci_sdc_expected_resources.h"
@@ -100,6 +102,47 @@ static NRF_GPIO_Type gP0;
 static NRF_GPIO_Type gP1;
 NRF_GPIO_Type *NRF_P0 = &gP0;
 NRF_GPIO_Type *NRF_P1 = &gP1;
+
+/*
+ * Pins with a far end, or without one.
+ *
+ * A driven pin holds its level whatever pull is applied, which is what an
+ * output on the other side of a wire does. An undriven pin follows the pull,
+ * which is what a pin with nothing on the far end does. That difference is the
+ * whole of what the probe measures, so the fake has to model exactly it and
+ * nothing else.
+ */
+#define FAKE_PIN_COUNT 48
+static bool gPinDriven[FAKE_PIN_COUNT];
+static bool gPinDrivenLevel[FAKE_PIN_COUNT];
+static IOPINRES gPinPull[FAKE_PIN_COUNT];
+static unsigned gPinConfigured[FAKE_PIN_COUNT];
+
+static int FakePinIndex(int PortNo, int PinNo)
+{
+    const int index = PortNo * 32 + PinNo;
+    assert(index >= 0 && index < FAKE_PIN_COUNT);
+    return index;
+}
+
+extern "C" void IOPinConfig(int PortNo, int PinNo, int, IOPINDIR Dir,
+                            IOPINRES Resistor, IOPINTYPE)
+{
+    assert(Dir == IOPINDIR_INPUT);
+    const int index = FakePinIndex(PortNo, PinNo);
+    gPinPull[index] = Resistor;
+    gPinConfigured[index]++;
+}
+
+extern "C" int IOPinRead(int PortNo, int PinNo)
+{
+    const int index = FakePinIndex(PortNo, PinNo);
+    if (gPinDriven[index])
+    {
+        return gPinDrivenLevel[index] ? 1 : 0;
+    }
+    return gPinPull[index] == IOPINRES_PULLUP ? 1 : 0;
+}
 
 static CryptoRngNrf gRng;
 static OscDesc_t gLfOsc = { OSC_TYPE_XTAL, 32768U, 20U, 0U };
@@ -700,6 +743,48 @@ static void TestUartTraceReadsTheRightPin(void)
     printf("[ok] the uart report reads the pin psel names\n");
 }
 
+/*
+ * The flow control probe.
+ *
+ * This is the measurement that replaces an argument. sdk-nrf says this part's
+ * RTS is P0.22 and the customer with the schematic says P0.19, and the pair
+ * being the wrong way round does not stop a link, so neither side of that
+ * argument would have been contradicted by anything the board did. The probe
+ * has to be right or it will settle it wrongly and with confidence.
+ */
+static void TestPinIsDrivenSeparatesInputFromOutput(void)
+{
+    const HciTarget_t target = HciNrf52840Target();
+    bool level = true;
+
+    /* Nothing on the far end: the pull decides, so the pin is an output. */
+    gPinDriven[FakePinIndex(0, 19)] = false;
+    assert(!HciTargetPinIsDriven(&target, 0U, 19U, &level));
+
+    /* Held low from outside: the pull is overridden, so the pin is an input. */
+    gPinDriven[FakePinIndex(0, 22)] = true;
+    gPinDrivenLevel[FakePinIndex(0, 22)] = false;
+    level = true;
+    assert(HciTargetPinIsDriven(&target, 0U, 22U, &level));
+    assert(!level);
+
+    /* Held high from outside is just as driven. A level is not a verdict. */
+    gPinDrivenLevel[FakePinIndex(0, 22)] = true;
+    level = false;
+    assert(HciTargetPinIsDriven(&target, 0U, 22U, &level));
+    assert(level);
+
+    /* Both pulls are tried, or a driven pin cannot be told from a pulled one. */
+    const unsigned before = gPinConfigured[FakePinIndex(1, 0)];
+    (void)HciTargetPinIsDriven(&target, 1U, 0U, &level);
+    assert(gPinConfigured[FakePinIndex(1, 0)] - before >= 2U);
+
+    /* And the pin is left neutral for whatever takes it next. */
+    assert(gPinPull[FakePinIndex(1, 0)] == IOPINRES_NONE);
+
+    printf("[ok] a driven pin is told from one that only follows a pull\n");
+}
+
 int main(void)
 {
     TestBringUpOrder();
@@ -711,6 +796,7 @@ int main(void)
     TestEventCauseStormIsBroken();
     TestUartModeLeavesUsbAlone();
     TestUartTraceReadsTheRightPin();
+    TestPinIsDrivenSeparatesInputFromOutput();
     printf("All nRF52840 USB bring up tests passed.\n");
     return 0;
 }

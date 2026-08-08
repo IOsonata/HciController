@@ -90,6 +90,29 @@ typedef struct {
      */
     void (*UartTrace)(const void *pContext, uint8_t DevNo);
 
+    /*
+     * Whether anything outside this part is driving a pin.
+     *
+     * Held with a pull up and then a pull down. A pin whose level follows the
+     * pull has nothing on the far end driving it; a pin that ignores the pull
+     * is being driven from outside. The internal pull is tens of kilohms and
+     * any real driver overrides it, so the two readings separate an input from
+     * an output with no schematic and no agreement needed.
+     *
+     * The one question it exists for is which of a pair of flow control pins
+     * is this part's RTS and which is its CTS, because getting that pair the
+     * wrong way round does not stop a link: two outputs fight on one line, the
+     * other line floats and usually reads as permission to send, traffic
+     * flows, and nothing anywhere reports an error.
+     *
+     * Only meaningful before the pins are handed to a peripheral. Optional; a
+     * port that cannot do it leaves this null.
+     */
+    bool (*PinIsDriven)(const void *pContext,
+                        uint8_t Port,
+                        uint8_t Pin,
+                        bool *pLevel);
+
     void (*Stop)(void *pContext);
 
     /*
@@ -149,6 +172,24 @@ static inline void HciTargetUsbTrace(const HciTarget_t *pTarget,
     }
 
     pTarget->pOps->UsbTrace(pTarget->pContext, pLabel, Pass);
+}
+
+/*
+ * Returns false when the pin is not driven from outside, which is also what a
+ * port with no answer returns, so pLevel says nothing on its own.
+ */
+static inline bool HciTargetPinIsDriven(const HciTarget_t *pTarget,
+                                        uint8_t Port,
+                                        uint8_t Pin,
+                                        bool *pLevel)
+{
+    if (pTarget == NULL || pTarget->pOps == NULL ||
+        pTarget->pOps->PinIsDriven == NULL)
+    {
+        return false;
+    }
+
+    return pTarget->pOps->PinIsDriven(pTarget->pContext, Port, Pin, pLevel);
 }
 
 static inline void HciTargetUartTrace(const HciTarget_t *pTarget, uint8_t DevNo)

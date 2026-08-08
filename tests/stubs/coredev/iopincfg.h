@@ -44,6 +44,13 @@ extern "C" {
 void IOPinCfg(const IOPinCfg_t *pCfg, int NbPins);
 void IOPinDisable(int PortNo, int PinNo);
 
+/*
+ * The single pin form, which the flow control probe uses to hold a pin with a
+ * pull up and then a pull down. Same argument order as the real header.
+ */
+void IOPinConfig(int PortNo, int PinNo, int PinOp, IOPINDIR Dir,
+                 IOPINRES Resistor, IOPINTYPE Type);
+
 #ifdef __cplusplus
 }
 #endif

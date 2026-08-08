@@ -33,7 +33,9 @@
 #include "device/dcd.h"
 #include "nrf_erratas.h"
 
+#include "coredev/iopincfg.h"
 #include "coredev/system_core_clock.h"
+#include "iopinctrl.h"
 #include "crypto_rng_nrf.h"
 #include "hci_trace.h"
 
@@ -1198,6 +1200,54 @@ static void HciNrf52840TargetUartTrace(const void *, uint8_t DevNo)
     (void)DevNo;
 }
 
+/*
+ * Long enough for a pin to reach the level its pull is asking for.
+ *
+ * The internal pull is tens of kilohms against a few tens of picofarads, so
+ * the time constant is well under a microsecond. This is a few microseconds at
+ * 64 MHz, which is generous for that and still nothing next to the rest of
+ * bring up. A loop rather than a timer because this runs before any clock this
+ * layer owns is running.
+ */
+#define HCI_NRF52840_PIN_SETTLE_LOOPS 200U
+
+static void HciNrf52840PinSettle(void)
+{
+    for (volatile uint32_t i = 0U; i < HCI_NRF52840_PIN_SETTLE_LOOPS; i++)
+    {
+    }
+}
+
+static bool HciNrf52840PinIsDriven(const void *,
+                                   uint8_t Port,
+                                   uint8_t Pin,
+                                   bool *pLevel)
+{
+    IOPinConfig(Port, Pin, 0, IOPINDIR_INPUT, IOPINRES_PULLUP,
+                IOPINTYPE_NORMAL);
+    HciNrf52840PinSettle();
+    const int high = IOPinRead(Port, Pin);
+
+    IOPinConfig(Port, Pin, 0, IOPINDIR_INPUT, IOPINRES_PULLDOWN,
+                IOPINTYPE_NORMAL);
+    HciNrf52840PinSettle();
+    const int low = IOPinRead(Port, Pin);
+
+    /*
+     * Left with no pull rather than with whichever one was tried last, so a
+     * pin about to be handed to the UART goes to it in a neutral state.
+     */
+    IOPinConfig(Port, Pin, 0, IOPINDIR_INPUT, IOPINRES_NONE, IOPINTYPE_NORMAL);
+
+    if (pLevel != nullptr)
+    {
+        *pLevel = high != 0;
+    }
+
+    /* The pull moved it, so nothing outside is holding it. */
+    return high == low;
+}
+
 static void HciNrf52840TargetStop(void *pContext)
 {
     HciNrf52840Stop(static_cast<HciNrf52840_t *>(pContext));
@@ -1244,6 +1294,7 @@ static const HciTargetOps_t s_Nrf52840Ops = {
     HciNrf52840TargetUsbStuck,
     HciNrf52840TargetUsbTrace,
     HciNrf52840TargetUartTrace,
+    HciNrf52840PinIsDriven,
     HciNrf52840TargetStop,
     HciNrf52840TargetGetSdcMem,
     HciNrf52840TargetLastError,
