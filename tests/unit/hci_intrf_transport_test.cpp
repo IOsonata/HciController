@@ -345,6 +345,65 @@ static void TestBannerThenIdleThenCommand(void)
     printf("[ok] a banner then a gap does not eat the command after it\n");
 }
 
+/*
+ * A packet built out of text is dropped rather than answered.
+ *
+ * This is the half that mattered on the hardware and the half that was
+ * missing. A reply to an accidental command is well formed H:4 going the other
+ * way, so it desynchronises the host's parser exactly as the text
+ * desynchronised this one, and the host then reads the answer it was waiting
+ * for as the middle of something else. Measured: sixty packets built out of a
+ * bootloader banner, sixty replies, and a host reporting every octet of them
+ * as an unknown H:4 type, including the octets of the answer it wanted.
+ *
+ * An octet refused at a packet boundary is evidence about everything after it,
+ * not only about itself, and the gap is the only way back.
+ */
+static void TestTextBuiltPacketsAreNotAnswered(void)
+{
+    ResetIntrf();
+
+    HciIntrfTransport_t transport;
+    Capture capture;
+    uint8_t packet[64];
+
+    memset(&capture, 0, sizeof(capture));
+    capture.Accept = true;
+
+    assert(HciIntrfTransportInit(&transport, &gIntrf.Base, packet,
+                                 sizeof(packet), CapturePacket, &capture));
+    HciIntrfTransportOpen(&transport);
+
+    /* Text, then something inside it that parses as a whole command. */
+    const uint8_t banner[] = {
+        'B', 'o', 'o', 't', 'i', 'n', 'g', ' ',
+        0x01, 0x03, 0x0C, 0x00,
+        'd', 'o', 'n', 'e', '\r', '\n',
+    };
+    FeedRx(banner, sizeof(banner));
+    HciIntrfTransportProcess(&transport);
+
+    assert(transport.Parser.InvalidTypeCount > 0U);
+    assert(HciIntrfTransportSuspect(&transport));
+    assert(capture.Count == 0U);
+    assert(transport.DroppedPacketCount == 1U);
+    assert(transport.RxPacketCount == 0U);
+
+    /* The gap, and then the same octets are a command again. */
+    HciIntrfTransportIdle(&transport);
+    assert(!HciIntrfTransportSuspect(&transport));
+
+    const uint8_t reset[] = {0x01, 0x03, 0x0C, 0x00};
+    FeedRx(reset, sizeof(reset));
+    HciIntrfTransportProcess(&transport);
+
+    assert(capture.Count == 1U);
+    assert(transport.RxPacketCount == 1U);
+    assert(transport.DroppedPacketCount == 1U);
+
+    printf("[ok] a command found inside text is dropped, not answered\n");
+}
+
 /* A packet split across several short reads is reassembled. */
 static void TestSplitReads(void)
 {
@@ -528,6 +587,7 @@ int main(void)
     TestFirstOctetsAreKept();
     TestNonH4StreamIsSeenAsSuch();
     TestBannerThenIdleThenCommand();
+    TestTextBuiltPacketsAreNotAnswered();
     TestSplitReads();
     TestBackpressure();
     TestSendDrains();

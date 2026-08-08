@@ -66,6 +66,28 @@ typedef struct {
     uint32_t RxPacketCount;
     uint32_t ResyncCount;
 
+    /*
+     * The stream has been shown not to be H:4, so nothing built out of it is
+     * answered until the link goes quiet.
+     *
+     * A real H:4 stream never holds an octet outside the indicator range at a
+     * packet boundary. One that does is either not H:4 or is being read from
+     * the wrong place, and in both cases every packet that follows it in the
+     * same burst is an accident of where the reading started. Answering those
+     * is worse than dropping them: the replies are well formed H:4 going the
+     * other way, so they desynchronise the host's parser exactly as the text
+     * desynchronised this one, and the host then eats the reply it was waiting
+     * for.
+     *
+     * Held as the rejected count at the last quiet moment rather than as a
+     * flag, because the flag has to be right at the instant a packet is
+     * handed over and the parser hands it over from inside the same call that
+     * rejected the octets. A mark compared on the spot cannot be set too late;
+     * a flag set after the call already was.
+     */
+    uint32_t RejectedMark;
+    uint32_t DroppedPacketCount;
+
 /*
  * The first octets that ever arrived, kept so they can be looked at.
  *
@@ -117,6 +139,12 @@ void HciIntrfTransportProcess(HciIntrfTransport_t *pTransport);
  * nothing.
  */
 void HciIntrfTransportIdle(HciIntrfTransport_t *pTransport);
+
+/*
+ * Whether the stream has shown itself not to be H:4 since it last went quiet,
+ * so packets built out of it are dropped rather than answered.
+ */
+bool HciIntrfTransportSuspect(const HciIntrfTransport_t *pTransport);
 
 bool HciIntrfTransportSend(HciIntrfTransport_t *pTransport,
                            HciH4PacketType_t Type,

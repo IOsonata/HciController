@@ -20,6 +20,18 @@ static bool HciIntrfPacketTypeValid(HciH4PacketType_t Type)
     return Type >= HCI_H4_PACKET_COMMAND && Type <= HCI_H4_PACKET_ISO;
 }
 
+/*
+ * An octet refused at a packet boundary is the only evidence in the stream
+ * that it is not H:4, and it is evidence about everything after it as well as
+ * about itself. Compared against the count at the last quiet moment, so it
+ * says "since the stream last started" rather than "ever".
+ */
+bool HciIntrfTransportSuspect(const HciIntrfTransport_t *pTransport)
+{
+    return pTransport != nullptr &&
+           pTransport->Parser.InvalidTypeCount != pTransport->RejectedMark;
+}
+
 static bool HciIntrfTransportCount(void *pContext,
                                    HciH4PacketType_t Type,
                                    const uint8_t *pPacket,
@@ -27,6 +39,17 @@ static bool HciIntrfTransportCount(void *pContext,
 {
     HciIntrfTransport_t *pTransport =
         static_cast<HciIntrfTransport_t *>(pContext);
+
+    /*
+     * Built out of a stream already shown not to be H:4, so it goes no
+     * further. Taken rather than refused, because refusing asks the parser to
+     * offer it again and it will not get better.
+     */
+    if (HciIntrfTransportSuspect(pTransport))
+    {
+        pTransport->DroppedPacketCount++;
+        return true;
+    }
 
     /*
      * Counted only when the handler takes it. A refused packet is retried on
@@ -158,7 +181,21 @@ static void HciIntrfTransportProcessRx(HciIntrfTransport_t *pTransport)
 
 void HciIntrfTransportIdle(HciIntrfTransport_t *pTransport)
 {
-    if (pTransport == nullptr || !HciH4ParserIsMidPacket(&pTransport->Parser))
+    if (pTransport == nullptr)
+    {
+        return;
+    }
+
+    /*
+     * Whatever was on the wire has stopped, so the next octet starts something
+     * new and gets the benefit of the doubt. This is the only way out of
+     * suspicion, and it is the right one: the gap is what separates the
+     * bootloader's output from the application's, and there is no octet that
+     * does.
+     */
+    pTransport->RejectedMark = pTransport->Parser.InvalidTypeCount;
+
+    if (!HciH4ParserIsMidPacket(&pTransport->Parser))
     {
         return;
     }

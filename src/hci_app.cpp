@@ -691,13 +691,15 @@ static void HciAppReportLink(HciApp_t *pApp)
      * all, and no amount of counting octets alone would have said so.
      */
     HciSyslogPrint(HciSyslogDefault(),
-                   "link: %s open=%u rx=%lu tx=%lu pkt=%lu resync=%lu "
-                   "rxerr=%lu txerr=%lu txbusy=%lu badtype=%lu oversize=%lu",
+                   "link: %s open=%u rx=%lu tx=%lu pkt=%lu drop=%lu "
+                   "resync=%lu rxerr=%lu txerr=%lu txbusy=%lu badtype=%lu "
+                   "oversize=%lu",
                    pApp->HostType == HCI_APP_HOST_USB ? "usb" : "uart",
                    (unsigned)pApp->HostOpen,
                    (unsigned long)pHost->RxOctetCount,
                    (unsigned long)pHost->TxOctetCount,
                    (unsigned long)pHost->RxPacketCount,
+                   (unsigned long)pHost->DroppedPacketCount,
                    (unsigned long)pHost->ResyncCount,
                    (unsigned long)pHost->RxErrorCount,
                    (unsigned long)pHost->TxErrorCount,
