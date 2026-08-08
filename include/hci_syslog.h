@@ -52,9 +52,14 @@ extern "C" {
  * The interesting case is twenty lines in a millisecond while something goes
  * wrong, and then silence, so the ring is what decides whether the beginning
  * of that burst survives to be read.
+ *
+ * Two thousand was not enough. Bring up alone filled it, so the ring was
+ * already dropping its own first lines before a terminal was plugged in, and
+ * on a board whose peer says something once every ten seconds the reader is
+ * always late. Four thousand holds bring up and the minutes after it.
  */
 #ifndef HCI_SYSLOG_SIZE
-#define HCI_SYSLOG_SIZE 2048U
+#define HCI_SYSLOG_SIZE 4096U
 #endif
 
 /*

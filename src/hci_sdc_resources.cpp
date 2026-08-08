@@ -42,10 +42,18 @@ static int32_t s_Required;
 static bool HciSdcCfgSet(uint8_t Type, const sdc_cfg_t *pCfg)
 {
     int32_t required = sdc_cfg_set(SDC_DEFAULT_RESOURCE_CFG_TAG, Type, pCfg);
-    HciTrace("sdc: cfg type=%u result=%ld\r\n", (unsigned)Type,
-             (long)required);
+
+    /*
+     * Only the ones that failed. There are twenty three of these and the
+     * running total each one returns is worth reading exactly when the pool
+     * comes up short, which the summary below already reports. Printed every
+     * time, they were seven hundred octets of a two thousand octet log ring,
+     * and the ring was dropping the start of the boot to hold them.
+     */
     if (required < 0)
     {
+        HciTrace("sdc: cfg type=%u failed result=%ld\r\n", (unsigned)Type,
+                 (long)required);
         s_Required = required;
         return false;
     }
