@@ -104,7 +104,13 @@ static HciCmdResult_t HciSdcStatus(uint8_t Status, size_t)
  *
  * The same section says the normal command flow control is not used for it, so
  * emitting no event costs the host no credit it was expecting back.
+ *
+ * Nothing calls it at the moment. Host Number Of Completed Packets was its one
+ * caller and that row is gone with the rest of controller to host flow
+ * control, so this is kept rather than deleted: it is the awkward half of that
+ * command and would have to be worked out again to bring the row back.
  */
+__attribute__((unused))
 static HciCmdResult_t HciSdcSilentOnSuccess(uint8_t Status, size_t)
 {
     HciCmdResult_t result = {Status,
@@ -219,9 +225,12 @@ static HciCmdResult_t HciSdcCmdReadSupportedCommands(void *,
 
     supported.params.hci_set_event_mask = 1U;
     supported.params.hci_reset = 1U;
-    supported.params.hci_set_controller_to_host_flow_control = 1U;
-    supported.params.hci_host_buffer_size = 1U;
-    supported.params.hci_host_number_of_completed_packets = 1U;
+    /*
+     * The three controller to host flow control bits stay clear. The
+     * controller refuses Host Buffer Size with 0x11 and no sdc_support call
+     * turns it on, so advertising it promises something that does not happen.
+     * The command table has no rows for them either; see the note there.
+     */
     supported.params.hci_read_local_version_information = 1U;
     supported.params.hci_read_local_supported_features = 1U;
     supported.params.hci_read_bd_addr = 1U;
@@ -1226,16 +1235,13 @@ HCI_SDC_CMD_PR(HciSdcCmdWriteAuthPayloadTimeout,
  * The host turns it on, says how many buffers it has, and hands them back as
  * it empties them. Vol 4 Part E 7.3.38 to 7.3.40.
  */
-HCI_SDC_CMD_P(HciSdcCmdSetControllerToHostFlowControl,
-              sdc_hci_cmd_cb_set_controller_to_host_flow_control,
-              sdc_hci_cmd_cb_set_controller_to_host_flow_control_t,
-              HciSdcComplete)
-HCI_SDC_CMD_P(HciSdcCmdHostBufferSize, sdc_hci_cmd_cb_host_buffer_size,
-              sdc_hci_cmd_cb_host_buffer_size_t, HciSdcComplete)
-HCI_SDC_CMD_VN(HciSdcCmdHostNumberOfCompletedPackets,
-               sdc_hci_cmd_cb_host_number_of_completed_packets,
-               sdc_hci_cmd_cb_host_number_of_completed_packets_t, array_params,
-               num_handles, HciSdcSilentOnSuccess)
+/*
+ * The three handlers are gone with the rows that called them. The controller
+ * answers Host Buffer Size with 0x11 and there is no way to change that from
+ * here, so wrapping it only produced a refusal with extra steps. Restoring
+ * them is three lines and a bitmap bit each, once a controller answers the
+ * command.
+ */
 
 /* Link control. */
 HCI_SDC_CMD_P(HciSdcCmdDisconnect, sdc_hci_cmd_lc_disconnect,
@@ -1687,22 +1693,32 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
     HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_CB_SET_EVENT_MASK, 8U,
                     HciSdcCmdSetEventMask),
     HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_CB_RESET, 0U, HciSdcCmdReset),
-    HCI_SDC_ENTRY_C(
-        SDC_HCI_OPCODE_CMD_CB_SET_CONTROLLER_TO_HOST_FLOW_CONTROL,
-        sizeof(sdc_hci_cmd_cb_set_controller_to_host_flow_control_t),
-        HciSdcCmdSetControllerToHostFlowControl),
-    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_CB_HOST_BUFFER_SIZE,
-                    sizeof(sdc_hci_cmd_cb_host_buffer_size_t),
-                    HciSdcCmdHostBufferSize),
     /*
-     * Answers nothing when it works, so the row declares no response at all.
-     * A length the dispatcher rejects before the handler runs still gets a
-     * Command Complete, because that is what Vol 4 Part E 7.3.40 asks for and
-     * what HciCmdBuildError produces for any row that is not Command Status.
+     * Controller to host flow control is not here: not Set Controller To Host
+     * Flow Control, not Host Buffer Size, not Host Number Of Completed
+     * Packets.
+     *
+     * The controller refuses Host Buffer Size. Measured on hardware against a
+     * Zephyr host, the answer is status 0x11, Unsupported Feature or Parameter
+     * Value, from sdc_hci_cmd_cb_host_buffer_size itself. There is no
+     * sdc_support call that turns it on, so there is nothing this layer can do
+     * to make it work.
+     *
+     * Dispatching it anyway was worse than not having it. A host reads the
+     * supported command bitmap first and only sends what it is told is there,
+     * so the bit and the row together were a promise the controller broke. A
+     * Zephyr host takes the refusal as a failure of bt_enable rather than of
+     * one command, and an application that treats a failed Bluetooth start as
+     * fatal reboots with nothing in its log to say why. That is exactly what
+     * the Thingy:91 did: Reset, Read Local Supported Features, Read Local
+     * Version, Read Local Supported Commands, then Host Buffer Size answered
+     * 0x11, and a restart, every ten seconds.
+     *
+     * With the bit clear the same host logs that the controller does not
+     * support it and goes on, which is the behaviour a controller without
+     * the feature is supposed to produce. The bitmap below drops the three
+     * bits to match, since a row and a bit have to agree in both directions.
      */
-    {SDC_HCI_OPCODE_CMD_CB_HOST_NUMBER_OF_COMPLETED_PACKETS,
-     HCI_CMD_VARIABLE_PARAM_LEN, 0U, HCI_CMD_RESPONSE_NONE,
-     HciSdcCmdHostNumberOfCompletedPackets},
     HCI_SDC_ENTRY_CR(
         SDC_HCI_OPCODE_CMD_CB_READ_AUTHENTICATED_PAYLOAD_TIMEOUT,
         sizeof(sdc_hci_cmd_cb_read_authenticated_payload_timeout_t),

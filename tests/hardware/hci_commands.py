@@ -172,21 +172,12 @@ _CB = [
     Command(0x0C2D, "Read Transmit Power Level", COMPLETE,
             lambda ctx: _conn(ctx, b"\x00"), needs=NEEDS_CONN,
             note="type 0 is the current level"),
-    Command(0x0C31, "Set Controller To Host Flow Control", COMPLETE,
-            b"\x01", undo=(0x0C31, b"\x00"),
-            note="on for ACL, because Host Number Of Completed Packets below "
-                 "is Command Disallowed while it is off. Undo turns it back "
-                 "off, which is where a reset leaves it"),
-    Command(0x0C33, "Host Buffer Size", COMPLETE,
-            struct.pack("<HBHH", 251, 0, 4, 0),
-            note="ACL only, no synchronous buffers"),
-    Command(0x0C35, "Host Number Of Completed Packets", NONE,
-            struct.pack("<BHH", 1, UNUSED_HANDLE, 0),
-            expect=(STATUS_INVALID_PARAMS, STATUS_UNKNOWN_CONNECTION),
-            note="zero packets on a handle that has none. Answers nothing on "
-                 "success, which is the whole point of testing it, and a "
-                 "controller is equally right to reject the handle. Both are "
-                 "a pass; a Command Complete with success is not"),
+    # Controller to host flow control, 0x0C31, 0x0C33 and 0x0C35, is not here.
+    # The controller answers Host Buffer Size with 0x11 and no sdc_support call
+    # turns it on, so the firmware no longer dispatches or advertises the
+    # three. Driving them here would only test that an unsupported command is
+    # refused, which is not what these rows are for. See the note beside the
+    # command table in src/hci_sdc_nrfxlib.cpp.
     Command(0x0C7B, "Read Authenticated Payload Timeout", COMPLETE,
             lambda ctx: _conn(ctx), needs=NEEDS_CONN),
     Command(0x0C7C, "Write Authenticated Payload Timeout", COMPLETE,

@@ -118,6 +118,7 @@ static Response Exchange(uint16_t opcode, const uint8_t *pParams, size_t len)
  * promises and an unexpected Command Complete would spend a credit the host
  * never lent.
  */
+__attribute__((unused))
 static void ExpectSilent(const char *label, uint16_t opcode,
                          const uint8_t *pParams, size_t len)
 {
@@ -806,31 +807,21 @@ int main(void)
                    sizeof(sdc_hci_cmd_le_set_ext_scan_enable_t), 0U);
 
     /*
-     * Controller to host flow control. Two ordinary commands and one that is
-     * not: Host Number Of Completed Packets answers nothing when it works and
-     * a Command Complete carrying 0x12 when it does not, Vol 4 Part E 7.3.40.
+     * Controller to host flow control is refused as unknown, all three of it.
+     *
+     * The controller answers Host Buffer Size with 0x11 and nothing here can
+     * change that, so the firmware neither dispatches nor advertises 0x0C31,
+     * 0x0C33 or 0x0C35. What is checked is that they are refused the way any
+     * opcode with no row is refused, because the alternative found on hardware
+     * was worse than not having them: a bitmap bit promising the command and a
+     * row producing 0x11 ended a Zephyr host's bt_enable, and the host rebooted
+     * every ten seconds with nothing in its log.
      */
-    ExpectComplete(
-        "Set Controller To Host Flow Control", 0x0C31, zeros,
-        sizeof(sdc_hci_cmd_cb_set_controller_to_host_flow_control_t), 0U);
-    ExpectComplete("Host Buffer Size", 0x0C33, zeros,
-                   sizeof(sdc_hci_cmd_cb_host_buffer_size_t), 0U);
-
-    {
-        /* One handle owing two packets: count, handle, then the count back. */
-        const uint8_t completed[] = {0x01U, 0x05U, 0x00U, 0x02U, 0x00U};
-        ExpectSilent("Host Number Of Completed Packets", 0x0C35, completed,
-                     sizeof(completed));
-
-        /* Two handles declared, one supplied. */
-        const uint8_t lying[] = {0x02U, 0x05U, 0x00U, 0x02U, 0x00U};
-        ExpectRejected("Host Number Of Completed Packets, count lies", 0x0C35,
-                       lying, sizeof(lying), 0x12);
-
-        /* Nothing at all still has to be answered rather than ignored. */
-        ExpectRejected("Host Number Of Completed Packets, empty", 0x0C35,
-                       zeros, 0U, 0x12);
-    }
+    ExpectRejected("Set Controller To Host Flow Control", 0x0C31, zeros, 1U,
+                   0x01);
+    ExpectRejected("Host Buffer Size", 0x0C33, zeros, 7U, 0x01);
+    ExpectRejected("Host Number Of Completed Packets", 0x0C35, zeros, 0U,
+                   0x01);
 
     /*
      * Privacy and the resolving list. Add Device To Resolving List carries two
