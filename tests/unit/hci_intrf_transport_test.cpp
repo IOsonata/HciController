@@ -404,6 +404,80 @@ static void TestTextBuiltPacketsAreLabelled(void)
     printf("[ok] a command found inside text is labelled, not lost\n");
 }
 
+/* Accepts only the one opcode, standing in for the dispatch table. */
+static bool OnlyReset(void *, HciH4PacketType_t Type, const uint8_t *pPacket,
+                      size_t PacketLen)
+{
+    return Type == HCI_H4_PACKET_COMMAND && PacketLen >= 2U &&
+           pPacket[0] == 0x03U && pPacket[1] == 0x0CU;
+}
+
+/*
+ * With a filter, a suspect stream loses its accidents and keeps its commands.
+ *
+ * Both halves have been wrong on hardware in turn. Answering everything let
+ * three hundred manufactured commands out onto the wire, and the host reported
+ * every octet of the answers as an unknown H:4 type with the answer it wanted
+ * among them. Answering nothing threw away real Resets. The opcode is what
+ * separates them, and only the layer holding the table can look.
+ */
+static void TestSuspectFilterKeepsRealCommands(void)
+{
+    ResetIntrf();
+
+    HciIntrfTransport_t transport;
+    Capture capture;
+    uint8_t packet[64];
+
+    memset(&capture, 0, sizeof(capture));
+    capture.Accept = true;
+
+    assert(HciIntrfTransportInit(&transport, &gIntrf.Base, packet,
+                                 sizeof(packet), CapturePacket, &capture));
+    HciIntrfTransportSetSuspectFilter(&transport, OnlyReset, nullptr);
+    HciIntrfTransportOpen(&transport);
+
+    /*
+     * Text, then a command the table does not know, then the Reset. All three
+     * in one burst, so every packet out of it is suspect and the filter is the
+     * only thing that can tell them apart.
+     */
+    const uint8_t burst[] = {
+        'T', 'F', '-', 'M', '\r', '\n',
+        0x01, 0x99, 0x99, 0x00,
+        0x01, 0x03, 0x0C, 0x00,
+    };
+    FeedRx(burst, sizeof(burst));
+    HciIntrfTransportProcess(&transport);
+
+    assert(HciIntrfTransportSuspect(&transport));
+    assert(transport.DroppedPacketCount == 1U);
+
+    assert(capture.Count == 1U);
+    assert(capture.Data[0] == 0x03U && capture.Data[1] == 0x0CU);
+    assert(transport.RxPacketCount == 1U);
+    assert(transport.SuspectPacketCount == 1U);
+
+    /* Only the delivered one is recorded, and it is marked where it came from. */
+    assert(transport.PktMarkLen == 1U);
+    assert(transport.PktMark[0].Head[0] == 0x03U);
+    assert(transport.PktMark[0].Suspect);
+
+    /* With no filter set, nothing is refused. */
+    ResetIntrf();
+    memset(&capture, 0, sizeof(capture));
+    capture.Accept = true;
+    assert(HciIntrfTransportInit(&transport, &gIntrf.Base, packet,
+                                 sizeof(packet), CapturePacket, &capture));
+    HciIntrfTransportOpen(&transport);
+    FeedRx(burst, sizeof(burst));
+    HciIntrfTransportProcess(&transport);
+    assert(capture.Count == 2U);
+    assert(transport.DroppedPacketCount == 0U);
+
+    printf("[ok] a suspect burst keeps the commands and loses the rest\n");
+}
+
 /*
  * Every packet is recorded, with whether the stream it came from was suspect.
  *
@@ -723,6 +797,7 @@ int main(void)
     TestNonH4StreamIsSeenAsSuch();
     TestBannerThenIdleThenCommand();
     TestTextBuiltPacketsAreLabelled();
+    TestSuspectFilterKeepsRealCommands();
     TestPacketMarksRecordBothOutcomes();
     TestOpenDiscardsWhatArrivedTooEarly();
     TestSplitReads();

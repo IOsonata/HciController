@@ -31,6 +31,31 @@ static const HciCmdEntry_t *HciCmdFindEntry(const HciCmdDispatch_t *pDispatch,
     return NULL;
 }
 
+bool HciCmdDispatchKnows(const HciCmdDispatch_t *pDispatch,
+                         uint16_t Opcode,
+                         size_t ParamLen)
+{
+    if (pDispatch == NULL)
+    {
+        return false;
+    }
+
+    const HciCmdEntry_t *pEntry = HciCmdFindEntry(pDispatch, Opcode);
+    if (pEntry == NULL)
+    {
+        return false;
+    }
+
+    /*
+     * A variable length command declares no length, so only the opcode can be
+     * checked for those. Everything else has to agree, which is what makes
+     * this worth asking at all: an opcode that exists by accident is unlikely
+     * to arrive with the right number of octets behind it as well.
+     */
+    return pEntry->ParamLen == HCI_CMD_VARIABLE_PARAM_LEN ||
+           pEntry->ParamLen == ParamLen;
+}
+
 static void HciCmdBuildComplete(HciCmdDispatch_t *pDispatch,
                                 uint16_t Opcode,
                                 uint8_t Status,

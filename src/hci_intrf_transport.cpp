@@ -61,6 +61,14 @@ static bool HciIntrfTransportCount(void *pContext,
      */
     const bool suspect = HciIntrfTransportSuspect(pTransport);
 
+    if (suspect && pTransport->SuspectFilter != nullptr &&
+        !pTransport->SuspectFilter(pTransport->pFilterContext, Type, pPacket,
+                                   PacketLen))
+    {
+        pTransport->DroppedPacketCount++;
+        return true;
+    }
+
     /*
      * A refused packet is offered again on the next pass, so both the count
      * and the record are taken only once the packet has stopped being offered.
@@ -128,6 +136,17 @@ bool HciIntrfTransportInit(HciIntrfTransport_t *pTransport,
  * Bounded, so a port that hands back data forever cannot hold start up.
  */
 #define HCI_INTRF_FLUSH_PASSES 64U
+
+void HciIntrfTransportSetSuspectFilter(HciIntrfTransport_t *pTransport,
+                                       HciH4PacketHandler_t Filter,
+                                       void *pContext)
+{
+    if (pTransport != nullptr)
+    {
+        pTransport->SuspectFilter = Filter;
+        pTransport->pFilterContext = pContext;
+    }
+}
 
 void HciIntrfTransportOpen(HciIntrfTransport_t *pTransport)
 {

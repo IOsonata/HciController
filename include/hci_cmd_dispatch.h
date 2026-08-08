@@ -160,6 +160,22 @@ bool HciCmdDispatchGet(HciCmdDispatch_t *pDispatch,
 
 bool HciCmdDispatchEventPending(const HciCmdDispatch_t *pDispatch);
 
+/*
+ * Whether this controller implements the opcode, and the length agrees with
+ * what the table says the command takes.
+ *
+ * Not a substitute for dispatching, which still answers an opcode it does not
+ * know with Unknown Command as the specification requires. This is for a
+ * caller that has to decide whether a packet is a command at all, which is a
+ * different question and one the octets cannot answer on their own: a stream
+ * that is not H:4 produces packets that are well formed and mean nothing, and
+ * the only thing separating them from real ones is that a real host sends
+ * opcodes that exist.
+ */
+bool HciCmdDispatchKnows(const HciCmdDispatch_t *pDispatch,
+                         uint16_t Opcode,
+                         size_t ParamLen);
+
 #ifdef __cplusplus
 }
 #endif

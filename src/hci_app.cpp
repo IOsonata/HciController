@@ -341,6 +341,49 @@ static bool HciAppInitUart(HciApp_t *pApp)
 #endif
 }
 
+/*
+ * Whether a packet built out of a stream that is not H:4 is worth answering.
+ *
+ * Only the opcode table can say. A command manufactured out of the nRF9160's
+ * bootloader banner is as well formed as a real one and the octets do not
+ * distinguish them, but a real host sends opcodes that exist and text does not:
+ * a hundred and fifty of sixty five thousand, with the parameter length having
+ * to agree as well.
+ *
+ * It matters because answering the false ones is not free. Each answer is well
+ * formed H:4 going the other way, so it desynchronises the host's parser, and
+ * with hardware flow control they leave this side only when the host asserts
+ * its ready line, which is the moment it opens the transport and starts
+ * reading. Measured on the board: three hundred and nineteen packets out of
+ * three hundred and twenty five were manufactured, and the host reported every
+ * octet of the answers as an unknown H:4 type, the answer it wanted among
+ * them.
+ *
+ * Refusing every suspect packet instead was tried and threw away real Resets.
+ * This refuses the ones that cannot be commands and keeps the ones that can.
+ */
+static bool HciAppSuspectFilter(void *pContext,
+                                HciH4PacketType_t Type,
+                                const uint8_t *pPacket,
+                                size_t PacketLen)
+{
+    const HciApp_t *pApp = static_cast<const HciApp_t *>(pContext);
+
+    /*
+     * Only commands are judged. A data packet holds a connection handle and no
+     * opcode, so there is nothing to check it against, and a controller with no
+     * connection open has nothing it could refer to anyway.
+     */
+    if (Type != HCI_H4_PACKET_COMMAND || PacketLen < 3U)
+    {
+        return false;
+    }
+
+    const uint16_t opcode = (uint16_t)pPacket[0] | ((uint16_t)pPacket[1] << 8);
+
+    return HciCmdDispatchKnows(&pApp->Sdc.Commands, opcode, pPacket[2]);
+}
+
 static void HciAppSetHostOpen(HciApp_t *pApp, bool Open)
 {
     if (pApp->HostOpen == Open)
@@ -795,7 +838,7 @@ static void HciAppReportLink(HciApp_t *pApp)
      * all, and no amount of counting octets alone would have said so.
      */
     HciSyslogPrint(HciSyslogDefault(),
-                   "link: %s open=%u rx=%lu tx=%lu pkt=%lu susp=%lu "
+                   "link: %s open=%u rx=%lu tx=%lu pkt=%lu susp=%lu drop=%lu "
                    "flush=%lu resync=%lu rxerr=%lu txerr=%lu txbusy=%lu "
                    "badtype=%lu oversize=%lu",
                    pApp->HostType == HCI_APP_HOST_USB ? "usb" : "uart",
@@ -804,6 +847,7 @@ static void HciAppReportLink(HciApp_t *pApp)
                    (unsigned long)pHost->TxOctetCount,
                    (unsigned long)pHost->RxPacketCount,
                    (unsigned long)pHost->SuspectPacketCount,
+                   (unsigned long)pHost->DroppedPacketCount,
                    (unsigned long)pHost->FlushedOctetCount,
                    (unsigned long)pHost->ResyncCount,
                    (unsigned long)pHost->RxErrorCount,
@@ -978,6 +1022,14 @@ bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType, HciTarget_t Target)
         s_pApp = nullptr;
         return false;
     }
+
+    /*
+     * The transport asks this before answering anything built out of a stream
+     * that is not H:4, and only then. Wired here because this is the one place
+     * that holds both the transport and the opcode table.
+     */
+    HciIntrfTransportSetSuspectFilter(&pApp->Controller.Host,
+                                      HciAppSuspectFilter, pApp);
 
     if (!pApp->Target.pOps->Init(pApp->Target.pContext,
                          &pApp->Runtime,

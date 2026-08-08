@@ -36,6 +36,24 @@ typedef struct {
     HciH4PacketHandler_t Handler;
     void *pHandlerContext;
 
+    /*
+     * Asked about a packet built out of a stream that has shown itself not to
+     * be H:4, and only about those. Returning false drops the packet unheard.
+     *
+     * It exists because this layer cannot answer the question and the layer
+     * above can. A command manufactured out of a bootloader banner is well
+     * formed and means nothing, and the only thing separating it from a real
+     * one is whether the opcode exists. Answering the false ones is not
+     * harmless: the replies are well formed H:4 going the other way, and they
+     * desynchronise the host's parser so that the answer it is waiting for
+     * arrives in the middle of something else.
+     *
+     * Null leaves every packet delivered, which is what a port with no such
+     * layer above it wants.
+     */
+    HciH4PacketHandler_t SuspectFilter;
+    void *pFilterContext;
+
     uint8_t RxChunk[HCI_INTRF_IO_CHUNK_SIZE];
     size_t RxChunkLen;
     size_t RxChunkOffset;
@@ -85,6 +103,7 @@ typedef struct {
      */
     uint32_t RejectedMark;
     uint32_t SuspectPacketCount;
+    uint32_t DroppedPacketCount;
 
     /*
      * Octets thrown away at open, because they arrived while the driver was
@@ -172,6 +191,14 @@ void HciIntrfTransportIdle(HciIntrfTransport_t *pTransport);
  * Packets built out of such a stream are labelled and still delivered.
  */
 bool HciIntrfTransportSuspect(const HciIntrfTransport_t *pTransport);
+
+/*
+ * Set what decides whether a packet built out of a suspect stream is worth
+ * delivering. See the member for why this is not decided here.
+ */
+void HciIntrfTransportSetSuspectFilter(HciIntrfTransport_t *pTransport,
+                                       HciH4PacketHandler_t Filter,
+                                       void *pContext);
 
 bool HciIntrfTransportSend(HciIntrfTransport_t *pTransport,
                            HciH4PacketType_t Type,
