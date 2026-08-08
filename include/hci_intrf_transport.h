@@ -89,6 +89,28 @@ typedef struct {
     uint32_t DroppedPacketCount;
 
 /*
+ * The first packets this side built, whether they were handed on or thrown
+ * away, as the indicator and the two octets behind it. For a command those two
+ * are the opcode, so 01 03 0C is an HCI Reset arriving and is the one thing
+ * worth being certain about on a link that is not working.
+ *
+ * Dropped ones are kept for the same reason accepted ones are, and it is the
+ * more important half: the rule that drops packets built out of text can throw
+ * away a real command if the host sends one without a gap in front of it, and
+ * nothing else would ever say that had happened.
+ *
+ * Three octets rather than the packet, because what is wanted here is which
+ * packet it was, not what was in it.
+ */
+#define HCI_INTRF_PKT_MARKS 8U
+    struct {
+        uint8_t Type;
+        uint8_t Head[2];
+        bool Dropped;
+    } PktMark[HCI_INTRF_PKT_MARKS];
+    uint8_t PktMarkLen;
+
+/*
  * The first octets that ever arrived, kept so they can be looked at.
  *
  * A count says something is on the wire. It cannot say what, and the answers

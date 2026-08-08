@@ -40,28 +40,40 @@ static bool HciIntrfTransportCount(void *pContext,
     HciIntrfTransport_t *pTransport =
         static_cast<HciIntrfTransport_t *>(pContext);
 
-    /*
-     * Built out of a stream already shown not to be H:4, so it goes no
-     * further. Taken rather than refused, because refusing asks the parser to
-     * offer it again and it will not get better.
-     */
-    if (HciIntrfTransportSuspect(pTransport))
-    {
-        pTransport->DroppedPacketCount++;
-        return true;
-    }
+    const bool dropped = HciIntrfTransportSuspect(pTransport);
 
     /*
-     * Counted only when the handler takes it. A refused packet is retried on
-     * the next pass, and counting it here would count it once per attempt.
+     * A refused packet is offered again on the next pass, so both the count
+     * and the record are taken only once the packet has stopped being offered.
+     * Counting on every attempt was the first version of this and it inflated
+     * exactly the number a reader would trust most.
      */
-    if (!pTransport->Handler(pTransport->pHandlerContext, Type, pPacket,
+    if (!dropped &&
+        !pTransport->Handler(pTransport->pHandlerContext, Type, pPacket,
                              PacketLen))
     {
         return false;
     }
 
-    pTransport->RxPacketCount++;
+    if (pTransport->PktMarkLen < HCI_INTRF_PKT_MARKS)
+    {
+        const uint8_t slot = pTransport->PktMarkLen;
+        pTransport->PktMark[slot].Type = (uint8_t)Type;
+        pTransport->PktMark[slot].Head[0] = PacketLen > 0U ? pPacket[0] : 0U;
+        pTransport->PktMark[slot].Head[1] = PacketLen > 1U ? pPacket[1] : 0U;
+        pTransport->PktMark[slot].Dropped = dropped;
+        pTransport->PktMarkLen++;
+    }
+
+    if (dropped)
+    {
+        pTransport->DroppedPacketCount++;
+    }
+    else
+    {
+        pTransport->RxPacketCount++;
+    }
+
     return true;
 }
 

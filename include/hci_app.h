@@ -108,6 +108,12 @@ typedef struct {
     /* The first octets are shown once, not on every report. */
     bool LinkFirstRxReported;
 
+    /*
+     * How many packet marks have been shown. Not a flag, because they arrive
+     * a few at a time and the interesting one is usually not the first.
+     */
+    uint8_t LinkPktMarksReported;
+
     HciTaktOs_t Runtime;
     /*
      * The part, held through its interface. The instance belongs to the port,

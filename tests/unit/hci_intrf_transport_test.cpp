@@ -404,6 +404,72 @@ static void TestTextBuiltPacketsAreNotAnswered(void)
     printf("[ok] a command found inside text is dropped, not answered\n");
 }
 
+/*
+ * Every packet is recorded with what became of it, dropped ones included.
+ *
+ * The dropped half is the point. The rule that refuses packets built out of
+ * text will refuse a real command too if the host sends one without a gap in
+ * front of it, and that failure looks exactly like a command that never
+ * arrived. Recording both is the only way the two can be told apart from a
+ * log, and telling them apart decides whether the idle threshold is wrong or
+ * the wire is.
+ */
+static void TestPacketMarksRecordBothOutcomes(void)
+{
+    ResetIntrf();
+
+    HciIntrfTransport_t transport;
+    Capture capture;
+    uint8_t packet[64];
+
+    memset(&capture, 0, sizeof(capture));
+    capture.Accept = true;
+
+    assert(HciIntrfTransportInit(&transport, &gIntrf.Base, packet,
+                                 sizeof(packet), CapturePacket, &capture));
+    HciIntrfTransportOpen(&transport);
+
+    /* Text, then a Reset with no gap in front of it, so it is refused. */
+    const uint8_t noGap[] = {'x', 'y', 0x01, 0x03, 0x0C, 0x00};
+    FeedRx(noGap, sizeof(noGap));
+    HciIntrfTransportProcess(&transport);
+
+    assert(transport.PktMarkLen == 1U);
+    assert(transport.PktMark[0].Type == HCI_H4_PACKET_COMMAND);
+    assert(transport.PktMark[0].Head[0] == 0x03);
+    assert(transport.PktMark[0].Head[1] == 0x0C);
+    assert(transport.PktMark[0].Dropped);
+
+    /* The gap, then the same Reset, which is taken. */
+    HciIntrfTransportIdle(&transport);
+    const uint8_t reset[] = {0x01, 0x03, 0x0C, 0x00};
+    FeedRx(reset, sizeof(reset));
+    HciIntrfTransportProcess(&transport);
+
+    assert(transport.PktMarkLen == 2U);
+    assert(transport.PktMark[1].Head[0] == 0x03);
+    assert(transport.PktMark[1].Head[1] == 0x0C);
+    assert(!transport.PktMark[1].Dropped);
+
+    /*
+     * A packet the handler refuses is offered again, and is recorded when it
+     * is finally taken rather than once per attempt. Counting on every attempt
+     * was the first version of this and inflated the number a reader trusts
+     * most.
+     */
+    capture.Accept = false;
+    FeedRx(reset, sizeof(reset));
+    HciIntrfTransportProcess(&transport);
+    assert(transport.PktMarkLen == 2U);
+
+    capture.Accept = true;
+    HciIntrfTransportProcess(&transport);
+    assert(transport.PktMarkLen == 3U);
+    assert(transport.RxPacketCount == 2U);
+
+    printf("[ok] packets are recorded once, with what became of them\n");
+}
+
 /* A packet split across several short reads is reassembled. */
 static void TestSplitReads(void)
 {
@@ -588,6 +654,7 @@ int main(void)
     TestNonH4StreamIsSeenAsSuch();
     TestBannerThenIdleThenCommand();
     TestTextBuiltPacketsAreNotAnswered();
+    TestPacketMarksRecordBothOutcomes();
     TestSplitReads();
     TestBackpressure();
     TestSendDrains();

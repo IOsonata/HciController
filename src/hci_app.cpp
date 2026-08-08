@@ -652,6 +652,44 @@ static void HciAppResyncOnIdle(HciApp_t *pApp)
     }
 }
 
+static void HciAppReportPktMarks(const HciIntrfTransport_t *pHost)
+{
+    static const char digits[] = "0123456789ABCDEF";
+    char line[HCI_INTRF_PKT_MARKS * 16U + 4U];
+    size_t at = 0U;
+
+    for (size_t i = 0U; i < pHost->PktMarkLen; i++)
+    {
+        const uint8_t octets[3] = {
+            pHost->PktMark[i].Type,
+            pHost->PktMark[i].Head[0],
+            pHost->PktMark[i].Head[1],
+        };
+
+        for (size_t j = 0U; j < 3U; j++)
+        {
+            line[at++] = digits[octets[j] >> 4];
+            line[at++] = digits[octets[j] & 0x0FU];
+            line[at++] = ' ';
+        }
+
+        const char *pWhat = pHost->PktMark[i].Dropped ? "drop" : "ok";
+        for (const char *p = pWhat; *p != '\0'; p++)
+        {
+            line[at++] = *p;
+        }
+
+        if (i + 1U < pHost->PktMarkLen)
+        {
+            line[at++] = ',';
+            line[at++] = ' ';
+        }
+    }
+    line[at] = '\0';
+
+    HciSyslogPrint(HciSyslogDefault(), "pkt: %s", line);
+}
+
 static void HciAppReportLink(HciApp_t *pApp)
 {
     const HciIntrfTransport_t *pHost = &pApp->Controller.Host;
@@ -689,6 +727,19 @@ static void HciAppReportLink(HciApp_t *pApp)
     {
         pApp->LinkFirstRxReported = true;
         HciAppReportFirstRx(pHost);
+    }
+
+    /*
+     * Which packets this side built, and what became of each. On a link that
+     * is not working this is the line that settles it: 01 03 0C is an HCI
+     * Reset, and whether it says ok or drop beside it is the difference
+     * between a command that never arrived and a command that arrived and was
+     * thrown away by the rule meant to protect the link.
+     */
+    if (pApp->LinkPktMarksReported != pHost->PktMarkLen)
+    {
+        pApp->LinkPktMarksReported = pHost->PktMarkLen;
+        HciAppReportPktMarks(pHost);
     }
 
     /*
