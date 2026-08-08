@@ -88,6 +88,13 @@ typedef struct {
     uint32_t RejectedMark;
     uint32_t DroppedPacketCount;
 
+    /*
+     * Octets thrown away at open, because they arrived while the driver was
+     * configured and nothing behind it could answer yet. A large number here
+     * is ordinary on a board whose peer talks during its own start up.
+     */
+    uint32_t FlushedOctetCount;
+
 /*
  * The first packets this side built, whether they were handed on or thrown
  * away, as the indicator and the two octets behind it. For a command those two

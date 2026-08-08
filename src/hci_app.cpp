@@ -784,14 +784,15 @@ static void HciAppReportLink(HciApp_t *pApp)
      */
     HciSyslogPrint(HciSyslogDefault(),
                    "link: %s open=%u rx=%lu tx=%lu pkt=%lu drop=%lu "
-                   "resync=%lu rxerr=%lu txerr=%lu txbusy=%lu badtype=%lu "
-                   "oversize=%lu",
+                   "flush=%lu resync=%lu rxerr=%lu txerr=%lu txbusy=%lu "
+                   "badtype=%lu oversize=%lu",
                    pApp->HostType == HCI_APP_HOST_USB ? "usb" : "uart",
                    (unsigned)pApp->HostOpen,
                    (unsigned long)pHost->RxOctetCount,
                    (unsigned long)pHost->TxOctetCount,
                    (unsigned long)pHost->RxPacketCount,
                    (unsigned long)pHost->DroppedPacketCount,
+                   (unsigned long)pHost->FlushedOctetCount,
                    (unsigned long)pHost->ResyncCount,
                    (unsigned long)pHost->RxErrorCount,
                    (unsigned long)pHost->TxErrorCount,

@@ -470,6 +470,63 @@ static void TestPacketMarksRecordBothOutcomes(void)
     printf("[ok] packets are recorded once, with what became of them\n");
 }
 
+/*
+ * Opening throws away what the port buffered while nobody was listening.
+ *
+ * This is the case that cost the Thingy:91 its Reset. The driver's buffer
+ * fills from the moment the UART is configured, several hundred milliseconds
+ * before the controller behind it can answer, so the first read after opening
+ * returns octets that were spread across that whole time with every gap
+ * between them gone. The bootloader banner and the Reset were four hundred
+ * milliseconds apart on the wire and adjacent in the buffer, and the Reset was
+ * refused as part of the banner's burst.
+ *
+ * A gap is the only thing that separates one sender's output from another's,
+ * so a buffer that erases gaps has to be emptied rather than read.
+ */
+static void TestOpenDiscardsWhatArrivedTooEarly(void)
+{
+    ResetIntrf();
+
+    HciIntrfTransport_t transport;
+    Capture capture;
+    uint8_t packet[64];
+
+    memset(&capture, 0, sizeof(capture));
+    capture.Accept = true;
+
+    assert(HciIntrfTransportInit(&transport, &gIntrf.Base, packet,
+                                 sizeof(packet), CapturePacket, &capture));
+
+    /* Banner and a Reset, buffered together while the port was shut. */
+    const uint8_t buffered[] = {
+        'B', 'o', 'o', 't', 'i', 'n', 'g', ' ', 'T', 'F', '-', 'M', '\r', '\n',
+        0x01, 0x03, 0x0C, 0x00,
+    };
+    FeedRx(buffered, sizeof(buffered));
+
+    HciIntrfTransportOpen(&transport);
+    assert(transport.FlushedOctetCount == sizeof(buffered));
+
+    HciIntrfTransportProcess(&transport);
+    assert(transport.RxOctetCount == 0U);
+    assert(transport.PktMarkLen == 0U);
+    assert(!HciIntrfTransportSuspect(&transport));
+
+    /* What the host sends once somebody is listening is taken. */
+    const uint8_t reset[] = {0x01, 0x03, 0x0C, 0x00};
+    FeedRx(reset, sizeof(reset));
+    HciIntrfTransportProcess(&transport);
+
+    assert(capture.Count == 1U);
+    assert(transport.RxPacketCount == 1U);
+    assert(transport.DroppedPacketCount == 0U);
+    assert(transport.PktMarkLen == 1U);
+    assert(!transport.PktMark[0].Dropped);
+
+    printf("[ok] opening empties the buffer rather than reading it\n");
+}
+
 /* A packet split across several short reads is reassembled. */
 static void TestSplitReads(void)
 {
@@ -614,13 +671,26 @@ static void TestClosedPort(void)
     assert(capture.Count == 0U);
     assert(!HciIntrfTransportSend(&transport, HCI_H4_PACKET_EVENT, wire, 4U));
 
+    /*
+     * Opening throws away what arrived while it was shut rather than reading
+     * it, so this command is gone and not merely delayed. That is the point of
+     * the flush and it is checked here as well as in its own case, because
+     * this test used to assert the opposite and was the only thing that
+     * noticed the behaviour had changed.
+     */
     HciIntrfTransportOpen(&transport);
+    HciIntrfTransportProcess(&transport);
+    assert(capture.Count == 0U);
+    assert(transport.FlushedOctetCount == sizeof(wire));
+
+    /* What arrives once it is open is read normally. */
+    FeedRx(wire, sizeof(wire));
     HciIntrfTransportProcess(&transport);
     assert(capture.Count == 1U);
 
     HciIntrfTransportClose(&transport);
     assert(!HciIntrfTransportSend(&transport, HCI_H4_PACKET_EVENT, wire, 4U));
-    printf("[ok] a closed port neither reads nor sends\n");
+    printf("[ok] a closed port reads nothing, sends nothing, keeps nothing\n");
 }
 
 /* Init rejects the argument combinations that cannot work. */
@@ -655,6 +725,7 @@ int main(void)
     TestBannerThenIdleThenCommand();
     TestTextBuiltPacketsAreNotAnswered();
     TestPacketMarksRecordBothOutcomes();
+    TestOpenDiscardsWhatArrivedTooEarly();
     TestSplitReads();
     TestBackpressure();
     TestSendDrains();

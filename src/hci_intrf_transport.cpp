@@ -109,12 +109,60 @@ bool HciIntrfTransportInit(HciIntrfTransport_t *pTransport,
                            pTransport);
 }
 
+/*
+ * Bounded, so a port that hands back data forever cannot hold start up.
+ */
+#define HCI_INTRF_FLUSH_PASSES 64U
+
 void HciIntrfTransportOpen(HciIntrfTransport_t *pTransport)
 {
-    if (pTransport != nullptr)
+    if (pTransport == nullptr)
     {
-        pTransport->Open = true;
+        return;
     }
+
+    pTransport->Open = true;
+
+    /*
+     * Throw away whatever arrived before anyone was listening.
+     *
+     * The port's own buffer fills from the moment the driver is configured,
+     * which on this application is several hundred milliseconds before the
+     * controller behind it can answer anything. So the first read after
+     * opening returns a run of octets that were spread over that whole time,
+     * with every gap between them gone.
+     *
+     * That matters because a gap is the only thing separating one sender's
+     * output from another's, and it is the only thing this layer has to
+     * recover from a stream that is not H:4. On the Thingy:91 the nRF9160's
+     * bootloader banner and the HCI Reset behind it are hundreds of
+     * milliseconds apart on the wire and adjacent in the buffer, so the Reset
+     * was read as part of the banner's burst and refused with it. The log said
+     * so in as many words: "pkt: 01 03 0C drop".
+     *
+     * Nothing is lost that was not already lost. A host that sends before this
+     * side can answer gets no answer either way, and H:4 has no retry, so the
+     * choice is between discarding those octets and misreading them. The host
+     * asks again.
+     */
+    for (uint32_t pass = 0U; pass < HCI_INTRF_FLUSH_PASSES; pass++)
+    {
+        const int received = DeviceIntrfRx(pTransport->pIntrf,
+                                           0U,
+                                           pTransport->RxChunk,
+                                           (int)sizeof(pTransport->RxChunk));
+        if (received <= 0)
+        {
+            break;
+        }
+
+        pTransport->FlushedOctetCount += (uint32_t)received;
+    }
+
+    pTransport->RxChunkLen = 0U;
+    pTransport->RxChunkOffset = 0U;
+    HciH4ParserReset(&pTransport->Parser);
+    pTransport->RejectedMark = pTransport->Parser.InvalidTypeCount;
 }
 
 void HciIntrfTransportClose(HciIntrfTransport_t *pTransport)
