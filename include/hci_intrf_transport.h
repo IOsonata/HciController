@@ -128,8 +128,12 @@ typedef struct {
  *
  * Three octets rather than the packet, because what is wanted here is which
  * packet it was, not what was in it.
+ *
+ * Twenty four of them, because a Zephyr host sends about twenty commands
+ * during bt_enable and eight showed only that it had started. Where the
+ * sequence stops is the useful part, and eight never reached it.
  */
-#define HCI_INTRF_PKT_MARKS 8U
+#define HCI_INTRF_PKT_MARKS 24U
     struct {
         uint8_t Type;
         uint8_t Head[2];

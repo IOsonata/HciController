@@ -710,13 +710,22 @@ static void HciAppResyncOnIdle(HciApp_t *pApp)
     }
 }
 
-static void HciAppReportPktMarks(const HciIntrfTransport_t *pHost)
+/*
+ * Eight to a line. Twenty four marks do not fit in one log line, and a line
+ * that truncates loses the end, which is the half worth reading: where a start
+ * up sequence stops is what says which command was mishandled.
+ */
+#define HCI_APP_PKT_MARKS_PER_LINE 8U
+
+static void HciAppReportPktMarks(const HciIntrfTransport_t *pHost,
+                                 size_t First,
+                                 size_t Last)
 {
     static const char digits[] = "0123456789ABCDEF";
-    char line[HCI_INTRF_PKT_MARKS * 16U + 4U];
+    char line[HCI_APP_PKT_MARKS_PER_LINE * 16U + 4U];
     size_t at = 0U;
 
-    for (size_t i = 0U; i < pHost->PktMarkLen; i++)
+    for (size_t i = First; i < Last; i++)
     {
         const uint8_t octets[3] = {
             pHost->PktMark[i].Type,
@@ -737,7 +746,7 @@ static void HciAppReportPktMarks(const HciIntrfTransport_t *pHost)
             line[at++] = *p;
         }
 
-        if (i + 1U < pHost->PktMarkLen)
+        if (i + 1U < Last)
         {
             line[at++] = ',';
             line[at++] = ' ';
@@ -745,7 +754,7 @@ static void HciAppReportPktMarks(const HciIntrfTransport_t *pHost)
     }
     line[at] = '\0';
 
-    HciSyslogPrint(HciSyslogDefault(), "pkt: %s", line);
+    HciSyslogPrint(HciSyslogDefault(), "pkt %u: %s", (unsigned)First, line);
 }
 
 static void HciAppReportLink(HciApp_t *pApp)
@@ -771,10 +780,21 @@ static void HciAppReportLink(HciApp_t *pApp)
         HciAppReportFirstRx(pHost);
     }
 
-    if (pApp->LinkPktMarksReported != pHost->PktMarkLen)
+    /*
+     * Only the marks not shown yet, a line at a time, so a sequence that keeps
+     * going does not reprint what has already been read.
+     */
+    while (pApp->LinkPktMarksReported < pHost->PktMarkLen)
     {
-        pApp->LinkPktMarksReported = pHost->PktMarkLen;
-        HciAppReportPktMarks(pHost);
+        const size_t first = pApp->LinkPktMarksReported;
+        size_t last = first + HCI_APP_PKT_MARKS_PER_LINE;
+        if (last > pHost->PktMarkLen)
+        {
+            last = pHost->PktMarkLen;
+        }
+
+        HciAppReportPktMarks(pHost, first, last);
+        pApp->LinkPktMarksReported = (uint8_t)last;
     }
 
     pApp->LinkReportPasses++;
@@ -856,6 +876,26 @@ static void HciAppReportLink(HciApp_t *pApp)
                    (unsigned long)pHost->TxBusyCount,
                    (unsigned long)pHost->Parser.InvalidTypeCount,
                    (unsigned long)pHost->Parser.OversizePacketCount);
+
+    /*
+     * What the dispatcher made of the commands, beside what the transport made
+     * of the octets. A link with commands on it that are refused looks exactly
+     * like one with commands on it that are answered, from the transport's
+     * side, and the host stops for a different reason in each case: a refused
+     * command ends bt_enable with an error rather than a timeout, which a host
+     * may answer by rebooting without saying why.
+     */
+    const HciCmdDispatch_t *pCmd = &pApp->Sdc.Commands;
+
+    HciSyslogPrint(HciSyslogDefault(),
+                   "cmd: n=%lu unknown=%lu badlen=%lu badpkt=%lu herr=%lu "
+                   "busy=%lu",
+                   (unsigned long)pCmd->CommandCount,
+                   (unsigned long)pCmd->UnknownCommandCount,
+                   (unsigned long)pCmd->InvalidParamLenCount,
+                   (unsigned long)pCmd->InvalidPacketCount,
+                   (unsigned long)pCmd->HandlerErrorCount,
+                   (unsigned long)pCmd->EventBackpressureCount);
 
     /*
      * And what the hardware says, which is the half this layer cannot know.
