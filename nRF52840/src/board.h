@@ -142,9 +142,8 @@
 /*
  * Placeholders, and they were worse than that. P0.25, P1.00, P0.19 and P0.22
  * are not dongle pins at all: they are the Nordic Thingy:91 nRF52840
- * interconnect, copied here and then left, with RTS and CTS crossed on the way
- * in. The Thingy:91 board file below has the same four the right way round,
- * taken from sdk-nrf boards/nordic/thingy91.
+ * interconnect, copied here and then left. The Thingy:91 branch below has that
+ * board's four and says which of them were measured rather than read.
  *
  * So these are named after the header the dongle brings out rather than after
  * another board's wiring, and they are still placeholders: this board reaches
@@ -215,18 +214,15 @@
  * flow control on is one line and not a pin hunt. Nothing drives them until
  * it is turned on.
  *
- * These four numbers are not arbitrary and that is the trap. They are the
- * Nordic Thingy:91 nRF52840 interconnect with RTS and CTS crossed, and they
- * reached three board branches by being copied between them. Against a
- * Thingy:91 they half work: transmit and receive land on the right wires, so
- * a link with no flow control appears to be wired correctly, and the moment
- * flow control is turned on both directions stop. This part then drives RTS
- * onto the line the nRF9160 drives its own RTS onto, and reads CTS from a
- * line nothing drives at all, so neither side is ever told it may send.
+ * These four numbers are not arbitrary. They are the Nordic Thingy:91
+ * nRF52840 interconnect, and they reached three board branches by being copied
+ * between them. They were called crossed here for a while, on the strength of
+ * the sdk-nrf pinctrl node, and they are not: measured on the board, RTS on
+ * P0.19 is what makes the peer transmit. The Thingy:91 branch below has the
+ * same four and says what was measured.
  *
- * A Thingy:91 build wants BOARD=THINGY91_NRF52840, which has the same four
- * the right way round. This branch is a breakout and its pins are whatever
- * the bench is wired to.
+ * This branch is still a breakout and its pins are still whatever the bench is
+ * wired to. A Thingy:91 build wants BOARD=THINGY91_NRF52840.
  */
 #define UART_TX_PORT            0
 #define UART_TX_PIN             25
@@ -302,9 +298,9 @@
  *     UART_TX  P0.22      UART_RX  P0.23
  *     UART_RTS P0.24      UART_CTS P0.25
  *
- * which crosses as it should: this part's RTS meets the nRF9160's CTS and the
- * other way round. Both board files say current-speed 1000000, and all four
- * pins below are these, confirmed on the hardware.
+ * Both board files say current-speed 1000000. TX and RX below are those two
+ * and are confirmed on the hardware. RTS and CTS below are not, and the note
+ * above them says what was measured instead.
  *
  * The other UART on each part is that part's own console, at 115200:
  *
@@ -355,45 +351,43 @@
 #define UART_RX_PINOP           0
 
 /*
- * RTS is P0.22 and CTS is P0.19, and that was decided by the board rather than
- * by a document. Two statements had to be reconciled:
+ * RTS is P0.19 and CTS is P0.22, which is the opposite of what the sdk-nrf
+ * pinctrl above assigns, and the hardware is what says so:
  *
- *     sdk-nrf thingy91_nrf52840-pinctrl.dtsi uart1:  RTS P0.22  CTS P0.19
- *     the customer, who has the schematic:           RTS P0.19  CTS P0.22
+ *     RTS on P0.19   the peer transmits, thousands of octets a second
+ *     RTS on P0.22   the peer transmits nothing at all
  *
- * Both were tried on the hardware and they do not behave the same:
+ * Measured on the board, both ways round, more than once. RTS is what tells
+ * the peer it may send, so driving the wrong pin leaves the peer's clear to
+ * send never asserted and the peer silent. That is what P0.22 gives. TX and RX
+ * are not affected and stay as the pinctrl has them.
  *
- *     RTS on P0.22   the peer transmits, thousands of octets a second
- *     RTS on P0.19   the peer transmits nothing at all
+ * Why a Nordic board file would disagree about its own peripheral assignment
+ * is not resolved here, and guessing at it is what caused the damage. This
+ * pair has now been changed three times on reasoning rather than measurement,
+ * twice into a state that does not work, and each time the reasoning sounded
+ * good. The measurement is short, repeatable and was available throughout.
+ * Nothing about this pair gets changed again without one.
  *
- * which is decisive, and in one direction only. RTS is what tells the peer it
- * may send. Drive the wrong pin and the peer's CTS is never asserted, so it
- * stays silent, and that is exactly what P0.19 produced. Drive P0.22 and it
- * talks. Nothing else in the link would make the difference fall that way.
+ * The reason the argument could run at all is that the pair being wrong is
+ * quiet in the other direction. Where this part drives RTS onto a line the
+ * peer also drives, two outputs fight; where it reads CTS from a line nothing
+ * drives, the line floats and usually reads as permission to send. Octets can
+ * still move, nothing reports an error, and the flow control does nothing.
  *
- * So the two statements are about naming, not about wiring. A net called RTS
- * at this part's P0.19 is named after the nRF9160's RTS, which arrives here as
- * this part's CTS. Both descriptions are of the same wire from opposite ends.
- *
- * Worth writing down because getting the pair the wrong way round is the one
- * wiring mistake that stays quiet in the other direction. Where this part
- * drives RTS onto a line the peer also drives, two outputs fight; where it
- * reads CTS from a line nothing drives, the line floats and usually reads as
- * permission to send. Octets move, nothing reports an error, and the flow
- * control does nothing.
- *
- * The firmware also measures it at start up, so this never has to be argued
- * again. Each pin is held with a pull up and then a pull down before the UART
- * takes it: a pin whose level follows the pull has nothing driving it from the
- * far side and is this part's output, and a pin that ignores the pull is being
- * driven and is this part's input. The answer is in the log as "flow:".
+ * So the firmware measures it at start up too. Each pin is held with a pull up
+ * and then a pull down before the UART takes it: a pin whose level follows the
+ * pull has nothing driving it from the far side and is this part's output, and
+ * a pin that ignores the pull is being driven and is this part's input. The
+ * answer is in the log as "flow:", on every boot, without anyone having to set
+ * up an experiment for it.
  */
 #define UART_RTS_PORT           0
-#define UART_RTS_PIN            22
+#define UART_RTS_PIN            19
 #define UART_RTS_PINOP          0
 
 #define UART_CTS_PORT           0
-#define UART_CTS_PIN            19
+#define UART_CTS_PIN            22
 #define UART_CTS_PINOP          0
 
 #define UART_HW_FLOWCTRL	1
