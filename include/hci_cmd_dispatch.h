@@ -103,6 +103,26 @@ typedef struct {
     uint32_t HandlerErrorCount;
     uint32_t EventBackpressureCount;
 
+/*
+ * What was answered, as the opcode and the status that went with it.
+ *
+ * The commands arriving are already recorded a layer down, and on this board
+ * they all arrive and none is refused, so the question moved to what was said
+ * back. A host that stops after six commands with nothing in its own log has
+ * either been told something it did not like or been told it wrongly, and a
+ * status of zero against every opcode rules out the first.
+ *
+ * Two octets of opcode and one of status, which is the whole of what a host
+ * decides on for most commands. The return parameters are the vendor's own
+ * answers and not this layer's to doubt.
+ */
+#define HCI_CMD_RSP_MARKS 24U
+    struct {
+        uint8_t Opcode[2];
+        uint8_t Status;
+    } RspMark[HCI_CMD_RSP_MARKS];
+    uint8_t RspMarkLen;
+
     /*
      * Asked about every command with a row, after the length check and before
      * the handler. A non zero answer is the status the command is refused

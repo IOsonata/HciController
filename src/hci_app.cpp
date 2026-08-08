@@ -887,6 +887,47 @@ static void HciAppReportLink(HciApp_t *pApp)
      */
     const HciCmdDispatch_t *pCmd = &pApp->Sdc.Commands;
 
+    while (pApp->LinkRspMarksReported < pCmd->RspMarkLen)
+    {
+        static const char digits[] = "0123456789ABCDEF";
+        char line[HCI_APP_PKT_MARKS_PER_LINE * 16U + 4U];
+        size_t at = 0U;
+
+        const size_t rspFirst = pApp->LinkRspMarksReported;
+        size_t rspLast = rspFirst + HCI_APP_PKT_MARKS_PER_LINE;
+        if (rspLast > pCmd->RspMarkLen)
+        {
+            rspLast = pCmd->RspMarkLen;
+        }
+
+        for (size_t i = rspFirst; i < rspLast; i++)
+        {
+            const uint8_t octets[3] = {
+                pCmd->RspMark[i].Opcode[0],
+                pCmd->RspMark[i].Opcode[1],
+                pCmd->RspMark[i].Status,
+            };
+
+            for (size_t j = 0U; j < 3U; j++)
+            {
+                line[at++] = digits[octets[j] >> 4];
+                line[at++] = digits[octets[j] & 0x0FU];
+                line[at++] = (j == 1U) ? '=' : ' ';
+            }
+
+            if (i + 1U < rspLast)
+            {
+                line[at++] = ',';
+                line[at++] = ' ';
+            }
+        }
+        line[at] = '\0';
+
+        HciSyslogPrint(HciSyslogDefault(), "rsp %u: %s", (unsigned)rspFirst,
+                       line);
+        pApp->LinkRspMarksReported = (uint8_t)rspLast;
+    }
+
     HciSyslogPrint(HciSyslogDefault(),
                    "cmd: n=%lu unknown=%lu badlen=%lu badpkt=%lu herr=%lu "
                    "busy=%lu",

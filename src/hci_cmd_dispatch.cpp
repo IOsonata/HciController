@@ -56,11 +56,29 @@ bool HciCmdDispatchKnows(const HciCmdDispatch_t *pDispatch,
            pEntry->ParamLen == ParamLen;
 }
 
+static void HciCmdRecordRsp(HciCmdDispatch_t *pDispatch,
+                            uint16_t Opcode,
+                            uint8_t Status)
+{
+    if (pDispatch->RspMarkLen >= HCI_CMD_RSP_MARKS)
+    {
+        return;
+    }
+
+    const uint8_t slot = pDispatch->RspMarkLen;
+    pDispatch->RspMark[slot].Opcode[0] = (uint8_t)Opcode;
+    pDispatch->RspMark[slot].Opcode[1] = (uint8_t)(Opcode >> 8);
+    pDispatch->RspMark[slot].Status = Status;
+    pDispatch->RspMarkLen++;
+}
+
 static void HciCmdBuildComplete(HciCmdDispatch_t *pDispatch,
                                 uint16_t Opcode,
                                 uint8_t Status,
                                 size_t ReturnLen)
 {
+    HciCmdRecordRsp(pDispatch, Opcode, Status);
+
     pDispatch->pEvent[0] = HCI_EVENT_COMMAND_COMPLETE;
     pDispatch->pEvent[1] = (uint8_t)(4U + ReturnLen);
     pDispatch->pEvent[2] = 1U;
@@ -116,6 +134,8 @@ static void HciCmdBuildStatus(HciCmdDispatch_t *pDispatch,
                               uint16_t Opcode,
                               uint8_t Status)
 {
+    HciCmdRecordRsp(pDispatch, Opcode, Status);
+
     pDispatch->pEvent[0] = HCI_EVENT_COMMAND_STATUS;
     pDispatch->pEvent[1] = 4U;
     pDispatch->pEvent[2] = Status;

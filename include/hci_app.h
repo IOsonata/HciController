@@ -117,6 +117,9 @@ typedef struct {
      */
     uint8_t LinkPktMarksReported;
 
+    /* And how many answers have been shown. */
+    uint8_t LinkRspMarksReported;
+
     HciTaktOs_t Runtime;
     /*
      * The part, held through its interface. The instance belongs to the port,
