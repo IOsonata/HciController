@@ -220,7 +220,7 @@ static bool HciAppUsbSetup(HciApp_t *pApp)
  * round the board has them.
  */
 #if defined(UART_RTS_PORT) && defined(UART_CTS_PORT)
-static void HciAppReportFlowPin(HciApp_t *pApp,
+static bool HciAppReportFlowPin(HciApp_t *pApp,
                                 const char *pName,
                                 uint8_t Port,
                                 uint8_t Pin)
@@ -234,6 +234,7 @@ static void HciAppReportFlowPin(HciApp_t *pApp,
                    driven ? "driven from outside, so an input" :
                             "follows a pull, so nothing drives it",
                    driven ? (level ? ", high" : ", low") : "");
+    return driven;
 }
 
 static void HciAppProbeFlowPins(HciApp_t *pApp)
@@ -243,8 +244,47 @@ static void HciAppProbeFlowPins(HciApp_t *pApp)
         return;
     }
 
-    HciAppReportFlowPin(pApp, "board says rts", UART_RTS_PORT, UART_RTS_PIN);
-    HciAppReportFlowPin(pApp, "board says cts", UART_CTS_PORT, UART_CTS_PIN);
+    const bool rtsDriven = HciAppReportFlowPin(pApp, "board says rts",
+                                               UART_RTS_PORT, UART_RTS_PIN);
+    const bool ctsDriven = HciAppReportFlowPin(pApp, "board says cts",
+                                               UART_CTS_PORT, UART_CTS_PIN);
+
+    /*
+     * Two facts are not an answer, and leaving them as two invites the reader
+     * to make one up. The first run of this printed a pair of lines that said
+     * neither pin was driven, in both pin maps, which reads like a result and
+     * is not one.
+     *
+     * Only one shape settles anything. Exactly one pin driven means that pin
+     * is this part's input and the other is its output, so the board file is
+     * either right or the wrong way round and the line says which. Neither
+     * driven means the peer was not driving anything at this moment, which at
+     * a cold start is the ordinary case: both parts come out of reset
+     * together, and the peer has not configured its own port yet, let alone
+     * asserted anything on it. That is a measurement of the moment, not of the
+     * wiring, and it settles nothing. Both driven should not happen and is
+     * worth seeing if it does.
+     */
+    if (rtsDriven != ctsDriven)
+    {
+        HciSyslogPrint(HciSyslogDefault(),
+                       "flow: %s, so the board file is %s",
+                       ctsDriven ? "cts is the driven one" :
+                                   "rts is the driven one",
+                       ctsDriven ? "right" : "the wrong way round");
+    }
+    else if (!rtsDriven)
+    {
+        HciSyslogPrint(HciSyslogDefault(),
+                       "flow: neither pin driven, no verdict; the peer drives "
+                       "one of them only once its own port is up, so a cold "
+                       "start where both parts reset together reads like this");
+    }
+    else
+    {
+        HciSyslogPrint(HciSyslogDefault(),
+                       "flow: both pins driven, which should not happen");
+    }
 }
 #else
 static void HciAppProbeFlowPins(HciApp_t *)
