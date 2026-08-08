@@ -61,10 +61,14 @@ typedef struct {
  * A count says something is on the wire. It cannot say what, and the answers
  * are not close together: a host stack talking H:4, a log console on the wrong
  * wire, and an unconnected pin picking up noise all read as a busy link. The
- * octets themselves separate them at a glance, and only the first ones are
- * needed, so this is captured once and never again.
+ * octets themselves separate them at a glance.
+ *
+ * Filled across as many reads as it takes rather than from one of them. A
+ * first read that returned three octets gave three octets to look at, which
+ * was enough to see that the wire held text and not enough to see whose text
+ * it was. Long enough now to hold a line of it.
  */
-#define HCI_INTRF_FIRST_RX_SIZE 24U
+#define HCI_INTRF_FIRST_RX_SIZE 64U
     uint8_t FirstRx[HCI_INTRF_FIRST_RX_SIZE];
     uint8_t FirstRxLen;
 } HciIntrfTransport_t;

@@ -204,16 +204,32 @@ static void TestFirstOctetsAreKept(void)
     assert(transport.FirstRxLen == 4U);
     assert(memcmp(transport.FirstRx, wire, sizeof(wire)) == 0);
 
-    /* More arrives. The count moves, the first octets do not. */
+    /*
+     * More arrives, and the window keeps filling across reads rather than
+     * holding whatever the first one happened to return. A short first read is
+     * the ordinary case on a busy wire, and taking only that gave three octets
+     * to identify a stream by.
+     */
     const uint8_t more[] = {0x01, 0x01, 0x10, 0x00};
     FeedRx(more, sizeof(more));
     HciIntrfTransportProcess(&transport);
 
     assert(transport.RxOctetCount == 8U);
-    assert(transport.FirstRxLen == 4U);
+    assert(transport.FirstRxLen == 8U);
+    assert(memcmp(transport.FirstRx, wire, sizeof(wire)) == 0);
+    assert(memcmp(&transport.FirstRx[4], more, sizeof(more)) == 0);
+
+    /* And it stops at its size rather than past it. */
+    uint8_t flood[HCI_INTRF_FIRST_RX_SIZE * 2U];
+    memset(flood, 0xEE, sizeof(flood));
+    FeedRx(flood, sizeof(flood));
+    HciIntrfTransportProcess(&transport);
+
+    assert(transport.FirstRxLen == HCI_INTRF_FIRST_RX_SIZE);
     assert(memcmp(transport.FirstRx, wire, sizeof(wire)) == 0);
 
-    printf("[ok] octets are counted and the first ones kept\n");
+    printf("[ok] the first %u octets are kept across reads\n",
+           (unsigned)transport.FirstRxLen);
 }
 
 /*

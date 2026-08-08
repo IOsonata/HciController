@@ -305,6 +305,18 @@
  * which crosses as it should: this part's RTS meets the nRF9160's CTS and the
  * other way round. Both board files say current-speed 1000000.
  *
+ * The other UART on each part is that part's own console, at 115200:
+ *
+ *     nRF52840 uart0   TX P0.15  RX P0.11  RTS P0.21  CTS P0.20
+ *     nRF9160  uart0   TX P0.18  RX P0.19  RTS P0.20  CTS P0.21
+ *
+ * Written down because the two pairs are easy to confuse and picking the
+ * wrong one gives a link with somebody's log on it at the wrong speed
+ * rather than a link that fails. Both uart1 nodes ship status "disabled", so
+ * an application that wants this interconnect enables it and chooses what
+ * goes on it, and nothing in the board files can say what that turned out to
+ * be.
+ *
  * All four wires exist, so flow control is on. Off, this part never asserts
  * RTS, and a host that has flow control on never sees its CTS asserted and so
  * never transmits: the first command times out with nothing on the wire in

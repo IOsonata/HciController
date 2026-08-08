@@ -467,46 +467,54 @@ static void HciAppLogPortOpened(HciApp_t *pApp)
 /*
  * Show the first octets that arrived, once, as hex and as text.
  *
- * Both, because the two readings answer different questions and the answer is
- * usually obvious in one of them. Text reads straight out if the wire is
- * a console on it rather than a host stack. Hex shows the H:4 indicator and
- * length of a real packet, and shows noise for what it is.
+ * Two lines rather than one, because a window long enough to hold a line of
+ * somebody's log does not fit both readings on one and the two readings answer
+ * different questions. Hex shows the H:4 indicator and length of a real packet
+ * and shows noise for what it is. Text is what lets a person recognise a log
+ * they have seen before, which no amount of hex would.
+ *
+ * Hex of the first sixteen only. Past that it stops telling anyone anything
+ * the text does not tell them faster.
  */
+#define HCI_APP_FIRST_RX_HEX 16U
+
 static void HciAppReportFirstRx(const HciIntrfTransport_t *pHost)
 {
     static const char digits[] = "0123456789ABCDEF";
-    char line[HCI_INTRF_FIRST_RX_SIZE * 4U + 24U];
+    char line[HCI_INTRF_FIRST_RX_SIZE + 4U];
     size_t at = 0U;
 
-    for (size_t i = 0U; i < pHost->FirstRxLen; i++)
+    size_t hexLen = pHost->FirstRxLen;
+    if (hexLen > HCI_APP_FIRST_RX_HEX)
+    {
+        hexLen = HCI_APP_FIRST_RX_HEX;
+    }
+
+    for (size_t i = 0U; i < hexLen; i++)
     {
         line[at++] = digits[pHost->FirstRx[i] >> 4];
         line[at++] = digits[pHost->FirstRx[i] & 0x0FU];
         line[at++] = ' ';
     }
+    line[at] = '\0';
 
-    line[at++] = '|';
+    HciSyslogPrint(HciSyslogDefault(), "rx first %u hex: %s",
+                   (unsigned)pHost->FirstRxLen, line);
+
+    at = 0U;
     for (size_t i = 0U; i < pHost->FirstRxLen; i++)
     {
         const uint8_t octet = pHost->FirstRx[i];
         line[at++] = (octet >= 0x20U && octet < 0x7FU) ? (char)octet : '.';
     }
-    line[at++] = '|';
     line[at] = '\0';
 
-    HciSyslogPrint(HciSyslogDefault(), "rx first %u: %s",
-                   (unsigned)pHost->FirstRxLen, line);
+    HciSyslogPrint(HciSyslogDefault(), "rx first text: |%s|", line);
 }
 
 static void HciAppReportLink(HciApp_t *pApp)
 {
     const HciIntrfTransport_t *pHost = &pApp->Controller.Host;
-
-    if (!pApp->LinkFirstRxReported && pHost->FirstRxLen != 0U)
-    {
-        pApp->LinkFirstRxReported = true;
-        HciAppReportFirstRx(pHost);
-    }
 
     pApp->LinkReportPasses++;
 
@@ -528,6 +536,18 @@ static void HciAppReportLink(HciApp_t *pApp)
     pApp->LinkReportPasses = 0U;
     pApp->LinkRxOctets = pHost->RxOctetCount;
     pApp->LinkTxOctets = pHost->TxOctetCount;
+
+    /*
+     * Here rather than the moment the first octet lands, so the window has had
+     * a whole report interval to fill. Reported on the first octet it showed
+     * whatever the first read happened to return, which on a busy wire was
+     * three octets out of a possible sixty four.
+     */
+    if (!pApp->LinkFirstRxReported && pHost->FirstRxLen != 0U)
+    {
+        pApp->LinkFirstRxReported = true;
+        HciAppReportFirstRx(pHost);
+    }
 
     /*
      * The parser counts belong here beside the octet counts, because together
