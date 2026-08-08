@@ -319,22 +319,36 @@
  * never transmits: the first command times out with nothing on the wire in
  * either direction, and no side can tell why.
  *
- * One more thing the host has to do, and it is not about pins. The nRF9160
- * holds this part in reset and releases it as part of bringing the HCI
- * transport up: sdk-nrf boards/nordic/thingy91/nrf52840_reset.c drives
- * nRF9160 P0.10 low, waits ten milliseconds, drains the port and lets go.
- * Zephyr then sends HCI Reset at once. Ten milliseconds is not enough for
- * this firmware to come out of reset, bring up TaktOS, the radio and the
- * port, so those four octets arrive at a part that is not listening yet, and
- * nothing retries them. The symptom is a Reset that times out after ten
- * seconds with the link otherwise correct.
+ * This link holds two things, not one, and that is the whole of what was wrong
+ * with it for weeks. The nRF9160's bootloader prints on it before the
+ * application ever opens it:
+ *
+ *     All pins have been configured as non-secure...
+ *     <esc>[1;34mBooting TF-M...
+ *
+ * captured here off the wire. Then the application starts and uses the same
+ * UART for HCI. The text is a prefix, not a permanent tenant, so the link does
+ * become an HCI link, but this side is handed several hundred octets of it
+ * first, on every reboot of the nRF9160.
+ *
+ * H:4 has no framing, so text that happens to hold an octet in the indicator
+ * range makes this side read a payload length out of more text and wait for a
+ * payload that never comes. The HCI Reset behind it is eaten as that payload.
+ * Nothing in the octets says so, and the host times out after ten seconds with
+ * a link that looks correct from both ends.
+ *
+ * The gap between the banner and the first command is the only thing that
+ * separates them: the banner is printed before Zephyr starts and the Reset
+ * arrives about a hundred milliseconds into the application. So the transport
+ * gives up a half built packet once the link has been quiet, which lands in
+ * that gap and takes the Reset cleanly. See HCI_APP_LINK_IDLE_PASSES.
  *
  * Where the host can be configured, Zephyr's CONFIG_BT_WAIT_NOP=y holds its
  * command semaphore at zero until a Command Complete for the No Operation
  * opcode arrives, which is what HciSdcNrfxlibQueueStartupNop queues here.
- * That turns the race into a handshake. A proprietary host cannot be told to
- * do it, and whether the race is real on such a host has not been measured,
- * so this is written down as something to check rather than as the cause.
+ * That would make the start up a handshake rather than a race. A proprietary
+ * host cannot be told to do it, so it is written down as something available
+ * rather than as something in use.
  *
  * What has been checked, against sdk-nrf and the Thingy:91 hardware guide:
  * the four pins above and their rate, that the low frequency crystal is on

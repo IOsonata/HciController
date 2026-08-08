@@ -245,3 +245,21 @@ bool HciH4ParserDeliveryPending(const HciH4Parser_t *pParser)
 {
     return pParser != NULL && pParser->State == HCI_H4_PARSE_DELIVER;
 }
+
+bool HciH4ParserIsMidPacket(const HciH4Parser_t *pParser)
+{
+    if (pParser == NULL)
+    {
+        return false;
+    }
+
+    /*
+     * Waiting for the rest of a header or a payload, or throwing away the
+     * remains of one that did not fit. A packet that is built and waiting to
+     * be handed over is not part way through anything, so it is not counted
+     * here: it is complete and the handler is what has not taken it yet.
+     */
+    return pParser->State == HCI_H4_PARSE_HEADER ||
+           pParser->State == HCI_H4_PARSE_PAYLOAD ||
+           pParser->State == HCI_H4_PARSE_DROP;
+}

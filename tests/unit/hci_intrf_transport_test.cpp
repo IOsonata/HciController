@@ -264,6 +264,87 @@ static void TestNonH4StreamIsSeenAsSuch(void)
            (unsigned long)transport.Parser.InvalidTypeCount);
 }
 
+/*
+ * A boot banner, then silence, then the first real command.
+ *
+ * This is the Thingy:91 exactly. The nRF9160's bootloader prints on the same
+ * UART its application later uses for HCI, so this side is handed text before
+ * it is handed packets. One octet of that text that happens to look like an
+ * indicator makes the parser read a payload length out of more text, and a
+ * length taken from text is long enough to swallow the Reset that follows.
+ * Nothing in the octets says so and the host times out with no idea why.
+ *
+ * The gap between the banner and the first command is the only thing that
+ * separates them, and on that board it is over a hundred milliseconds.
+ */
+static void TestBannerThenIdleThenCommand(void)
+{
+    ResetIntrf();
+
+    HciIntrfTransport_t transport;
+    Capture capture;
+    uint8_t packet[64];
+
+    memset(&capture, 0, sizeof(capture));
+    capture.Accept = true;
+
+    assert(HciIntrfTransportInit(&transport, &gIntrf.Base, packet,
+                                 sizeof(packet), CapturePacket, &capture));
+    HciIntrfTransportOpen(&transport);
+
+    /*
+     * Ends with an octet that looks like an ACL indicator and a length taken
+     * from the text behind it, so the parser is left waiting for a payload
+     * far longer than anything that follows. Built on purpose rather than
+     * hoped for, because the case only matters when it happens.
+     */
+    const uint8_t banner[] = {
+        'A', 'l', 'l', ' ', 'p', 'i', 'n', 's', ' ', 'o', 'k', '\r', '\n',
+        0x02, 0x40, 0x00, 0xFF, 0x00,
+    };
+    FeedRx(banner, sizeof(banner));
+    HciIntrfTransportProcess(&transport);
+
+    assert(capture.Count == 0U);
+    assert(HciH4ParserIsMidPacket(&transport.Parser));
+
+    /* The real command, which without a resync is eaten as that payload. */
+    const uint8_t reset[] = {0x01, 0x03, 0x0C, 0x00};
+    FeedRx(reset, sizeof(reset));
+    HciIntrfTransportProcess(&transport);
+    assert(capture.Count == 0U);
+
+    /* Rewind and do it again, with the gap the board actually leaves. */
+    ResetIntrf();
+    memset(&capture, 0, sizeof(capture));
+    capture.Accept = true;
+    assert(HciIntrfTransportInit(&transport, &gIntrf.Base, packet,
+                                 sizeof(packet), CapturePacket, &capture));
+    HciIntrfTransportOpen(&transport);
+
+    FeedRx(banner, sizeof(banner));
+    HciIntrfTransportProcess(&transport);
+    assert(HciH4ParserIsMidPacket(&transport.Parser));
+
+    HciIntrfTransportIdle(&transport);
+    assert(!HciH4ParserIsMidPacket(&transport.Parser));
+    assert(transport.ResyncCount == 1U);
+
+    FeedRx(reset, sizeof(reset));
+    HciIntrfTransportProcess(&transport);
+
+    assert(capture.Count == 1U);
+    assert(capture.Type == HCI_H4_PACKET_COMMAND);
+    assert(capture.Data[0] == 0x03 && capture.Data[1] == 0x0C);
+    assert(transport.RxPacketCount == 1U);
+
+    /* And a gap at a packet boundary throws nothing away and counts nothing. */
+    HciIntrfTransportIdle(&transport);
+    assert(transport.ResyncCount == 1U);
+
+    printf("[ok] a banner then a gap does not eat the command after it\n");
+}
+
 /* A packet split across several short reads is reassembled. */
 static void TestSplitReads(void)
 {
@@ -446,6 +527,7 @@ int main(void)
     TestSinglePacket();
     TestFirstOctetsAreKept();
     TestNonH4StreamIsSeenAsSuch();
+    TestBannerThenIdleThenCommand();
     TestSplitReads();
     TestBackpressure();
     TestSendDrains();

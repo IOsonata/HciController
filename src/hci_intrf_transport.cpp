@@ -20,6 +20,28 @@ static bool HciIntrfPacketTypeValid(HciH4PacketType_t Type)
     return Type >= HCI_H4_PACKET_COMMAND && Type <= HCI_H4_PACKET_ISO;
 }
 
+static bool HciIntrfTransportCount(void *pContext,
+                                   HciH4PacketType_t Type,
+                                   const uint8_t *pPacket,
+                                   size_t PacketLen)
+{
+    HciIntrfTransport_t *pTransport =
+        static_cast<HciIntrfTransport_t *>(pContext);
+
+    /*
+     * Counted only when the handler takes it. A refused packet is retried on
+     * the next pass, and counting it here would count it once per attempt.
+     */
+    if (!pTransport->Handler(pTransport->pHandlerContext, Type, pPacket,
+                             PacketLen))
+    {
+        return false;
+    }
+
+    pTransport->RxPacketCount++;
+    return true;
+}
+
 bool HciIntrfTransportInit(HciIntrfTransport_t *pTransport,
                            DevIntrf_t *pIntrf,
                            uint8_t *pHciRxPacket,
@@ -36,12 +58,20 @@ bool HciIntrfTransportInit(HciIntrfTransport_t *pTransport,
 
     memset(pTransport, 0, sizeof(*pTransport));
     pTransport->pIntrf = pIntrf;
+    pTransport->Handler = PacketHandler;
+    pTransport->pHandlerContext = pPacketContext;
 
+    /*
+     * The parser calls in here and this passes the packet on, so a packet that
+     * was accepted can be counted in the one place that knows it was. A count
+     * of packets next to a count of octets is what separates a link with H:4
+     * on it from a link with merely traffic on it.
+     */
     return HciH4ParserInit(&pTransport->Parser,
                            pHciRxPacket,
                            HciRxPacketCapacity,
-                           PacketHandler,
-                           pPacketContext);
+                           HciIntrfTransportCount,
+                           pTransport);
 }
 
 void HciIntrfTransportOpen(HciIntrfTransport_t *pTransport)
@@ -124,6 +154,24 @@ static void HciIntrfTransportProcessRx(HciIntrfTransport_t *pTransport)
         pTransport->RxChunkLen = (size_t)received;
         pTransport->RxChunkOffset = 0U;
     }
+}
+
+void HciIntrfTransportIdle(HciIntrfTransport_t *pTransport)
+{
+    if (pTransport == nullptr || !HciH4ParserIsMidPacket(&pTransport->Parser))
+    {
+        return;
+    }
+
+    /*
+     * The chunk goes with it. Whatever is left in it belongs to the packet
+     * being abandoned, and feeding it after the reset would rebuild the same
+     * wrong packet from the same wrong octets.
+     */
+    HciH4ParserReset(&pTransport->Parser);
+    pTransport->RxChunkLen = 0U;
+    pTransport->RxChunkOffset = 0U;
+    pTransport->ResyncCount++;
 }
 
 static void HciIntrfTransportProcessTx(HciIntrfTransport_t *pTransport)

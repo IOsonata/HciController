@@ -96,6 +96,15 @@ typedef struct {
     uint32_t LinkTxOctets;
     uint32_t LinkReportPasses;
 
+    /*
+     * The octet count as it stood when the link last moved, and how many pump
+     * passes it has stood still since. Enough to tell a link that has paused
+     * from one that has stopped, which is what decides whether a half built
+     * packet is still going to be finished.
+     */
+    uint32_t LinkIdleOctets;
+    uint32_t LinkIdlePasses;
+
     /* The first octets are shown once, not on every report. */
     bool LinkFirstRxReported;
 

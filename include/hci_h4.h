@@ -79,6 +79,21 @@ size_t HciH4ParserFeed(HciH4Parser_t *pParser,
 
 bool HciH4ParserDeliveryPending(const HciH4Parser_t *pParser);
 
+/*
+ * True when the parser is part way through a packet: it has taken an indicator
+ * and is still collecting the header or the payload behind it.
+ *
+ * H:4 has no framing. There is no delimiter, no length that can be checked
+ * against anything, and no way to tell a packet from the middle of one by
+ * looking at the octets. So a stream that once held something other than H:4
+ * can leave this parser waiting for a payload that will never come, and every
+ * real packet after it gets eaten as that payload. Only the caller knows
+ * anything that could break the deadlock, because the one thing that separates
+ * packets on a real link is not in the octets at all: it is the gap between
+ * them.
+ */
+bool HciH4ParserIsMidPacket(const HciH4Parser_t *pParser);
+
 #ifdef __cplusplus
 }
 #endif

@@ -603,9 +603,53 @@ static void HciAppReportFirstRx(const HciIntrfTransport_t *pHost)
     HciSyslogPrint(HciSyslogDefault(), "rx first text: |%s|", line);
 }
 
+/*
+ * How many quiet pump passes mean the link has stopped rather than paused.
+ *
+ * A pass is one poll interval, five milliseconds, so four of them is twenty.
+ * At a megabit that is two thousand octet times, and a host sends a packet in
+ * one go, so nothing real is still on its way after that. Long enough that no
+ * host pausing inside a packet could be cut off, short enough that a stream
+ * which was never H:4 is abandoned before the packet that matters arrives.
+ *
+ * The Thingy:91 is why this exists. The nRF9160's secure firmware prints its
+ * boot banner on the same UART the HCI stream uses, so this side is handed
+ * text before it is handed packets. An octet of that text that happens to look
+ * like an indicator makes this side read a payload length out of more text,
+ * and a length taken from text is usually long enough to swallow the HCI Reset
+ * that follows. Nothing in the octets says so; only the gap between the banner
+ * and the first command does, and that gap is hundreds of milliseconds.
+ */
+#ifndef HCI_APP_LINK_IDLE_PASSES
+#define HCI_APP_LINK_IDLE_PASSES 4U
+#endif
+
+static void HciAppResyncOnIdle(HciApp_t *pApp)
+{
+    HciIntrfTransport_t *pHost = &pApp->Controller.Host;
+
+    if (pHost->RxOctetCount != pApp->LinkIdleOctets)
+    {
+        pApp->LinkIdleOctets = pHost->RxOctetCount;
+        pApp->LinkIdlePasses = 0U;
+        return;
+    }
+
+    if (pApp->LinkIdlePasses < HCI_APP_LINK_IDLE_PASSES)
+    {
+        pApp->LinkIdlePasses++;
+        if (pApp->LinkIdlePasses == HCI_APP_LINK_IDLE_PASSES)
+        {
+            HciIntrfTransportIdle(pHost);
+        }
+    }
+}
+
 static void HciAppReportLink(HciApp_t *pApp)
 {
     const HciIntrfTransport_t *pHost = &pApp->Controller.Host;
+
+    HciAppResyncOnIdle(pApp);
 
     pApp->LinkReportPasses++;
 
@@ -647,18 +691,19 @@ static void HciAppReportLink(HciApp_t *pApp)
      * all, and no amount of counting octets alone would have said so.
      */
     HciSyslogPrint(HciSyslogDefault(),
-                   "link: %s open=%u rx=%lu tx=%lu rxerr=%lu txerr=%lu "
-                   "txbusy=%lu badtype=%lu oversize=%lu retry=%lu",
+                   "link: %s open=%u rx=%lu tx=%lu pkt=%lu resync=%lu "
+                   "rxerr=%lu txerr=%lu txbusy=%lu badtype=%lu oversize=%lu",
                    pApp->HostType == HCI_APP_HOST_USB ? "usb" : "uart",
                    (unsigned)pApp->HostOpen,
                    (unsigned long)pHost->RxOctetCount,
                    (unsigned long)pHost->TxOctetCount,
+                   (unsigned long)pHost->RxPacketCount,
+                   (unsigned long)pHost->ResyncCount,
                    (unsigned long)pHost->RxErrorCount,
                    (unsigned long)pHost->TxErrorCount,
                    (unsigned long)pHost->TxBusyCount,
                    (unsigned long)pHost->Parser.InvalidTypeCount,
-                   (unsigned long)pHost->Parser.OversizePacketCount,
-                   (unsigned long)pHost->Parser.DeliveryRetryCount);
+                   (unsigned long)pHost->Parser.OversizePacketCount);
 
     /*
      * And what the hardware says, which is the half this layer cannot know.
