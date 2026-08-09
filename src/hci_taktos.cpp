@@ -82,8 +82,27 @@ void HciTaktOsWake(HciTaktOs_t *pRuntime, uint32_t Events)
      * fetch_or here is indivisible against anything. Release, so whatever was
      * written before the bit goes in is in front of it.
      */
-    __atomic_fetch_or(&pRuntime->PendingEvents, Events, __ATOMIC_RELEASE);
+    const uint32_t was =
+        __atomic_fetch_or(&pRuntime->PendingEvents, Events, __ATOMIC_RELEASE);
     __atomic_fetch_add(&pRuntime->WakeCount, 1U, __ATOMIC_RELAXED);
+
+    /*
+     * Nothing more to do when the thread had already been told. Whoever set
+     * the bit first gave the semaphore and the thread has not taken the word
+     * since, or it would be clear, so the thread is already on its way and
+     * will find this event with the one that is already there.
+     *
+     * Worth its own branch because the alternative is one semaphore call per
+     * accepted USB event, several per host packet, from an interrupt, and
+     * nearly all of them return full: WakeSem holds one. Under load that is
+     * the largest thing this interrupt does, and an interrupt that takes too
+     * long is the thing to remove before looking anywhere else.
+     */
+    if ((was & Events) == Events)
+    {
+        __atomic_fetch_add(&pRuntime->WakeFoldCount, 1U, __ATOMIC_RELAXED);
+        return;
+    }
 
     TaktOSErr_t result = TaktOSSemGive(&pRuntime->WakeSem, HciTaktOsIsInIsr());
     if (result == TAKTOS_ERR_FULL)

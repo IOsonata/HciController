@@ -90,6 +90,11 @@ extern "C" bool nrf52_errata_187(void) { return true; }
 static NRF_CLOCK_Type gClock;
 NRF_CLOCK_Type *NRF_CLOCK = &gClock;
 
+static DWT_Type gDwt;
+static CoreDebug_Type gCoreDebug;
+DWT_Type *HciTestDwt = &gDwt;
+CoreDebug_Type *HciTestCoreDebug = &gCoreDebug;
+
 /* Drain a log into a buffer, so a trace line can be read back and checked. */
 static size_t SyslogTake(HciSyslog_t *pLog, char *pOut, size_t Capacity);
 

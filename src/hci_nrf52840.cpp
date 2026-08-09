@@ -131,6 +131,8 @@ static bool HciNrf52840HfxoOnXtal(void)
 
 static HciNrf52840_t *s_pTarget;
 
+static void HciNrf52840CycleCounterStart(void);
+
 /*
  * The USBD startup sequence is driven here rather than through
  * tusb_hal_nrf_power_event. That helper calls hfclk_enable() on both its
@@ -879,6 +881,12 @@ bool HciNrf52840Init(HciNrf52840_t *pTarget,
     pTarget->pSdcMem = pSdcMem;
     pTarget->SdcMemCapacity = SdcMemCapacity;
     pTarget->UsbEnabled = UsbEnabled;
+
+    /*
+     * Before anything can raise an interrupt, so the first one is timed like
+     * every other one.
+     */
+    HciNrf52840CycleCounterStart();
     return true;
 }
 
@@ -1021,6 +1029,20 @@ static uint32_t HciNrf52840UsbdPendingEvents(void)
     return pending;
 }
 
+/*
+ * Start the core's cycle counter, so the USB handler can time itself.
+ *
+ * It is free running and reading it is one load, which is what makes it
+ * usable from inside the handler it measures. Nothing else here uses it, and
+ * leaving it running costs nothing.
+ */
+static void HciNrf52840CycleCounterStart(void)
+{
+    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+    DWT->CYCCNT = 0U;
+    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+}
+
 void HciNrf52840UsbPassMark(HciNrf52840_t *pTarget)
 {
     if (pTarget != nullptr)
@@ -1033,6 +1055,8 @@ extern "C" void USBD_IRQHandler(void)
 {
     if (s_pTarget != nullptr && s_pTarget->UsbStarted)
     {
+        const uint32_t entryCycle = DWT->CYCCNT;
+
         s_pTarget->UsbIrqCount++;
 
         /*
@@ -1083,6 +1107,13 @@ extern "C" void USBD_IRQHandler(void)
         }
 
         tusb_int_handler(0U, true);
+
+        const uint32_t took = DWT->CYCCNT - entryCycle;
+        s_pTarget->UsbIrqCycles = took;
+        if (took > s_pTarget->UsbIrqCyclesWorst)
+        {
+            s_pTarget->UsbIrqCyclesWorst = took;
+        }
     }
 }
 
@@ -1168,7 +1199,7 @@ static void HciNrf52840TargetUsbTrace(const void *pContext,
      */
     HciTrace("usbd: epstat=0x%08lX epdata=0x%08lX epin=0x%02lX epout=0x%02lX "
              "inten=0x%08lX cause=0x%08lX pend=0x%08lX sizeout2=%lu "
-             "pullup=%lu\r\n",
+             "pullup=%lu irq=%lu cyc=%lu worst=%lu\r\n",
              (unsigned long)NRF_USBD->EPSTATUS,
              (unsigned long)NRF_USBD->EPDATASTATUS,
              (unsigned long)NRF_USBD->EPINEN,
@@ -1177,7 +1208,10 @@ static void HciNrf52840TargetUsbTrace(const void *pContext,
              (unsigned long)NRF_USBD->EVENTCAUSE,
              (unsigned long)HciNrf52840UsbdPendingEvents(),
              (unsigned long)NRF_USBD->SIZE.EPOUT[2],
-             (unsigned long)NRF_USBD->USBPULLUP);
+             (unsigned long)NRF_USBD->USBPULLUP,
+             (unsigned long)pTarget->UsbIrqCount,
+             (unsigned long)pTarget->UsbIrqCycles,
+             (unsigned long)pTarget->UsbIrqCyclesWorst);
 
     /* HciTrace discards its arguments when tracing is off. */
     (void)pLabel;

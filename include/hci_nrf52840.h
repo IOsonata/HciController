@@ -56,6 +56,16 @@ typedef struct {
     uint32_t AssertCount;
     bool AssertFromSdc;
     volatile uint32_t UsbIrqCount;
+
+    /*
+     * Core cycles the USB interrupt took, last and worst. Measured across the
+     * whole handler, so a stretch where the radio preempted it is included,
+     * which is the number that matters: it is how long the handler occupies
+     * before the peripheral's next event can be looked at. At 64 MHz a
+     * microsecond is 64 of these.
+     */
+    volatile uint32_t UsbIrqCycles;
+    volatile uint32_t UsbIrqCyclesWorst;
     volatile uint32_t UsbIrqMark;
     volatile uint32_t UsbStuckCauseCount;
     volatile uint32_t UsbEventCause;

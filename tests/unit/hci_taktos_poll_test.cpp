@@ -115,6 +115,37 @@ int main(void)
     assert(gRuntime->PollWakeCount == 0U);
     printf("[ok] uart mode keeps waiting for a wake\n");
 
+    /*
+     * A wake for an event already pending must not touch the semaphore. It is
+     * one call per accepted USB event otherwise, from an interrupt, and nearly
+     * all of them would return full.
+     */
+    {
+        HciTaktOs_t runtime = {};
+        HciTaktOsOps_t ops = {};
+        HciTaktOsHostOps_t hostOps = {};
+        ops.Start = TargetStart;
+        ops.ProcessMpsl = MpslProcess;
+        hostOps.Start = HostStart;
+        hostOps.Process = Process;
+        assert(HciTaktOsInit(&runtime, &ops, &hostOps));
+
+        gGiveCount = 0U;
+        HciTaktOsWake(&runtime, HCI_TAKTOS_EVENT_HOST);
+        assert(gGiveCount == 1U);
+        assert(runtime.WakeFoldCount == 0U);
+
+        HciTaktOsWake(&runtime, HCI_TAKTOS_EVENT_HOST);
+        HciTaktOsWake(&runtime, HCI_TAKTOS_EVENT_HOST);
+        assert(gGiveCount == 1U);
+        assert(runtime.WakeFoldCount == 2U);
+
+        /* A different event is not pending yet, so it still has to tell. */
+        HciTaktOsWake(&runtime, HCI_TAKTOS_EVENT_MPSL);
+        assert(gGiveCount == 2U);
+    }
+    printf("[ok] a wake for an event already pending leaves the semaphore\n");
+
     printf("All runtime pump tests passed.\n");
     return 0;
 }
