@@ -48,28 +48,28 @@
 #endif
 
 /*
- * 6, and it may not be raised.
+ * 6. Raising it was tried and changed nothing either way.
  *
- * It was moved to 5 once, on the reasoning that 4 and below belong to MPSL
- * and 5 was the highest left. The image died on the first packet: the port
- * enumerated, the log opened, the host opened the HCI function, and the
- * device answered nothing.
+ * It was moved to 5 on the reasoning that 4 and below belong to MPSL and 5
+ * was the highest left. That image behaved exactly like every other one: it
+ * ran for a while and then the port stopped. No better, no worse.
  *
- * Nothing else on this part sits at 5 or 6 in a USB build. The UART is at 6
- * and is not brought up when the HCI stream is on USB, and MPSL's deferred
- * processing is at 7 and was already being preempted at 6. So moving from 6
- * to 5 changed no preemption that exists, and yet it changed the outcome.
+ * Which is what the measurement already said it would be. The handler was
+ * timed at fifteen hundred core cycles for an ordinary entry and sixty three
+ * hundred at worst, at roughly three hundred and twenty entries a second,
+ * which is under one percent of the part. Latency on a handler that cheap is
+ * not what stops this port.
  *
- * What is left is the runtime. This handler reaches HciTaktOsWake, which
- * calls TaktOSSemGive, and an RTOS that guards its own state with BASEPRI
- * only excludes interrupts at or below the level it masks to. An interrupt
- * above that level calling into it is not excluded from anything and
- * corrupts what it walks through. That is the ordinary shape of this fault
- * and it fits: 6 works, 5 does not, and nothing else distinguishes them.
+ * There is also nothing at 5 or 6 for the move to have changed. The UART is
+ * at 6 and is not brought up when the HCI stream is on USB, and MPSL's
+ * deferred processing is at 7 and was being preempted at either value.
  *
- * The threshold is therefore somewhere between 5 and 6, and the TaktOS
- * sources are still not in this workspace to say where. Until they are, this
- * value is a measurement and not a preference. Do not raise it.
+ * So it sits at 6, which is where it was, because a change with no measured
+ * effect is not worth the difference. One caution if anyone reconsiders: this
+ * handler reaches HciTaktOsWake and so calls into TaktOS, and an RTOS that
+ * guards its state with BASEPRI is only safe to call from interrupts at or
+ * below the level it masks to. Where TaktOS sets that is not readable from
+ * this workspace, so 4 and above needs its sources first, not an argument.
  */
 #ifndef HCI_NRF52840_USB_IRQ_PRIORITY
 #define HCI_NRF52840_USB_IRQ_PRIORITY 6U
