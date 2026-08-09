@@ -47,8 +47,22 @@
 #define HCI_NRF52840_CLOCK_IRQ_PRIORITY 4U
 #endif
 
+/*
+ * USB sits directly under everything MPSL owns and above everything else.
+ *
+ * The radio, RTC0 and TIMER0 are at MPSL_HIGH_IRQ_PRIORITY and POWER_CLOCK is
+ * at 4, and that one runs MPSL_IRQ_CLOCK_Handler, so the crystal events the
+ * radio schedules against go through it. Nothing here may sit above those.
+ * Below them, 5 is the highest available, and it puts USB in front of the
+ * UART at 6 and MPSL's own deferred processing at 7.
+ *
+ * It was 6, level with the UART. The handler was measured at fifteen hundred
+ * cycles for an ordinary entry and far more at worst, and USB has its own
+ * timing to keep: a full speed frame is one millisecond and the host will not
+ * wait past its own limits for an endpoint to be serviced.
+ */
 #ifndef HCI_NRF52840_USB_IRQ_PRIORITY
-#define HCI_NRF52840_USB_IRQ_PRIORITY 6U
+#define HCI_NRF52840_USB_IRQ_PRIORITY 5U
 #endif
 
 /* Set to 1 when the nrfxlib in use predates mpsl_clock_hfclk_src_request. */

@@ -1,0 +1,34 @@
+diff --git a/src/portable/nordic/nrf5x/dcd_nrf5x.c b/src/portable/nordic/nrf5x/dcd_nrf5x.c
+index 5170e06..eb2b165 100644
+--- a/src/portable/nordic/nrf5x/dcd_nrf5x.c
++++ b/src/portable/nordic/nrf5x/dcd_nrf5x.c
+@@ -582,17 +582,27 @@ void dcd_int_handler(uint8_t rhport) {
+ 
+   volatile uint32_t* regevt = &NRF_USBD->EVENTS_USBRESET;
+ 
++  bool evt_cleared = false;
+   for (uint8_t i = 0; i < USBD_INTEN_EPDATA_Pos + 1; i++) {
+     if (tu_bit_test(inten, i) && regevt[i]) {
+       int_status |= TU_BIT(i);
+ 
+       // event clear
+       regevt[i] = 0;
+-      __ISB();
+-      __DSB();
++      evt_cleared = true;
+     }
+   }
+ 
++  // One barrier for the whole scan instead of one per event. The clears must
++  // land before this handler returns or the interrupt re-triggers, and a
++  // single DSB drains all of them. Accesses to Device memory are not
++  // reordered against each other, so the reads later in the loop still see
++  // the writes made earlier in it.
++  if (evt_cleared) {
++    __ISB();
++    __DSB();
++  }
++
+   if (int_status & USBD_INTEN_USBRESET_Msk) {
+     bus_reset();
+     dcd_event_bus_reset(0, TUSB_SPEED_FULL, true);
