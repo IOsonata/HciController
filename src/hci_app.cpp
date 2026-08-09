@@ -879,23 +879,23 @@ static void HciAppReportLink(HciApp_t *pApp)
 
     /*
      * And what the device stack is waiting on, which none of the counts above
-     * can see. Each pair is turns of the stack the endpoint has been busy
-     * without finishing a transfer, now and at worst: the HCI stream in, the
-     * HCI stream out, then the log's in.
+     * can see. Each pair is turns of the stack the endpoint has been marked
+     * busy, now and at worst: the HCI stream in, the HCI stream out, then the
+     * log's in.
      *
-     * A few is a transfer in flight. Hundreds is an endpoint whose completion
-     * event was lost, which is the one way this port stops with every other
-     * counter on this line at zero.
+     * in and log are stalls when they are large, because a transfer this
+     * device asked for is outstanding. out is not: a read stays armed and
+     * marked busy while the host sends nothing, so a large out with rx above
+     * standing still is octets that are not arriving, and a large out with rx
+     * moving is an idle host and nothing more.
      */
     if (pApp->UsbRunning)
     {
         HciSyslogPrint(HciSyslogDefault(),
-                       "usb: mounted=%u task=%lu rst=%lu in=%u/%u out=%u/%u "
-                       "log=%u/%u wbusy=%lu werr=%lu rxdrop=%lu rderr=%lu "
-                       "itferr=%lu",
+                       "usb: mounted=%u task=%lu in=%u/%u out=%u/%u log=%u/%u "
+                       "wbusy=%lu werr=%lu rxdrop=%lu rderr=%lu itferr=%lu",
                        (unsigned)HciTinyUsbIsMounted(&pApp->Usb),
                        (unsigned long)pApp->Usb.TaskCount,
-                       (unsigned long)pApp->Usb.RestartCount,
                        (unsigned)pApp->Usb.EpBusyTurns[0],
                        (unsigned)pApp->Usb.EpBusyWorst[0],
                        (unsigned)pApp->Usb.EpBusyTurns[1],

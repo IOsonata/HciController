@@ -12,7 +12,6 @@
 
 #include "tusb.h"
 #include "device/usbd_pvt.h"
-#include "device/dcd.h"
 
 #include "hci_trace.h"
 
@@ -226,10 +225,9 @@ static const uint8_t s_HciTinyUsbWatchedEp[HCI_TINYUSB_EP_COUNT] = {
     (uint8_t)HCI_USB_EP_LOG_IN,
 };
 
-static bool HciTinyUsbWatchEndpoints(HciTinyUsb_t *pUsb)
+static void HciTinyUsbWatchEndpoints(HciTinyUsb_t *pUsb)
 {
     const bool mounted = tud_mounted();
-    bool stuck = false;
 
     for (size_t i = 0U; i < HCI_TINYUSB_EP_COUNT; i++)
     {
@@ -248,58 +246,7 @@ static bool HciTinyUsbWatchEndpoints(HciTinyUsb_t *pUsb)
         {
             pUsb->EpBusyWorst[i] = pUsb->EpBusyTurns[i];
         }
-
-        if (pUsb->EpBusyTurns[i] >= HCI_TINYUSB_EP_STUCK_TURNS)
-        {
-            stuck = true;
-        }
     }
-
-    return stuck;
-}
-
-/*
- * Take the port down and put it back up when an endpoint has stopped.
- *
- * Detaching makes the host enumerate again, and the reset that comes with
- * that is what clears the device stack's endpoint state and the port's own.
- * Nothing else reachable from here does: the busy mark belongs to the stack
- * and the transfer state to the driver, and clearing one without the other
- * leaves a pair that disagree.
- *
- * The detach is held for a stretch of turns rather than a measured time,
- * because this layer has no clock and the turns are what it can count.
- */
-static void HciTinyUsbRecoverPort(HciTinyUsb_t *pUsb, bool Stuck)
-{
-    if (pUsb->DetachTurns != 0U)
-    {
-        pUsb->DetachTurns--;
-        if (pUsb->DetachTurns == 0U)
-        {
-            dcd_connect(0U);
-            HciTrace("tinyusb: port back up after restart %lu\r\n",
-                     (unsigned long)pUsb->RestartCount);
-        }
-        return;
-    }
-
-    if (!Stuck)
-    {
-        return;
-    }
-
-    pUsb->RestartCount++;
-    pUsb->DetachTurns = HCI_TINYUSB_DETACH_TURNS;
-
-    for (size_t i = 0U; i < HCI_TINYUSB_EP_COUNT; i++)
-    {
-        pUsb->EpBusyTurns[i] = 0U;
-    }
-
-    HciTrace("tinyusb: endpoint stuck, restarting the port, restart=%lu\r\n",
-             (unsigned long)pUsb->RestartCount);
-    dcd_disconnect(0U);
 }
 
 void HciTinyUsbProcess(HciTinyUsb_t *pUsb)
@@ -316,7 +263,7 @@ void HciTinyUsbProcess(HciTinyUsb_t *pUsb)
      * runtime loop wants.
      */
     tud_task_ext(0U, false);
-    HciTinyUsbRecoverPort(pUsb, HciTinyUsbWatchEndpoints(pUsb));
+    HciTinyUsbWatchEndpoints(pUsb);
     HciTinyUsbProcessRx(pUsb);
     HciTinyUsbProcessTx(pUsb);
 }

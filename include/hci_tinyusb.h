@@ -34,23 +34,6 @@ typedef void (*HciTinyUsbWake_t)(void *pContext);
  */
 #define HCI_TINYUSB_EP_COUNT 3
 
-/*
- * Turns of the device stack an endpoint may stay busy before the port is
- * taken down and put back up.
- *
- * A wedged endpoint stops producing events, so the only thing still turning
- * the stack over is the poll, twice a turn every few milliseconds. Four
- * hundred is on the order of a second of that, which no transfer on a bulk
- * endpoint comes close to and which is well inside the time a host takes to
- * give up and reset the port itself. Doing it here is the safer of the two,
- * because a wedged endpoint has nothing in flight, where a host reset can
- * arrive in the middle of a transfer.
- */
-#define HCI_TINYUSB_EP_STUCK_TURNS 400U
-
-/* Turns spent detached, long enough for a host to see the port go. */
-#define HCI_TINYUSB_DETACH_TURNS 40U
-
 typedef struct {
     UsbdCdcDevIntrf_t *pIntrf;
     uint8_t Interface;
@@ -66,38 +49,34 @@ typedef struct {
 
     /*
      * How many turns of the device stack each watched endpoint has been
-     * waiting on a transfer without finishing one, and the worst run of that
-     * seen so far.
+     * marked busy without that mark clearing, and the worst run of that so
+     * far. Read in the order the report prints them: HCI in, HCI out, log in.
      *
-     * This is the one reading that says a port has stopped rather than paused.
-     * An endpoint is marked busy when a transfer is handed to the driver and
-     * the mark is cleared in exactly one place, the device stack task handling
-     * that transfer's completion event. If the event is lost, and the queue
-     * that holds it drops silently when it fills, the mark is never cleared
-     * and the endpoint refuses every later transfer. Nothing faults, nothing
-     * prints, and no other counter here moves.
+     * The mark is set when a transfer is handed to the driver and cleared in
+     * exactly one place, the device stack task handling that transfer's
+     * completion. If the completion is lost, and the queue that holds it
+     * drops silently when it fills, the mark is never cleared and the
+     * endpoint refuses every later transfer with nothing faulting, printing
+     * or counting.
      *
-     * A few turns busy is ordinary, that is a transfer in flight. Hundreds is
-     * the failure.
+     * Read the two directions differently, because the mark does not mean the
+     * same thing on each.
+     *
+     * On an IN endpoint it means a transfer this device asked for is still
+     * outstanding, so a long run really is a stall. On an OUT endpoint it
+     * means a read is armed and waiting for the host to send something, which
+     * is the ordinary resting state of a healthy idle endpoint: the stack
+     * arms the next read as soon as one completes and there is room, so an
+     * OUT endpoint with an idle host sits marked busy for as long as the host
+     * stays quiet. A long run there says nothing on its own, and taking it
+     * for a stall is a mistake this reading was written into once already.
+     *
+     * What a long OUT run does say, when the host is known to be sending, is
+     * that the octets are not arriving. That comparison is the reader's, and
+     * rx on the link line is the other half of it.
      */
     uint16_t EpBusyTurns[HCI_TINYUSB_EP_COUNT];
     uint16_t EpBusyWorst[HCI_TINYUSB_EP_COUNT];
-
-    /*
-     * How many times the port has been taken down and put back up because an
-     * endpoint stayed busy past the limit above, and where the current one is
-     * in its detached stretch. Zero when nothing is being restarted.
-     *
-     * The alternative to doing this is what has been happening: the endpoint
-     * stops, the host keeps sending into a port that will not take it, and
-     * some time later the host resets the port itself. That reset lands
-     * wherever it lands, and if a transfer is in flight when it does, the
-     * peripheral is left holding off every endpoint with nothing able to
-     * release it, which is a stop only a replug clears. Restarting from here
-     * happens when the wedged endpoint has nothing in flight.
-     */
-    uint32_t RestartCount;
-    uint16_t DetachTurns;
 
     uint32_t RxDropCount;
     uint32_t ReadErrorCount;
