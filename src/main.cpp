@@ -190,7 +190,7 @@ int main(void)
     TaktOSCfg_t kernelCfg = {};
     kernelCfg.KernClockHz = SystemCoreClockGet();
     kernelCfg.TickHz = 1000U;
-    kernelCfg.TickPriority = TAKTOS_PRIORITY_LOW;
+    kernelCfg.TickPriority = TAKTOS_PRIORITY_LOWEST;
 
     HciTrace("boot: coreclk=%lu\r\n", (unsigned long)kernelCfg.KernClockHz);
     if (TaktOSInit(&kernelCfg) != TAKTOS_OK)
