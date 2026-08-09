@@ -18,8 +18,6 @@ static bool gSemAlwaysTimesOut;
 static uint32_t gLastWaitTicks;
 static HciTaktOs_t *gRuntime;
 
-extern "C" uint32_t TaktOSEnterCritical(void) { return 0U; }
-extern "C" void TaktOSExitCritical(uint32_t) {}
 
 extern "C" TaktOSErr_t TaktOSSemInit(TaktOSSem_t *pSem, uint32_t Initial, uint32_t Max)
 {
