@@ -51,7 +51,6 @@
 #define HCI_NRF52840_USB_IRQ_PRIORITY 6U
 #endif
 
-/* Set to 1 when the nrfxlib in use predates mpsl_clock_hfclk_src_request. */
 /* Bounded wait for the crystal. Worst case ramp-up is 1400 us. */
 #ifndef HCI_NRF52840_HFCLK_WAIT_LOOPS
 #define HCI_NRF52840_HFCLK_WAIT_LOOPS 1000000U
@@ -94,10 +93,6 @@
 #define HCI_NRF52840_USB_STORM_LIMIT 2000U
 #endif
 
-/*
- * Attempts at the random source before giving up. It is polled from low
- * priority processing, so this bounds a stall rather than a busy wait.
- */
 /*
  * Attempts allowed when proving the entropy source at start up. This bounds a
  * start up check, not the SDC callback, which must block per sdc_soc.h.
@@ -248,6 +243,21 @@ static int32_t HciNrf52840HfclkRelease(void)
     return mpsl_clock_hfclk_src_release(MPSL_CLOCK_HF_SRC_XO);
 }
 
+/*
+ * A successful request belongs to this target until USB starts or the request
+ * is explicitly released. An error while waiting for the clock must therefore
+ * unwind the request as well as report the error; otherwise a retry sees
+ * HfclkRequested and incorrectly assumes the crystal is still owned.
+ */
+static bool HciNrf52840HfclkStartFailed(HciNrf52840_t *pTarget,
+                                        int32_t Error)
+{
+    (void)HciNrf52840HfclkRelease();
+    pTarget->HfclkRequested = false;
+    pTarget->LastError = Error;
+    return false;
+}
+
 static bool HciNrf52840HfclkStart(HciNrf52840_t *pTarget)
 {
     if (pTarget->HfclkRequested)
@@ -278,8 +288,7 @@ static bool HciNrf52840HfclkStart(HciNrf52840_t *pTarget)
         result = HciNrf52840HfclkIsRunning(&running);
         if (result != 0)
         {
-            pTarget->LastError = result;
-            return false;
+            return HciNrf52840HfclkStartFailed(pTarget, result);
         }
 
         if (running != 0U)
@@ -292,8 +301,8 @@ static bool HciNrf52840HfclkStart(HciNrf52840_t *pTarget)
     }
 
     HciTrace("hfclk: timeout\r\n");
-    pTarget->LastError = HCI_NRF52840_ERR_HFCLK_TIMEOUT;
-    return false;
+    return HciNrf52840HfclkStartFailed(
+        pTarget, HCI_NRF52840_ERR_HFCLK_TIMEOUT);
 }
 
 /*
@@ -1061,9 +1070,22 @@ extern "C" void USBD_IRQHandler(void)
             s_pTarget->UsbEventCause |= cause;
             s_pTarget->UsbStuckCauseCount++;
             NRF_USBD->EVENTCAUSE = cause;
-            NRF_USBD->EVENTS_USBEVENT = 0U;
             __ISB();
             __DSB();
+
+            /*
+             * Take the umbrella event away only when no cause that TinyUSB
+             * consumes remains. Clearing EVENTS_USBEVENT while SUSPEND,
+             * RESUME or USBWUALLOWED is still set prevents the port from ever
+             * seeing that state transition.
+             */
+            if ((NRF_USBD->EVENTCAUSE &
+                 (uint32_t)HCI_NRF52840_USBD_PORT_EVENTCAUSE) == 0U)
+            {
+                NRF_USBD->EVENTS_USBEVENT = 0U;
+                __ISB();
+                __DSB();
+            }
         }
 
         tusb_int_handler(0U, true);

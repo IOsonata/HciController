@@ -224,6 +224,26 @@ int main(void)
     }
 
     /*
+     * A trace line longer than the buffer has to say so. Silent truncation
+     * takes the tail off, and the tail is where the newest field is, so a
+     * measurement reads as a smaller measurement rather than as an absent
+     * one and the reader believes it.
+     */
+    {
+        char wide[400];
+        memset(wide, 'x', sizeof(wide) - 1U);
+        wide[sizeof(wide) - 1U] = '\0';
+
+        gSinkLen = 0U;
+        gSink[0] = '\0';
+        HciTrace("%s", wide);
+        HciSyslogDrain(HciSyslogDefault(), SinkAll, NULL);
+        assert(strstr(gSink, "...") != NULL);
+        printf("[ok] %-42s the tail says it was cut\n",
+               "an over long trace line is marked");
+    }
+
+    /*
      * A line already built goes in as text. The percent sign is the case that
      * matters: through the formatter it would be read as a conversion and take
      * an argument that is not there, and trace lines are built by callers that

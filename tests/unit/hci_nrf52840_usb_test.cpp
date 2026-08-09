@@ -433,7 +433,16 @@ static void TestHfclkTimeoutDoesNotHang(void)
     assert(!HciNrf52840UsbStart(&target));
     assert(target.LastError == -1000);
     assert(!target.UsbStarted);
+    assert(gHfclkRequests == 1U);
+    assert(gHfclkReleases == 1U);
+    assert(!target.HfclkRequested);
     assert(gUsbPowerEvents[0] == 0U && gUsbPowerEvents[2] == 0U);
+
+    /* A retry must make a fresh MPSL request rather than trust stale state. */
+    gHfclkStartAfter = gLowPrioProcess + 1U;
+    assert(HciNrf52840UsbStart(&target));
+    assert(gHfclkRequests == 2U);
+    assert(target.HfclkRequested);
 
     /* The first recorded cause survives the generic fault report. */
     ops.Fault(ops.pContext, -1);
@@ -441,7 +450,8 @@ static void TestHfclkTimeoutDoesNotHang(void)
     assert(target.FaultCount == 1U);
 
     HciNrf52840Stop(&target);
-    printf("[ok] crystal wait is bounded and the cause is kept\n");
+    assert(gHfclkReleases == 2U);
+    printf("[ok] crystal timeout releases its request and retry re-requests it\n");
 }
 
 static void TestUsbRegulatorTimeout(void)
@@ -602,6 +612,32 @@ static void TestEventCauseStormIsBroken(void)
 
     assert((gUsbd.EVENTCAUSE.Value & USBD_EVENTCAUSE_SUSPEND_Msk) != 0U);
     assert(target.UsbStuckCauseCount == 1U);
+
+    /*
+     * Both kinds at once, which is the case that decides it. Clearing the one
+     * the port ignores must not take EVENTS_USBEVENT with it while a cause the
+     * port still has to read is behind it. The port never looks at EVENTCAUSE
+     * unless the event is there, so a suspend or a resume dropped here is a
+     * suspend or a resume the port never learns about.
+     */
+    gUsbd.EVENTCAUSE.Value = USBD_EVENTCAUSE_READY_Msk |
+                             USBD_EVENTCAUSE_SUSPEND_Msk;
+    gUsbd.EVENTS_USBEVENT = 1U;
+    USBD_IRQHandler();
+
+    assert((gUsbd.EVENTCAUSE.Value & USBD_EVENTCAUSE_READY_Msk) == 0U);
+    assert((gUsbd.EVENTCAUSE.Value & USBD_EVENTCAUSE_SUSPEND_Msk) != 0U);
+    assert(gUsbd.EVENTS_USBEVENT == 1U);
+    assert(target.UsbStuckCauseCount == 2U);
+
+    /* And with nothing left behind it the event still has to go. */
+    gUsbd.EVENTCAUSE.Value = USBD_EVENTCAUSE_READY_Msk;
+    gUsbd.EVENTS_USBEVENT = 1U;
+    USBD_IRQHandler();
+
+    assert(gUsbd.EVENTCAUSE.Value == 0U);
+    assert(gUsbd.EVENTS_USBEVENT == 0U);
+    assert(target.UsbStuckCauseCount == 3U);
 
     /* A source that keeps re-asserting is captured and named, not guessed. */
     gUsbd.EVENTCAUSE.Value = 0U;

@@ -69,6 +69,12 @@ typedef struct {
     uint32_t LoopCount;
     uint32_t EmptyWakeCount;
     uint32_t SemaphoreFullCount;
+
+    /*
+     * Wakes that asked for an event already pending, so the semaphore was not
+     * touched. Under load this is most of them.
+     */
+    uint32_t WakeFoldCount;
     uint32_t StartErrorCount;
     uint32_t HostRetryCount;
     uint32_t PollWakeCount;

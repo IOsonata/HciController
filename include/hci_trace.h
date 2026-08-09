@@ -120,8 +120,22 @@ static void HciTrace(const char *pFmt, ...)
     va_list args;
 
     va_start(args, pFmt);
-    (void)vsnprintf(line, sizeof(line), pFmt, args);
+    const int len = vsnprintf(line, sizeof(line), pFmt, args);
     va_end(args);
+
+    /*
+     * Say when a line did not fit, rather than let it end wherever the buffer
+     * did. A number cut in half reads as a smaller number and not as a
+     * missing one, which is how a worst case of sixty thousand cycles was
+     * read off this log as six, twice, before anyone counted the characters.
+     */
+    if (len >= (int)sizeof(line))
+    {
+        line[sizeof(line) - 4U] = '.';
+        line[sizeof(line) - 3U] = '.';
+        line[sizeof(line) - 2U] = '.';
+        line[sizeof(line) - 1U] = '\0';
+    }
 
     HciTraceWrite0(line);
     HciSyslogTraceLine(line);
