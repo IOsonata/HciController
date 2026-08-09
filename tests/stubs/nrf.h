@@ -45,17 +45,8 @@ struct UsbdEnableReg {
  * target. USBEVENT is bit 22.
  */
 typedef struct {
-    volatile uint32_t EPOUT[8];
-} UsbdSizeReg;
-
-typedef struct {
     UsbdEnableReg ENABLE;
     volatile uint32_t USBPULLUP;
-    volatile uint32_t EPSTATUS;
-    volatile uint32_t EPDATASTATUS;
-    volatile uint32_t EPINEN;
-    volatile uint32_t EPOUTEN;
-    UsbdSizeReg SIZE;
     UsbdEventCauseReg EVENTCAUSE;
     volatile uint32_t ISOSPLIT;
     volatile uint32_t INTENSET;
@@ -74,20 +65,6 @@ extern NRF_USBD_Type *NRF_USBD;
 #define USBD_EVENTCAUSE_SUSPEND_Msk      (1UL << 8)
 #define USBD_EVENTCAUSE_RESUME_Msk       (1UL << 9)
 #define USBD_EVENTCAUSE_USBWUALLOWED_Msk (1UL << 10)
-
-/*
- * The cycle counter the firmware uses to time its own interrupt handler.
- * Modelled rather than left out, so the handler under test writes and reads
- * the same fields it does on the part.
- */
-typedef struct { volatile uint32_t CTRL; volatile uint32_t CYCCNT; } DWT_Type;
-typedef struct { volatile uint32_t DEMCR; } CoreDebug_Type;
-extern DWT_Type *HciTestDwt;
-extern CoreDebug_Type *HciTestCoreDebug;
-#define DWT       HciTestDwt
-#define CoreDebug HciTestCoreDebug
-#define CoreDebug_DEMCR_TRCENA_Msk (1UL << 24)
-#define DWT_CTRL_CYCCNTENA_Msk     (1UL << 0)
 
 #define __ISB() do { } while (0)
 #define __DSB() do { } while (0)

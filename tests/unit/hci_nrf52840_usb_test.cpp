@@ -90,11 +90,6 @@ extern "C" bool nrf52_errata_187(void) { return true; }
 static NRF_CLOCK_Type gClock;
 NRF_CLOCK_Type *NRF_CLOCK = &gClock;
 
-static DWT_Type gDwt;
-static CoreDebug_Type gCoreDebug;
-DWT_Type *HciTestDwt = &gDwt;
-CoreDebug_Type *HciTestCoreDebug = &gCoreDebug;
-
 /* Drain a log into a buffer, so a trace line can be read back and checked. */
 static size_t SyslogTake(HciSyslog_t *pLog, char *pOut, size_t Capacity);
 
@@ -438,7 +433,16 @@ static void TestHfclkTimeoutDoesNotHang(void)
     assert(!HciNrf52840UsbStart(&target));
     assert(target.LastError == -1000);
     assert(!target.UsbStarted);
+    assert(gHfclkRequests == 1U);
+    assert(gHfclkReleases == 1U);
+    assert(!target.HfclkRequested);
     assert(gUsbPowerEvents[0] == 0U && gUsbPowerEvents[2] == 0U);
+
+    /* A retry must make a fresh MPSL request rather than trust stale state. */
+    gHfclkStartAfter = gLowPrioProcess + 1U;
+    assert(HciNrf52840UsbStart(&target));
+    assert(gHfclkRequests == 2U);
+    assert(target.HfclkRequested);
 
     /* The first recorded cause survives the generic fault report. */
     ops.Fault(ops.pContext, -1);
@@ -446,7 +450,8 @@ static void TestHfclkTimeoutDoesNotHang(void)
     assert(target.FaultCount == 1U);
 
     HciNrf52840Stop(&target);
-    printf("[ok] crystal wait is bounded and the cause is kept\n");
+    assert(gHfclkReleases == 2U);
+    printf("[ok] crystal timeout releases its request and retry re-requests it\n");
 }
 
 static void TestUsbRegulatorTimeout(void)
