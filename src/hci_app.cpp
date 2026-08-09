@@ -967,6 +967,20 @@ static void HciAppHostProcess(void *pContext)
     if (pApp->UsbRunning)
     {
         /*
+         * Where this pass started, in interrupts. The storm capture asks how
+         * many arrived between two of these marks, and the only other mark is
+         * taken in the enumeration settling loop, which ends at mount. So
+         * after mount it was comparing a lifetime count against the limit and
+         * latching on ordinary traffic.
+         *
+         * The interval this delimits is one wake to the next, which includes
+         * the poll wait, so it is bounded by that wait plus one pass rather
+         * than by a pass alone. At the limit it takes hundreds of thousands of
+         * interrupts a second to reach, which is a storm on any reading of it.
+         */
+        pApp->Target.pOps->UsbPassMark(pApp->Target.pContext);
+
+        /*
          * Cable attach and detach are recorded by POWER_CLOCK and applied
          * here, in the same context that pumps the device stack, because the
          * TinyUSB event queue is only protected against this context.
