@@ -38,6 +38,29 @@
 #define CFG_TUD_ENDPOINT0_SIZE 64
 
 /*
+ * The device stack has one event queue. It holds bus events, transfer
+ * completions and the deferred EasyDMA starts the nRF5x port queues whenever a
+ * transfer is asked for while another is already running. The nRF52840 USBD has
+ * a single EasyDMA engine shared by every endpoint, so two CDC functions moving
+ * data at once reach that deferral often.
+ *
+ * On overflow the stack drops the event through a TU_ASSERT that is a bare
+ * early return in a release build. A dropped transfer completion leaves its
+ * endpoint marked busy for good, because the only place that mark is cleared is
+ * the task handling that event. A dropped deferral leaves a transfer that never
+ * starts. Nothing is printed and no counter moves.
+ *
+ * The depth was the default 16. The drain was, and by default still would be,
+ * 16 events per turn of the task, so a deeper queue on its own only lengthens
+ * the fuse: the depth has to be matched by a drain that empties it. Zero means
+ * empty it.
+ *
+ * 64 entries costs 64 times sizeof(dcd_event_t), under a kilooctet.
+ */
+#define CFG_TUD_TASK_QUEUE_SZ      64
+#define CFG_TUD_TASK_EVENTS_PER_RUN 0
+
+/*
  * Two. One is the HCI byte stream and one is a log, and the second exists
  * because a controller that can only be watched with a debugger cannot be
  * watched at all on a sealed board or on somebody else's product. The nRF52840
