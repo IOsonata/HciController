@@ -75,6 +75,12 @@ static bool gEpBusyHciIn;
 static bool gEpBusyHciOut;
 static bool gEpBusyLogIn;
 
+static unsigned gDcdConnect;
+static unsigned gDcdDisconnect;
+
+extern "C" void dcd_connect(uint8_t rhport) { assert(rhport == 0U); gDcdConnect++; }
+extern "C" void dcd_disconnect(uint8_t rhport) { assert(rhport == 0U); gDcdDisconnect++; }
+
 extern "C" bool usbd_edpt_busy(uint8_t rhport, uint8_t ep_addr)
 {
     assert(rhport == 0U);
@@ -114,6 +120,8 @@ static void Reset(UsbdCdcDevIntrf_t *pIntrf)
     gEpBusyHciIn = false;
     gEpBusyHciOut = false;
     gEpBusyLogIn = false;
+    gDcdConnect = 0U;
+    gDcdDisconnect = 0U;
 
     memset(pIntrf, 0, sizeof(*pIntrf));
     pIntrf->hRxFifo = &gRxFifo;
@@ -213,6 +221,41 @@ int main(void)
     HciTinyUsbProcess(&usb);
     assert(usb.EpBusyTurns[0] == 0U);
     printf("[ok] a busy endpoint is counted in turns, and the worst is kept\n");
+
+    /*
+     * An endpoint that stays busy past the limit takes the port down and puts
+     * it back up. Once, not once a turn, and the detach is held long enough
+     * for a host to see the port go.
+     */
+    Reset(&intrf);
+    memset(&usb, 0, sizeof(usb));
+    assert(HciTinyUsbInit(&usb, &intrf, 0U, Wake, nullptr));
+    assert(HciTinyUsbStart(&usb));
+    gMounted = true;
+    gEpBusyHciOut = true;
+
+    for (unsigned i = 0U; i < HCI_TINYUSB_EP_STUCK_TURNS; i++)
+    {
+        HciTinyUsbProcess(&usb);
+    }
+    assert(usb.RestartCount == 1U);
+    assert(gDcdDisconnect == 1U);
+    assert(gDcdConnect == 0U);
+    assert(usb.EpBusyWorst[1] == HCI_TINYUSB_EP_STUCK_TURNS);
+
+    /* Down for the whole stretch, and not taken down again while it is. */
+    for (unsigned i = 0U; i < HCI_TINYUSB_DETACH_TURNS - 1U; i++)
+    {
+        HciTinyUsbProcess(&usb);
+    }
+    assert(gDcdConnect == 0U);
+    assert(gDcdDisconnect == 1U);
+    assert(usb.RestartCount == 1U);
+
+    HciTinyUsbProcess(&usb);
+    assert(gDcdConnect == 1U);
+    assert(usb.RestartCount == 1U);
+    printf("[ok] an endpoint stuck past the limit restarts the port, once\n");
 
     printf("All device stack bring up tests passed.\n");
     return 0;

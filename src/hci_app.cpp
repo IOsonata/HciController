@@ -890,10 +890,12 @@ static void HciAppReportLink(HciApp_t *pApp)
     if (pApp->UsbRunning)
     {
         HciSyslogPrint(HciSyslogDefault(),
-                       "usb: mounted=%u task=%lu in=%u/%u out=%u/%u log=%u/%u "
-                       "wbusy=%lu werr=%lu rxdrop=%lu rderr=%lu itferr=%lu",
+                       "usb: mounted=%u task=%lu rst=%lu in=%u/%u out=%u/%u "
+                       "log=%u/%u wbusy=%lu werr=%lu rxdrop=%lu rderr=%lu "
+                       "itferr=%lu",
                        (unsigned)HciTinyUsbIsMounted(&pApp->Usb),
                        (unsigned long)pApp->Usb.TaskCount,
+                       (unsigned long)pApp->Usb.RestartCount,
                        (unsigned)pApp->Usb.EpBusyTurns[0],
                        (unsigned)pApp->Usb.EpBusyWorst[0],
                        (unsigned)pApp->Usb.EpBusyTurns[1],
