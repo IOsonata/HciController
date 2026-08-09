@@ -191,6 +191,11 @@
 			<locationURI>PARENT-2-PROJECT_LOC/src/hci_tinyusb.cpp</locationURI>
 		</link>
 		<link>
+			<name>src/hci_tinyusb_dcd_nrf5x.c</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/src/hci_tinyusb_dcd_nrf5x.c</locationURI>
+		</link>
+		<link>
 			<name>src/main.cpp</name>
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/src/main.cpp</locationURI>
