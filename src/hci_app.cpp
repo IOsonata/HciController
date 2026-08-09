@@ -878,45 +878,6 @@ static void HciAppReportLink(HciApp_t *pApp)
                    (unsigned long)pHost->Parser.OversizePacketCount);
 
     /*
-     * And what the device stack is waiting on, which none of the counts above
-     * can see. Each pair is turns of the stack the endpoint has been marked
-     * busy, now and at worst: the HCI stream in, the HCI stream out, then the
-     * log's in.
-     *
-     * in and log are stalls when they are large, because a transfer this
-     * device asked for is outstanding. out is not: a read stays armed and
-     * marked busy while the host sends nothing, so a large out with rx above
-     * standing still is octets that are not arriving, and a large out with rx
-     * moving is an idle host and nothing more.
-     */
-    if (pApp->UsbRunning)
-    {
-        HciSyslogPrint(HciSyslogDefault(),
-                       "usb: mounted=%u task=%lu in=%u/%u out=%u/%u log=%u/%u "
-                       "wbusy=%lu werr=%lu rxdrop=%lu rderr=%lu itferr=%lu",
-                       (unsigned)HciTinyUsbIsMounted(&pApp->Usb),
-                       (unsigned long)pApp->Usb.TaskCount,
-                       (unsigned)pApp->Usb.EpBusyTurns[0],
-                       (unsigned)pApp->Usb.EpBusyWorst[0],
-                       (unsigned)pApp->Usb.EpBusyTurns[1],
-                       (unsigned)pApp->Usb.EpBusyWorst[1],
-                       (unsigned)pApp->Usb.EpBusyTurns[2],
-                       (unsigned)pApp->Usb.EpBusyWorst[2],
-                       (unsigned long)pApp->Usb.WriteBusyCount,
-                       (unsigned long)pApp->Usb.WriteErrorCount,
-                       (unsigned long)pApp->Usb.RxDropCount,
-                       (unsigned long)pApp->Usb.ReadErrorCount,
-                       (unsigned long)pApp->Usb.CallbackInterfaceErrorCount);
-
-        /*
-         * And the peripheral's own registers, because everything above this
-         * point is what the firmware believes and none of it has ever
-         * disagreed with itself at a stop.
-         */
-        HciTargetUsbTrace(&pApp->Target, "link", pApp->Usb.TaskCount);
-    }
-
-    /*
      * What the dispatcher made of the commands, beside what the transport made
      * of the octets. A link with commands on it that are refused looks exactly
      * like one with commands on it that are answered, from the transport's
@@ -1005,20 +966,6 @@ static void HciAppHostProcess(void *pContext)
 
     if (pApp->UsbRunning)
     {
-        /*
-         * Where this pass started, in interrupts. The storm capture asks how
-         * many arrived between two of these marks, and the only other mark is
-         * taken in the enumeration settling loop, which ends at mount. So
-         * after mount it was comparing a lifetime count against the limit and
-         * latching on ordinary traffic.
-         *
-         * The interval this delimits is one wake to the next, which includes
-         * the poll wait, so it is bounded by that wait plus one pass rather
-         * than by a pass alone. At the limit it takes hundreds of thousands of
-         * interrupts a second to reach, which is a storm on any reading of it.
-         */
-        pApp->Target.pOps->UsbPassMark(pApp->Target.pContext);
-
         /*
          * Cable attach and detach are recorded by POWER_CLOCK and applied
          * here, in the same context that pumps the device stack, because the

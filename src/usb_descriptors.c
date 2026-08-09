@@ -42,10 +42,13 @@
  */
 #define HCI_USB_CONFIG_TOTAL   (TUD_CONFIG_DESC_LEN + 2 * TUD_CDC_DESC_LEN)
 
-/*
- * The endpoint addresses are in tusb_config.h, so that the layer that watches
- * them and this one that declares them cannot disagree about which is which.
- */
+#define HCI_USB_EP_CDC_NOTIFY  0x81U
+#define HCI_USB_EP_CDC_OUT     0x02U
+#define HCI_USB_EP_CDC_IN      0x82U
+
+#define HCI_USB_EP_LOG_NOTIFY  0x83U
+#define HCI_USB_EP_LOG_OUT     0x04U
+#define HCI_USB_EP_LOG_IN      0x84U
 
 static tusb_desc_device_t const s_DeviceDescriptor = {
 	.bLength = sizeof(tusb_desc_device_t),

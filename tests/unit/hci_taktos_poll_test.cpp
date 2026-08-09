@@ -15,6 +15,7 @@ static unsigned gMpslProcess;
 static unsigned gSemTake;
 static unsigned gGiveCount;
 static bool gSemAlwaysTimesOut;
+static bool gTargetStartResult;
 static uint32_t gLastWaitTicks;
 static HciTaktOs_t *gRuntime;
 
@@ -65,7 +66,7 @@ extern "C" TaktOSErr_t TaktOSSemTake(TaktOSSem_t *pSem, bool, uint32_t WaitTicks
     return TAKTOS_OK;
 }
 
-static bool TargetStart(void *) { gTargetStart++; return true; }
+static bool TargetStart(void *) { gTargetStart++; return gTargetStartResult; }
 static bool HostStart(void *) { gHostStart++; return true; }
 static void Process(void *) { gProcess++; }
 static void MpslProcess(void *) { gMpslProcess++; }
@@ -73,7 +74,8 @@ static void MpslProcess(void *) { gMpslProcess++; }
 static void Reset(void)
 {
     gTargetStart = 0U; gHostStart = 0U; gProcess = 0U; gMpslProcess = 0U;
-    gSemTake = 0U; gGiveCount = 0U; gSemAlwaysTimesOut = false; gLastWaitTicks = 0U;
+    gSemTake = 0U; gGiveCount = 0U; gSemAlwaysTimesOut = false;
+    gTargetStartResult = true; gLastWaitTicks = 0U;
 }
 
 static void Run(uint32_t PollMs, bool AlwaysTimeout)
@@ -145,6 +147,36 @@ int main(void)
         assert(gGiveCount == 2U);
     }
     printf("[ok] a wake for an event already pending leaves the semaphore\n");
+
+    /*
+     * A target start failure is still a thread exit. ThreadLive must not stay
+     * set after the function has returned, and a stop that began during start
+     * must have a completion token to wake on.
+     */
+    {
+        HciTaktOs_t runtime = {};
+        HciTaktOsOps_t ops = {};
+        HciTaktOsHostOps_t hostOps = {};
+
+        Reset();
+        gRuntime = &runtime;
+        gTargetStartResult = false;
+        ops.Start = TargetStart;
+        ops.ProcessMpsl = MpslProcess;
+        hostOps.Start = HostStart;
+        hostOps.Process = Process;
+
+        assert(HciTaktOsInit(&runtime, &ops, &hostOps));
+        HciTaktOsThread(&runtime);
+
+        assert(gTargetStart == 1U);
+        assert(gHostStart == 0U);
+        assert(!runtime.Started);
+        assert(!runtime.Running);
+        assert(!runtime.ThreadLive);
+        assert(runtime.StoppedSem.Count == 1U);
+    }
+    printf("[ok] target start failure leaves the runtime thread stopped\n");
 
     printf("All runtime pump tests passed.\n");
     return 0;

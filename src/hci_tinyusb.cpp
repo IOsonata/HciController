@@ -11,7 +11,6 @@
 #include "hci_tinyusb.h"
 
 #include "tusb.h"
-#include "device/usbd_pvt.h"
 
 #include "hci_trace.h"
 
@@ -147,8 +146,6 @@ static void HciTinyUsbProcessRx(HciTinyUsb_t *pUsb)
             break;
         }
 
-        pUsb->RxMoved = true;
-
         int written = CFifoWrite(pUsb->pIntrf->hRxFifo, data, (int)actual);
         if (written != (int)actual)
         {
@@ -213,72 +210,6 @@ static void HciTinyUsbProcessTx(HciTinyUsb_t *pUsb)
     (void)tud_cdc_n_write_flush(pUsb->Interface);
 }
 
-/*
- * Which endpoints are still waiting on a transfer, counted in turns of the
- * device stack rather than in time, because it is the number of chances the
- * stack has had to finish one that says whether it is stuck.
- *
- * usbd_edpt_busy reads the same word the stack itself checks before it will
- * start another transfer, so this is the state and not a guess at it.
- */
-static const uint8_t s_HciTinyUsbWatchedEp[HCI_TINYUSB_EP_COUNT] = {
-    (uint8_t)HCI_USB_EP_CDC_IN,
-    (uint8_t)HCI_USB_EP_CDC_OUT,
-    (uint8_t)HCI_USB_EP_LOG_IN,
-};
-
-static void HciTinyUsbWatchEndpoints(HciTinyUsb_t *pUsb)
-{
-    const bool mounted = tud_mounted();
-
-    /*
-     * Whether anything arrived since the last look. Taken once and cleared,
-     * because it decides what a busy OUT endpoint means.
-     */
-    const bool rxMoved = pUsb->RxMoved;
-    pUsb->RxMoved = false;
-
-    for (size_t i = 0U; i < HCI_TINYUSB_EP_COUNT; i++)
-    {
-        const uint8_t ep = s_HciTinyUsbWatchedEp[i];
-        const bool isOut = (ep & 0x80U) == 0U;
-
-        if (!mounted || !usbd_edpt_busy(0U, ep))
-        {
-            pUsb->EpBusyTurns[i] = 0U;
-            continue;
-        }
-
-        /*
-         * A read stays armed, and so marked busy, from the moment one
-         * finishes until the host sends the next octet. This is sampled just
-         * after the stack has turned over, which is exactly when it has
-         * re-armed, so an OUT endpoint is busy on very nearly every look and
-         * counting those turns measures the pump and not the port. It did:
-         * the count came back equal to the turn count to the digit, four
-         * hundred against four hundred on every report, while five thousand
-         * octets a report were arriving the whole time.
-         *
-         * So an OUT endpoint only counts a turn where nothing arrived.
-         */
-        if (isOut && rxMoved)
-        {
-            pUsb->EpBusyTurns[i] = 0U;
-            continue;
-        }
-
-        if (pUsb->EpBusyTurns[i] < UINT16_MAX)
-        {
-            pUsb->EpBusyTurns[i]++;
-        }
-
-        if (pUsb->EpBusyTurns[i] > pUsb->EpBusyWorst[i])
-        {
-            pUsb->EpBusyWorst[i] = pUsb->EpBusyTurns[i];
-        }
-    }
-}
-
 void HciTinyUsbProcess(HciTinyUsb_t *pUsb)
 {
     if (pUsb == nullptr || !pUsb->Started)
@@ -293,7 +224,6 @@ void HciTinyUsbProcess(HciTinyUsb_t *pUsb)
      * runtime loop wants.
      */
     tud_task_ext(0U, false);
-    HciTinyUsbWatchEndpoints(pUsb);
     HciTinyUsbProcessRx(pUsb);
     HciTinyUsbProcessTx(pUsb);
 }

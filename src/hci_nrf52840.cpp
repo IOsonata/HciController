@@ -47,35 +47,10 @@
 #define HCI_NRF52840_CLOCK_IRQ_PRIORITY 4U
 #endif
 
-/*
- * 6. Raising it was tried and changed nothing either way.
- *
- * It was moved to 5 on the reasoning that 4 and below belong to MPSL and 5
- * was the highest left. That image behaved exactly like every other one: it
- * ran for a while and then the port stopped. No better, no worse.
- *
- * Which is what the measurement already said it would be. The handler was
- * timed at fifteen hundred core cycles for an ordinary entry and sixty three
- * hundred at worst, at roughly three hundred and twenty entries a second,
- * which is under one percent of the part. Latency on a handler that cheap is
- * not what stops this port.
- *
- * There is also nothing at 5 or 6 for the move to have changed. The UART is
- * at 6 and is not brought up when the HCI stream is on USB, and MPSL's
- * deferred processing is at 7 and was being preempted at either value.
- *
- * So it sits at 6, which is where it was, because a change with no measured
- * effect is not worth the difference. One caution if anyone reconsiders: this
- * handler reaches HciTaktOsWake and so calls into TaktOS, and an RTOS that
- * guards its state with BASEPRI is only safe to call from interrupts at or
- * below the level it masks to. Where TaktOS sets that is not readable from
- * this workspace, so 4 and above needs its sources first, not an argument.
- */
 #ifndef HCI_NRF52840_USB_IRQ_PRIORITY
 #define HCI_NRF52840_USB_IRQ_PRIORITY 6U
 #endif
 
-/* Set to 1 when the nrfxlib in use predates mpsl_clock_hfclk_src_request. */
 /* Bounded wait for the crystal. Worst case ramp-up is 1400 us. */
 #ifndef HCI_NRF52840_HFCLK_WAIT_LOOPS
 #define HCI_NRF52840_HFCLK_WAIT_LOOPS 1000000U
@@ -119,10 +94,6 @@
 #endif
 
 /*
- * Attempts at the random source before giving up. It is polled from low
- * priority processing, so this bounds a stall rather than a busy wait.
- */
-/*
  * Attempts allowed when proving the entropy source at start up. This bounds a
  * start up check, not the SDC callback, which must block per sdc_soc.h.
  */
@@ -154,8 +125,6 @@ static bool HciNrf52840HfxoOnXtal(void)
 }
 
 static HciNrf52840_t *s_pTarget;
-
-static void HciNrf52840CycleCounterStart(void);
 
 /*
  * The USBD startup sequence is driven here rather than through
@@ -274,6 +243,21 @@ static int32_t HciNrf52840HfclkRelease(void)
     return mpsl_clock_hfclk_src_release(MPSL_CLOCK_HF_SRC_XO);
 }
 
+/*
+ * A successful request belongs to this target until USB starts or the request
+ * is explicitly released. An error while waiting for the clock must therefore
+ * unwind the request as well as report the error; otherwise a retry sees
+ * HfclkRequested and incorrectly assumes the crystal is still owned.
+ */
+static bool HciNrf52840HfclkStartFailed(HciNrf52840_t *pTarget,
+                                        int32_t Error)
+{
+    (void)HciNrf52840HfclkRelease();
+    pTarget->HfclkRequested = false;
+    pTarget->LastError = Error;
+    return false;
+}
+
 static bool HciNrf52840HfclkStart(HciNrf52840_t *pTarget)
 {
     if (pTarget->HfclkRequested)
@@ -304,8 +288,7 @@ static bool HciNrf52840HfclkStart(HciNrf52840_t *pTarget)
         result = HciNrf52840HfclkIsRunning(&running);
         if (result != 0)
         {
-            pTarget->LastError = result;
-            return false;
+            return HciNrf52840HfclkStartFailed(pTarget, result);
         }
 
         if (running != 0U)
@@ -318,8 +301,8 @@ static bool HciNrf52840HfclkStart(HciNrf52840_t *pTarget)
     }
 
     HciTrace("hfclk: timeout\r\n");
-    pTarget->LastError = HCI_NRF52840_ERR_HFCLK_TIMEOUT;
-    return false;
+    return HciNrf52840HfclkStartFailed(
+        pTarget, HCI_NRF52840_ERR_HFCLK_TIMEOUT);
 }
 
 /*
@@ -905,12 +888,6 @@ bool HciNrf52840Init(HciNrf52840_t *pTarget,
     pTarget->pSdcMem = pSdcMem;
     pTarget->SdcMemCapacity = SdcMemCapacity;
     pTarget->UsbEnabled = UsbEnabled;
-
-    /*
-     * Before anything can raise an interrupt, so the first one is timed like
-     * every other one.
-     */
-    HciNrf52840CycleCounterStart();
     return true;
 }
 
@@ -1053,20 +1030,6 @@ static uint32_t HciNrf52840UsbdPendingEvents(void)
     return pending;
 }
 
-/*
- * Start the core's cycle counter, so the USB handler can time itself.
- *
- * It is free running and reading it is one load, which is what makes it
- * usable from inside the handler it measures. Nothing else here uses it, and
- * leaving it running costs nothing.
- */
-static void HciNrf52840CycleCounterStart(void)
-{
-    CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
-    DWT->CYCCNT = 0U;
-    DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
-}
-
 void HciNrf52840UsbPassMark(HciNrf52840_t *pTarget)
 {
     if (pTarget != nullptr)
@@ -1079,8 +1042,6 @@ extern "C" void USBD_IRQHandler(void)
 {
     if (s_pTarget != nullptr && s_pTarget->UsbStarted)
     {
-        const uint32_t entryCycle = DWT->CYCCNT;
-
         s_pTarget->UsbIrqCount++;
 
         /*
@@ -1113,13 +1074,10 @@ extern "C" void USBD_IRQHandler(void)
             __DSB();
 
             /*
-             * Take the event away only when nothing the port reads is left.
-             * SUSPEND, RESUME and USBWUALLOWED can be set in the same word as
-             * the cause cleared above, and the port learns about them from
-             * EVENTS_USBEVENT alone: it never reads EVENTCAUSE unless the
-             * event is there. Clearing it whatever is left loses a suspend or
-             * a resume, and a lost resume leaves the peripheral in low power
-             * with nothing to bring it out.
+             * Take the umbrella event away only when no cause that TinyUSB
+             * consumes remains. Clearing EVENTS_USBEVENT while SUSPEND,
+             * RESUME or USBWUALLOWED is still set prevents the port from ever
+             * seeing that state transition.
              */
             if ((NRF_USBD->EVENTCAUSE &
                  (uint32_t)HCI_NRF52840_USBD_PORT_EVENTCAUSE) == 0U)
@@ -1130,22 +1088,7 @@ extern "C" void USBD_IRQHandler(void)
             }
         }
 
-        const uint32_t portCycle = DWT->CYCCNT;
         tusb_int_handler(0U, true);
-        const uint32_t portTook = DWT->CYCCNT - portCycle;
-
-        s_pTarget->UsbPortCycles = portTook;
-        if (portTook > s_pTarget->UsbPortCyclesWorst)
-        {
-            s_pTarget->UsbPortCyclesWorst = portTook;
-        }
-
-        const uint32_t took = DWT->CYCCNT - entryCycle;
-        s_pTarget->UsbIrqCycles = took;
-        if (took > s_pTarget->UsbIrqCyclesWorst)
-        {
-            s_pTarget->UsbIrqCyclesWorst = took;
-        }
     }
 }
 
@@ -1219,41 +1162,6 @@ static void HciNrf52840TargetUsbTrace(const void *pContext,
              (unsigned long)pTarget->UsbStormInten,
              (unsigned long)pTarget->UsbStormEvents,
              (unsigned long)pTarget->UsbStormCause);
-
-    /*
-     * And the peripheral itself, which is the layer under everything the
-     * firmware counts. EPINEN and EPOUTEN say which endpoints the port still
-     * has open, INTEN says which end of transfer interrupts it is still
-     * listening for, and pend says which events are raised right now. An end
-     * of transfer raised with its INTEN bit clear is a transfer whose
-     * completion nobody will ever deliver, which is the one shape that stops
-     * an endpoint with every counter above it at zero.
-     */
-    HciTrace("usbd: epstat=0x%08lX epdata=0x%08lX epin=0x%02lX epout=0x%02lX "
-             "inten=0x%08lX cause=0x%08lX pend=0x%08lX sizeout2=%lu "
-             "pullup=%lu\r\n",
-             (unsigned long)NRF_USBD->EPSTATUS,
-             (unsigned long)NRF_USBD->EPDATASTATUS,
-             (unsigned long)NRF_USBD->EPINEN,
-             (unsigned long)NRF_USBD->EPOUTEN,
-             (unsigned long)NRF_USBD->INTEN,
-             (unsigned long)NRF_USBD->EVENTCAUSE,
-             (unsigned long)HciNrf52840UsbdPendingEvents(),
-             (unsigned long)NRF_USBD->SIZE.EPOUT[2],
-             (unsigned long)NRF_USBD->USBPULLUP);
-
-    /*
-     * On its own line. Together with the registers above it came to a
-     * hundred and sixty one characters against a buffer of a hundred and
-     * sixty, so the last field lost a digit whenever an earlier one gained
-     * one, and the worst case read as though it were falling.
-     */
-    HciTrace("usbdt: irq=%lu cyc=%lu worst=%lu port=%lu portworst=%lu\r\n",
-             (unsigned long)pTarget->UsbIrqCount,
-             (unsigned long)pTarget->UsbIrqCycles,
-             (unsigned long)pTarget->UsbIrqCyclesWorst,
-             (unsigned long)pTarget->UsbPortCycles,
-             (unsigned long)pTarget->UsbPortCyclesWorst);
 
     /* HciTrace discards its arguments when tracing is off. */
     (void)pLabel;

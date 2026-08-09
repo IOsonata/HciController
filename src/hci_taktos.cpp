@@ -73,9 +73,10 @@ void HciTaktOsWake(HciTaktOs_t *pRuntime, uint32_t Events)
 
     /*
      * This is the one function here an interrupt reaches: the USB one through
-     * the device stack's event hook, and the MPSL one. An interrupt must not
-     * mask interrupts, so this side is atomic and the critical section stays
-     * on the thread side only.
+     * the device stack's event hook, and the MPSL one. Keep the pending-word
+     * update atomic so this path does not need a second explicit critical
+     * section before TaktOSSemGive performs its own short kernel-protected
+     * update.
      *
      * The pair still holds. HciTaktOsTakeEvents masks while it reads the word
      * and clears it, so no interrupt can land between those two, and the
@@ -135,10 +136,10 @@ bool HciTaktOsWaitStopped(HciTaktOs_t *pRuntime, uint32_t TimeoutMs)
     if (!pRuntime->ThreadLive)
     {
         /*
-         * The thread body was never entered, so there is nothing inside SDC or
-         * MPSL to wait for. Gating on Started instead would short circuit for
-         * the whole of bring up, which is exactly when the thread is deepest
-         * inside mpsl_low_priority_process.
+         * The thread body was never entered, or has already left, so there is
+         * nothing inside SDC or MPSL to wait for. Gating on Started instead
+         * would short circuit for the whole of bring up, which is exactly when
+         * the thread is deepest inside mpsl_low_priority_process.
          */
         return true;
     }
@@ -172,6 +173,19 @@ static void HciTaktOsServiceHost(HciTaktOs_t *pRuntime)
     pRuntime->HostOps.Process(pRuntime->HostOps.pContext);
 }
 
+static void HciTaktOsThreadLeave(HciTaktOs_t *pRuntime)
+{
+    pRuntime->Running = false;
+    pRuntime->ThreadLive = false;
+
+    /*
+     * Wake a stop that began while the thread was still live. Giving the
+     * binary semaphore after ThreadLive is cleared also makes a later
+     * HciTaktOsWaitStopped return immediately without depending on the token.
+     */
+    (void)TaktOSSemGive(&pRuntime->StoppedSem, false);
+}
+
 void HciTaktOsThread(void *pContext)
 {
     HciTaktOs_t *pRuntime = static_cast<HciTaktOs_t *>(pContext);
@@ -195,6 +209,7 @@ void HciTaktOsThread(void *pContext)
         {
             pRuntime->Ops.Fault(pRuntime->Ops.pContext, -1);
         }
+        HciTaktOsThreadLeave(pRuntime);
         return;
     }
 
@@ -273,9 +288,5 @@ void HciTaktOsThread(void *pContext)
         }
     }
 
-    pRuntime->Running = false;
-    pRuntime->ThreadLive = false;
-
-    /* Release anything waiting to tear the target down behind us. */
-    (void)TaktOSSemGive(&pRuntime->StoppedSem, false);
+    HciTaktOsThreadLeave(pRuntime);
 }
