@@ -23,9 +23,11 @@
  * failure leaves an enumerated USB device that no longer moves traffic.
  *
  * Keep TinyUSB's nRF5x DCD as the implementation, but intercept only those DMA
- * retry deferrals. They are retained here in a bounded, de-duplicating table
- * and retried at the tail of the USBD interrupt, after TinyUSB has processed
- * the END event that releases dma_running.
+ * retry deferrals. They are retained here in a bounded, de-duplicating table.
+ * ISR-context retries are serviced at the tail of the USBD interrupt, after
+ * TinyUSB has processed the END event that releases dma_running. Task-context
+ * retries also kick the table immediately; this closes the race where END can
+ * happen between observing dma_running busy and recording the pending retry.
  *
  * The Eclipse project links this file in place of external/tinyusb's
  * dcd_nrf5x.c. The installed TinyUSB source is included below, so there is one
@@ -46,14 +48,15 @@
 #define HCI_DCD_OUT_REQUEST_BASE  1U
 
 static void HciDcdDefer(osal_task_func_t func, void *param, bool in_isr);
+static void HciDcdRunPending(void);
 
 /*
  * Rename the functions that need an IOsonata wrapper while compiling the
  * installed TinyUSB implementation into this translation unit.
  */
-#define usbd_defer_func   HciDcdDefer
-#define dcd_int_handler   HciTinyUsbDcdIntHandler
-#define dcd_disconnect    HciTinyUsbDcdDisconnect
+#define usbd_defer_func    HciDcdDefer
+#define dcd_int_handler    HciTinyUsbDcdIntHandler
+#define dcd_disconnect     HciTinyUsbDcdDisconnect
 #define dcd_edpt_close_all HciTinyUsbDcdEdptCloseAll
 #include "portable/nordic/nrf5x/dcd_nrf5x.c"
 #undef dcd_edpt_close_all
@@ -177,8 +180,8 @@ static bool HciDcdDmaIdle(void)
 {
     /*
      * C11 atomic_flag has no load operation. Probe it without changing its
-     * final state. This is called at the tail of USBD_IRQHandler, so the
-     * TinyUSB task cannot race this probe.
+     * final state. If an interrupt starts another DMA around this probe, the
+     * real TinyUSB start routine re-checks dma_running and re-pends the request.
      */
     if (atomic_flag_test_and_set_explicit(&_dcd.dma_running,
                                           memory_order_acquire))
@@ -233,6 +236,23 @@ static void HciDcdDefer(osal_task_func_t func, void *param, bool in_isr)
 
     if (request != 0U && HciDcdPend(request))
     {
+        /*
+         * Lost-wakeup closure for task context:
+         *
+         *   task sees dma_running busy
+         *   END interrupt preempts, clears dma_running, finds no pending work
+         *   task resumes and records this request
+         *
+         * Without this kick there may be no later USB interrupt to service the
+         * request, especially for OUT where the host packet is already sitting
+         * in the endpoint waiting for EasyDMA. In ISR context the outer wrapper
+         * drains the table when TinyUSB's handler returns, so do not recurse
+         * into the scheduler from inside the DCD interrupt path.
+         */
+        if (!in_isr)
+        {
+            HciDcdRunPending();
+        }
         return;
     }
 
