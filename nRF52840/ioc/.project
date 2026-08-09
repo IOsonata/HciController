@@ -288,7 +288,7 @@
 		<link>
 			<name>src/TinyUSB/src/portable/nordic/nrf5x/dcd_nrf5x.c</name>
 			<type>1</type>
-			<locationURI>PARENT-3-PROJECT_LOC/external/tinyusb/src/portable/nordic/nrf5x/dcd_nrf5x.c</locationURI>
+			<locationURI>PARENT-2-PROJECT_LOC/src/hci_tinyusb_dcd_nrf5x.c</locationURI>
 		</link>
 	</linkedResources>
 </projectDescription>
