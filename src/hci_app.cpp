@@ -907,6 +907,13 @@ static void HciAppReportLink(HciApp_t *pApp)
                        (unsigned long)pApp->Usb.RxDropCount,
                        (unsigned long)pApp->Usb.ReadErrorCount,
                        (unsigned long)pApp->Usb.CallbackInterfaceErrorCount);
+
+        /*
+         * And the peripheral's own registers, because everything above this
+         * point is what the firmware believes and none of it has ever
+         * disagreed with itself at a stop.
+         */
+        HciTargetUsbTrace(&pApp->Target, "link", pApp->Usb.TaskCount);
     }
 
     /*

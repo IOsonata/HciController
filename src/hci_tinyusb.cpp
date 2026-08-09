@@ -147,6 +147,8 @@ static void HciTinyUsbProcessRx(HciTinyUsb_t *pUsb)
             break;
         }
 
+        pUsb->RxMoved = true;
+
         int written = CFifoWrite(pUsb->pIntrf->hRxFifo, data, (int)actual);
         if (written != (int)actual)
         {
@@ -229,9 +231,37 @@ static void HciTinyUsbWatchEndpoints(HciTinyUsb_t *pUsb)
 {
     const bool mounted = tud_mounted();
 
+    /*
+     * Whether anything arrived since the last look. Taken once and cleared,
+     * because it decides what a busy OUT endpoint means.
+     */
+    const bool rxMoved = pUsb->RxMoved;
+    pUsb->RxMoved = false;
+
     for (size_t i = 0U; i < HCI_TINYUSB_EP_COUNT; i++)
     {
-        if (!mounted || !usbd_edpt_busy(0U, s_HciTinyUsbWatchedEp[i]))
+        const uint8_t ep = s_HciTinyUsbWatchedEp[i];
+        const bool isOut = (ep & 0x80U) == 0U;
+
+        if (!mounted || !usbd_edpt_busy(0U, ep))
+        {
+            pUsb->EpBusyTurns[i] = 0U;
+            continue;
+        }
+
+        /*
+         * A read stays armed, and so marked busy, from the moment one
+         * finishes until the host sends the next octet. This is sampled just
+         * after the stack has turned over, which is exactly when it has
+         * re-armed, so an OUT endpoint is busy on very nearly every look and
+         * counting those turns measures the pump and not the port. It did:
+         * the count came back equal to the turn count to the digit, four
+         * hundred against four hundred on every report, while five thousand
+         * octets a report were arriving the whole time.
+         *
+         * So an OUT endpoint only counts a turn where nothing arrived.
+         */
+        if (isOut && rxMoved)
         {
             pUsb->EpBusyTurns[i] = 0U;
             continue;

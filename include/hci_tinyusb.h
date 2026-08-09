@@ -78,6 +78,13 @@ typedef struct {
     uint16_t EpBusyTurns[HCI_TINYUSB_EP_COUNT];
     uint16_t EpBusyWorst[HCI_TINYUSB_EP_COUNT];
 
+    /*
+     * Whether any octet arrived since the endpoints were last looked at. An
+     * armed read on a quiet host is marked busy, so this is what tells that
+     * apart from a read that will never finish.
+     */
+    bool RxMoved;
+
     uint32_t RxDropCount;
     uint32_t ReadErrorCount;
     uint32_t WriteBusyCount;

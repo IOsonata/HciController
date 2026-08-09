@@ -1157,6 +1157,28 @@ static void HciNrf52840TargetUsbTrace(const void *pContext,
              (unsigned long)pTarget->UsbStormEvents,
              (unsigned long)pTarget->UsbStormCause);
 
+    /*
+     * And the peripheral itself, which is the layer under everything the
+     * firmware counts. EPINEN and EPOUTEN say which endpoints the port still
+     * has open, INTEN says which end of transfer interrupts it is still
+     * listening for, and pend says which events are raised right now. An end
+     * of transfer raised with its INTEN bit clear is a transfer whose
+     * completion nobody will ever deliver, which is the one shape that stops
+     * an endpoint with every counter above it at zero.
+     */
+    HciTrace("usbd: epstat=0x%08lX epdata=0x%08lX epin=0x%02lX epout=0x%02lX "
+             "inten=0x%08lX cause=0x%08lX pend=0x%08lX sizeout2=%lu "
+             "pullup=%lu\r\n",
+             (unsigned long)NRF_USBD->EPSTATUS,
+             (unsigned long)NRF_USBD->EPDATASTATUS,
+             (unsigned long)NRF_USBD->EPINEN,
+             (unsigned long)NRF_USBD->EPOUTEN,
+             (unsigned long)NRF_USBD->INTEN,
+             (unsigned long)NRF_USBD->EVENTCAUSE,
+             (unsigned long)HciNrf52840UsbdPendingEvents(),
+             (unsigned long)NRF_USBD->SIZE.EPOUT[2],
+             (unsigned long)NRF_USBD->USBPULLUP);
+
     /* HciTrace discards its arguments when tracing is off. */
     (void)pLabel;
     (void)Pass;

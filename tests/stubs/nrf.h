@@ -45,8 +45,17 @@ struct UsbdEnableReg {
  * target. USBEVENT is bit 22.
  */
 typedef struct {
+    volatile uint32_t EPOUT[8];
+} UsbdSizeReg;
+
+typedef struct {
     UsbdEnableReg ENABLE;
     volatile uint32_t USBPULLUP;
+    volatile uint32_t EPSTATUS;
+    volatile uint32_t EPDATASTATUS;
+    volatile uint32_t EPINEN;
+    volatile uint32_t EPOUTEN;
+    UsbdSizeReg SIZE;
     UsbdEventCauseReg EVENTCAUSE;
     volatile uint32_t ISOSPLIT;
     volatile uint32_t INTENSET;
