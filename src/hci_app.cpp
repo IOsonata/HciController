@@ -878,6 +878,36 @@ static void HciAppReportLink(HciApp_t *pApp)
                    (unsigned long)pHost->Parser.OversizePacketCount);
 
     /*
+     * And what the device stack is waiting on, which none of the counts above
+     * can see. Each pair is turns of the stack the endpoint has been busy
+     * without finishing a transfer, now and at worst: the HCI stream in, the
+     * HCI stream out, then the log's in.
+     *
+     * A few is a transfer in flight. Hundreds is an endpoint whose completion
+     * event was lost, which is the one way this port stops with every other
+     * counter on this line at zero.
+     */
+    if (pApp->UsbRunning)
+    {
+        HciSyslogPrint(HciSyslogDefault(),
+                       "usb: mounted=%u task=%lu in=%u/%u out=%u/%u log=%u/%u "
+                       "wbusy=%lu werr=%lu rxdrop=%lu rderr=%lu itferr=%lu",
+                       (unsigned)HciTinyUsbIsMounted(&pApp->Usb),
+                       (unsigned long)pApp->Usb.TaskCount,
+                       (unsigned)pApp->Usb.EpBusyTurns[0],
+                       (unsigned)pApp->Usb.EpBusyWorst[0],
+                       (unsigned)pApp->Usb.EpBusyTurns[1],
+                       (unsigned)pApp->Usb.EpBusyWorst[1],
+                       (unsigned)pApp->Usb.EpBusyTurns[2],
+                       (unsigned)pApp->Usb.EpBusyWorst[2],
+                       (unsigned long)pApp->Usb.WriteBusyCount,
+                       (unsigned long)pApp->Usb.WriteErrorCount,
+                       (unsigned long)pApp->Usb.RxDropCount,
+                       (unsigned long)pApp->Usb.ReadErrorCount,
+                       (unsigned long)pApp->Usb.CallbackInterfaceErrorCount);
+    }
+
+    /*
      * What the dispatcher made of the commands, beside what the transport made
      * of the octets. A link with commands on it that are refused looks exactly
      * like one with commands on it that are answered, from the transport's

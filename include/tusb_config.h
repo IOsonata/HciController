@@ -82,4 +82,24 @@
 #define CFG_TUD_CDC_RX_EPSIZE  64
 #define CFG_TUD_CDC_TX_EPSIZE  64
 
+/*
+ * The endpoint addresses, here rather than beside the descriptors, because
+ * two places need them and a descriptor that declares one address while a
+ * watcher reads another would be a fault nobody could see.
+ *
+ * usb_descriptors.c builds the configuration from them. hci_tinyusb.cpp asks
+ * the device stack whether each is still waiting on a transfer.
+ *
+ * IN and OUT are separate address spaces but the nRF52840 USBD cannot let a
+ * bulk IN and a bulk OUT share a number, and the notification endpoints have
+ * to be distinct from both. Four IN and two OUT out of seven each way.
+ */
+#define HCI_USB_EP_CDC_NOTIFY  0x81U
+#define HCI_USB_EP_CDC_OUT     0x02U
+#define HCI_USB_EP_CDC_IN      0x82U
+
+#define HCI_USB_EP_LOG_NOTIFY  0x83U
+#define HCI_USB_EP_LOG_OUT     0x04U
+#define HCI_USB_EP_LOG_IN      0x84U
+
 #endif /* TUSB_CONFIG_H */

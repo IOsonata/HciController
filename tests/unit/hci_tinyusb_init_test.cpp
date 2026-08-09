@@ -70,6 +70,23 @@ extern "C" uint32_t tud_cdc_n_write_available(uint8_t) { return 0U; }
 extern "C" uint32_t tud_cdc_n_write(uint8_t, const void *, uint32_t) { return 0U; }
 extern "C" uint32_t tud_cdc_n_write_flush(uint8_t) { return 0U; }
 
+/* One flag per watched endpoint, so a run of turns busy can be driven. */
+static bool gEpBusyHciIn;
+static bool gEpBusyHciOut;
+static bool gEpBusyLogIn;
+
+extern "C" bool usbd_edpt_busy(uint8_t rhport, uint8_t ep_addr)
+{
+    assert(rhport == 0U);
+    switch (ep_addr)
+    {
+    case HCI_USB_EP_CDC_IN:  return gEpBusyHciIn;
+    case HCI_USB_EP_CDC_OUT: return gEpBusyHciOut;
+    case HCI_USB_EP_LOG_IN:  return gEpBusyLogIn;
+    default:                 return false;
+    }
+}
+
 extern "C" int CFifoAvail(hCFifo_t) { return 0; }
 extern "C" int CFifoUsed(hCFifo_t) { return 0; }
 extern "C" int CFifoRead(hCFifo_t, uint8_t *, int) { return 0; }
@@ -94,6 +111,9 @@ static void Reset(UsbdCdcDevIntrf_t *pIntrf)
     gWakeCalls = 0U;
     gDcdHandlerCalls = 0U;
     gRhportRole[0] = TUSB_ROLE_INVALID;
+    gEpBusyHciIn = false;
+    gEpBusyHciOut = false;
+    gEpBusyLogIn = false;
 
     memset(pIntrf, 0, sizeof(*pIntrf));
     pIntrf->hRxFifo = &gRxFifo;
@@ -147,6 +167,52 @@ int main(void)
     HciTinyUsbProcess(&usb);
     assert(gTaskCalls == 0U);
     printf("[ok] failed bring up leaves the layer stopped\n");
+
+    /*
+     * The endpoint reading is a run of turns busy, not a total. It has to
+     * fall back to zero the moment a transfer finishes, and the worst run has
+     * to survive that, because the worst run is the one that says a port
+     * stopped rather than paused.
+     */
+    Reset(&intrf);
+    memset(&usb, 0, sizeof(usb));
+    assert(HciTinyUsbInit(&usb, &intrf, 0U, Wake, nullptr));
+    assert(HciTinyUsbStart(&usb));
+    gMounted = true;
+
+    HciTinyUsbProcess(&usb);
+    assert(usb.EpBusyTurns[0] == 0U);
+    assert(usb.EpBusyWorst[0] == 0U);
+
+    gEpBusyHciIn = true;
+    for (unsigned i = 0U; i < 5U; i++)
+    {
+        HciTinyUsbProcess(&usb);
+    }
+    assert(usb.EpBusyTurns[0] == 5U);
+    assert(usb.EpBusyWorst[0] == 5U);
+
+    /* The other two are idle and must stay at zero. */
+    assert(usb.EpBusyWorst[1] == 0U);
+    assert(usb.EpBusyWorst[2] == 0U);
+
+    gEpBusyHciIn = false;
+    HciTinyUsbProcess(&usb);
+    assert(usb.EpBusyTurns[0] == 0U);
+    assert(usb.EpBusyWorst[0] == 5U);
+
+    /* A shorter run afterwards must not pull the worst down. */
+    gEpBusyHciIn = true;
+    HciTinyUsbProcess(&usb);
+    HciTinyUsbProcess(&usb);
+    assert(usb.EpBusyTurns[0] == 2U);
+    assert(usb.EpBusyWorst[0] == 5U);
+
+    /* Nothing mounted is nothing waiting. */
+    gMounted = false;
+    HciTinyUsbProcess(&usb);
+    assert(usb.EpBusyTurns[0] == 0U);
+    printf("[ok] a busy endpoint is counted in turns, and the worst is kept\n");
 
     printf("All device stack bring up tests passed.\n");
     return 0;

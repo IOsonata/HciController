@@ -11,6 +11,7 @@
 #include "hci_tinyusb.h"
 
 #include "tusb.h"
+#include "device/usbd_pvt.h"
 
 #include "hci_trace.h"
 
@@ -210,6 +211,44 @@ static void HciTinyUsbProcessTx(HciTinyUsb_t *pUsb)
     (void)tud_cdc_n_write_flush(pUsb->Interface);
 }
 
+/*
+ * Which endpoints are still waiting on a transfer, counted in turns of the
+ * device stack rather than in time, because it is the number of chances the
+ * stack has had to finish one that says whether it is stuck.
+ *
+ * usbd_edpt_busy reads the same word the stack itself checks before it will
+ * start another transfer, so this is the state and not a guess at it.
+ */
+static const uint8_t s_HciTinyUsbWatchedEp[HCI_TINYUSB_EP_COUNT] = {
+    (uint8_t)HCI_USB_EP_CDC_IN,
+    (uint8_t)HCI_USB_EP_CDC_OUT,
+    (uint8_t)HCI_USB_EP_LOG_IN,
+};
+
+static void HciTinyUsbWatchEndpoints(HciTinyUsb_t *pUsb)
+{
+    const bool mounted = tud_mounted();
+
+    for (size_t i = 0U; i < HCI_TINYUSB_EP_COUNT; i++)
+    {
+        if (!mounted || !usbd_edpt_busy(0U, s_HciTinyUsbWatchedEp[i]))
+        {
+            pUsb->EpBusyTurns[i] = 0U;
+            continue;
+        }
+
+        if (pUsb->EpBusyTurns[i] < UINT16_MAX)
+        {
+            pUsb->EpBusyTurns[i]++;
+        }
+
+        if (pUsb->EpBusyTurns[i] > pUsb->EpBusyWorst[i])
+        {
+            pUsb->EpBusyWorst[i] = pUsb->EpBusyTurns[i];
+        }
+    }
+}
+
 void HciTinyUsbProcess(HciTinyUsb_t *pUsb)
 {
     if (pUsb == nullptr || !pUsb->Started)
@@ -224,6 +263,7 @@ void HciTinyUsbProcess(HciTinyUsb_t *pUsb)
      * runtime loop wants.
      */
     tud_task_ext(0U, false);
+    HciTinyUsbWatchEndpoints(pUsb);
     HciTinyUsbProcessRx(pUsb);
     HciTinyUsbProcessTx(pUsb);
 }
