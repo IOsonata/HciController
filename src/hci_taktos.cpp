@@ -12,6 +12,7 @@
 
 #include <string.h>
 
+#include "TaktOSCriticalSection.h"
 #include "hci_trace.h"
 
 static bool HciTaktOsIsInIsr(void)
@@ -25,17 +26,13 @@ static bool HciTaktOsIsInIsr(void)
 #endif
 }
 
-/*
- * Take what has been asked for and leave the word empty, in one exchange.
- * A load followed by a separate store would lose a bit set between the two,
- * which is a wake that never happens.
- *
- * Acquire, so whatever the setter wrote before the bit went in is visible
- * here. It pairs with the release in HciTaktOsWake.
- */
 static uint32_t HciTaktOsTakeEvents(HciTaktOs_t *pRuntime)
 {
-    return __atomic_exchange_n(&pRuntime->PendingEvents, 0U, __ATOMIC_ACQUIRE);
+    uint32_t state = TaktOSEnterCritical();
+    uint32_t events = pRuntime->PendingEvents;
+    pRuntime->PendingEvents = 0U;
+    TaktOSExitCritical(state);
+    return events;
 }
 
 bool HciTaktOsInit(HciTaktOs_t *pRuntime,
@@ -68,28 +65,17 @@ void HciTaktOsWake(HciTaktOs_t *pRuntime, uint32_t Events)
         return;
     }
 
-    /*
-     * Reached from the USB interrupt, from the MPSL one and from the thread,
-     * so it has to hold against all three at once.
-     *
-     * Atomics rather than a critical section. Each of these is one LDREX and
-     * STREX pair on this part and masks nothing, where the critical section
-     * masked interrupts twice for every accepted USB event: once for the two
-     * fields here and once for the full count below, which under load is most
-     * events because WakeSem holds one. TaktOSSemGive may still mask on its
-     * own account, which is not readable from this tree, but that is one
-     * window rather than three.
-     *
-     * Release, so whatever was written before the bit goes in is in front of
-     * it for the exchange above, which takes it with acquire.
-     */
-    __atomic_fetch_or(&pRuntime->PendingEvents, Events, __ATOMIC_RELEASE);
-    __atomic_fetch_add(&pRuntime->WakeCount, 1U, __ATOMIC_RELAXED);
+    uint32_t state = TaktOSEnterCritical();
+    pRuntime->PendingEvents |= Events;
+    pRuntime->WakeCount++;
+    TaktOSExitCritical(state);
 
     TaktOSErr_t result = TaktOSSemGive(&pRuntime->WakeSem, HciTaktOsIsInIsr());
     if (result == TAKTOS_ERR_FULL)
     {
-        __atomic_fetch_add(&pRuntime->SemaphoreFullCount, 1U, __ATOMIC_RELAXED);
+        state = TaktOSEnterCritical();
+        pRuntime->SemaphoreFullCount++;
+        TaktOSExitCritical(state);
     }
 }
 
@@ -100,12 +86,9 @@ void HciTaktOsStop(HciTaktOs_t *pRuntime)
         return;
     }
 
-    /*
-     * One store of one word, which never needed anything around it. The
-     * reader is a plain load of a volatile bool in the thread loop, so this
-     * only has to land, not to order anything.
-     */
-    __atomic_store_n(&pRuntime->StopRequested, true, __ATOMIC_RELAXED);
+    uint32_t state = TaktOSEnterCritical();
+    pRuntime->StopRequested = true;
+    TaktOSExitCritical(state);
 
     HciTaktOsWake(pRuntime, HCI_TAKTOS_EVENT_STOP);
 }
