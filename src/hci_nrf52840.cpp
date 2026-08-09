@@ -48,21 +48,31 @@
 #endif
 
 /*
- * USB sits directly under everything MPSL owns and above everything else.
+ * 6, and it may not be raised.
  *
- * The radio, RTC0 and TIMER0 are at MPSL_HIGH_IRQ_PRIORITY and POWER_CLOCK is
- * at 4, and that one runs MPSL_IRQ_CLOCK_Handler, so the crystal events the
- * radio schedules against go through it. Nothing here may sit above those.
- * Below them, 5 is the highest available, and it puts USB in front of the
- * UART at 6 and MPSL's own deferred processing at 7.
+ * It was moved to 5 once, on the reasoning that 4 and below belong to MPSL
+ * and 5 was the highest left. The image died on the first packet: the port
+ * enumerated, the log opened, the host opened the HCI function, and the
+ * device answered nothing.
  *
- * It was 6, level with the UART. The handler was measured at fifteen hundred
- * cycles for an ordinary entry and far more at worst, and USB has its own
- * timing to keep: a full speed frame is one millisecond and the host will not
- * wait past its own limits for an endpoint to be serviced.
+ * Nothing else on this part sits at 5 or 6 in a USB build. The UART is at 6
+ * and is not brought up when the HCI stream is on USB, and MPSL's deferred
+ * processing is at 7 and was already being preempted at 6. So moving from 6
+ * to 5 changed no preemption that exists, and yet it changed the outcome.
+ *
+ * What is left is the runtime. This handler reaches HciTaktOsWake, which
+ * calls TaktOSSemGive, and an RTOS that guards its own state with BASEPRI
+ * only excludes interrupts at or below the level it masks to. An interrupt
+ * above that level calling into it is not excluded from anything and
+ * corrupts what it walks through. That is the ordinary shape of this fault
+ * and it fits: 6 works, 5 does not, and nothing else distinguishes them.
+ *
+ * The threshold is therefore somewhere between 5 and 6, and the TaktOS
+ * sources are still not in this workspace to say where. Until they are, this
+ * value is a measurement and not a preference. Do not raise it.
  */
 #ifndef HCI_NRF52840_USB_IRQ_PRIORITY
-#define HCI_NRF52840_USB_IRQ_PRIORITY 5U
+#define HCI_NRF52840_USB_IRQ_PRIORITY 6U
 #endif
 
 /* Set to 1 when the nrfxlib in use predates mpsl_clock_hfclk_src_request. */
