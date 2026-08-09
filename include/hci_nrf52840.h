@@ -66,6 +66,14 @@ typedef struct {
      */
     volatile uint32_t UsbIrqCycles;
     volatile uint32_t UsbIrqCyclesWorst;
+
+    /*
+     * The same, for the device stack port's handler alone. The pair says
+     * which side of the call the time is on: this file's prologue, or the
+     * scan of twenty five event registers the port makes on every entry.
+     */
+    volatile uint32_t UsbPortCycles;
+    volatile uint32_t UsbPortCyclesWorst;
     volatile uint32_t UsbIrqMark;
     volatile uint32_t UsbStuckCauseCount;
     volatile uint32_t UsbEventCause;

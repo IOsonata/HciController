@@ -1106,7 +1106,15 @@ extern "C" void USBD_IRQHandler(void)
             }
         }
 
+        const uint32_t portCycle = DWT->CYCCNT;
         tusb_int_handler(0U, true);
+        const uint32_t portTook = DWT->CYCCNT - portCycle;
+
+        s_pTarget->UsbPortCycles = portTook;
+        if (portTook > s_pTarget->UsbPortCyclesWorst)
+        {
+            s_pTarget->UsbPortCyclesWorst = portTook;
+        }
 
         const uint32_t took = DWT->CYCCNT - entryCycle;
         s_pTarget->UsbIrqCycles = took;
@@ -1199,7 +1207,7 @@ static void HciNrf52840TargetUsbTrace(const void *pContext,
      */
     HciTrace("usbd: epstat=0x%08lX epdata=0x%08lX epin=0x%02lX epout=0x%02lX "
              "inten=0x%08lX cause=0x%08lX pend=0x%08lX sizeout2=%lu "
-             "pullup=%lu irq=%lu cyc=%lu worst=%lu\r\n",
+             "pullup=%lu\r\n",
              (unsigned long)NRF_USBD->EPSTATUS,
              (unsigned long)NRF_USBD->EPDATASTATUS,
              (unsigned long)NRF_USBD->EPINEN,
@@ -1208,10 +1216,20 @@ static void HciNrf52840TargetUsbTrace(const void *pContext,
              (unsigned long)NRF_USBD->EVENTCAUSE,
              (unsigned long)HciNrf52840UsbdPendingEvents(),
              (unsigned long)NRF_USBD->SIZE.EPOUT[2],
-             (unsigned long)NRF_USBD->USBPULLUP,
+             (unsigned long)NRF_USBD->USBPULLUP);
+
+    /*
+     * On its own line. Together with the registers above it came to a
+     * hundred and sixty one characters against a buffer of a hundred and
+     * sixty, so the last field lost a digit whenever an earlier one gained
+     * one, and the worst case read as though it were falling.
+     */
+    HciTrace("usbdt: irq=%lu cyc=%lu worst=%lu port=%lu portworst=%lu\r\n",
              (unsigned long)pTarget->UsbIrqCount,
              (unsigned long)pTarget->UsbIrqCycles,
-             (unsigned long)pTarget->UsbIrqCyclesWorst);
+             (unsigned long)pTarget->UsbIrqCyclesWorst,
+             (unsigned long)pTarget->UsbPortCycles,
+             (unsigned long)pTarget->UsbPortCyclesWorst);
 
     /* HciTrace discards its arguments when tracing is off. */
     (void)pLabel;
