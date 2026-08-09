@@ -50,15 +50,15 @@
  * the task handling that event. A dropped deferral leaves a transfer that never
  * starts. Nothing is printed and no counter moves.
  *
- * The depth was the default 16. The drain was, and by default still would be,
- * 16 events per turn of the task, so a deeper queue on its own only lengthens
- * the fuse: the depth has to be matched by a drain that empties it. Zero means
- * empty it.
+ * The depth was the default 16. The drain is left at its default of 16 events
+ * per turn of the task, so a burst larger than that still takes more than one
+ * turn to retire and the depth is what absorbs it. Raising the drain to
+ * unlimited was tried in the same image as another change and both were backed
+ * out together; it is worth trying again on its own, once the port is stable.
  *
  * 64 entries costs 64 times sizeof(dcd_event_t), under a kilooctet.
  */
-#define CFG_TUD_TASK_QUEUE_SZ      64
-#define CFG_TUD_TASK_EVENTS_PER_RUN 0
+#define CFG_TUD_TASK_QUEUE_SZ 64
 
 /*
  * Two. One is the HCI byte stream and one is a log, and the second exists
