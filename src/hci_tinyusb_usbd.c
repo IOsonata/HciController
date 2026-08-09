@@ -15,14 +15,12 @@
  * The nRF5x DCD uses the same queue for transfer completions and for deferred
  * EasyDMA retries. queue_event() discards either one when osal_queue_send()
  * returns false; in a release build TU_ASSERT returns from queue_event() and
- * nothing above it is told. A lost completion leaves an endpoint busy. A lost
- * function call can leave a packet in the peripheral with no DMA start left to
- * consume it.
+ * nothing above it is told.
  *
  * Intercept only osal_queue_send() while compiling the installed usbd.c. The
  * real OSAL function still performs the send and its return value is passed
- * through unchanged. The tud_task_ext() wrapper reports a failure later from
- * task context, never from the USB interrupt.
+ * through unchanged. tud_task_ext() reports queue and DCD state from task
+ * context at low rate, never from USBD_IRQHandler.
  */
 
 #include <stdbool.h>
@@ -46,6 +44,8 @@ volatile uint32_t g_HciTinyUsbQueueLastFailEp;
 volatile uint32_t g_HciTinyUsbQueueLastFailLen;
 volatile uintptr_t g_HciTinyUsbQueueLastFailFunc;
 volatile uintptr_t g_HciTinyUsbQueueLastFailParam;
+
+extern void HciTinyUsbDcdTrace(void);
 
 static void HciTinyUsbQueueHighWaterUpdate(uint32_t Depth)
 {
@@ -124,18 +124,29 @@ static bool HciTinyUsbQueueSend(osal_queue_t Queue,
     return success;
 }
 
-/*
- * The real declarations above are already parsed before these substitutions,
- * so the wrappers can call the installed functions while usbd.c itself sees
- * only the diagnostic names.
- */
 #define osal_queue_send HciTinyUsbQueueSend
 #define tud_task_ext HciTinyUsbUsbdTaskExt
 #include "device/usbd.c"
 #undef tud_task_ext
 #undef osal_queue_send
 
+#ifndef HCI_TINYUSB_DIAG_TASK_INTERVAL
+#define HCI_TINYUSB_DIAG_TASK_INTERVAL 400U
+#endif
+
 static uint32_t s_HciTinyUsbQueueFailReported;
+static uint32_t s_HciTinyUsbDiagTaskCount;
+
+static uint32_t HciTinyUsbQueueDepth(void)
+{
+    if (_usbd_q == NULL || _usbd_q->item_size == 0U)
+    {
+        return 0U;
+    }
+
+    return (uint32_t)tu_fifo_count(&_usbd_q->ff) /
+           (uint32_t)_usbd_q->item_size;
+}
 
 void tud_task_ext(uint32_t TimeoutMs, bool InIsr)
 {
@@ -143,7 +154,17 @@ void tud_task_ext(uint32_t TimeoutMs, bool InIsr)
 
     const uint32_t failed =
         __atomic_load_n(&g_HciTinyUsbQueueFailCount, __ATOMIC_RELAXED);
-    if (failed == s_HciTinyUsbQueueFailReported)
+    const bool newFailure = failed != s_HciTinyUsbQueueFailReported;
+
+    s_HciTinyUsbDiagTaskCount++;
+    bool periodic = false;
+    if (s_HciTinyUsbDiagTaskCount >= HCI_TINYUSB_DIAG_TASK_INTERVAL)
+    {
+        s_HciTinyUsbDiagTaskCount = 0U;
+        periodic = true;
+    }
+
+    if (!periodic && !newFailure)
     {
         return;
     }
@@ -152,35 +173,52 @@ void tud_task_ext(uint32_t TimeoutMs, bool InIsr)
         __atomic_load_n(&g_HciTinyUsbQueueSendCount, __ATOMIC_RELAXED);
     const uint32_t high =
         __atomic_load_n(&g_HciTinyUsbQueueHighWater, __ATOMIC_RELAXED);
-    const uint32_t depth =
-        __atomic_load_n(&g_HciTinyUsbQueueLastFailDepth, __ATOMIC_RELAXED);
-    const uint32_t eventId =
-        __atomic_load_n(&g_HciTinyUsbQueueLastFailEvent, __ATOMIC_RELAXED);
-    const uint32_t inIsr =
-        __atomic_load_n(&g_HciTinyUsbQueueLastFailInIsr, __ATOMIC_RELAXED);
-    const uint32_t ep =
-        __atomic_load_n(&g_HciTinyUsbQueueLastFailEp, __ATOMIC_RELAXED);
-    const uint32_t len =
-        __atomic_load_n(&g_HciTinyUsbQueueLastFailLen, __ATOMIC_RELAXED);
-    const uintptr_t func =
-        __atomic_load_n(&g_HciTinyUsbQueueLastFailFunc, __ATOMIC_RELAXED);
-    const uintptr_t param =
-        __atomic_load_n(&g_HciTinyUsbQueueLastFailParam, __ATOMIC_RELAXED);
+    const uint32_t depth = HciTinyUsbQueueDepth();
 
-    HciTrace("usbq: fail=%lu send=%lu high=%lu depth=%lu evt=%lu isr=%lu\r\n",
-             (unsigned long)failed,
+    HciTrace("usbqs: send=%lu fail=%lu high=%lu depth=%lu\r\n",
              (unsigned long)sent,
+             (unsigned long)failed,
              (unsigned long)high,
-             (unsigned long)depth,
-             (unsigned long)eventId,
-             (unsigned long)inIsr);
-    HciTrace("usbqf: ep=0x%02lX len=%lu fn=0x%08lX arg=0x%08lX\r\n",
-             (unsigned long)ep,
-             (unsigned long)len,
-             (unsigned long)func,
-             (unsigned long)param);
+             (unsigned long)depth);
 
-    s_HciTinyUsbQueueFailReported = failed;
+    if (newFailure)
+    {
+        const uint32_t failDepth =
+            __atomic_load_n(&g_HciTinyUsbQueueLastFailDepth,
+                            __ATOMIC_RELAXED);
+        const uint32_t eventId =
+            __atomic_load_n(&g_HciTinyUsbQueueLastFailEvent,
+                            __ATOMIC_RELAXED);
+        const uint32_t inIsr =
+            __atomic_load_n(&g_HciTinyUsbQueueLastFailInIsr,
+                            __ATOMIC_RELAXED);
+        const uint32_t ep =
+            __atomic_load_n(&g_HciTinyUsbQueueLastFailEp,
+                            __ATOMIC_RELAXED);
+        const uint32_t len =
+            __atomic_load_n(&g_HciTinyUsbQueueLastFailLen,
+                            __ATOMIC_RELAXED);
+        const uintptr_t func =
+            __atomic_load_n(&g_HciTinyUsbQueueLastFailFunc,
+                            __ATOMIC_RELAXED);
+        const uintptr_t param =
+            __atomic_load_n(&g_HciTinyUsbQueueLastFailParam,
+                            __ATOMIC_RELAXED);
+
+        HciTrace("usbqf: depth=%lu evt=%lu isr=%lu ep=0x%02lX len=%lu\r\n",
+                 (unsigned long)failDepth,
+                 (unsigned long)eventId,
+                 (unsigned long)inIsr,
+                 (unsigned long)ep,
+                 (unsigned long)len);
+        HciTrace("usbqfp: fn=0x%08lX arg=0x%08lX\r\n",
+                 (unsigned long)func,
+                 (unsigned long)param);
+
+        s_HciTinyUsbQueueFailReported = failed;
+    }
+
+    HciTinyUsbDcdTrace();
 }
 
 #endif
