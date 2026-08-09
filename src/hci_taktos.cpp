@@ -26,6 +26,12 @@ static bool HciTaktOsIsInIsr(void)
 #endif
 }
 
+/*
+ * The thread side of the pending word. A critical section is right here and
+ * not in HciTaktOsWake: this runs on the thread, where masking briefly is
+ * ordinary, and masking is what makes the read and the clear one operation
+ * against the interrupt that sets bits.
+ */
 static uint32_t HciTaktOsTakeEvents(HciTaktOs_t *pRuntime)
 {
     uint32_t state = TaktOSEnterCritical();
@@ -65,17 +71,24 @@ void HciTaktOsWake(HciTaktOs_t *pRuntime, uint32_t Events)
         return;
     }
 
-    uint32_t state = TaktOSEnterCritical();
-    pRuntime->PendingEvents |= Events;
-    pRuntime->WakeCount++;
-    TaktOSExitCritical(state);
+    /*
+     * This is the one function here an interrupt reaches: the USB one through
+     * the device stack's event hook, and the MPSL one. An interrupt must not
+     * mask interrupts, so this side is atomic and the critical section stays
+     * on the thread side only.
+     *
+     * The pair still holds. HciTaktOsTakeEvents masks while it reads the word
+     * and clears it, so no interrupt can land between those two, and the
+     * fetch_or here is indivisible against anything. Release, so whatever was
+     * written before the bit goes in is in front of it.
+     */
+    __atomic_fetch_or(&pRuntime->PendingEvents, Events, __ATOMIC_RELEASE);
+    __atomic_fetch_add(&pRuntime->WakeCount, 1U, __ATOMIC_RELAXED);
 
     TaktOSErr_t result = TaktOSSemGive(&pRuntime->WakeSem, HciTaktOsIsInIsr());
     if (result == TAKTOS_ERR_FULL)
     {
-        state = TaktOSEnterCritical();
-        pRuntime->SemaphoreFullCount++;
-        TaktOSExitCritical(state);
+        __atomic_fetch_add(&pRuntime->SemaphoreFullCount, 1U, __ATOMIC_RELAXED);
     }
 }
 
