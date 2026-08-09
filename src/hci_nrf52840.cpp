@@ -1061,9 +1061,25 @@ extern "C" void USBD_IRQHandler(void)
             s_pTarget->UsbEventCause |= cause;
             s_pTarget->UsbStuckCauseCount++;
             NRF_USBD->EVENTCAUSE = cause;
-            NRF_USBD->EVENTS_USBEVENT = 0U;
             __ISB();
             __DSB();
+
+            /*
+             * Take the event away only when nothing the port reads is left.
+             * SUSPEND, RESUME and USBWUALLOWED can be set in the same word as
+             * the cause cleared above, and the port learns about them from
+             * EVENTS_USBEVENT alone: it never reads EVENTCAUSE unless the
+             * event is there. Clearing it whatever is left loses a suspend or
+             * a resume, and a lost resume leaves the peripheral in low power
+             * with nothing to bring it out.
+             */
+            if ((NRF_USBD->EVENTCAUSE &
+                 (uint32_t)HCI_NRF52840_USBD_PORT_EVENTCAUSE) == 0U)
+            {
+                NRF_USBD->EVENTS_USBEVENT = 0U;
+                __ISB();
+                __DSB();
+            }
         }
 
         tusb_int_handler(0U, true);

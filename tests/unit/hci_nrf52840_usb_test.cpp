@@ -603,6 +603,32 @@ static void TestEventCauseStormIsBroken(void)
     assert((gUsbd.EVENTCAUSE.Value & USBD_EVENTCAUSE_SUSPEND_Msk) != 0U);
     assert(target.UsbStuckCauseCount == 1U);
 
+    /*
+     * Both kinds at once, which is the case that decides it. Clearing the one
+     * the port ignores must not take EVENTS_USBEVENT with it while a cause the
+     * port still has to read is behind it. The port never looks at EVENTCAUSE
+     * unless the event is there, so a suspend or a resume dropped here is a
+     * suspend or a resume the port never learns about.
+     */
+    gUsbd.EVENTCAUSE.Value = USBD_EVENTCAUSE_READY_Msk |
+                             USBD_EVENTCAUSE_SUSPEND_Msk;
+    gUsbd.EVENTS_USBEVENT = 1U;
+    USBD_IRQHandler();
+
+    assert((gUsbd.EVENTCAUSE.Value & USBD_EVENTCAUSE_READY_Msk) == 0U);
+    assert((gUsbd.EVENTCAUSE.Value & USBD_EVENTCAUSE_SUSPEND_Msk) != 0U);
+    assert(gUsbd.EVENTS_USBEVENT == 1U);
+    assert(target.UsbStuckCauseCount == 2U);
+
+    /* And with nothing left behind it the event still has to go. */
+    gUsbd.EVENTCAUSE.Value = USBD_EVENTCAUSE_READY_Msk;
+    gUsbd.EVENTS_USBEVENT = 1U;
+    USBD_IRQHandler();
+
+    assert(gUsbd.EVENTCAUSE.Value == 0U);
+    assert(gUsbd.EVENTS_USBEVENT == 0U);
+    assert(target.UsbStuckCauseCount == 3U);
+
     /* A source that keeps re-asserting is captured and named, not guessed. */
     gUsbd.EVENTCAUSE.Value = 0U;
     gUsbd.EVENTS_USBEVENT = 0U;
