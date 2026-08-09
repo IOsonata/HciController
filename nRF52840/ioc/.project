@@ -258,7 +258,7 @@
 		<link>
 			<name>src/TinyUSB/src/device/usbd.c</name>
 			<type>1</type>
-			<locationURI>PARENT-3-PROJECT_LOC/external/tinyusb/src/device/usbd.c</locationURI>
+			<locationURI>PARENT-2-PROJECT_LOC/src/hci_tinyusb_usbd.c</locationURI>
 		</link>
 		<link>
 			<name>src/TinyUSB/src/device/usbd.h</name>
