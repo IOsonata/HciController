@@ -48,7 +48,7 @@
 #endif
 
 #ifndef HCI_NRF52840_USB_IRQ_PRIORITY
-#define HCI_NRF52840_USB_IRQ_PRIORITY 6U
+#define HCI_NRF52840_USB_IRQ_PRIORITY 7U
 #endif
 
 /* Bounded wait for the crystal. Worst case ramp-up is 1400 us. */
