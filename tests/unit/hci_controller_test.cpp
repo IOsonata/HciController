@@ -177,7 +177,7 @@ struct Fixture
     uint8_t ControllerPacket[FAKE_PACKET_SIZE];
 };
 
-static void Setup(Fixture *pFixture)
+static void SetupClosed(Fixture *pFixture)
 {
     memset(&gIntrf, 0, sizeof(gIntrf));
     memset(&gController, 0, sizeof(gController));
@@ -192,6 +192,11 @@ static void Setup(Fixture *pFixture)
                              pFixture->ControllerPacket,
                              sizeof(pFixture->ControllerPacket),
                              &gOps));
+}
+
+static void Setup(Fixture *pFixture)
+{
+    SetupClosed(pFixture);
     HciControllerPortOpen(&pFixture->Controller);
 }
 
@@ -231,6 +236,57 @@ static void TestHostToController(void)
     assert(gController.PutData[0][0] == 0x03);
     assert(gController.ProcessCount >= 1U);
     printf("[ok] host command reaches the controller\n");
+}
+
+/*
+ * A clean host may send Reset while the controller is still coming up. H:4
+ * has no transport retry, so a complete packet already queued when the port
+ * opens must survive that boundary.
+ */
+static void TestPreopenH4BacklogIsPreserved(void)
+{
+    Fixture fixture;
+    SetupClosed(&fixture);
+
+    const uint8_t reset[] = {0x01, 0x03, 0x0C, 0x00};
+    FeedHost(reset, sizeof(reset));
+
+    HciControllerPortOpen(&fixture.Controller);
+    assert(fixture.Controller.Host.FlushedOctetCount == 0U);
+    assert(fixture.Controller.Host.RxOctetCount == sizeof(reset));
+
+    HciControllerProcess(&fixture.Controller);
+    assert(gController.PutCount == 1U);
+    assert(gController.PutType[0] == HCI_H4_PACKET_COMMAND);
+    assert(gController.PutLen[0] == 3U);
+    assert(gController.PutData[0][0] == 0x03U);
+    assert(gController.PutData[0][1] == 0x0CU);
+    printf("[ok] a clean H4 Reset queued before open is preserved\n");
+}
+
+/*
+ * The Thingy:91 case is the opposite: the same FIFO begins with boot text and
+ * only later contains H:4. The UART buffer erased the real time gap, so the
+ * whole stale mixed backlog still has to be discarded at open.
+ */
+static void TestPreopenMixedBacklogIsFlushed(void)
+{
+    Fixture fixture;
+    SetupClosed(&fixture);
+
+    const uint8_t buffered[] = {
+        'B', 'o', 'o', 't', 'i', 'n', 'g', ' ', 'T', 'F', '-', 'M', '\r', '\n',
+        0x01, 0x03, 0x0C, 0x00,
+    };
+    FeedHost(buffered, sizeof(buffered));
+
+    HciControllerPortOpen(&fixture.Controller);
+    HciControllerProcess(&fixture.Controller);
+
+    assert(gController.PutCount == 0U);
+    assert(fixture.Controller.Host.FlushedOctetCount == sizeof(buffered));
+    assert(fixture.Controller.Host.RxOctetCount == 0U);
+    printf("[ok] a text-prefixed pre-open backlog is still flushed\n");
 }
 
 /* A controller refusing the packet gets it again, and it is not duplicated. */
@@ -412,6 +468,8 @@ static void TestInitGuards(void)
 int main(void)
 {
     TestHostToController();
+    TestPreopenH4BacklogIsPreserved();
+    TestPreopenMixedBacklogIsFlushed();
     TestHostRetry();
     TestControllerToHost();
     TestControllerOrdering();
