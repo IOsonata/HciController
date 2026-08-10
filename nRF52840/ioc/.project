@@ -56,6 +56,11 @@
 			<locationURI>PARENT-2-PROJECT_LOC/include/hci_controller.h</locationURI>
 		</link>
 		<link>
+			<name>include/hci_core_profile.h</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/include/hci_core_profile.h</locationURI>
+		</link>
+		<link>
 			<name>include/hci_counters.h</name>
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/include/hci_counters.h</locationURI>
