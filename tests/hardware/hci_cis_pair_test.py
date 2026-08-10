@@ -10,6 +10,9 @@ import serial
 from serial.tools import list_ports
 
 import hci_commands
+# The teardown lives in hci_cis_cleanup so it can be driven without a board.
+from hci_cis_cleanup import cleanup
+
 from hci_ble_test import (
     ERROR_NAMES,
     EVT_DISCONNECTION_COMPLETE,
@@ -504,76 +507,6 @@ def counter_delta(before, after, index):
     if index >= len(before) or index >= len(after):
         return None
     return after[index] - before[index]
-
-
-def remove_iso_paths(hci, cis):
-    hci.command(
-        OP_LE_REMOVE_ISO_DATA_PATH,
-        struct.pack("<HB", cis, 0x03),
-        allow_fail=True,
-    )
-
-
-def cleanup(central, peripheral, cig_id, central_cis, peripheral_cis,
-            central_acl, peripheral_acl):
-    for hci, cis in ((central, central_cis), (peripheral, peripheral_cis)):
-        if cis is None:
-            continue
-        try:
-            remove_iso_paths(hci, cis)
-        except (HciError, HciGone):
-            pass
-
-    if central_cis is not None:
-        try:
-            central.command(
-                OP_DISCONNECT,
-                struct.pack("<HB", central_cis, 0x13),
-                allow_fail=True,
-            )
-        except (HciError, HciGone):
-            pass
-
-    end = time.time() + 0.5
-    while time.time() < end:
-        for hci in (central, peripheral):
-            try:
-                hci.read_packet(0.02)
-            except (HciError, HciGone):
-                pass
-
-    if cig_id is not None:
-        try:
-            central.command(OP_LE_REMOVE_CIG, bytes([cig_id]), allow_fail=True)
-        except (HciError, HciGone):
-            pass
-
-    for hci, acl in ((central, central_acl), (peripheral, peripheral_acl)):
-        if acl is None:
-            continue
-        try:
-            hci.command(
-                OP_DISCONNECT,
-                struct.pack("<HB", acl, 0x13),
-                allow_fail=True,
-            )
-        except (HciError, HciGone):
-            pass
-
-    try:
-        peripheral.command(OP_LE_SET_ADV_ENABLE, b"\x00", allow_fail=True)
-    except (HciError, HciGone):
-        pass
-
-    for hci in (central, peripheral):
-        try:
-            hci.command(
-                OP_LE_SET_HOST_FEATURE,
-                bytes([CIS_HOST_SUPPORT_BIT, 0]),
-                allow_fail=True,
-            )
-        except (HciError, HciGone):
-            pass
 
 
 def main():

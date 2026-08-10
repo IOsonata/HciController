@@ -1,13 +1,68 @@
 #!/usr/bin/env python3
 """
-Decoding for the HCI events the hardware tests read.
+The HCI vocabulary the hardware tests share: packet and event codes, error
+names, the exceptions they raise, and the decoding of connection events.
 
 Byte handling only. Nothing here opens a port or imports pyserial, so the
-regressions that feed it captured event bodies run anywhere python does,
-including a machine with no serial library and no board attached.
+regressions that feed it captured bodies or drive its logic against a
+recorded controller run anywhere python does, with no board attached.
 """
 
 import struct
+
+# H:4 packet indicators, Vol 4 Part A 2.
+H4_COMMAND = 0x01
+H4_ACL = 0x02
+H4_SCO = 0x03
+H4_EVENT = 0x04
+H4_ISO = 0x05
+
+# Event codes, Vol 4 Part E 7.7.
+EVT_DISCONNECTION_COMPLETE = 0x05
+EVT_ENCRYPTION_CHANGE = 0x08
+EVT_COMMAND_COMPLETE = 0x0E
+EVT_COMMAND_STATUS = 0x0F
+EVT_NUM_COMPLETED_PACKETS = 0x13
+EVT_LE_META = 0x3E
+
+# Vol 4 Part D 2. Only the codes these tests can actually provoke.
+ERROR_NAMES = {
+    0x00: "Success",
+    0x01: "Unknown HCI Command",
+    0x02: "Unknown Connection Identifier",
+    0x08: "Connection Timeout",
+    0x0C: "Command Disallowed",
+    0x11: "Unsupported Feature or Parameter Value",
+    0x12: "Invalid HCI Command Parameters",
+    0x13: "Remote User Terminated Connection",
+    0x16: "Connection Terminated By Local Host",
+    0x3E: "Connection Failed To Be Established",
+    0x41: "Unacceptable Connection Parameters",
+    0x42: "Unknown Advertising Identifier",
+    0x43: "Limit Reached",
+    0x44: "Operation Cancelled By Host",
+}
+
+
+class HciError(Exception):
+    pass
+
+
+class HciGone(Exception):
+    """
+    The port went away underneath us.
+
+    On a dongle this is not a serial problem. MPSL and the SoftDevice
+    Controller reset the chip from their assert handlers by design, see
+    HciNrf52840MpslAssert in src/hci_nrf52840.cpp, so a controller fault
+    takes the USB device with it and the CDC port disappears. The board then
+    re-enumerates and the next run starts clean, which is exactly what makes
+    it easy to mistake for a flaky cable.
+    """
+
+
+def status_text(status):
+    return "0x%02X %s" % (status, ERROR_NAMES.get(status, ""))
 
 # LE Meta subevent codes, Vol 4 Part E 7.7.65.
 LE_CONNECTION_COMPLETE = 0x01

@@ -50,16 +50,17 @@ try:
 except ImportError:
     sys.exit("pyserial is missing. Run: pip3 install pyserial")
 
-H4_COMMAND = 0x01
-H4_ACL = 0x02
-H4_EVENT = 0x04
+H4_ACL = hci_events.H4_ACL
+H4_COMMAND = hci_events.H4_COMMAND
+H4_EVENT = hci_events.H4_EVENT
+H4_ISO = hci_events.H4_ISO
 
-EVT_DISCONNECTION_COMPLETE = 0x05
-EVT_COMMAND_COMPLETE = 0x0E
-EVT_COMMAND_STATUS = 0x0F
-EVT_ENCRYPTION_CHANGE = 0x08
-EVT_NUM_COMPLETED_PACKETS = 0x13
-EVT_LE_META = 0x3E
+EVT_COMMAND_COMPLETE = hci_events.EVT_COMMAND_COMPLETE
+EVT_COMMAND_STATUS = hci_events.EVT_COMMAND_STATUS
+EVT_DISCONNECTION_COMPLETE = hci_events.EVT_DISCONNECTION_COMPLETE
+EVT_ENCRYPTION_CHANGE = hci_events.EVT_ENCRYPTION_CHANGE
+EVT_LE_META = hci_events.EVT_LE_META
+EVT_NUM_COMPLETED_PACKETS = hci_events.EVT_NUM_COMPLETED_PACKETS
 
 # The LE subevent codes and the connection event decoding live in hci_events,
 # which imports no serial library, so the regressions that replay captured
@@ -204,39 +205,10 @@ NUS_SERVICE = uuid128("6E400001-B5A3-F393-E0A9-E50E24DCCA9E")
 NUS_RX = uuid128("6E400002-B5A3-F393-E0A9-E50E24DCCA9E")
 NUS_TX = uuid128("6E400003-B5A3-F393-E0A9-E50E24DCCA9E")
 
-ERROR_NAMES = {
-    0x00: "Success",
-    0x01: "Unknown HCI Command",
-    0x02: "Unknown Connection Identifier",
-    0x08: "Connection Timeout",
-    0x0C: "Command Disallowed",
-    0x11: "Unsupported Feature or Parameter Value",
-    0x12: "Invalid HCI Command Parameters",
-    0x13: "Remote User Terminated Connection",
-    0x16: "Connection Terminated By Local Host",
-    0x3E: "Connection Failed To Be Established",
-    0x41: "Unacceptable Connection Parameters",
-    0x42: "Unknown Advertising Identifier",
-    0x43: "Limit Reached",
-    0x44: "Operation Cancelled By Host",
-}
-
-
-class HciError(Exception):
-    pass
-
-
-class HciGone(Exception):
-    """
-    The port went away underneath us.
-
-    On a dongle this is not a serial problem. MPSL and the SoftDevice
-    Controller reset the chip from their assert handlers by design, see
-    HciNrf52840MpslAssert in src/hci_nrf52840.cpp, so a controller fault
-    takes the USB device with it and the CDC port disappears. The board then
-    re-enumerates and the next run starts clean, which is exactly what makes
-    it easy to mistake for a flaky cable.
-    """
+ERROR_NAMES = hci_events.ERROR_NAMES
+HciError = hci_events.HciError
+HciGone = hci_events.HciGone
+status_text = hci_events.status_text
 
 
 def addr_str(raw):

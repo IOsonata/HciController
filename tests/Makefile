@@ -149,7 +149,7 @@ endif
 
 .PHONY: all run clean check-root check-project check-boards \
         check-usb-desc check-usb-runtime check-commands check-smp \
-        check-events print-config
+        check-events check-cis-cleanup print-config
 
 PYTHON ?= python3
 
@@ -310,8 +310,18 @@ check-events:
 	@echo "[TEST] hci_connection_event_test.py"
 	@cd $(THIS_DIR)/hardware && $(PYTHON) hci_connection_event_test.py
 
+# A two controller run ended with LE Set Host Feature refused on both dongles
+# and the test printing PASS regardless, because teardown swallowed the status.
+# This drives the teardown against a recorded controller, so the ordering is
+# checked without two boards on the bench.
+check-cis-cleanup:
+	@command -v $(PYTHON) >/dev/null 2>&1 || { \
+	  echo "[TEST] hci_cis_cleanup_test.py skipped, no $(PYTHON)"; exit 0; }
+	@echo "[TEST] hci_cis_cleanup_test.py"
+	@cd $(THIS_DIR)/hardware && $(PYTHON) hci_cis_cleanup_test.py
+
 run: all check-project check-boards check-usb-desc check-usb-runtime \
-     check-commands check-smp check-events
+     check-commands check-smp check-events check-cis-cleanup
 	@set -e; for t in $(TARGETS); do \
 	  echo "[TEST] $$(basename $$t)"; $$t; done
 	@echo
