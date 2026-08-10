@@ -3,7 +3,10 @@
 
 import sys
 
-from hci_ble_test import parse_connection
+# hci_events, not hci_ble_test: this replays captured event bodies and has no
+# board to talk to, so it must not pull in a module that exits when pyserial
+# is missing.
+from hci_events import parse_connection
 
 
 def check(body_hex, expected):

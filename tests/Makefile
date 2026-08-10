@@ -148,7 +148,8 @@ TARGETS += $(RESOURCES_TARGET)
 endif
 
 .PHONY: all run clean check-root check-project check-boards \
-        check-usb-desc check-usb-runtime check-commands check-smp print-config
+        check-usb-desc check-usb-runtime check-commands check-smp \
+        check-events print-config
 
 PYTHON ?= python3
 
@@ -298,7 +299,19 @@ check-boards:
 	@echo "[TEST] board_pins.py"
 	@$(PYTHON) $(THIS_DIR)/board_pins.py $(ROOT)
 
-run: all check-project check-boards check-usb-desc check-usb-runtime check-commands check-smp
+# The connection complete parser is shared by advertise, connect, probe and the
+# two controller CIS run, and the only thing that had ever exercised it was a
+# board. Enhanced v2 arriving on the wire is what showed that up. This replays
+# the event bodies captured from that run, so it needs no hardware, and it
+# imports hci_events rather than hci_ble_test so it needs no pyserial either.
+check-events:
+	@command -v $(PYTHON) >/dev/null 2>&1 || { \
+	  echo "[TEST] hci_connection_event_test.py skipped, no $(PYTHON)"; exit 0; }
+	@echo "[TEST] hci_connection_event_test.py"
+	@cd $(THIS_DIR)/hardware && $(PYTHON) hci_connection_event_test.py
+
+run: all check-project check-boards check-usb-desc check-usb-runtime \
+     check-commands check-smp check-events
 	@set -e; for t in $(TARGETS); do \
 	  echo "[TEST] $$(basename $$t)"; $$t; done
 	@echo

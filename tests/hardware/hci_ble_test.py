@@ -42,6 +42,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hci_commands
+import hci_events
 
 try:
     import serial
@@ -60,16 +61,24 @@ EVT_ENCRYPTION_CHANGE = 0x08
 EVT_NUM_COMPLETED_PACKETS = 0x13
 EVT_LE_META = 0x3E
 
-LE_CONNECTION_COMPLETE = 0x01
-LE_ADVERTISING_REPORT = 0x02
-LE_CONNECTION_UPDATE_COMPLETE = 0x03
-LE_READ_REMOTE_FEATURES_COMPLETE = 0x04
-LE_LONG_TERM_KEY_REQUEST = 0x05
-LE_DATA_LENGTH_CHANGE = 0x07
-LE_PHY_UPDATE_COMPLETE = 0x0C
-LE_ENHANCED_CONNECTION_COMPLETE = 0x0A
-LE_EXTENDED_ADVERTISING_REPORT = 0x0D
-LE_ENHANCED_CONNECTION_COMPLETE_V2 = 0x29
+# The LE subevent codes and the connection event decoding live in hci_events,
+# which imports no serial library, so the regressions that replay captured
+# event bodies do not need pyserial to run. Named here so the modules that
+# take them from this one keep working.
+LE_ADVERTISING_REPORT = hci_events.LE_ADVERTISING_REPORT
+LE_CONNECTION_COMPLETE = hci_events.LE_CONNECTION_COMPLETE
+LE_CONNECTION_UPDATE_COMPLETE = hci_events.LE_CONNECTION_UPDATE_COMPLETE
+LE_DATA_LENGTH_CHANGE = hci_events.LE_DATA_LENGTH_CHANGE
+LE_ENHANCED_CONNECTION_COMPLETE = hci_events.LE_ENHANCED_CONNECTION_COMPLETE
+LE_ENHANCED_CONNECTION_COMPLETE_V2 = \
+    hci_events.LE_ENHANCED_CONNECTION_COMPLETE_V2
+LE_EXTENDED_ADVERTISING_REPORT = hci_events.LE_EXTENDED_ADVERTISING_REPORT
+LE_LONG_TERM_KEY_REQUEST = hci_events.LE_LONG_TERM_KEY_REQUEST
+LE_PHY_UPDATE_COMPLETE = hci_events.LE_PHY_UPDATE_COMPLETE
+LE_READ_REMOTE_FEATURES_COMPLETE = hci_events.LE_READ_REMOTE_FEATURES_COMPLETE
+
+describe_interval = hci_events.describe_interval
+parse_connection = hci_events.parse_connection
 
 OP_DISCONNECT = 0x0406
 OP_RESET = 0x0C03
@@ -501,39 +510,6 @@ def find_port():
         if info.product and "HCI" in info.product:
             return info.device
     return None
-
-
-def parse_connection(body):
-    """Handles LE Connection Complete and Enhanced v1/v2."""
-    if not body:
-        return None
-
-    sub = body[0]
-    if sub == LE_CONNECTION_COMPLETE:
-        if len(body) < 18:
-            return None
-        status = body[1]
-        handle = struct.unpack("<H", body[2:4])[0] & 0x0FFF
-        role = body[4]
-        peer = body[6:12]
-        interval, latency, timeout = struct.unpack("<HHH", body[12:18])
-    elif sub in (LE_ENHANCED_CONNECTION_COMPLETE,
-                  LE_ENHANCED_CONNECTION_COMPLETE_V2):
-        if len(body) < 30:
-            return None
-        status = body[1]
-        handle = struct.unpack("<H", body[2:4])[0] & 0x0FFF
-        role = body[4]
-        peer = body[6:12]
-        interval, latency, timeout = struct.unpack("<HHH", body[24:30])
-    else:
-        return None
-    return status, handle, role, peer, interval, latency, timeout
-
-
-def describe_interval(interval, latency, timeout):
-    return "interval %.2f ms, latency %d, timeout %d ms" % (
-        interval * 1.25, latency, timeout * 10)
 
 
 class Attribute:
