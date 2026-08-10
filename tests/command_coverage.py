@@ -63,13 +63,29 @@ def opcode_values(nrfxlib, root):
     if match:
         values["HCI_COUNTERS_OPCODE"] = int(match.group(1), 16)
 
-    compat = os.path.join(root, "src", "hci_sdc.cpp")
-    with open(compat, "r") as handle:
-        text = handle.read()
-    for match in re.finditer(
-            r"#define\s+(HCI_SDC_COMPAT_OPCODE_[A-Z0-9_]+)\s+"
-            r"(0x[0-9A-Fa-f]+)U?", text):
-        values[match.group(1)] = int(match.group(2), 16)
+    # Compatibility opcodes are part of the generic HCI layer. Some are
+    # private to hci_sdc.cpp and others are public because callers need the
+    # numeric opcode too, so resolve both locations just as the compiler does.
+    compat_paths = (
+        os.path.join(root, "include", "hci_sdc.h"),
+        os.path.join(root, "src", "hci_sdc.cpp"),
+    )
+    compat_pattern = re.compile(
+        r"#define\s+(HCI_SDC_COMPAT_OPCODE_[A-Z0-9_]+)\s+"
+        r"(0x[0-9A-Fa-f]+)U?"
+    )
+    for compat in compat_paths:
+        with open(compat, "r") as handle:
+            text = handle.read()
+        for match in compat_pattern.finditer(text):
+            name = match.group(1)
+            value = int(match.group(2), 16)
+            if name in values and values[name] != value:
+                raise SystemExit(
+                    "%s has conflicting opcode values 0x%04X and 0x%04X"
+                    % (name, values[name], value)
+                )
+            values[name] = value
 
     return values
 
