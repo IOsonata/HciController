@@ -1,27 +1,32 @@
 #!/usr/bin/env python3
-"""Check that the Python tooling drives every opcode the firmware dispatches.
+"""Check that the current Core profile drives every opcode it exposes.
 
-tests/hardware/hci_commands.py holds one entry per HCI command, with a
-parameter block that can actually be sent. src/hci_sdc_nrfxlib.cpp holds the
-dispatch table. Nothing kept the two in step, and for most of this branch
-they were far apart: the firmware answered 126 opcodes and the tooling drove
-29, so every command added after the ACL credit fix had only ever been seen
-by a compiled stub.
+The controller has two command dispatch sources:
 
-This reports both directions. An opcode in the firmware and not in the table
-is a command nothing will ever send at a radio. An opcode in the table and
-not in the firmware is a test for something that was removed.
+    src/hci_sdc_nrfxlib.cpp   commands mapped directly to nrfxlib
+    src/hci_sdc.cpp           compatibility commands supplied by this bridge
 
-Opcode values come from the nrfxlib headers, because the dispatch table names
-them symbolically, so this needs a checkout:
+tests/hardware/hci_commands.py holds the broad radio probe table. Dedicated
+profile probes may cover compatibility commands that need stronger semantic
+checks than a generic command row; hci_core54_profile_test.py declares those
+opcodes explicitly.
+
+The current product profile can also hide backend commands from a newer Core
+revision. The same profile test declares those excluded opcodes, so this check
+compares the externally exposed HCI controller rather than every function the
+linked nrfxlib happens to contain.
+
+Opcode values for the vendor table come from nrfxlib headers:
 
     python3 tests/command_coverage.py /path/to/sdk-nrfxlib
     NRFXLIB_DIR=/path/to/sdk-nrfxlib python3 tests/command_coverage.py
 
-Exit status is 0 when the two agree, 1 when they do not, and 0 with a message
-when there is no nrfxlib to resolve against.
+Exit status is 0 when exposed firmware and hardware tooling agree, 1 when they
+do not, and 0 with a message when there is no nrfxlib checkout to resolve the
+vendor opcode names.
 """
 
+import ast
 import glob
 import os
 import re
@@ -40,7 +45,7 @@ def repo_root():
 
 
 def opcode_values(nrfxlib, root):
-    """Every SDC_HCI_OPCODE_CMD_ name, plus this firmware's own vendor one."""
+    """Every vendor opcode name plus locally defined bridge opcodes."""
     values = {}
     pattern = os.path.join(nrfxlib, "softdevice_controller", "include", "*.h")
     for header in glob.glob(pattern):
@@ -57,32 +62,87 @@ def opcode_values(nrfxlib, root):
                           handle.read())
     if match:
         values["HCI_COUNTERS_OPCODE"] = int(match.group(1), 16)
+
+    compat = os.path.join(root, "src", "hci_sdc.cpp")
+    with open(compat, "r") as handle:
+        text = handle.read()
+    for match in re.finditer(
+            r"#define\s+(HCI_SDC_COMPAT_OPCODE_[A-Z0-9_]+)\s+"
+            r"(0x[0-9A-Fa-f]+)U?", text):
+        values[match.group(1)] = int(match.group(2), 16)
+
     return values
 
 
-def firmware_table(root, values):
-    """The opcodes src/hci_sdc_nrfxlib.cpp dispatches, by name and number."""
-    path = os.path.join(root, "src", "hci_sdc_nrfxlib.cpp")
+def dispatch_names(path, declaration, name_pattern):
     with open(path, "r") as handle:
         text = handle.read()
 
-    start = text.find("static const HciCmdEntry_t s_HciSdcCommands[] = {")
+    start = text.find(declaration)
     if start < 0:
         raise SystemExit("dispatch table not found in %s" % path)
     end = text.find("\n};", start)
+    if end < 0:
+        raise SystemExit("dispatch table end not found in %s" % path)
+
     body = re.sub(r"/\*.*?\*/", "", text[start:end], flags=re.S)
+    return re.findall(name_pattern, body)
 
-    names = re.findall(
+
+def firmware_tables(root, values):
+    """Externally reachable vendor and compatibility dispatcher opcodes."""
+    vendor_path = os.path.join(root, "src", "hci_sdc_nrfxlib.cpp")
+    vendor_names = dispatch_names(
+        vendor_path,
+        "static const HciCmdEntry_t s_HciSdcCommands[] = {",
         r"(?:HCI_SDC_ENTRY_\w*\s*\(\s*|\{\s*)"
-        r"(SDC_HCI_OPCODE_CMD_[A-Z0-9_]+|HCI_COUNTERS_OPCODE)", body)
+        r"(SDC_HCI_OPCODE_CMD_[A-Z0-9_]+|HCI_COUNTERS_OPCODE)",
+    )
 
+    compat_path = os.path.join(root, "src", "hci_sdc.cpp")
+    compat_names = dispatch_names(
+        compat_path,
+        "static const HciCmdEntry_t s_HciSdcCompatCommands[] = {",
+        r"\{\s*(HCI_SDC_COMPAT_OPCODE_[A-Z0-9_]+)",
+    )
+
+    names = vendor_names + compat_names
     unresolved = sorted(set(n for n in names if n not in values))
     if unresolved:
         raise SystemExit(
-            "these dispatch table entries are not defined by this nrfxlib:\n  "
-            + "\n  ".join(unresolved))
+            "these dispatch table entries have no resolved opcode value:\n  "
+            + "\n  ".join(unresolved)
+        )
 
-    return {values[n]: n for n in names}
+    firmware = {}
+    for name in names:
+        opcode = values[name]
+        if opcode in firmware:
+            raise SystemExit(
+                "opcode 0x%04X appears in both dispatch sources (%s, %s)"
+                % (opcode, firmware[opcode], name)
+            )
+        firmware[opcode] = name
+    return firmware
+
+
+def literal_set(path, variable):
+    """Read a literal set assignment without importing hardware/serial code."""
+    with open(path, "r") as handle:
+        tree = ast.parse(handle.read(), filename=path)
+
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(isinstance(target, ast.Name) and target.id == variable
+                   for target in node.targets):
+            continue
+        value = ast.literal_eval(node.value)
+        if not isinstance(value, set):
+            raise SystemExit("%s in %s is not a literal set" % (variable, path))
+        return set(value)
+
+    raise SystemExit("%s not found in %s" % (variable, path))
 
 
 def main(argv):
@@ -110,36 +170,55 @@ def main(argv):
     sys.path.insert(0, os.path.join(root, "tests", "hardware"))
     import hci_commands
 
-    values = opcode_values(nrfxlib, root)
-    firmware = firmware_table(root, values)
-    tooling = dict(hci_commands.BY_OPCODE)
+    profile_path = os.path.join(
+        root, "tests", "hardware", "hci_core54_profile_test.py"
+    )
+    covered = literal_set(profile_path, "COVERED_OPCODES")
+    excluded = literal_set(profile_path, "EXCLUDED_OPCODES")
 
-    undriven = sorted(set(firmware) - set(tooling))
-    orphaned = sorted(set(tooling) - set(firmware))
+    values = opcode_values(nrfxlib, root)
+    firmware_all = firmware_tables(root, values)
+    firmware = {
+        opcode: name for opcode, name in firmware_all.items()
+        if opcode not in excluded
+    }
+
+    tooling = set(hci_commands.BY_OPCODE) | covered
+    tooling -= excluded
+
+    undriven = sorted(set(firmware) - tooling)
+    orphaned = sorted(tooling - set(firmware))
 
     for opcode in undriven:
-        print("[!!] 0x%04X %-56s dispatched, not driven"
+        print("[!!] 0x%04X %-56s exposed, not driven"
               % (opcode, firmware[opcode]))
     for opcode in orphaned:
-        print("[!!] 0x%04X %-56s driven, not dispatched"
-              % (opcode, tooling[opcode].name))
+        if opcode in hci_commands.BY_OPCODE:
+            name = hci_commands.BY_OPCODE[opcode].name
+        else:
+            name = "dedicated Core profile probe"
+        print("[!!] 0x%04X %-56s driven, not exposed" % (opcode, name))
 
     if undriven or orphaned:
-        print("\n%d opcode(s) disagree between src/hci_sdc_nrfxlib.cpp and "
-              "tests/hardware/hci_commands.py."
-              % (len(undriven) + len(orphaned)))
+        print(
+            "\n%d opcode(s) disagree between the exposed dispatch profile "
+            "and hardware tooling."
+            % (len(undriven) + len(orphaned))
+        )
         return 1
 
-    # What the probe can send without help is worth stating, because the
-    # difference between the table being complete and the radio having seen
-    # every command is the part a reader will otherwise assume away.
     buckets = {}
-    for command in hci_commands.BY_OPCODE.values():
+    for opcode, command in hci_commands.BY_OPCODE.items():
+        if opcode in excluded:
+            continue
         for need in command.needs:
             buckets[need] = buckets.get(need, 0) + 1
 
-    print("[ok] %d opcodes, dispatched and driven, both ways."
-          % len(firmware))
+    print("[ok] %d exposed opcodes, all driven." % len(firmware))
+    print("     %d vendor/compat dispatch opcodes hidden by the Core profile."
+          % len(set(firmware_all) & excluded))
+    print("     %d compatibility opcodes have dedicated profile coverage."
+          % len(covered))
     print("     %d need nothing, %d need a connection, %d an advertising set,"
           % (buckets.get(hci_commands.NEEDS_NOTHING, 0),
              buckets.get(hci_commands.NEEDS_CONN, 0),
