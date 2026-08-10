@@ -592,7 +592,6 @@ static HciCmdResult_t HciSdcCmdLeSetScanEnable(void *,
     return HciSdcComplete(sdc_hci_cmd_le_set_scan_enable(&params), 0U);
 }
 
-
 /*
  * The handlers below are all the same few shapes, so they are generated to
  * keep the mapping between an opcode and its SDC call in one line each. The
@@ -1512,7 +1511,6 @@ HCI_SDC_CMD_P(HciSdcCmdLeSetExtScanEnable, sdc_hci_cmd_le_set_ext_scan_enable,
 HCI_SDC_CMD_VP(HciSdcCmdLeExtCreateConn, sdc_hci_cmd_le_ext_create_conn,
                sdc_hci_cmd_le_ext_create_conn_t, array_params,
                initiating_phys, HciSdcStatus)
-
 
 /*
  * Table entry helpers. Each names the response kind and the return parameter
@@ -2648,6 +2646,7 @@ static HciSdcAdvCmdType_t HciSdcAdvCommandType(uint16_t Opcode)
         case SDC_HCI_OPCODE_CMD_LE_READ_ADV_PHYSICAL_CHANNEL_TX_POWER:
             return HCI_SDC_ADV_CMD_LEGACY;
 
+        case SDC_HCI_OPCODE_CMD_LE_SET_ADV_SET_RANDOM_ADDRESS:
         case SDC_HCI_OPCODE_CMD_LE_SET_EXT_ADV_PARAMS:
         case SDC_HCI_OPCODE_CMD_LE_READ_NUMBER_OF_SUPPORTED_ADV_SETS:
         case SDC_HCI_OPCODE_CMD_LE_READ_PERIODIC_ADV_LIST_SIZE:

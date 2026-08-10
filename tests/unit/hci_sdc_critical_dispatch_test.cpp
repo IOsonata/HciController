@@ -63,6 +63,39 @@ static size_t SendCommand(const HciControllerOps_t *controller,
     return eventLen;
 }
 
+static uint8_t SendCommandStatus(const HciControllerOps_t *controller,
+                                 uint16_t Opcode,
+                                 const uint8_t *pParams,
+                                 size_t ParamLen,
+                                 uint8_t *pEvent,
+                                 size_t EventCapacity)
+{
+    assert(ParamLen <= 255U);
+    uint8_t command[258];
+    command[0] = (uint8_t)Opcode;
+    command[1] = (uint8_t)(Opcode >> 8);
+    command[2] = (uint8_t)ParamLen;
+    if (ParamLen != 0U)
+    {
+        memcpy(&command[3], pParams, ParamLen);
+    }
+
+    assert(controller->Put(controller->pContext, HCI_H4_PACKET_COMMAND,
+                           command, 3U + ParamLen));
+
+    HciH4PacketType_t type = HCI_H4_PACKET_NONE;
+    size_t eventLen = 0U;
+    assert(controller->Get(controller->pContext, &type, pEvent,
+                           EventCapacity, &eventLen) ==
+           HCI_CONTROLLER_GET_PACKET);
+    assert(type == HCI_H4_PACKET_EVENT);
+    assert(eventLen >= HCI_COMMAND_COMPLETE_BASE_SIZE);
+    assert(pEvent[0] == HCI_EVENT_COMMAND_COMPLETE);
+    assert(pEvent[3] == (uint8_t)Opcode);
+    assert(pEvent[4] == (uint8_t)(Opcode >> 8));
+    return pEvent[5];
+}
+
 static void GiveControllerQueueItsTurn(const HciControllerOps_t *controller)
 {
     HciH4PacketType_t type = HCI_H4_PACKET_NONE;
@@ -120,6 +153,49 @@ static void TestCigVariableReturn(const HciControllerOps_t *controller,
     }
 }
 
+static void TestAdvertisingSetRandomAddressGuard(
+    const HciControllerOps_t *controller)
+{
+    uint8_t event[64];
+    uint8_t legacy[sizeof(sdc_hci_cmd_le_set_adv_params_t)] = {0};
+    uint8_t randomAddress[sizeof(sdc_hci_cmd_le_set_adv_set_random_address_t)] =
+        {0};
+
+    HciSdcNrfxlibResetAdvCommandType();
+    g_SdcStub.LastCall = NULL;
+    (void)SendCommand(controller, SDC_HCI_OPCODE_CMD_LE_SET_ADV_PARAMS,
+                      legacy, sizeof(legacy), event, sizeof(event));
+    assert(strcmp(g_SdcStub.LastCall, "sdc_hci_cmd_le_set_adv_params") == 0);
+    GiveControllerQueueItsTurn(controller);
+
+    g_SdcStub.LastCall = NULL;
+    assert(SendCommandStatus(
+               controller, SDC_HCI_OPCODE_CMD_LE_SET_ADV_SET_RANDOM_ADDRESS,
+               randomAddress, sizeof(randomAddress), event, sizeof(event)) ==
+           HCI_STATUS_COMMAND_DISALLOWED);
+    assert(g_SdcStub.LastCall == NULL);
+    GiveControllerQueueItsTurn(controller);
+    printf("[ok] LE Set Advertising Set Random Address is rejected after legacy\n");
+
+    HciSdcNrfxlibResetAdvCommandType();
+    g_SdcStub.LastCall = NULL;
+    (void)SendCommand(controller,
+                      SDC_HCI_OPCODE_CMD_LE_SET_ADV_SET_RANDOM_ADDRESS,
+                      randomAddress, sizeof(randomAddress), event,
+                      sizeof(event));
+    assert(strcmp(g_SdcStub.LastCall,
+                  "sdc_hci_cmd_le_set_adv_set_random_address") == 0);
+    GiveControllerQueueItsTurn(controller);
+
+    g_SdcStub.LastCall = NULL;
+    assert(SendCommandStatus(controller, SDC_HCI_OPCODE_CMD_LE_SET_ADV_PARAMS,
+                             legacy, sizeof(legacy), event, sizeof(event)) ==
+           HCI_STATUS_COMMAND_DISALLOWED);
+    assert(g_SdcStub.LastCall == NULL);
+    GiveControllerQueueItsTurn(controller);
+    printf("[ok] LE Set Advertising Set Random Address selects extended mode\n");
+}
+
 int main(void)
 {
     HciSdc_t sdc;
@@ -152,7 +228,10 @@ int main(void)
                           sdc_hci_cmd_le_set_cig_params_test_return_t>(
         controller, SDC_HCI_OPCODE_CMD_LE_SET_CIG_PARAMS_TEST,
         "sdc_hci_cmd_le_set_cig_params_test");
+    GiveControllerQueueItsTurn(controller);
     printf("[ok] LE Set CIG Parameters Test returns both CIS handles\n");
+
+    TestAdvertisingSetRandomAddressGuard(controller);
 
     printf("All critical SDC real-header dispatch tests passed.\n");
     return 0;
