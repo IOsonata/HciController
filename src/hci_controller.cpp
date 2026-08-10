@@ -12,6 +12,77 @@
 
 #include <string.h>
 
+/*
+ * Core version presented by this HCI controller to its Host.
+ *
+ * The vendor controller may implement a newer Core revision than the product
+ * exposes. That is the case on nRF52 with current nrfxlib: SDC reports its own
+ * newer HCI version, while this controller is deliberately audited and exposed
+ * as a Core 5.4 controller. Keep this as a target build setting so a future
+ * nRF54 target can select the Core revision it actually exposes.
+ *
+ * Zero disables capping and passes the backend version through unchanged.
+ * The cap is downward only: an older backend is never promoted to a newer Core
+ * revision by this layer.
+ */
+#ifndef HCI_CONTROLLER_TARGET_CORE_VERSION
+#define HCI_CONTROLLER_TARGET_CORE_VERSION 0x0DU
+#endif
+
+#if HCI_CONTROLLER_TARGET_CORE_VERSION > 0xFFU
+#error "HCI_CONTROLLER_TARGET_CORE_VERSION must fit in one octet"
+#endif
+
+#define HCI_CONTROLLER_EVENT_COMMAND_COMPLETE       0x0EU
+#define HCI_CONTROLLER_OPCODE_READ_LOCAL_VERSION    0x1001U
+#define HCI_CONTROLLER_LOCAL_VERSION_EVENT_SIZE     14U
+
+static uint16_t HciControllerReadLe16(const uint8_t *pData)
+{
+    return (uint16_t)pData[0] | ((uint16_t)pData[1] << 8);
+}
+
+static void HciControllerCapReportedCoreVersion(HciH4PacketType_t Type,
+                                                uint8_t *pPacket,
+                                                size_t PacketLen)
+{
+#if HCI_CONTROLLER_TARGET_CORE_VERSION != 0U
+    if (Type != HCI_H4_PACKET_EVENT ||
+        PacketLen < HCI_CONTROLLER_LOCAL_VERSION_EVENT_SIZE ||
+        pPacket[0] != HCI_CONTROLLER_EVENT_COMMAND_COMPLETE ||
+        HciControllerReadLe16(&pPacket[3]) !=
+            HCI_CONTROLLER_OPCODE_READ_LOCAL_VERSION ||
+        pPacket[5] != 0U)
+    {
+        return;
+    }
+
+    /*
+     * Vol 4 Part E 7.4.1: HCI_Version is the version of the HCI specification
+     * supported by the Controller. The public controller is this bridge plus
+     * its backend, not the backend library by itself. If the backend is newer
+     * than the target profile, expose the target profile. Never move a lower
+     * backend version upward; the hardware version test must catch that.
+     *
+     * The backend supplies the same Core version in LMP_Version for this LE
+     * controller, so cap both fields consistently while preserving both
+     * vendor-specific subversions and the Company Identifier.
+     */
+    if (pPacket[6] > HCI_CONTROLLER_TARGET_CORE_VERSION)
+    {
+        pPacket[6] = HCI_CONTROLLER_TARGET_CORE_VERSION;
+    }
+    if (pPacket[9] > HCI_CONTROLLER_TARGET_CORE_VERSION)
+    {
+        pPacket[9] = HCI_CONTROLLER_TARGET_CORE_VERSION;
+    }
+#else
+    (void)Type;
+    (void)pPacket;
+    (void)PacketLen;
+#endif
+}
+
 static bool HciControllerHostTypeValid(HciH4PacketType_t Type)
 {
     return Type == HCI_H4_PACKET_COMMAND ||
@@ -99,6 +170,10 @@ static void HciControllerFetchPacket(HciController_t *pController)
         pController->InvalidControllerPacketCount++;
         return;
     }
+
+    HciControllerCapReportedCoreVersion(type,
+                                        pController->pControllerPacket,
+                                        packetLen);
 
     pController->ControllerPacketType = type;
     pController->ControllerPacketLen = packetLen;
