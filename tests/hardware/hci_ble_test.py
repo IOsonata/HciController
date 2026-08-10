@@ -69,6 +69,7 @@ LE_DATA_LENGTH_CHANGE = 0x07
 LE_PHY_UPDATE_COMPLETE = 0x0C
 LE_ENHANCED_CONNECTION_COMPLETE = 0x0A
 LE_EXTENDED_ADVERTISING_REPORT = 0x0D
+LE_ENHANCED_CONNECTION_COMPLETE_V2 = 0x29
 
 OP_DISCONNECT = 0x0406
 OP_RESET = 0x0C03
@@ -503,15 +504,23 @@ def find_port():
 
 
 def parse_connection(body):
-    """Handles both Connection Complete and its Enhanced form."""
+    """Handles LE Connection Complete and Enhanced v1/v2."""
+    if not body:
+        return None
+
     sub = body[0]
     if sub == LE_CONNECTION_COMPLETE:
+        if len(body) < 18:
+            return None
         status = body[1]
         handle = struct.unpack("<H", body[2:4])[0] & 0x0FFF
         role = body[4]
         peer = body[6:12]
         interval, latency, timeout = struct.unpack("<HHH", body[12:18])
-    elif sub == LE_ENHANCED_CONNECTION_COMPLETE:
+    elif sub in (LE_ENHANCED_CONNECTION_COMPLETE,
+                  LE_ENHANCED_CONNECTION_COMPLETE_V2):
+        if len(body) < 30:
+            return None
         status = body[1]
         handle = struct.unpack("<H", body[2:4])[0] & 0x0FFF
         role = body[4]
