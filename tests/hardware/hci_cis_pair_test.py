@@ -33,7 +33,7 @@ from hci_ble_test import (
 
 H4_ISO = 0x05
 
-LE_CIS_ESTABLISHED = 0x19
+LE_CIS_ESTABLISHED_SUBEVENTS = (0x19, 0x2A)
 LE_CIS_REQUEST = 0x1A
 
 OP_LE_READ_BUFFER_SIZE_V2 = 0x2060
@@ -54,9 +54,9 @@ ISO_DIRECTION_INPUT = 0x00
 ISO_DIRECTION_OUTPUT = 0x01
 ISO_DATA_PATH_HCI = 0x00
 
-# CIS Established is LE subevent 0x19 and CIS Request is 0x1A.
-# Their event mask bits are therefore 24 and 25. The existing probe mask
-# already covers both, along with the rest of the LE events this test may see.
+# CIS Established v1/v2 are LE subevents 0x19 and 0x2A; CIS Request is 0x1A.
+# Their event mask bits are therefore 24, 41 and 25. The existing probe mask
+# already covers all three, along with the rest of the LE events this test may see.
 LE_EVENT_MASK_WITH_CIS = bytes.fromhex("ffffffffffffff1f")
 
 
@@ -309,7 +309,7 @@ def wait_cis_established(hci, label, expected_cis, timeout=5.0):
 
         if kind != H4_EVENT or code != EVT_LE_META:
             continue
-        if len(body) < 4 or body[0] != LE_CIS_ESTABLISHED:
+        if len(body) < 4 or body[0] not in LE_CIS_ESTABLISHED_SUBEVENTS:
             continue
 
         status = body[1]
