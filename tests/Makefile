@@ -106,7 +106,8 @@ SDC_SOURCES := $(UNIT)/hci_sdc_dispatch_test.cpp \
                $(SRC)/hci_sdc.cpp \
                $(SRC)/hci_counters.cpp \
                $(SRC)/hci_cmd_dispatch.cpp \
-               $(STUBS)/sdclink/sdc_stub.cpp
+               $(STUBS)/sdclink/sdc_stub.cpp \
+               $(STUBS)/sdclink/sdc_stub_page2.cpp
 TARGETS += $(SDC_TARGET)
 
 # Focused real-header regressions for command shapes the table-wide dispatch
@@ -118,7 +119,8 @@ SDC_CRITICAL_SOURCES := $(UNIT)/hci_sdc_critical_dispatch_test.cpp \
                         $(SRC)/hci_sdc.cpp \
                         $(SRC)/hci_counters.cpp \
                         $(SRC)/hci_cmd_dispatch.cpp \
-                        $(STUBS)/sdclink/sdc_stub.cpp
+                        $(STUBS)/sdclink/sdc_stub.cpp \
+                        $(STUBS)/sdclink/sdc_stub_page2.cpp
 TARGETS += $(SDC_CRITICAL_TARGET)
 
 # The resource configuration against the real headers. Everything else that

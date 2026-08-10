@@ -169,6 +169,10 @@ _CB = [
             note="every event this specification version defines"),
     Command(0x0C03, "Reset", COMPLETE, b"",
             note="sent first by the probe, not as one of the tested rows"),
+    Command(0x0C63, "Set Event Mask Page 2", COMPLETE, bytes(8),
+            undo=(0x0C63, bytes(8)),
+            note="all zeroes exercise the eight-octet page 2 command without "
+                 "changing asynchronous event delivery during the probe"),
     Command(0x0C2D, "Read Transmit Power Level", COMPLETE,
             lambda ctx: _conn(ctx, b"\x00"), needs=NEEDS_CONN,
             note="type 0 is the current level"),

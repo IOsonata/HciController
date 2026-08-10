@@ -12,6 +12,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "sdc_hci_cmd_controller_baseband.h"
+#include "sdc_hci_cmd_info_params.h"
 #include "sdc_hci_cmd_le.h"
 #include "sdc_stub.h"
 
@@ -196,6 +198,36 @@ static void TestAdvertisingSetRandomAddressGuard(
     printf("[ok] LE Set Advertising Set Random Address selects extended mode\n");
 }
 
+static void TestEventMaskPage2(const HciControllerOps_t *controller)
+{
+    uint8_t event[HCI_COMMAND_COMPLETE_BASE_SIZE +
+                  sizeof(sdc_hci_cmd_ip_read_local_supported_commands_return_t)];
+
+    const size_t supportedLen = SendCommand(
+        controller, SDC_HCI_OPCODE_CMD_IP_READ_LOCAL_SUPPORTED_COMMANDS,
+        NULL, 0U, event, sizeof(event));
+    assert(supportedLen == HCI_COMMAND_COMPLETE_BASE_SIZE +
+                           sizeof(sdc_hci_cmd_ip_read_local_supported_commands_return_t));
+
+    sdc_hci_cmd_ip_read_local_supported_commands_return_t supported;
+    memcpy(supported.raw, &event[HCI_COMMAND_COMPLETE_BASE_SIZE],
+           sizeof(supported.raw));
+    assert(supported.params.hci_set_event_mask_page_2 == 1U);
+    GiveControllerQueueItsTurn(controller);
+    printf("[ok] Read Local Supported Commands advertises Set Event Mask Page 2\n");
+
+    uint8_t page2[sizeof(sdc_hci_cmd_cb_set_event_mask_page_2_t)] = {0};
+    g_SdcStub.LastCall = NULL;
+    const size_t page2Len = SendCommand(
+        controller, SDC_HCI_OPCODE_CMD_CB_SET_EVENT_MASK_PAGE_2,
+        page2, sizeof(page2), event, sizeof(event));
+    assert(page2Len == HCI_COMMAND_COMPLETE_BASE_SIZE);
+    assert(strcmp(g_SdcStub.LastCall,
+                  "sdc_hci_cmd_cb_set_event_mask_page_2") == 0);
+    GiveControllerQueueItsTurn(controller);
+    printf("[ok] Set Event Mask Page 2 reaches the SDC entry point\n");
+}
+
 int main(void)
 {
     HciSdc_t sdc;
@@ -232,6 +264,7 @@ int main(void)
     printf("[ok] LE Set CIG Parameters Test returns both CIS handles\n");
 
     TestAdvertisingSetRandomAddressGuard(controller);
+    TestEventMaskPage2(controller);
 
     printf("All critical SDC real-header dispatch tests passed.\n");
     return 0;

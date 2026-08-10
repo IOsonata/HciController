@@ -153,6 +153,17 @@ static HciCmdResult_t HciSdcCmdSetEventMask(void *,
     return HciSdcComplete(sdc_hci_cmd_cb_set_event_mask(&params), 0U);
 }
 
+static HciCmdResult_t HciSdcCmdSetEventMaskPage2(void *,
+                                                 const uint8_t *pParams,
+                                                 size_t,
+                                                 uint8_t *,
+                                                 size_t)
+{
+    sdc_hci_cmd_cb_set_event_mask_page_2_t params;
+    memcpy(params.raw, pParams, sizeof(params.raw));
+    return HciSdcComplete(sdc_hci_cmd_cb_set_event_mask_page_2(&params), 0U);
+}
+
 static HciCmdResult_t HciSdcCmdReset(void *pContext,
                                      const uint8_t *,
                                      size_t,
@@ -225,6 +236,7 @@ static HciCmdResult_t HciSdcCmdReadSupportedCommands(void *,
 
     supported.params.hci_set_event_mask = 1U;
     supported.params.hci_reset = 1U;
+    supported.params.hci_set_event_mask_page_2 = 1U;
     /*
      * The three controller to host flow control bits stay clear. The
      * controller refuses Host Buffer Size with 0x11 and no sdc_support call
@@ -1730,6 +1742,9 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
     HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_CB_SET_EVENT_MASK, 8U,
                     HciSdcCmdSetEventMask),
     HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_CB_RESET, 0U, HciSdcCmdReset),
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_CB_SET_EVENT_MASK_PAGE_2,
+                    sizeof(sdc_hci_cmd_cb_set_event_mask_page_2_t),
+                    HciSdcCmdSetEventMaskPage2),
     /*
      * Controller to host flow control is not here: not Set Controller To Host
      * Flow Control, not Host Buffer Size, not Host Number Of Completed
@@ -2327,6 +2342,7 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
 
 /* Command parameters. */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_cb_set_event_mask_t, 8U);                /* 7.3.1  */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_cb_set_event_mask_page_2_t, 8U);         /* 7.3.69 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_cb_set_controller_to_host_flow_control_t,
                  1U);                                                 /* 7.3.38 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_cb_host_buffer_size_t, 7U);              /* 7.3.39 */
