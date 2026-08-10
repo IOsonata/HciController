@@ -613,7 +613,7 @@ static HciCmdResult_t HciSdcCmdLeSetScanEnable(void *,
  * keep the mapping between an opcode and its SDC call in one line each. The
  * shapes are: parameters only, parameters with a return, no parameters, no
  * parameters with a return, and the variable length forms where the command
- * carries an array whose size comes from the packet.
+ * has an array whose size comes from the packet.
  */
 #define HCI_SDC_CMD_P(Name, SdcFunc, SdcType, Reply)                          \
     static HciCmdResult_t Name(void *,                                        \
@@ -932,7 +932,7 @@ HCI_SDC_CMD_PR(HciSdcCmdVsZephyrReadTxPower,
  * that, so passing the answer through would name commands the table has no row
  * for, and a host that reads the bitmap and then sends one gets Unknown HCI
  * Command back. The standard bitmap is built up bit by bit from what the table
- * carries and is checked against it in the tests; this one starts from SDC and
+ * declares and is checked against it in the tests; this one starts from SDC and
  * is masked down to the same set, which reaches the same place from the other
  * direction.
  *
@@ -1465,9 +1465,9 @@ HCI_SDC_CMD_PR(HciSdcCmdReadRssi, sdc_hci_cmd_sp_read_rssi,
 
 /*
  * Vol 4 Part E 7.8.115. How a host declares which optional features it
- * supports, and the gate the controller checks before it will negotiate
+ * supports, and what the controller checks before it will negotiate
  * subrating or a CIS. Zephyr sends it during initialisation, so without it a
- * host log carries an unexplained Unknown HCI Command.
+ * host log shows an unexplained Unknown HCI Command.
  */
 HCI_SDC_CMD_P(HciSdcCmdLeSetHostFeature, sdc_hci_cmd_le_set_host_feature,
               sdc_hci_cmd_le_set_host_feature_t, HciSdcComplete)
@@ -1622,7 +1622,7 @@ static HciCmdResult_t HciSdcCmdLeReadBufferSizeV2(void *pContext,
     if (status == HCI_STATUS_SUCCESS)
     {
         /*
-         * V2 carries the same ACL packet count as V1, followed by the ISO
+         * V2 reports the same ACL packet count as V1, followed by the ISO
          * buffer fields. A host that uses V2 is entitled to the same ACL flow
          * control enforcement as one that used V1.
          */
@@ -1789,7 +1789,8 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
      * Not because the function is missing. NCS calls the same one, through
      * sdc_hci_cmd_cb_host_buffer_size_wrapper in
      * subsys/bluetooth/controller/hci_internal_wrappers.c. What NCS also does
-     * is gate the whole feature, the bitmap bits and the dispatch rows alike,
+     * is condition the whole feature, the bitmap bits and the dispatch rows
+     * alike,
      * behind CONFIG_BT_HCI_ACL_FLOW_CONTROL, and the controller sample for
      * this exact board does not set it: samples/bluetooth/hci_lpuart with
      * boards/thingy91_nrf52840.conf. So the reference firmware for the
@@ -2219,7 +2220,7 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
     /*
      * Vendor specific. The return type ends in a flexible array, so sizeof()
      * on it is the count byte alone, which is exactly the minimum this command
-     * always carries and what an error is padded out to.
+     * always returns and what an error is padded out to.
      */
     HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_VS_ZEPHYR_READ_STATIC_ADDRESSES, 0U,
                      HciSdcCmdVsReadStaticAddresses,
@@ -2549,7 +2550,7 @@ static_assert(offsetof(sdc_hci_cmd_le_transmitter_test_v4_t,
                        antenna_ids_and_remaining_parameters) == 7U,
               "LE Transmitter Test v4 fixed part is not 7 octets");
 
-/* Return parameters, status excluded since the event carries it separately. */
+/* Return parameters, status excluded since the event reports it separately. */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_ip_read_local_version_information_return_t, 8U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_ip_read_local_supported_features_return_t, 8U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_ip_read_bd_addr_return_t, 6U);

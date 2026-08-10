@@ -481,7 +481,7 @@ class Controller:
                     print("   client: found CCCD at 0x%04X" % att_handle)
                     self.cccd_handle = att_handle
 
-            # A response carries one UUID format only, so keep walking.
+            # A response has one UUID format only, so keep walking.
             if self.cccd_handle is None and 0 < last < 0x0015:
                 self.att_send(handle, struct.pack("<BHH",
                                                   ATT_FIND_INFORMATION_REQ,

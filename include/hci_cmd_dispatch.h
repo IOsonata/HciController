@@ -36,7 +36,7 @@ extern "C" {
 #define HCI_CMD_VARIABLE_PARAM_LEN          0xFFFFU
 
 /*
- * An HCI event carries a single byte length, and Command Complete spends four
+ * An HCI event has a single byte length, and Command Complete spends four
  * of those on the header before the return parameters start.
  */
 #define HCI_CMD_MAX_RETURN_LEN              251U
@@ -140,7 +140,7 @@ typedef struct {
 /*
  * Queue the Command Complete for the No Operation opcode, which is how a
  * controller says it is ready to take commands. Vol 4 Part E 7.7.14 gives 0x0000
- * that meaning, and the event carries the command credit and the opcode and
+ * that meaning, and the event returns the command credit and the opcode and
  * nothing else: no status, no return parameters, so it is five octets where
  * every other Command Complete is at least six.
  *

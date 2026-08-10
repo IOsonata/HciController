@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "cfifo.h"
 #include "tusb.h"
 
 static unsigned gRhportInitCalls;
@@ -25,10 +26,15 @@ static unsigned gWakeCalls;
 static tusb_role_t gRhportRole[1];
 static unsigned gDcdHandlerCalls;
 
-static uint8_t gTxData[32];
-static size_t gTxLen;
-static size_t gTxPos;
-static unsigned gTxFifoReadCalls;
+/*
+ * Real IOsonata FIFOs, not fakes. hci_tinyusb.cpp asks the RX FIFO how much
+ * room it has, clamps its USB read to that, and counts a short write as a
+ * drop; a fake that always answered zero left every one of those lines
+ * unreachable. Byte FIFOs, so the block size is one.
+ */
+#define TEST_FIFO_BYTES 64U
+static uint8_t gRxFifoMem[CFIFO_MEMSIZE(TEST_FIFO_BYTES)];
+static uint8_t gTxFifoMem[CFIFO_MEMSIZE(TEST_FIFO_BYTES)];
 static uint8_t gUsbOut[64];
 static size_t gUsbOutLen;
 static uint32_t gWriteAvailable;
@@ -67,8 +73,23 @@ extern "C" void tud_task_ext(uint8_t rhport, bool)
 }
 extern "C" bool tud_mounted(void) { return gMounted; }
 extern "C" uint8_t tud_cdc_n_get_line_state(uint8_t) { return gLineState; }
-extern "C" uint32_t tud_cdc_n_available(uint8_t) { return 0U; }
-extern "C" uint32_t tud_cdc_n_read(uint8_t, void *, uint32_t) { return 0U; }
+/* What the host has queued for the device to read, and how far it has got. */
+static uint8_t gUsbIn[128];
+static size_t gUsbInLen;
+static size_t gUsbInPos;
+
+extern "C" uint32_t tud_cdc_n_available(uint8_t)
+{
+    return (uint32_t)(gUsbInLen - gUsbInPos);
+}
+extern "C" uint32_t tud_cdc_n_read(uint8_t, void *pData, uint32_t Len)
+{
+    uint32_t remaining = (uint32_t)(gUsbInLen - gUsbInPos);
+    uint32_t actual = Len < remaining ? Len : remaining;
+    memcpy(pData, &gUsbIn[gUsbInPos], actual);
+    gUsbInPos += actual;
+    return actual;
+}
 extern "C" uint32_t tud_cdc_n_write_available(uint8_t) { return gWriteAvailable; }
 extern "C" uint32_t tud_cdc_n_write(uint8_t, const void *pData, uint32_t Len)
 {
@@ -84,33 +105,8 @@ extern "C" uint32_t tud_cdc_n_write(uint8_t, const void *pData, uint32_t Len)
 }
 extern "C" uint32_t tud_cdc_n_write_flush(uint8_t) { return 0U; }
 
-static struct __CFifo gRxFifo;
-static struct __CFifo gTxFifo;
-
-extern "C" int CFifoAvail(hCFifo_t) { return 0; }
-extern "C" int CFifoUsed(hCFifo_t Fifo)
-{
-    if (Fifo != &gTxFifo)
-    {
-        return 0;
-    }
-    return (int)(gTxLen - gTxPos);
-}
-extern "C" int CFifoRead(hCFifo_t Fifo, uint8_t *pData, int Len)
-{
-    if (Fifo != &gTxFifo || Len <= 0)
-    {
-        return 0;
-    }
-
-    size_t remaining = gTxLen - gTxPos;
-    size_t count = (size_t)Len < remaining ? (size_t)Len : remaining;
-    memcpy(pData, &gTxData[gTxPos], count);
-    gTxPos += count;
-    gTxFifoReadCalls++;
-    return (int)count;
-}
-extern "C" int CFifoWrite(hCFifo_t, uint8_t *, int) { return 0; }
+static hCFifo_t gRxFifo;
+static hCFifo_t gTxFifo;
 
 static void Wake(void *) { gWakeCalls++; }
 
@@ -128,16 +124,19 @@ static void Reset(UsbdCdcDevIntrf_t *pIntrf)
     gWakeCalls = 0U;
     gDcdHandlerCalls = 0U;
     gRhportRole[0] = TUSB_ROLE_INVALID;
-    gTxLen = 0U;
-    gTxPos = 0U;
-    gTxFifoReadCalls = 0U;
     gUsbOutLen = 0U;
+    gUsbInLen = 0U;
+    gUsbInPos = 0U;
     gWriteAvailable = 64U;
     gWriteLimit = 64U;
 
+    gRxFifo = CFifoInit(gRxFifoMem, sizeof(gRxFifoMem), 1U, true);
+    gTxFifo = CFifoInit(gTxFifoMem, sizeof(gTxFifoMem), 1U, true);
+    assert(gRxFifo != nullptr && gTxFifo != nullptr);
+
     memset(pIntrf, 0, sizeof(*pIntrf));
-    pIntrf->hRxFifo = &gRxFifo;
-    pIntrf->hTxFifo = &gTxFifo;
+    pIntrf->hRxFifo = gRxFifo;
+    pIntrf->hTxFifo = gTxFifo;
 }
 
 int main(void)
@@ -192,14 +191,14 @@ int main(void)
     assert(HciTinyUsbInit(&usb, &intrf, 0U, Wake, nullptr));
     assert(HciTinyUsbStart(&usb));
 
-    const uint8_t packet[] = {0x11U, 0x22U, 0x33U, 0x44U, 0x55U, 0x66U, 0x77U};
-    memcpy(gTxData, packet, sizeof(packet));
-    gTxLen = sizeof(packet);
+    uint8_t packet[] = {0x11U, 0x22U, 0x33U, 0x44U, 0x55U, 0x66U, 0x77U};
+    assert(CFifoWrite(gTxFifo, packet, (int)sizeof(packet)) ==
+           (int)sizeof(packet));
     gWriteLimit = 2U;
 
     HciTinyUsbProcess(&usb);
-    assert(gTxPos == sizeof(packet));
-    assert(gTxFifoReadCalls == 1U);
+    /* The whole packet left the FIFO in one read even though USB took two. */
+    assert(CFifoUsed(gTxFifo) == 0);
     assert(gUsbOutLen == 2U);
     assert(usb.TxPendingLen == sizeof(packet));
     assert(usb.TxPendingOffset == 2U);
@@ -207,12 +206,53 @@ int main(void)
 
     gWriteLimit = 64U;
     HciTinyUsbProcess(&usb);
-    assert(gTxFifoReadCalls == 1U);
+    assert(CFifoUsed(gTxFifo) == 0);
     assert(gUsbOutLen == sizeof(packet));
     assert(memcmp(gUsbOut, packet, sizeof(packet)) == 0);
     assert(usb.TxPendingLen == 0U);
     assert(usb.TxPendingOffset == 0U);
     printf("[ok] short USB write preserves every byte across pumps\n");
+
+    /*
+     * Receive. The loop reads only as much as the RX FIFO will take, so a host
+     * sending more than the FIFO holds must leave the surplus in the USB
+     * endpoint rather than dropping it or overrunning. None of this was
+     * reachable while CFifoAvail was faked to zero.
+     */
+    Reset(&intrf);
+    memset(&usb, 0, sizeof(usb));
+    gLineState = 1U;
+    assert(HciTinyUsbInit(&usb, &intrf, 0U, Wake, nullptr));
+    assert(HciTinyUsbStart(&usb));
+
+    for (size_t i = 0U; i < sizeof(gUsbIn); i++)
+    {
+        gUsbIn[i] = (uint8_t)i;
+    }
+    gUsbInLen = sizeof(gUsbIn);
+
+    HciTinyUsbProcess(&usb);
+    assert(CFifoUsed(gRxFifo) == (int)TEST_FIFO_BYTES);
+    assert(CFifoAvail(gRxFifo) == 0);
+    assert(gUsbInPos == TEST_FIFO_BYTES);
+    assert(usb.RxDropCount == 0U);
+    assert(usb.ReadErrorCount == 0U);
+
+    uint8_t got[TEST_FIFO_BYTES];
+    assert(CFifoRead(gRxFifo, got, (int)sizeof(got)) == (int)sizeof(got));
+    assert(memcmp(got, gUsbIn, sizeof(got)) == 0);
+    printf("[ok] USB read is clamped to FIFO room, surplus stays queued\n");
+
+    /* Room again, so the pump takes the rest without losing its place. */
+    HciTinyUsbProcess(&usb);
+    assert(gUsbInPos == sizeof(gUsbIn));
+    assert(CFifoUsed(gRxFifo) == (int)(sizeof(gUsbIn) - TEST_FIFO_BYTES));
+    assert(usb.RxDropCount == 0U);
+
+    uint8_t rest[sizeof(gUsbIn) - TEST_FIFO_BYTES];
+    assert(CFifoRead(gRxFifo, rest, (int)sizeof(rest)) == (int)sizeof(rest));
+    assert(memcmp(rest, &gUsbIn[TEST_FIFO_BYTES], sizeof(rest)) == 0);
+    printf("[ok] the rest arrives on the next pump, in order\n");
 
     printf("All device stack bring up tests passed.\n");
     return 0;

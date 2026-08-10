@@ -1,9 +1,12 @@
 # Host tests for HciController.
 #
 # Everything here is compiled with the native C++ compiler. The target headers
-# that the firmware needs on device, nrf.h, MPSL, TinyUSB, TaktOS, IOsonata and
-# the SoftDevice Controller, are replaced by the fakes under stubs, so no SDK
+# that the firmware needs on device, nrf.h, MPSL, TinyUSB, TaktOS and the
+# SoftDevice Controller, are replaced by the fakes under stubs, so no SDK
 # checkout is needed for the default target.
+#
+# IOsonata is different: cfifo needs no hardware, so the real source is copied
+# into iosonata and built. Faking it made the FIFO paths untestable.
 #
 #   make -C tests run                  build and run everything available
 #   make -C tests run NRFXLIB_DIR=...  add the SDC dispatch test
@@ -23,16 +26,28 @@ SRC := $(ROOT)/src
 UNIT := $(THIS_DIR)/unit
 STUBS := $(THIS_DIR)/stubs
 
+# Real IOsonata sources, copied in rather than faked. cfifo depends on nothing
+# but the C library and the compiler atomics, so the host can build and run the
+# same code the target does. A fake here would have made the FIFO paths in
+# hci_tinyusb.cpp untestable, which is what it did before.
+IOSONATA := $(THIS_DIR)/iosonata
+
 CC ?= cc
 CXX ?= c++
 BUILD_DIR ?= $(THIS_DIR)/build
 
+# Built as C, with the C compiler, and linked in as an object. Compiling a .c
+# through the C++ driver is deprecated and would fail the -Werror build on
+# some toolchains.
+CFIFO_OBJ := $(BUILD_DIR)/iosonata/cfifo.o
+
 CXXFLAGS ?= -std=c++14 -O0 -g3 -Wall -Wextra -Werror -Wshadow -Wundef
+CFLAGS ?= -std=gnu11 -O0 -g3 -Wall -Wextra -Werror -Wshadow -Wundef
 
 # stubs/sdc holds the fake sdc.h. It comes first so it wins over a real
 # nrfxlib checkout that may also be on the path, and it is left out of the
 # dispatch test, which wants the real headers.
-MOCK_INCLUDES := -I$(STUBS)/sdc -I$(STUBS) -I$(ROOT)/include
+MOCK_INCLUDES := -I$(STUBS)/sdc -I$(STUBS) -I$(IOSONATA) -I$(ROOT)/include
 # CFG_TUSB_MCU is what the firmware build passes and what tusb_config.h refuses
 # to be included without. The stub tusb.h includes the real config so a test
 # sees the real function count rather than a copy of it that can drift.
@@ -64,7 +79,7 @@ hci_controller_SRC     := $(SRC)/hci_controller.cpp \
 hci_nrf52840_usb_SRC   := $(SRC)/hci_nrf52840.cpp \
                           $(SRC)/hci_sdc_resources.cpp
 hci_taktos_poll_SRC    := $(SRC)/hci_taktos.cpp
-hci_tinyusb_init_SRC   := $(SRC)/hci_tinyusb.cpp
+hci_tinyusb_init_SRC   := $(SRC)/hci_tinyusb.cpp $(CFIFO_OBJ)
 hci_syslog_SRC         :=
 
 # Every file that traces needs the sink that trace goes to, because a line
@@ -161,14 +176,19 @@ check-root:
 # nothing and the .d handling would be one more thing to get wrong.
 HEADERS := $(wildcard $(ROOT)/include/*.h) $(wildcard $(STUBS)/*.h) \
            $(wildcard $(STUBS)/sdc/*.h) $(wildcard $(STUBS)/sdclink/*.h) \
-           $(wildcard $(STUBS)/nrfficr/*.h)
+           $(wildcard $(STUBS)/nrfficr/*.h) $(wildcard $(IOSONATA)/*.h)
 
 .SECONDEXPANSION:
 $(BUILD_DIR)/%_test: $(UNIT)/%_test.cpp $$($$*_SRC) $(COMMON_SRC) $(HEADERS) \
                      | check-root
 	@mkdir -p $(dir $@)
 	$(CXX) $(MOCK_INCLUDES) $(MOCK_DEFINES) -DHCI_TRACE=0 $(CXXFLAGS) \
-	  $(filter %.cpp,$^) -o $@
+	  $(filter %.cpp %.o,$^) -o $@
+
+$(BUILD_DIR)/iosonata/%.o: $(IOSONATA)/%.c $(wildcard $(IOSONATA)/*.h) \
+                           | check-root
+	@mkdir -p $(dir $@)
+	$(CC) -I$(IOSONATA) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/trace/%.o: $(SRC)/%.cpp $(HEADERS) | check-root
 	@mkdir -p $(dir $@)
@@ -212,7 +232,7 @@ endif
 # is compiled by the target build and by nothing else, and the thing most
 # likely to be wrong in it, the declared configuration length against the
 # bytes that follow, is not an error until a host refuses to enumerate. The
-# file carries a _Static_assert for exactly that; this is what runs it.
+# file has a _Static_assert for exactly that; this is what runs it.
 #
 # Built when a TinyUSB checkout can be found and skipped otherwise, the same
 # way the SDC tests are.

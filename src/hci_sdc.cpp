@@ -74,10 +74,20 @@ static HciCmdResult_t HciSdcCompatReadSupportedStates(void *,
                                                        size_t ReturnCapacity)
 {
     /*
-     * Core 5.4 Vol 4 Part E 7.8.27. The configured multirole SDC supports
-     * advertising, scanning, initiating and connection state in both roles,
-     * including the simultaneous combinations defined by the legacy 42-bit LE
-     * States field. Bits 42..63 are reserved and remain zero.
+     * Core 5.4 Vol 4 Part E 7.8.27. States 0 to 41 set, 42 to 63 reserved and
+     * zero, on the reasoning that the multirole build does advertising,
+     * scanning, initiating and connections in either role, so every legacy
+     * combination is reachable.
+     *
+     * Unlike every other constant in this layer, that is a judgement about
+     * what SDC can do concurrently rather than a figure read from a
+     * specification section or measured from a structure. It has not been
+     * checked against the controller. The combinations most likely to be
+     * wrong are the ones needing two links at once in different roles, since
+     * those depend on the peripheral and central counts the resource
+     * configuration sets rather than on the radio. A conformance tester will
+     * act on this value, so it wants confirming on hardware, or narrowing to
+     * the combinations the configured link counts can actually satisfy.
      */
     static const uint8_t states[8] = {
         0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFFU, 0x03U, 0x00U, 0x00U
@@ -114,7 +124,9 @@ static const HciCmdEntry_t s_HciSdcCompatCommands[] = {
  * Read Local Supported Commands is supplied by nrfxlib, but the bit for the
  * compatibility command above must describe the complete HCI controller, not
  * merely the vendor library. Vol 4 Part E 6.27 assigns LE Read Supported
- * States to octet 28 bit 3.
+ * States to octet 28 bit 3, which is where nrfxlib's own
+ * hci_le_read_supported_states field lands, so the two agree about position
+ * even though only one of them can answer the command.
  */
 static void HciSdcPatchSupportedCommands(uint8_t *pEvent, size_t EventLen)
 {
@@ -148,6 +160,11 @@ bool HciSdcKnowsCommand(const HciSdc_t *pSdc,
  * ACL credit accounting.
  * ------------------------------------------------------------------------- */
 
+/*
+ * Remember a flow control credit owed back for an ACL packet the controller
+ * would not take. The connection handle is the low 12 bits of the first two
+ * octets of the ACL header, Vol 4 Part E 5.4.2.
+ */
 static void HciSdcOweCredit(HciSdc_t *pSdc, const uint8_t *pPacket)
 {
     const uint16_t handle = (uint16_t)(((uint16_t)pPacket[0] |
@@ -164,6 +181,11 @@ static void HciSdcOweCredit(HciSdc_t *pSdc, const uint8_t *pPacket)
 
     if (pSdc->CreditEntries >= HCI_SDC_CREDIT_HANDLES)
     {
+        /*
+         * More links owing credits than the table holds. Dropping the credit
+         * costs the host one buffer on that link, which is the same failure
+         * this function exists to avoid, so it is counted rather than hidden.
+         */
         pSdc->CreditOverflowCount++;
         return;
     }
@@ -173,6 +195,10 @@ static void HciSdcOweCredit(HciSdc_t *pSdc, const uint8_t *pPacket)
     pSdc->CreditEntries++;
 }
 
+/*
+ * Build the Number Of Completed Packets event for everything owed, Vol 4 Part
+ * E 7.7.19. One event covers every handle, so the table empties in one go.
+ */
 static bool HciSdcBuildCreditEvent(HciSdc_t *pSdc,
                                    uint8_t *pPacket,
                                    size_t PacketCapacity,
@@ -218,6 +244,17 @@ void HciSdcResetFlowControl(HciSdc_t *pSdc)
         return;
     }
 
+    /*
+     * Vol 4 Part E 7.3.2 puts the link layer in standby and drops every
+     * connection, and no event is reported for them, so no Disconnection
+     * Complete arrives to clear this the usual way. Left alone, a handle the
+     * controller hands out again after a reset inherits the old in flight
+     * count and is throttled, or stalled outright once it reads as full, for
+     * the life of the board.
+     *
+     * The credits owed go with it. Emitting them after a reset would name
+     * connection handles the same section has already made meaningless.
+     */
     pSdc->AclTrackEntries = 0U;
     pSdc->AclOutstandingTotal = 0U;
     pSdc->CreditEntries = 0U;
@@ -230,6 +267,7 @@ static uint16_t HciSdcHandleOf(const uint8_t *pPacket)
                        ((uint16_t)pPacket[1] << 8)) & 0x0FFFU);
 }
 
+/* Index of the link, or -1 when it is not tracked and cannot be. */
 static int HciSdcAclSlot(HciSdc_t *pSdc, uint16_t Handle, bool Create)
 {
     for (uint8_t i = 0U; i < pSdc->AclTrackEntries; i++)
@@ -257,6 +295,20 @@ static int HciSdcAclSlot(HciSdc_t *pSdc, uint16_t Handle, bool Create)
     return (int)(pSdc->AclTrackEntries - 1U);
 }
 
+/*
+ * Off by default, and HCI_SDC_ENFORCE_ACL_CREDITS in the header says why: the
+ * link lifetime this depends on comes from Disconnection Complete on the event
+ * stream, which a Host is allowed to mask. What follows is what the guard does
+ * when a build turns it on.
+ *
+ * True when the host already has as many packets in flight, across every link
+ * together, as it was told it could. Unknown limit answers false, and so does
+ * a link the table cannot hold, because a packet that will not be counted must
+ * not be refused either: this refuses only what it can prove is over.
+ *
+ * The slot is taken here rather than after the decision so that the answer and
+ * the counting agree about which links are tracked.
+ */
 #if HCI_SDC_ENFORCE_ACL_CREDITS
 static bool HciSdcAclAtLimit(HciSdc_t *pSdc, const uint8_t *pPacket)
 {
@@ -293,6 +345,7 @@ static void HciSdcAclForget(HciSdc_t *pSdc, uint16_t Handle)
         return;
     }
 
+    /* The link takes its share of the total with it. */
     if (pSdc->AclOutstandingTotal > pSdc->AclOutstanding[slot])
     {
         pSdc->AclOutstandingTotal =
@@ -309,6 +362,16 @@ static void HciSdcAclForget(HciSdc_t *pSdc, uint16_t Handle)
     pSdc->AclTrackEntries--;
 }
 
+/*
+ * Watches what goes out to the host for the two events that change how many
+ * packets a link has in flight. Number Of Completed Packets frees them, and a
+ * disconnection discards whatever the controller still held for that link
+ * without ever counting those back, so the entry goes with the link.
+ *
+ * The counting runs whether or not the guard above is compiled in: the figures
+ * are read back through the vendor counter block, and a disabled guard must
+ * still not leave stale ones behind.
+ */
 static void HciSdcAclTrackEvent(HciSdc_t *pSdc,
                                 const uint8_t *pEvent,
                                 size_t EventLen)
@@ -341,6 +404,11 @@ static void HciSdcAclTrackEvent(HciSdc_t *pSdc,
                 continue;
             }
 
+            /*
+             * Take off what the link actually had, not what the event claims,
+             * so a count larger than anything outstanding cannot drive the
+             * total below the sum of the other links.
+             */
             const uint16_t freed = pSdc->AclOutstanding[slot] < done
                                        ? pSdc->AclOutstanding[slot]
                                        : done;
@@ -355,6 +423,14 @@ static void HciSdcAclTrackEvent(HciSdc_t *pSdc,
 
     if (pEvent[0] == HCI_SDC_EVENT_DISCONNECTION_COMPLETE && EventLen >= 5U)
     {
+        /*
+         * Only a successful one. Vol 4 Part E 7.7.5 gives the status octet the
+         * meaning that a non zero value is a disconnection that did not
+         * happen, so the handle is still live and what is in flight on it is
+         * still in flight. Forgetting it there hands the host a fresh full
+         * allowance on top of the packets the controller has not returned yet,
+         * which is the overrun this tracking exists to refuse.
+         */
         if (pEvent[2] != HCI_STATUS_SUCCESS)
         {
             return;
@@ -383,10 +459,18 @@ static bool HciSdcPutPacket(void *pContext,
         case HCI_H4_PACKET_COMMAND:
         {
             /*
-             * There are two command dispatchers now, so the pending check is
-             * across both. Otherwise a vendor command could occupy one event
-             * slot while a compatibility command occupies the other, granting
-             * a second command credit the controller never intended to grant.
+             * Hold the next command until the controller queue has had the
+             * outgoing slot. Without this a host that keeps a command in
+             * flight, which it is entitled to do because every Command
+             * Complete hands back a credit, produces a fresh command event on
+             * every pass and sdc_hci_get is never reached. Refusing here is
+             * ordinary backpressure: the parser keeps the packet and offers it
+             * again next pass.
+             *
+             * There are two command dispatchers, so the pending check spans
+             * both. Otherwise a vendor command could occupy one event slot
+             * while a compatibility command occupies the other, granting a
+             * second command credit the controller never intended to grant.
              */
             if (pSdc->CommandEventLast ||
                 HciCmdDispatchEventPending(&pSdc->Commands) ||
@@ -538,6 +622,11 @@ static HciControllerGetResult_t HciSdcGetPacket(void *pContext,
     uint8_t sdcType = HCI_SDC_MSG_TYPE_NONE;
     int32_t result = pSdc->Ops.Get(pSdc->Ops.pContext, pPacket, &sdcType);
 
+    /*
+     * The controller queue has had its turn, even when it was empty or
+     * returned an error. A new command and a new synthetic credit event may
+     * now use their respective turns.
+     */
     pSdc->CommandEventLast = false;
     pSdc->CreditEventLast = false;
 

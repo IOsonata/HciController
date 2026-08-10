@@ -837,7 +837,7 @@ class AttServer:
                 continue
             entry = (self.u16(attr.handle) + self.u16(attr.group_end)
                      + attr.value)
-            # One response carries entries of a single length only.
+            # One response has entries of a single length only.
             if size is None:
                 size = len(entry)
             if len(entry) != size:

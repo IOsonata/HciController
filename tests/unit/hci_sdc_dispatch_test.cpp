@@ -279,7 +279,7 @@ static void ExpectRejectedStatus(const char *label, uint16_t opcode,
 }
 
 /*
- * A rejection on a Command Complete opcode still carries the full declared
+ * A rejection on a Command Complete opcode still returns the full declared
  * return parameter length, zero filled.
  */
 static void ExpectRejectedLen(const char *label, uint16_t opcode,
@@ -447,7 +447,7 @@ int main(void)
         0U);
 
     /*
-     * Channel survey carries a four octet interval after the enable byte, so
+     * Channel survey has a four octet interval after the enable byte, so
      * the enable byte on its own is the shape a host would send if it had
      * mistaken this command for the other two enables here. Refused rather
      * than passed on with four octets of whatever the last packet left.
@@ -565,10 +565,10 @@ int main(void)
         ExpectComplete("LE Set Periodic Adv Data, empty", 0x203F, zeros, head,
                        0U);
 
-        const uint8_t honest[] = {0x00U, 0x03U, 0x04U,
-                                  0xAAU, 0xBBU, 0xCCU, 0xDDU};
-        ExpectComplete("LE Set Periodic Adv Data, honest count", 0x203F,
-                       honest, sizeof(honest), 0U);
+        const uint8_t matching[] = {0x00U, 0x03U, 0x04U,
+                                    0xAAU, 0xBBU, 0xCCU, 0xDDU};
+        ExpectComplete("LE Set Periodic Adv Data, matching count", 0x203F,
+                       matching, sizeof(matching), 0U);
 
         const uint8_t lying[] = {0x00U, 0x03U, 0x08U, 0xAAU, 0xBBU};
         ExpectRejected("LE Set Periodic Adv Data, lying count", 0x203F, lying,
@@ -662,7 +662,7 @@ int main(void)
                            sdc_hci_cmd_le_set_periodic_adv_subevent_data_return_t));
 
         /*
-         * Handle, two entries. First carries three octets, second carries one,
+         * Handle, two entries. First has three octets, second has one,
          * so a fixed stride would get the second one wrong.
          */
         const uint8_t two[] = {0x00U, 0x02U,
@@ -819,7 +819,7 @@ int main(void)
                    0x01);
 
     /*
-     * Privacy and the resolving list. Add Device To Resolving List carries two
+     * Privacy and the resolving list. Add Device To Resolving List takes two
      * sixteen octet keys and is now the longest fixed length command the table
      * accepts, at 39, so it is the one that proves the parameter path is not
      * quietly bounded somewhere short of what the specification allows.
@@ -863,7 +863,7 @@ int main(void)
 
     {
         /*
-         * v3 carries an antenna switching pattern counted in bytes. Zero of
+         * v3 takes an antenna switching pattern counted in bytes. Zero of
          * them is the normal request on a part with no direction finding, and
          * is the fixed part on its own.
          */
@@ -962,7 +962,7 @@ int main(void)
                        advData, 8U, 0x12);
 
         advData[3] = 4U;     /* now the count agrees with what was sent */
-        ExpectComplete("LE Set Extended Adv Data, honest count", 0x2037,
+        ExpectComplete("LE Set Extended Adv Data, matching count", 0x2037,
                        advData, 8U, 0U);
 
         advData[3] = 3U;     /* one byte more sent than declared */
@@ -988,7 +988,7 @@ int main(void)
         const size_t setSize =
             sizeof(sdc_hci_le_set_ext_adv_enable_array_params_t);
         advEnable[1] = 1U;
-        ExpectComplete("LE Set Extended Adv Enable, honest count", 0x2039,
+        ExpectComplete("LE Set Extended Adv Enable, matching count", 0x2039,
                        advEnable,
                        offsetof(sdc_hci_cmd_le_set_ext_adv_enable_t,
                                 array_params) + setSize, 0U);
@@ -1059,7 +1059,7 @@ int main(void)
                       sizeof(sdc_hci_cmd_le_read_channel_map_return_t));
     ExpectRejectedLen("LE Read PHY, wrong length", 0x2030, zeros, 1U, 0x12,
                       sizeof(sdc_hci_cmd_le_read_phy_return_t));
-    ExpectRejectedLen("LE Encrypt, wrong length carries return", 0x2017, zeros,
+    ExpectRejectedLen("LE Encrypt, wrong length keeps return", 0x2017, zeros,
                       3U, 0x12, sizeof(sdc_hci_cmd_le_encrypt_return_t));
 
     /* The same applies when the controller itself refuses the command. */
@@ -1093,7 +1093,7 @@ int main(void)
      * Table self consistency. Every fixed length entry declares a response
      * kind and a return parameter length, and both are checked against what
      * the dispatcher actually emits, once on a success and once on a
-     * rejection. This is what keeps the declared values honest across all
+     * rejection. This is what keeps the declared values right across all
      * entries rather than the handful named individually above.
      */
     {
@@ -1119,7 +1119,7 @@ int main(void)
                 EVENT_COMMAND_STATUS : EVENT_COMMAND_COMPLETE;
 
             /*
-             * One command carries a variable tail, so its declared length is
+             * One command has a variable tail, so its declared length is
              * the minimum rather than the whole answer. Every other entry
              * emits exactly what it declares.
              */
@@ -1225,7 +1225,7 @@ int main(void)
             /*
              * Vendor specific. Vol 4 Part E 6.27 covers the opcodes the
              * specification assigns and has no bit for anything in the 0x3F
-             * opcode group, so this row carries no bit either.
+             * opcode group, so this row has no bit either.
              */
             {SDC_HCI_OPCODE_CMD_VS_ZEPHYR_READ_STATIC_ADDRESSES, NULL,
              "vs_zephyr_read_static_addresses"},

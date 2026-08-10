@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Focused no-peer CIS capability check for HciController.
 
-This is the first hardware gate for connected isochronous streams. It does not
+This is the first hardware check for connected isochronous streams. It does not
 try to establish a CIS over the air; that needs a second controller. It checks
 the two local facts that must agree before that test is worth doing:
 
@@ -127,7 +127,7 @@ def main():
         print()
         if ok:
             print("PASS: local CIS Host Support and one-CIS CIG creation agree.")
-            print("Next gate: establish that CIS with a real peer and move ISO data.")
+            print("Next step: establish that CIS with a real peer and move ISO data.")
             return 0
 
         print("FAIL: the controller's local CIS capabilities are inconsistent.")

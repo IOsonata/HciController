@@ -52,7 +52,7 @@ extern "C" {
  * The last two are not counters. They are the two numbers that decide whether
  * the controller starts at all, and they are here for the reason the rest of
  * this readout exists: a sealed dongle has no console, so the trace that
- * carries them on a development board reaches nobody on a shipped one.
+ * shows them on a development board reaches nobody on a shipped one.
  *
  * The pool is computed from the configuration in hci_nrf52840.h, but the
  * figure that actually decides is the one sdc_cfg_set answers at run time, and

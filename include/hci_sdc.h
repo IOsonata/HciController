@@ -215,7 +215,7 @@ typedef struct {
 } HciSdc_t;
 
 /*
- * The buffer count the controller answers with. The backend records what SDC
+ * The buffer count the controller answers with. This records what SDC
  * actually reported rather than what the build configured, so the two cannot
  * drift.
  */

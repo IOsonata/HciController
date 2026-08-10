@@ -22,7 +22,7 @@
 #include "hci_sdc_expected_resources.h"
 
 /*
- * The fake sdc.h this file builds against carries hand written copies of the
+ * The fake sdc.h this file builds against has hand written copies of the
  * vendor SDC_MEM_ macros. hci_sdc_resources_test measures the real ones
  * against the same expectations, so a copy that drifts from the vendor header
  * fails here while the real one still passes, and the pair says which moved.

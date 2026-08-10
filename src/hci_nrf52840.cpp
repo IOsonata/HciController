@@ -476,7 +476,7 @@ static void HciNrf52840SdcAssert(const char *file, uint32_t line)
 /*
  * The entropy source SDC uses for pairing and for resolvable addresses.
  *
- * sdc_soc.h states the contract without an escape: "This function must block
+ * sdc_soc.h states the requirement without an escape: "This function must block
  * until length bytes of random numbers were written to p_buff", and the source
  * "must conform to Core Spec Vol 2, Part H, Section 2". The signature returns
  * void because failure is not a permitted outcome. Handing back zeros would
