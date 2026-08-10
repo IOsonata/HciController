@@ -15,6 +15,27 @@ uint8_t sdc_hci_cmd_cb_set_event_mask_page_2(
     return g_SdcStub.NextStatus;
 }
 
+uint8_t sdc_hci_cmd_cb_read_conn_accept_timeout(
+    sdc_hci_cmd_cb_read_conn_accept_timeout_return_t *pReturn)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_cb_read_conn_accept_timeout";
+    g_SdcStub.Calls++;
+    if (pReturn != NULL)
+    {
+        memset(pReturn, 0x5A, sizeof(*pReturn));
+    }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_cb_write_conn_accept_timeout(
+    const sdc_hci_cmd_cb_write_conn_accept_timeout_t *pParams)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_cb_write_conn_accept_timeout";
+    g_SdcStub.Calls++;
+    (void)pParams;
+    return g_SdcStub.NextStatus;
+}
+
 uint8_t sdc_hci_cmd_le_read_all_local_supported_features(
     sdc_hci_cmd_le_read_all_local_supported_features_return_t *pReturn)
 {

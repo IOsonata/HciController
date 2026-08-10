@@ -12,6 +12,11 @@
 
 #include <string.h>
 
+#include "sdc_hci_cmd_controller_baseband.h"
+
+#define HCI_SDC_COMPAT_OPCODE_READ_CONN_ACCEPT_TIMEOUT  0x0C15U
+#define HCI_SDC_COMPAT_OPCODE_WRITE_CONN_ACCEPT_TIMEOUT 0x0C16U
+
 static uint16_t HciSdcReadLe16(const uint8_t *pData)
 {
     return (uint16_t)pData[0] | ((uint16_t)pData[1] << 8);
@@ -67,6 +72,55 @@ static bool HciSdcPacketLength(HciH4PacketType_t Type,
  * Core HCI compatibility commands not exported by the vendor controller.
  * ------------------------------------------------------------------------- */
 
+static HciCmdResult_t HciSdcCompatReadConnAcceptTimeout(void *,
+                                                         const uint8_t *,
+                                                         size_t,
+                                                         uint8_t *pReturn,
+                                                         size_t ReturnCapacity)
+{
+    sdc_hci_cmd_cb_read_conn_accept_timeout_return_t value;
+
+    if (ReturnCapacity < sizeof(value))
+    {
+        HciCmdResult_t error = {
+            HCI_STATUS_MEMORY_CAPACITY_EXCEEDED,
+            HCI_CMD_RESPONSE_COMPLETE,
+            0U,
+        };
+        return error;
+    }
+
+    const uint8_t status = sdc_hci_cmd_cb_read_conn_accept_timeout(&value);
+    if (status == HCI_STATUS_SUCCESS)
+    {
+        memcpy(pReturn, &value, sizeof(value));
+    }
+
+    HciCmdResult_t result = {
+        status,
+        HCI_CMD_RESPONSE_COMPLETE,
+        status == HCI_STATUS_SUCCESS ? sizeof(value) : 0U,
+    };
+    return result;
+}
+
+static HciCmdResult_t HciSdcCompatWriteConnAcceptTimeout(void *,
+                                                          const uint8_t *pParams,
+                                                          size_t,
+                                                          uint8_t *,
+                                                          size_t)
+{
+    sdc_hci_cmd_cb_write_conn_accept_timeout_t value;
+    memcpy(&value, pParams, sizeof(value));
+
+    HciCmdResult_t result = {
+        sdc_hci_cmd_cb_write_conn_accept_timeout(&value),
+        HCI_CMD_RESPONSE_COMPLETE,
+        0U,
+    };
+    return result;
+}
+
 static HciCmdResult_t HciSdcCompatReadSupportedStates(void *,
                                                        const uint8_t *,
                                                        size_t,
@@ -113,6 +167,16 @@ static HciCmdResult_t HciSdcCompatReadSupportedStates(void *,
 }
 
 static const HciCmdEntry_t s_HciSdcCompatCommands[] = {
+    {HCI_SDC_COMPAT_OPCODE_READ_CONN_ACCEPT_TIMEOUT,
+     0U,
+     2U,
+     HCI_CMD_RESPONSE_COMPLETE,
+     HciSdcCompatReadConnAcceptTimeout},
+    {HCI_SDC_COMPAT_OPCODE_WRITE_CONN_ACCEPT_TIMEOUT,
+     2U,
+     0U,
+     HCI_CMD_RESPONSE_COMPLETE,
+     HciSdcCompatWriteConnAcceptTimeout},
     {HCI_SDC_COMPAT_OPCODE_LE_READ_SUPPORTED_STATES,
      0U,
      8U,
@@ -121,26 +185,27 @@ static const HciCmdEntry_t s_HciSdcCompatCommands[] = {
 };
 
 /*
- * Read Local Supported Commands is supplied by nrfxlib, but the bit for the
- * compatibility command above must describe the complete HCI controller, not
- * merely the vendor library. Vol 4 Part E 6.27 assigns LE Read Supported
- * States to octet 28 bit 3, which is where nrfxlib's own
- * hci_le_read_supported_states field lands, so the two agree about position
- * even though only one of them can answer the command.
+ * Read Local Supported Commands is supplied by nrfxlib, but compatibility
+ * commands must describe the complete HCI controller, not merely the vendor
+ * library. Core 5.4 Vol 4 Part E 6.27 assigns Read/Write Connection Accept
+ * Timeout to octet 7 bits 2 and 3, and LE Read Supported States to octet 28
+ * bit 3.
  */
 static void HciSdcPatchSupportedCommands(uint8_t *pEvent, size_t EventLen)
 {
     const uint16_t readSupportedCommands = 0x1002U;
-    const size_t supportedByte = HCI_COMMAND_COMPLETE_BASE_SIZE + 28U;
+    const size_t timeoutByte = HCI_COMMAND_COMPLETE_BASE_SIZE + 7U;
+    const size_t statesByte = HCI_COMMAND_COMPLETE_BASE_SIZE + 28U;
 
-    if (EventLen <= supportedByte || pEvent[0] != HCI_EVENT_COMMAND_COMPLETE ||
+    if (EventLen <= statesByte || pEvent[0] != HCI_EVENT_COMMAND_COMPLETE ||
         HciSdcReadLe16(&pEvent[3]) != readSupportedCommands ||
         pEvent[5] != HCI_STATUS_SUCCESS)
     {
         return;
     }
 
-    pEvent[supportedByte] |= (1U << 3);
+    pEvent[timeoutByte] |= (uint8_t)((1U << 2) | (1U << 3));
+    pEvent[statesByte] |= (1U << 3);
 }
 
 bool HciSdcKnowsCommand(const HciSdc_t *pSdc,
@@ -483,7 +548,9 @@ static bool HciSdcPutPacket(void *pContext,
             if (PacketLen >= HCI_DISPATCH_COMMAND_HEADER_SIZE)
             {
                 const uint16_t opcode = HciSdcReadLe16(pPacket);
-                if (opcode == HCI_SDC_COMPAT_OPCODE_LE_READ_SUPPORTED_STATES)
+                if (opcode == HCI_SDC_COMPAT_OPCODE_READ_CONN_ACCEPT_TIMEOUT ||
+                    opcode == HCI_SDC_COMPAT_OPCODE_WRITE_CONN_ACCEPT_TIMEOUT ||
+                    opcode == HCI_SDC_COMPAT_OPCODE_LE_READ_SUPPORTED_STATES)
                 {
                     return HciCmdDispatchPut(&pSdc->CompatCommands,
                                              pPacket, PacketLen);
