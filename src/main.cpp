@@ -207,12 +207,19 @@ int main(void)
         HciFatal();
     }
 
+    /*
+     * Mark the runtime as owning a thread before the kernel can schedule it.
+     * A stop in the interval between task creation and the task's first
+     * instruction must wait rather than tear SDC/MPSL down under that task.
+     */
+    HciTaktOsThreadArm(&s_HciApp.Runtime);
     if (TaktOSThreadCreate(s_HciThreadMem,
                            sizeof(s_HciThreadMem),
                            HciAppThread,
                            &s_HciApp,
                            TAKTOS_PRIORITY_HIGHEST) == nullptr)
     {
+        HciTaktOsThreadDisarm(&s_HciApp.Runtime);
         HciTrace("fatal: hci thread create\r\n");
         HciFatal();
     }

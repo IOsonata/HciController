@@ -29,6 +29,14 @@ extern "C" {
 
 #define HCI_SDC_RETRY_ERROR     (-11)
 
+/*
+ * nrfxlib's multirole SDC does not export an entry point for this mandatory LE
+ * Controller command. The generic HCI layer supplies it instead, so the normal
+ * dispatcher and the early-UART suspect filter both have to know the opcode.
+ */
+#define HCI_SDC_COMPAT_OPCODE_LE_READ_SUPPORTED_STATES 0x201CU
+#define HCI_SDC_COMPAT_EVENT_SIZE                      14U
+
 typedef int32_t (*HciSdcDataPut_t)(void *pContext, const uint8_t *pPacket);
 typedef int32_t (*HciSdcGet_t)(void *pContext, uint8_t *pPacket, uint8_t *pType);
 typedef void (*HciSdcProcess_t)(void *pContext);
@@ -100,14 +108,29 @@ typedef struct {
  * the connection. Refusing here loses the same packet and hands the buffer
  * back, and counts it, which a host can at least see.
  *
- * Set to 0 to keep the counter and let the packets through to SDC.
+ * The guard used to be on by default. That is unsafe without an internal,
+ * unmasked link-termination signal: the bookkeeping removes a link when it
+ * observes Disconnection Complete on the HCI event stream, and the Host is
+ * allowed to mask that event. A masked disconnection can therefore leave a
+ * stale outstanding count attached to a handle that is later reused. Keep the
+ * guard available for controlled tests, but leave it off until link lifetime
+ * comes from an unmaskable controller indication.
  */
 #ifndef HCI_SDC_ENFORCE_ACL_CREDITS
-#define HCI_SDC_ENFORCE_ACL_CREDITS 1
+#define HCI_SDC_ENFORCE_ACL_CREDITS 0
 #endif
 
 typedef struct {
     HciCmdDispatch_t Commands;
+
+    /*
+     * Core-required HCI behavior which is not an nrfxlib entry point. Kept in
+     * a separate dispatcher so the vendor table remains an exact statement of
+     * which vendor symbols actually exist.
+     */
+    HciCmdDispatch_t CompatCommands;
+    uint8_t CompatEvent[HCI_SDC_COMPAT_EVENT_SIZE];
+
     HciSdcOps_t Ops;
     HciControllerOps_t ControllerOps;
 
@@ -213,6 +236,11 @@ bool HciSdcInit(HciSdc_t *pSdc,
                 void *pCommandContext,
                 uint8_t *pCommandEvent,
                 size_t CommandEventCapacity);
+
+/* Includes both the vendor table and the generic Core compatibility commands. */
+bool HciSdcKnowsCommand(const HciSdc_t *pSdc,
+                        uint16_t Opcode,
+                        size_t ParamLen);
 
 const HciControllerOps_t *HciSdcGetControllerOps(HciSdc_t *pSdc);
 

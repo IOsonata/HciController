@@ -93,6 +93,9 @@
 #define HCI_NRF52840_USB_STORM_LIMIT 2000U
 #endif
 
+/* A nonzero latch even when the peripheral exposes no individual event bit. */
+#define HCI_NRF52840_USB_STORM_UNKNOWN 0x80000000UL
+
 /*
  * Attempts allowed when proving the entropy source at start up. This bounds a
  * start up check, not the SDC callback, which must block per sdc_soc.h.
@@ -109,6 +112,8 @@
 #define HCI_NRF52840_ERR_NO_VBUS            (-1004)
 /* The entropy source SDC requires is absent or produces nothing. */
 #define HCI_NRF52840_ERR_NO_ENTROPY         (-1005)
+/* An interrupt source re-asserted faster than the runtime could consume it. */
+#define HCI_NRF52840_ERR_USB_STORM          (-1006)
 
 /*
  * The crystal check the TinyUSB nRF5x port spins on. MPSL reporting the clock
@@ -306,6 +311,35 @@ static bool HciNrf52840HfclkStart(HciNrf52840_t *pTarget)
 }
 
 /*
+ * Finish shutting down a USB port that the ISR already contained. Clock
+ * ownership belongs to MPSL and is therefore unwound from thread context, not
+ * from USBD_IRQHandler.
+ */
+static void HciNrf52840UsbAbort(HciNrf52840_t *pTarget, int32_t Error)
+{
+    NVIC_DisableIRQ(USBD_IRQn);
+    NRF_USBD->INTEN = 0U;
+    NRF_USBD->USBPULLUP = 0U;
+    NRF_USBD->ENABLE = 0U;
+    __ISB();
+    __DSB();
+
+    NRF_POWER->INTENCLR = HCI_NRF52840_USB_INT_MASK;
+
+    if (pTarget->HfclkRequested)
+    {
+        (void)HciNrf52840HfclkRelease();
+        pTarget->HfclkRequested = false;
+    }
+
+    pTarget->UsbStarted = false;
+    pTarget->UsbReadyDone = false;
+    pTarget->UsbAttachPending = false;
+    pTarget->UsbDetachPending = false;
+    pTarget->LastError = Error;
+}
+
+/*
  * Record the cable event and leave. dcd_connect and dcd_disconnect must not
  * run from here.
  *
@@ -358,7 +392,23 @@ static void HciNrf52840UsbPowerIrq(void)
  */
 void HciNrf52840UsbPowerProcess(HciNrf52840_t *pTarget)
 {
-    if (pTarget == nullptr || !pTarget->UsbReadyDone)
+    if (pTarget == nullptr)
+    {
+        return;
+    }
+
+    /*
+     * A storm was already made harmless in the ISR by taking the pull-up and
+     * interrupt away. Complete the shutdown here so the MPSL-owned crystal is
+     * released and the failed port cannot be mistaken for a usable one.
+     */
+    if (pTarget->UsbStormEvents != 0U)
+    {
+        HciNrf52840UsbAbort(pTarget, HCI_NRF52840_ERR_USB_STORM);
+        return;
+    }
+
+    if (!pTarget->UsbReadyDone)
     {
         return;
     }
@@ -649,10 +699,12 @@ static void HciNrf52840ProcessMpsl(void *pContext)
 
     /*
      * POWER and CLOCK are one peripheral and MPSL owns it, so it can drop the
-     * USB bits from the shared enable register. Put them back each pass.
+     * USB bits from the shared enable register. Put them back each pass, unless
+     * a storm deliberately quenched the port.
      */
     HciNrf52840_t *pTarget = static_cast<HciNrf52840_t *>(pContext);
-    if (pTarget != nullptr && pTarget->UsbStarted)
+    if (pTarget != nullptr && pTarget->UsbStarted &&
+        pTarget->UsbStormEvents == 0U)
     {
         NRF_POWER->INTENSET = HCI_NRF52840_USB_INT_MASK;
     }
@@ -714,6 +766,17 @@ bool HciNrf52840UsbStart(HciNrf52840_t *pTarget)
     if (pTarget == nullptr || pTarget != s_pTarget || !pTarget->UsbEnabled ||
         !pTarget->MpslInitialized)
     {
+        return false;
+    }
+
+    /*
+     * A storm is latched until target reinitialization. Re-enabling the same
+     * peripheral immediately would reproduce the interrupt starvation before
+     * the runtime had a chance to report or contain anything.
+     */
+    if (pTarget->UsbStormEvents != 0U)
+    {
+        pTarget->LastError = HCI_NRF52840_ERR_USB_STORM;
         return false;
     }
 
@@ -1046,8 +1109,10 @@ extern "C" void USBD_IRQHandler(void)
 
         /*
          * Too many entries inside one pump pass means an event is re-asserting
-         * faster than it is being consumed. Record what is pending once, so
-         * the offending source can be named instead of guessed at.
+         * faster than it is being consumed. Capture what is pending, then
+         * contain the source immediately. Logging a storm while leaving a
+         * level-sensitive source enabled only guarantees this handler keeps
+         * starving the thread that was supposed to report it.
          */
         if (s_pTarget->UsbStormEvents == 0U &&
             (s_pTarget->UsbIrqCount - s_pTarget->UsbIrqMark) >
@@ -1055,7 +1120,25 @@ extern "C" void USBD_IRQHandler(void)
         {
             s_pTarget->UsbStormInten = NRF_USBD->INTEN;
             s_pTarget->UsbStormCause = NRF_USBD->EVENTCAUSE;
-            s_pTarget->UsbStormEvents = HciNrf52840UsbdPendingEvents();
+            uint32_t pending = HciNrf52840UsbdPendingEvents();
+            s_pTarget->UsbStormEvents = pending != 0U ? pending :
+                                        HCI_NRF52840_USB_STORM_UNKNOWN;
+            s_pTarget->LastError = HCI_NRF52840_ERR_USB_STORM;
+
+            NRF_USBD->INTEN = 0U;
+            NRF_USBD->USBPULLUP = 0U;
+            NRF_POWER->INTENCLR = HCI_NRF52840_USB_INT_MASK;
+            NVIC_DisableIRQ(USBD_IRQn);
+            s_pTarget->UsbStarted = false;
+            s_pTarget->UsbReadyDone = false;
+            __ISB();
+            __DSB();
+
+            if (s_pTarget->pRuntime != nullptr)
+            {
+                HciTaktOsWake(s_pTarget->pRuntime, HCI_TAKTOS_EVENT_HOST);
+            }
+            return;
         }
 
         /*

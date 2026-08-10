@@ -35,6 +35,15 @@ typedef struct {
     volatile bool LineStatePending;
     volatile bool RequestedOpen;
 
+    /*
+     * A FIFO read is destructive, while tud_cdc_n_write is allowed to accept
+     * fewer octets than requested. Keep the unread tail here until the device
+     * stack accepts it, otherwise one short write removes bytes from the H:4
+     * stream permanently and every packet after it is misframed.
+     */
+    size_t TxPendingOffset;
+    size_t TxPendingLen;
+
     uint32_t TaskCount;
     uint32_t RxDropCount;
     uint32_t ReadErrorCount;
@@ -70,6 +79,11 @@ bool HciTinyUsbInit(HciTinyUsb_t *pUsb,
                     HciTinyUsbWake_t Wake,
                     void *pWakeContext);
 
+/*
+ * Idempotent for the same object. The device stack is initialized before the
+ * part-specific USB hardware is started, so a target failure must be retryable
+ * without trying to initialize TinyUSB a second time.
+ */
 bool HciTinyUsbStart(HciTinyUsb_t *pUsb);
 void HciTinyUsbProcess(HciTinyUsb_t *pUsb);
 bool HciTinyUsbIsOpen(const HciTinyUsb_t *pUsb);

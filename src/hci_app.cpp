@@ -381,7 +381,7 @@ static bool HciAppSuspectFilter(void *pContext,
 
     const uint16_t opcode = (uint16_t)pPacket[0] | ((uint16_t)pPacket[1] << 8);
 
-    return HciCmdDispatchKnows(&pApp->Sdc.Commands, opcode, pPacket[2]);
+    return HciSdcKnowsCommand(&pApp->Sdc, opcode, pPacket[2]);
 }
 
 static void HciAppSetHostOpen(HciApp_t *pApp, bool Open)
@@ -484,6 +484,19 @@ static bool HciAppHostStart(void *pContext)
             }
 
             pApp->Target.pOps->UsbPowerProcess(pApp->Target.pContext);
+
+            /*
+             * A storm is not a slow enumeration. The target has already
+             * contained the interrupt source; report startup failure so the
+             * runtime does not mark a dead USB path as successfully started.
+             */
+            if (HciTargetUsbStuck(&pApp->Target))
+            {
+                HciTargetUsbTrace(&pApp->Target, "storm", pass + 1U);
+                HciAppSetHostOpen(pApp, false);
+                return false;
+            }
+
             pApp->Target.pOps->UsbPassMark(pApp->Target.pContext);
             HciTinyUsbProcess(&pApp->Usb);
 
@@ -496,17 +509,6 @@ static bool HciAppHostStart(void *pContext)
             if (pApp->Runtime.StopRequested)
             {
                 HciTrace("host: settle abandoned, stop requested\r\n");
-                break;
-            }
-
-            /*
-             * The port says whether the peripheral has reached a state the
-             * remaining passes cannot change, and prints what it saw. Which
-             * registers those are is not something this layer knows.
-             */
-            if (HciTargetUsbStuck(&pApp->Target))
-            {
-                HciTargetUsbTrace(&pApp->Target, "storm", pass + 1U);
                 break;
             }
 
@@ -973,6 +975,22 @@ static void HciAppHostProcess(void *pContext)
          */
         pApp->Target.pOps->UsbPowerProcess(pApp->Target.pContext);
 
+        /*
+         * A latched USBD storm has already been contained by the target. Do
+         * not call into TinyUSB against disabled hardware; return the runtime
+         * to its host-start state instead.
+         */
+        if (HciTargetUsbStuck(&pApp->Target))
+        {
+            HciTargetUsbTrace(&pApp->Target, "runtime storm", 0U);
+            if (pApp->HostType == HCI_APP_HOST_USB)
+            {
+                HciAppSetHostOpen(pApp, false);
+            }
+            HciTaktOsHostDown(&pApp->Runtime);
+            return;
+        }
+
         HciTinyUsbProcess(&pApp->Usb);
 
         /*
@@ -1006,9 +1024,14 @@ bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType, HciTarget_t Target)
         return false;
     }
 
+    /*
+     * A live application owns the singleton even when the caller presents the
+     * same address again. This is what prevents a stop timeout from being
+     * followed by memset() of storage a still-running runtime thread uses.
+     */
     if (pApp == nullptr ||
         (HostType != HCI_APP_HOST_UART && HostType != HCI_APP_HOST_USB) ||
-        (s_pApp != nullptr && s_pApp != pApp))
+        s_pApp != nullptr)
     {
         return false;
     }
@@ -1180,9 +1203,13 @@ void HciAppStop(HciApp_t *pApp)
      */
     if (!HciTaktOsWaitStopped(&pApp->Runtime, HCI_APP_STOP_TIMEOUT_MS))
     {
-        HciTrace("stop: runtime still running, target left up\r\n");
-        pApp->Initialized = false;
-        s_pApp = nullptr;
+        /*
+         * Keep ownership as well as the target. The runtime may still
+         * dereference this HciApp_t, so clearing Initialized/s_pApp would allow
+         * a later HciAppInit to memset live storage underneath it.
+         */
+        HciTrace("stop: runtime still running, target and app left owned\r\n");
+        pApp->LastError = -6;
         return;
     }
 
