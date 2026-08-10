@@ -208,6 +208,13 @@ def wait_acl_pair(central, peripheral, timeout=10.0):
                     % (label, status_text(status))
                 )
 
+            expected_role = 0 if label == "central" else 1
+            if role != expected_role:
+                raise HciError(
+                    "%s ACL connection reported role %u, expected %u"
+                    % (label, role, expected_role)
+                )
+
             handles[label] = handle
             print(
                 "%-10s ACL 0x%04X role=%s peer=%s interval=%.2f ms"
@@ -248,8 +255,13 @@ def parse_cig_return(data):
 
 def create_cig(central):
     row = hci_commands.BY_OPCODE[OP_LE_SET_CIG_PARAMS]
+    payload = row.build(None)
+    if len(payload) < 16 or payload[14] != 1:
+        raise HciError("CIG test row does not describe exactly one CIS")
+    expected_cis_id = payload[15]
+
     status, data = central.command(
-        OP_LE_SET_CIG_PARAMS, row.build(None), allow_fail=True
+        OP_LE_SET_CIG_PARAMS, payload, allow_fail=True
     )
     if status != 0:
         raise HciError("LE Set CIG Parameters returned %s"
@@ -261,10 +273,11 @@ def create_cig(central):
 
     print("CIG 0x%02X reserved central CIS 0x%04X"
           % (cig_id, handles[0]))
-    return cig_id, handles[0]
+    return cig_id, handles[0], expected_cis_id
 
 
-def wait_cis_request(peripheral, expected_acl, timeout=5.0):
+def wait_cis_request(peripheral, expected_acl, expected_cig, expected_cis_id,
+                     timeout=5.0):
     deadline = time.time() + timeout
 
     while time.time() < deadline:
@@ -286,9 +299,17 @@ def wait_cis_request(peripheral, expected_acl, timeout=5.0):
         if acl != expected_acl:
             continue
 
+        cig = body[5]
+        cis_id = body[6]
+        if cig != expected_cig or cis_id != expected_cis_id:
+            raise HciError(
+                "CIS Request reported CIG %u CIS_ID %u, expected %u/%u"
+                % (cig, cis_id, expected_cig, expected_cis_id)
+            )
+
         print(
             "Peripheral CIS Request: ACL 0x%04X CIS 0x%04X CIG %u CIS_ID %u"
-            % (acl, cis, body[5], body[6])
+            % (acl, cis, cig, cis_id)
         )
         return cis
 
@@ -439,7 +460,13 @@ def wait_iso(hci, label, expected_cis, expected_sdu, timeout=5.0):
             if iso["sdu_len"] != len(expected_sdu):
                 continue
 
-            if iso["fragment"][:len(expected_sdu)] != expected_sdu:
+            if len(iso["fragment"]) != iso["sdu_len"]:
+                raise HciError(
+                    "%s HCI ISO fragment has %d bytes for declared SDU length %d"
+                    % (label, len(iso["fragment"]), iso["sdu_len"])
+                )
+
+            if iso["fragment"] != expected_sdu:
                 continue
 
             print(
@@ -607,7 +634,7 @@ def main():
         )
         central_acl, peripheral_acl = wait_acl_pair(central, peripheral)
 
-        cig_id, central_cis = create_cig(central)
+        cig_id, central_cis, cis_id = create_cig(central)
 
         status, _ = central.command(
             OP_LE_CREATE_CIS,
@@ -618,7 +645,9 @@ def main():
             raise HciError("LE Create CIS returned %s" % status_text(status))
         print("Central LE Create CIS accepted")
 
-        peripheral_cis = wait_cis_request(peripheral, peripheral_acl)
+        peripheral_cis = wait_cis_request(
+            peripheral, peripheral_acl, cig_id, cis_id
+        )
         status, _ = peripheral.command(
             OP_LE_ACCEPT_CIS_REQUEST,
             struct.pack("<H", peripheral_cis),
