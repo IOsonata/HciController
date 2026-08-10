@@ -9,6 +9,7 @@
  */
 
 #include "hci_sdc_resources.h"
+#include "hci_core_profile.h"
 
 #include <stddef.h>
 
@@ -110,8 +111,10 @@ int32_t HciSdcResourcesApply(void)
     sdc_support_connection_subrating_central();
     sdc_support_connection_subrating_peripheral();
 
+#if HCI_CONTROLLER_TARGET_CORE_VERSION >= HCI_CORE_VERSION_6_0
     sdc_support_extended_feature_set_central();
     sdc_support_extended_feature_set_peripheral();
+#endif
 
     /*
      * sdk-nrfxlib asks for a central role before this, which
@@ -194,6 +197,7 @@ int32_t HciSdcResourcesApply(void)
     cfg.fal_size = HCI_SDC_FAL_SIZE;
     if (!HciSdcCfgSet(SDC_CFG_TYPE_FAL_SIZE, &cfg)) return s_Required;
 
+#if HCI_CONTROLLER_TARGET_CORE_VERSION >= HCI_CORE_VERSION_6_0
     /*
      * How many feature pages the controller keeps per link. The pool in
      * hci_sdc_resources.h is computed from the same macro, so the two cannot
@@ -206,6 +210,7 @@ int32_t HciSdcResourcesApply(void)
     {
         return s_Required;
     }
+#endif
 
     /*
      * Periodic advertisers. Each takes one of the advertising sets configured

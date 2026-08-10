@@ -9,73 +9,124 @@
  */
 
 #include "hci_controller.h"
+#include "hci_core_profile.h"
 
 #include <string.h>
 
-/*
- * Core version presented by this HCI controller to its Host.
- *
- * The vendor controller may implement a newer Core revision than the product
- * exposes. That is the case on nRF52 with current nrfxlib: SDC reports its own
- * newer HCI version, while this controller is deliberately audited and exposed
- * as a Core 5.4 controller. Keep this as a target build setting so a future
- * nRF54 target can select the Core revision it actually exposes.
- *
- * Zero disables capping and passes the backend version through unchanged.
- * The cap is downward only: an older backend is never promoted to a newer Core
- * revision by this layer.
- */
-#ifndef HCI_CONTROLLER_TARGET_CORE_VERSION
-#define HCI_CONTROLLER_TARGET_CORE_VERSION 0x0DU
-#endif
+#define HCI_CONTROLLER_EVENT_COMMAND_COMPLETE         0x0EU
+#define HCI_CONTROLLER_STATUS_UNKNOWN_HCI_COMMAND     0x01U
+#define HCI_CONTROLLER_OPCODE_READ_LOCAL_VERSION      0x1001U
+#define HCI_CONTROLLER_OPCODE_READ_SUPPORTED_COMMANDS 0x1002U
+#define HCI_CONTROLLER_LOCAL_VERSION_EVENT_SIZE       14U
+#define HCI_CONTROLLER_UNKNOWN_COMMAND_EVENT_SIZE     6U
 
-#if HCI_CONTROLLER_TARGET_CORE_VERSION > 0xFFU
-#error "HCI_CONTROLLER_TARGET_CORE_VERSION must fit in one octet"
-#endif
-
-#define HCI_CONTROLLER_EVENT_COMMAND_COMPLETE       0x0EU
-#define HCI_CONTROLLER_OPCODE_READ_LOCAL_VERSION    0x1001U
-#define HCI_CONTROLLER_LOCAL_VERSION_EVENT_SIZE     14U
+/* Core 6.0 commands which current nrfxlib also exposes on nRF52. */
+#define HCI_CONTROLLER_OPCODE_LE_READ_ALL_LOCAL_FEATURES  0x2087U
+#define HCI_CONTROLLER_OPCODE_LE_READ_ALL_REMOTE_FEATURES 0x2088U
+#define HCI_CONTROLLER_OPCODE_LE_SET_HOST_FEATURE_V2      0x2097U
 
 static uint16_t HciControllerReadLe16(const uint8_t *pData)
 {
     return (uint16_t)pData[0] | ((uint16_t)pData[1] << 8);
 }
 
-static void HciControllerCapReportedCoreVersion(HciH4PacketType_t Type,
-                                                uint8_t *pPacket,
-                                                size_t PacketLen)
+static bool HciControllerCommandAllowedByCore(uint16_t Opcode)
+{
+#if HCI_CONTROLLER_TARGET_CORE_VERSION != 0U && \
+    HCI_CONTROLLER_TARGET_CORE_VERSION < HCI_CORE_VERSION_6_0
+    switch (Opcode)
+    {
+        case HCI_CONTROLLER_OPCODE_LE_READ_ALL_LOCAL_FEATURES:
+        case HCI_CONTROLLER_OPCODE_LE_READ_ALL_REMOTE_FEATURES:
+        case HCI_CONTROLLER_OPCODE_LE_SET_HOST_FEATURE_V2:
+            return false;
+
+        default:
+            break;
+    }
+#else
+    (void)Opcode;
+#endif
+    return true;
+}
+
+static bool HciControllerQueueUnknownCommand(HciController_t *pController,
+                                             uint16_t Opcode)
+{
+    if (pController->ControllerPacketPending ||
+        HciIntrfTransportTxBusy(&pController->Host))
+    {
+        return false;
+    }
+
+    uint8_t *pEvent = pController->pControllerPacket;
+    pEvent[0] = HCI_CONTROLLER_EVENT_COMMAND_COMPLETE;
+    pEvent[1] = 4U;
+    pEvent[2] = 1U;
+    pEvent[3] = (uint8_t)Opcode;
+    pEvent[4] = (uint8_t)(Opcode >> 8);
+    pEvent[5] = HCI_CONTROLLER_STATUS_UNKNOWN_HCI_COMMAND;
+
+    pController->ControllerPacketType = HCI_H4_PACKET_EVENT;
+    pController->ControllerPacketLen = HCI_CONTROLLER_UNKNOWN_COMMAND_EVENT_SIZE;
+    pController->ControllerPacketPending = true;
+    return true;
+}
+
+static void HciControllerApplyCoreProfile(HciH4PacketType_t Type,
+                                          uint8_t *pPacket,
+                                          size_t PacketLen)
 {
 #if HCI_CONTROLLER_TARGET_CORE_VERSION != 0U
     if (Type != HCI_H4_PACKET_EVENT ||
-        PacketLen < HCI_CONTROLLER_LOCAL_VERSION_EVENT_SIZE ||
+        PacketLen < HCI_CONTROLLER_UNKNOWN_COMMAND_EVENT_SIZE ||
         pPacket[0] != HCI_CONTROLLER_EVENT_COMMAND_COMPLETE ||
-        HciControllerReadLe16(&pPacket[3]) !=
-            HCI_CONTROLLER_OPCODE_READ_LOCAL_VERSION ||
         pPacket[5] != 0U)
     {
         return;
     }
 
-    /*
-     * Vol 4 Part E 7.4.1: HCI_Version is the version of the HCI specification
-     * supported by the Controller. The public controller is this bridge plus
-     * its backend, not the backend library by itself. If the backend is newer
-     * than the target profile, expose the target profile. Never move a lower
-     * backend version upward; the hardware version test must catch that.
-     *
-     * The backend supplies the same Core version in LMP_Version for this LE
-     * controller, so cap both fields consistently while preserving both
-     * vendor-specific subversions and the Company Identifier.
-     */
-    if (pPacket[6] > HCI_CONTROLLER_TARGET_CORE_VERSION)
+    const uint16_t opcode = HciControllerReadLe16(&pPacket[3]);
+
+    if (opcode == HCI_CONTROLLER_OPCODE_READ_LOCAL_VERSION &&
+        PacketLen >= HCI_CONTROLLER_LOCAL_VERSION_EVENT_SIZE)
     {
-        pPacket[6] = HCI_CONTROLLER_TARGET_CORE_VERSION;
+        /*
+         * Expose the Core revision implemented by this complete HCI controller,
+         * not merely the newer backend library. The cap is downward only; an
+         * older backend is never promoted.
+         */
+        if (pPacket[6] > HCI_CONTROLLER_TARGET_CORE_VERSION)
+        {
+            pPacket[6] = HCI_CONTROLLER_TARGET_CORE_VERSION;
+        }
+        if (pPacket[9] > HCI_CONTROLLER_TARGET_CORE_VERSION)
+        {
+            pPacket[9] = HCI_CONTROLLER_TARGET_CORE_VERSION;
+        }
+        return;
     }
-    if (pPacket[9] > HCI_CONTROLLER_TARGET_CORE_VERSION)
+
+#if HCI_CONTROLLER_TARGET_CORE_VERSION < HCI_CORE_VERSION_6_0
+    if (opcode == HCI_CONTROLLER_OPCODE_READ_SUPPORTED_COMMANDS)
     {
-        pPacket[9] = HCI_CONTROLLER_TARGET_CORE_VERSION;
+        /*
+         * Core 5.4 Vol 4 Part E 6.27 ends assigned command bits at octet 47
+         * bit 1. Core 6.0 assigns octet 47 bits 2, 3 and 4 to Read All Local
+         * Features, Read All Remote Features and Set Host Feature v2. nrfxlib
+         * exposes those backend capabilities on nRF52, so hide them from the
+         * 5.4 product profile.
+         *
+         * Six octets precede the 64-octet Supported_Commands parameter in a
+         * Command Complete event: event header, command credit, opcode, status.
+         */
+        const size_t octet47 = 6U + 47U;
+        if (PacketLen > octet47)
+        {
+            pPacket[octet47] &= (uint8_t)~0x1CU;
+        }
     }
+#endif
 #else
     (void)Type;
     (void)pPacket;
@@ -115,6 +166,20 @@ static bool HciControllerHostPacket(void *pContext,
     {
         pController->InvalidHostPacketCount++;
         return true;
+    }
+
+    if (Type == HCI_H4_PACKET_COMMAND && PacketLen >= 3U)
+    {
+        const uint16_t opcode = HciControllerReadLe16(pPacket);
+        if (!HciControllerCommandAllowedByCore(opcode))
+        {
+            if (!HciControllerQueueUnknownCommand(pController, opcode))
+            {
+                pController->HostPacketRetryCount++;
+                return false;
+            }
+            return true;
+        }
     }
 
     if (!pController->Controller.Put(pController->Controller.pContext,
@@ -171,9 +236,9 @@ static void HciControllerFetchPacket(HciController_t *pController)
         return;
     }
 
-    HciControllerCapReportedCoreVersion(type,
-                                        pController->pControllerPacket,
-                                        packetLen);
+    HciControllerApplyCoreProfile(type,
+                                  pController->pControllerPacket,
+                                  packetLen);
 
     pController->ControllerPacketType = type;
     pController->ControllerPacketLen = packetLen;
@@ -220,7 +285,8 @@ bool HciControllerInit(HciController_t *pController,
 {
     if (pController == nullptr || pHostIntrf == nullptr ||
         pHostPacket == nullptr || HostPacketCapacity == 0U ||
-        pControllerPacket == nullptr || ControllerPacketCapacity == 0U ||
+        pControllerPacket == nullptr ||
+        ControllerPacketCapacity < HCI_CONTROLLER_UNKNOWN_COMMAND_EVENT_SIZE ||
         pControllerOps == nullptr || pControllerOps->Put == nullptr ||
         pControllerOps->Get == nullptr)
     {
