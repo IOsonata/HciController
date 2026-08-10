@@ -391,6 +391,12 @@ _LE_BASIC = [
                  "(Host Support), which this firmware does not enable, so "
                  "asking for it gets Unsupported Feature and says nothing "
                  "about subrating"),
+    Command(0x2087, "LE Read All Local Supported Features", COMPLETE, b""),
+    Command(0x2097, "LE Set Host Feature v2", COMPLETE,
+            struct.pack("<HB", 38, 1),
+            undo=(0x2097, struct.pack("<HB", 38, 0)),
+            note="the same host-support bit used by v1, with the two-octet "
+                 "bit number carried by the v2 command"),
     Command(0x207D, "LE Set Default Subrate", COMPLETE,
             struct.pack("<HHHHH", 1, 1, 0, 0, 300),
             note="a factor of one is no subrating, so this configures the "

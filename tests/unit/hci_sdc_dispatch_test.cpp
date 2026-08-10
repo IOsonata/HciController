@@ -541,6 +541,9 @@ int main(void)
     ExpectRejectedStatus("LE Subrate Request, missing the handle", 0x207E,
                          zeros,
                          sizeof(sdc_hci_cmd_le_set_default_subrate_t), 0x12);
+    ExpectComplete(
+        "LE Read All Local Supported Features", 0x2087, zeros, 0U,
+        sizeof(sdc_hci_cmd_le_read_all_local_supported_features_return_t));
     ExpectStatus("LE Read All Remote Features", 0x2088, zeros,
                  sizeof(sdc_hci_cmd_le_read_all_remote_features_t));
 
@@ -857,6 +860,8 @@ int main(void)
                    sizeof(sdc_hci_cmd_sp_read_rssi_return_t));
     ExpectComplete("LE Set Host Feature", 0x2074, zeros,
                    sizeof(sdc_hci_cmd_le_set_host_feature_t), 0U);
+    ExpectComplete("LE Set Host Feature v2", 0x2097, zeros,
+                   sizeof(sdc_hci_cmd_le_set_host_feature_v2_t), 0U);
     ExpectComplete("LE Receiver Test v2", 0x2033, zeros,
                    sizeof(sdc_hci_cmd_le_receiver_test_v2_t), 0U);
     ExpectComplete("LE Transmitter Test v2", 0x2034, zeros,
@@ -1399,6 +1404,8 @@ int main(void)
                          hci_le_set_default_subrate_command),
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SUBRATE_REQUEST,
                          hci_le_subrate_request_command),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_READ_ALL_LOCAL_SUPPORTED_FEATURES,
+                         hci_le_read_all_local_supported_features),
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_READ_ALL_REMOTE_FEATURES,
                          hci_le_read_all_remote_features),
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_PARAMS,
@@ -1451,6 +1458,8 @@ int main(void)
             {SDC_HCI_OPCODE_CMD_VS_CONN_UPDATE, NULL, "vs_conn_update"},
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_HOST_FEATURE,
                          hci_le_set_host_feature),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_HOST_FEATURE_V2,
+                         hci_le_set_host_feature_v2),
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_RECEIVER_TEST_V2,
                          hci_le_receiver_test_v2),
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_TRANSMITTER_TEST_V2,

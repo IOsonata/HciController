@@ -293,6 +293,7 @@ static HciCmdResult_t HciSdcCmdReadSupportedCommands(void *,
     supported.params.hci_le_test_end = 1U;
 
     supported.params.hci_le_set_host_feature = 1U;
+    supported.params.hci_le_set_host_feature_v2 = 1U;
 
     supported.params.hci_read_transmit_power_level = 1U;
     supported.params.hci_le_read_rf_path_compensation = 1U;
@@ -307,6 +308,7 @@ static HciCmdResult_t HciSdcCmdReadSupportedCommands(void *,
     supported.params.hci_le_request_peer_sca = 1U;
     supported.params.hci_le_set_default_subrate_command = 1U;
     supported.params.hci_le_subrate_request_command = 1U;
+    supported.params.hci_le_read_all_local_supported_features = 1U;
     supported.params.hci_le_read_all_remote_features = 1U;
 
     supported.params.hci_le_set_periodic_advertising_parameters = 1U;
@@ -1056,6 +1058,10 @@ HCI_SDC_CMD_P(HciSdcCmdLeSetDefaultSubrate,
 HCI_SDC_CMD_P(HciSdcCmdLeSubrateRequest, sdc_hci_cmd_le_subrate_request,
               sdc_hci_cmd_le_subrate_request_t, HciSdcStatus)
 
+HCI_SDC_CMD_NR(HciSdcCmdLeReadAllLocalSupportedFeatures,
+               sdc_hci_cmd_le_read_all_local_supported_features,
+               sdc_hci_cmd_le_read_all_local_supported_features_return_t)
+
 HCI_SDC_CMD_P(HciSdcCmdLeReadAllRemoteFeatures,
               sdc_hci_cmd_le_read_all_remote_features,
               sdc_hci_cmd_le_read_all_remote_features_t, HciSdcStatus)
@@ -1463,6 +1469,8 @@ HCI_SDC_CMD_PR(HciSdcCmdReadRssi, sdc_hci_cmd_sp_read_rssi,
  */
 HCI_SDC_CMD_P(HciSdcCmdLeSetHostFeature, sdc_hci_cmd_le_set_host_feature,
               sdc_hci_cmd_le_set_host_feature_t, HciSdcComplete)
+HCI_SDC_CMD_P(HciSdcCmdLeSetHostFeatureV2, sdc_hci_cmd_le_set_host_feature_v2,
+              sdc_hci_cmd_le_set_host_feature_v2_t, HciSdcComplete)
 
 /* Data length. */
 HCI_SDC_CMD_PR(HciSdcCmdLeSetDataLength, sdc_hci_cmd_le_set_data_length,
@@ -2019,6 +2027,9 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
     HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_HOST_FEATURE,
                     sizeof(sdc_hci_cmd_le_set_host_feature_t),
                     HciSdcCmdLeSetHostFeature),
+    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_HOST_FEATURE_V2,
+                    sizeof(sdc_hci_cmd_le_set_host_feature_v2_t),
+                    HciSdcCmdLeSetHostFeatureV2),
 
     /* Transmit power, and the path loss the two ends work out from it. */
     HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_CB_READ_TRANSMIT_POWER_LEVEL,
@@ -2071,6 +2082,10 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
     HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_SUBRATE_REQUEST,
                     sizeof(sdc_hci_cmd_le_subrate_request_t),
                     HciSdcCmdLeSubrateRequest),
+    HCI_SDC_ENTRY_CR(
+        SDC_HCI_OPCODE_CMD_LE_READ_ALL_LOCAL_SUPPORTED_FEATURES, 0U,
+        HciSdcCmdLeReadAllLocalSupportedFeatures,
+        sdc_hci_cmd_le_read_all_local_supported_features_return_t),
     HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_READ_ALL_REMOTE_FEATURES,
                     sizeof(sdc_hci_cmd_le_read_all_remote_features_t),
                     HciSdcCmdLeReadAllRemoteFeatures),
@@ -2384,6 +2399,7 @@ HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_transmitter_test_v1_t, 3U);           /* 7.8.29 
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_receiver_test_v2_t, 3U);              /* 7.8.50 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_transmitter_test_v2_t, 4U);           /* 7.8.51 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_host_feature_t, 2U);             /* 7.8.115 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_host_feature_v2_t, 3U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_sp_read_rssi_t, 2U);                      /* 7.5.4 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_cb_read_transmit_power_level_t, 3U);     /* 7.3.35 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_write_rf_path_compensation_t, 4U);    /* 7.8.76 */
@@ -2505,6 +2521,8 @@ HCI_SDC_SPEC_LEN(sdc_hci_cmd_ip_read_bd_addr_return_t, 6U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_buffer_size_return_t, 3U);       /* 7.8.2  */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_buffer_size_v2_return_t, 6U);    /* 7.8.132 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_local_supported_features_return_t, 8U);
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_all_local_supported_features_return_t,
+                 249U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_adv_physical_channel_tx_power_return_t, 1U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_filter_accept_list_size_return_t, 1U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_channel_map_return_t, 7U);       /* 7.8.20 */
