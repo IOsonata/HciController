@@ -991,6 +991,7 @@ static void HciAppHostProcess(void *pContext)
             return;
         }
 
+        pApp->Target.pOps->UsbPassMark(pApp->Target.pContext);
         HciTinyUsbProcess(&pApp->Usb);
 
         /*
