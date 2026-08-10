@@ -133,7 +133,7 @@ TARGETS += $(RESOURCES_TARGET)
 endif
 
 .PHONY: all run clean check-root check-project check-boards \
-        check-usb-desc check-commands check-smp print-config
+        check-usb-desc check-usb-runtime check-commands check-smp print-config
 
 PYTHON ?= python3
 
@@ -230,6 +230,16 @@ else
 	@echo "[TEST] usb_descriptors.c skipped, set TINYUSB_DIR to a checkout"
 endif
 
+# hci_app.cpp is compile checked but not linked by the host suite. This pins
+# the cross-layer order that defines one USB storm-counting window. In 70088f5
+# the runtime path omitted UsbPassMark, so ordinary traffic accumulated forever
+# against the startup mark and disconnected once it crossed the storm limit.
+check-usb-runtime:
+	@command -v $(PYTHON) >/dev/null 2>&1 || { \
+	  echo "[TEST] usb_runtime_pass.py skipped, no $(PYTHON)"; exit 0; }
+	@echo "[TEST] usb_runtime_pass.py"
+	@$(PYTHON) $(THIS_DIR)/usb_runtime_pass.py $(ROOT)
+
 # The Eclipse project names every file individually, so one added to src/ and
 # not added there is not compiled, and the target build fails at link time
 # naming a symbol rather than a file. Nothing a C++ test can see.
@@ -268,7 +278,7 @@ check-boards:
 	@echo "[TEST] board_pins.py"
 	@$(PYTHON) $(THIS_DIR)/board_pins.py $(ROOT)
 
-run: all check-project check-boards check-usb-desc check-commands check-smp
+run: all check-project check-boards check-usb-desc check-usb-runtime check-commands check-smp
 	@set -e; for t in $(TARGETS); do \
 	  echo "[TEST] $$(basename $$t)"; $$t; done
 	@echo
