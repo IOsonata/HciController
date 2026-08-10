@@ -778,16 +778,8 @@ int main(void)
     ExpectComplete("LE LTK Request Reply", 0x201A, zeros,
                    sizeof(sdc_hci_cmd_le_long_term_key_request_reply_t),
                    sizeof(sdc_hci_cmd_le_long_term_key_request_reply_return_t));
-    /*
-     * The multirole library does not define
-     * sdc_hci_cmd_le_read_supported_states, so the table has no row for it and
-     * a host asking gets Unknown HCI Command. That is permanent rather than a
-     * build choice: this firmware links multirole and nothing else. Vol 4
-     * Part E 7.8.27 reports the legacy advertising state combinations, and
-     * this controller advertises through the extended commands.
-     */
-    ExpectRejected("LE Read Supported States, absent from multirole", 0x201C,
-                   zeros, 0U, 0x01);
+    /* Generic compatibility layer supplies this mandatory command. */
+    ExpectCompleteLocal("LE Read Supported States", 0x201C, zeros, 0U, 8U);
     ExpectComplete("LE Read Transmit Power", 0x204B, zeros, 0U,
                    sizeof(sdc_hci_cmd_le_read_transmit_power_return_t));
     ExpectComplete("LE Receiver Test", 0x201D, zeros,
