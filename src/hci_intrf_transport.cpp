@@ -61,7 +61,21 @@ static bool HciIntrfTransportCount(void *pContext,
      */
     const bool suspect = HciIntrfTransportSuspect(pTransport);
 
-    if (suspect && pTransport->SuspectFilter != nullptr &&
+    /*
+     * Only commands have an opcode that the layer above can validate. Passing
+     * suspect ACL/SCO/ISO packets through the command filter used to drop them
+     * unconditionally because the filter quite correctly had no opcode to
+     * check. For ACL that also loses a host flow-control credit: the host spent
+     * the credit when it sent the packet and no controller completion can ever
+     * return it for a packet discarded here.
+     *
+     * Data packets therefore bypass this filter. If they are real, they must
+     * reach the controller; if they were manufactured out of foreign bytes,
+     * there is no information at this layer or above that can distinguish them
+     * without also discarding legitimate data.
+     */
+    if (suspect && Type == HCI_H4_PACKET_COMMAND &&
+        pTransport->SuspectFilter != nullptr &&
         !pTransport->SuspectFilter(pTransport->pFilterContext, Type, pPacket,
                                    PacketLen))
     {
@@ -301,25 +315,41 @@ void HciIntrfTransportIdle(HciIntrfTransport_t *pTransport)
         return;
     }
 
-    /*
-     * Whatever was on the wire has stopped, so the next octet starts something
-     * new and gets the benefit of the doubt. This is the only way out of
-     * suspicion, and it is the right one: the gap is what separates the
-     * bootloader's output from the application's, and there is no octet that
-     * does.
-     */
-    pTransport->RejectedMark = pTransport->Parser.InvalidTypeCount;
+    const bool suspect = HciIntrfTransportSuspect(pTransport);
 
     if (!HciH4ParserIsMidPacket(&pTransport->Parser))
+    {
+        /*
+         * A clean packet boundary is always a safe place to forget earlier
+         * foreign octets. Nothing is being abandoned here.
+         */
+        pTransport->RejectedMark = pTransport->Parser.InvalidTypeCount;
+        return;
+    }
+
+    /*
+     * Do not tear down a clean H:4 packet merely because its sender paused.
+     * Once a valid indicator and header have been accepted, the remaining
+     * payload octets are still payload. Resetting the parser here made a
+     * continuation beginning 01 03 0C 00 become an HCI_Reset command and let
+     * arbitrary payload bytes act on the controller.
+     *
+     * The idle heuristic is only justified after the stream has independently
+     * shown that it is not H:4. That is the Thingy:91 boot-banner case this
+     * recovery was added for: invalid indicators precede the false packet, and
+     * the long gap separates the banner from the real HCI stream.
+     */
+    if (!suspect)
     {
         return;
     }
 
     /*
-     * The chunk goes with it. Whatever is left in it belongs to the packet
-     * being abandoned, and feeding it after the reset would rebuild the same
-     * wrong packet from the same wrong octets.
+     * The chunk goes with the suspect packet. Whatever is left in it belongs
+     * to the packet being abandoned, and feeding it after the reset would
+     * rebuild the same wrong packet from the same wrong octets.
      */
+    pTransport->RejectedMark = pTransport->Parser.InvalidTypeCount;
     HciH4ParserReset(&pTransport->Parser);
     pTransport->RxChunkLen = 0U;
     pTransport->RxChunkOffset = 0U;

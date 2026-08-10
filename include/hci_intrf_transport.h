@@ -37,8 +37,8 @@ typedef struct {
     void *pHandlerContext;
 
     /*
-     * Asked about a packet built out of a stream that has shown itself not to
-     * be H:4, and only about those. Returning false drops the packet unheard.
+     * Asked only about a command packet built out of a stream that has shown
+     * itself not to be H:4. Returning false drops that command unheard.
      *
      * It exists because this layer cannot answer the question and the layer
      * above can. A command manufactured out of a bootloader banner is well
@@ -48,7 +48,13 @@ typedef struct {
      * desynchronise the host's parser so that the answer it is waiting for
      * arrives in the middle of something else.
      *
-     * Null leaves every packet delivered, which is what a port with no such
+     * Data packets do not pass through this filter. They carry a connection
+     * handle rather than an opcode, so there is nothing the filter can validate
+     * without also rejecting legitimate data. In particular an ACL packet
+     * discarded here would consume a host buffer credit permanently because
+     * it never reaches the controller that could complete it.
+     *
+     * Null leaves every command delivered, which is what a port with no such
      * layer above it wants.
      */
     HciH4PacketHandler_t SuspectFilter;
@@ -171,25 +177,24 @@ void HciIntrfTransportClose(HciIntrfTransport_t *pTransport);
 void HciIntrfTransportProcess(HciIntrfTransport_t *pTransport);
 
 /*
- * The link has been quiet long enough that nothing can still be arriving, so
- * anything half built is not going to be finished. Throw it away and take the
- * next octet as the start of a packet.
+ * The link has been quiet long enough that a stream already known not to be
+ * H:4 may be resynchronised at the gap.
  *
- * This is the only thing that can recover a stream that once held something
- * other than H:4. There is no delimiter in H:4 and no length worth checking,
- * so an octet of foreign data that happens to look like an indicator makes
- * this side read a header and a payload behind it, and a payload length taken
- * from text is usually long enough to swallow whatever real packet comes next.
- * Nothing in the octets ever says so.
+ * A half-built packet is abandoned only when invalid H:4 indicators have also
+ * been seen since the previous quiet point. That independent evidence matters:
+ * a legitimate H:4 sender can pause after a valid header, and resetting a clean
+ * parser in the middle of that packet makes the payload that follows become
+ * new packet indicators. A payload beginning 01 03 0C 00 would otherwise be
+ * executed as HCI_Reset.
  *
- * The gap is the one thing that does. A host sends a packet in one go, so a
- * silence of many octet times means the previous packet ended, whatever this
- * side believes about it. The caller decides how long is long enough, since
- * only it knows the rate.
+ * The recovery is for the mixed-stream case. An octet of bootloader text that
+ * happens to look like an indicator can make this side read a bogus payload
+ * length and swallow the real packet after it. Once the preceding invalid
+ * indicators establish that the burst was not H:4, the gap is a safe reason
+ * to abandon that false packet and give the next burst a fresh boundary.
  *
- * Safe when nothing is half built, which is the ordinary case: a parser
- * sitting at a packet boundary has nothing to throw away, and this counts
- * nothing.
+ * At a clean packet boundary this simply clears the suspect mark. On a clean
+ * packet that is still being collected it does nothing.
  */
 void HciIntrfTransportIdle(HciIntrfTransport_t *pTransport);
 
@@ -200,8 +205,8 @@ void HciIntrfTransportIdle(HciIntrfTransport_t *pTransport);
 bool HciIntrfTransportSuspect(const HciIntrfTransport_t *pTransport);
 
 /*
- * Set what decides whether a packet built out of a suspect stream is worth
- * delivering. See the member for why this is not decided here.
+ * Set what decides whether a command built out of a suspect stream is worth
+ * delivering. Data packets are not passed to this filter.
  */
 void HciIntrfTransportSetSuspectFilter(HciIntrfTransport_t *pTransport,
                                        HciH4PacketHandler_t Filter,

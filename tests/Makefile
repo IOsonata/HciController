@@ -46,6 +46,7 @@ TESTS := hci_h4 \
          hci_sdc \
          hci_sdc_critical \
          hci_intrf_transport \
+         hci_intrf_transport_integrity \
          hci_controller \
          hci_nrf52840_usb \
          hci_taktos_poll \
@@ -57,6 +58,7 @@ hci_cmd_dispatch_SRC   := $(SRC)/hci_cmd_dispatch.cpp
 hci_sdc_SRC            := $(SRC)/hci_sdc.cpp $(SRC)/hci_cmd_dispatch.cpp
 hci_sdc_critical_SRC   := $(SRC)/hci_sdc.cpp $(SRC)/hci_cmd_dispatch.cpp
 hci_intrf_transport_SRC := $(SRC)/hci_intrf_transport.cpp $(SRC)/hci_h4.cpp
+hci_intrf_transport_integrity_SRC := $(SRC)/hci_intrf_transport.cpp $(SRC)/hci_h4.cpp
 hci_controller_SRC     := $(SRC)/hci_controller.cpp \
                           $(SRC)/hci_intrf_transport.cpp $(SRC)/hci_h4.cpp
 hci_nrf52840_usb_SRC   := $(SRC)/hci_nrf52840.cpp \
