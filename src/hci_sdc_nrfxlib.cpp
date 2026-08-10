@@ -750,7 +750,7 @@ static HciCmdResult_t HciSdcCmdLeSetScanEnable(void *,
             return HciSdcComplete(HCI_STATUS_INVALID_HCI_PARAMETERS, 0U);     \
         }                                                                     \
         const SdcType *pCmd = reinterpret_cast<const SdcType *>(pParams);     \
-        if (ParamLen - offsetof(SdcType, ArrayField) !=                        \
+        if (ParamLen - offsetof(SdcType, ArrayField) !=                       \
             (size_t)pCmd->CountField)                                         \
         {                                                                     \
             return HciSdcComplete(HCI_STATUS_INVALID_HCI_PARAMETERS, 0U);     \
@@ -769,6 +769,12 @@ static HciCmdResult_t HciSdcCmdLeSetScanEnable(void *,
  * where this first occurs: LE Set CIG Parameters takes one array element per
  * stream and answers with the connection handle of each, so neither the
  * byte counted form nor the plain element counted one fits.
+ *
+ * The return structures for Set CIG Parameters and Set CIG Parameters Test end
+ * in flexible arrays. sizeof(SdcReturn) is therefore only the CIG_ID and
+ * CIS_Count prefix. SDC writes one connection-handle element per CIS, so the
+ * dispatcher return buffer itself must be the SDC output object; a fixed local
+ * object is too small as soon as CIS_Count is non-zero.
  */
 #define HCI_SDC_CMD_VNR(Name, SdcFunc, SdcType, SdcReturn, ArrayField,        \
                         CountField)                                           \
@@ -778,11 +784,6 @@ static HciCmdResult_t HciSdcCmdLeSetScanEnable(void *,
                                uint8_t *pReturn,                              \
                                size_t ReturnCapacity)                         \
     {                                                                         \
-        SdcReturn result;                                                     \
-        if (!HciSdcReturnFits(sizeof(result), ReturnCapacity))                \
-        {                                                                     \
-            return HciSdcComplete(HCI_STATUS_MEMORY_CAPACITY_EXCEEDED, 0U);   \
-        }                                                                     \
         if (ParamLen < offsetof(SdcType, ArrayField))                         \
         {                                                                     \
             return HciSdcComplete(HCI_STATUS_INVALID_HCI_PARAMETERS, 0U);     \
@@ -794,13 +795,21 @@ static HciCmdResult_t HciSdcCmdLeSetScanEnable(void *,
         {                                                                     \
             return HciSdcComplete(HCI_STATUS_INVALID_HCI_PARAMETERS, 0U);     \
         }                                                                     \
-        uint8_t status = SdcFunc(pCmd, &result);                              \
+        const size_t returnLen = offsetof(SdcReturn, ArrayField) +            \
+            ((size_t)pCmd->CountField *                                       \
+             sizeof(((SdcReturn *)0)->ArrayField[0]));                        \
+        if (!HciSdcReturnFits(returnLen, ReturnCapacity))                     \
+        {                                                                     \
+            return HciSdcComplete(HCI_STATUS_MEMORY_CAPACITY_EXCEEDED, 0U);   \
+        }                                                                     \
+        memset(pReturn, 0, returnLen);                                        \
+        SdcReturn *pResult = reinterpret_cast<SdcReturn *>(pReturn);          \
+        uint8_t status = SdcFunc(pCmd, pResult);                              \
         if (status != HCI_STATUS_SUCCESS)                                     \
         {                                                                     \
             return HciSdcComplete(status, 0U);                                \
         }                                                                     \
-        memcpy(pReturn, &result, sizeof(result));                             \
-        return HciSdcComplete(status, sizeof(result));                        \
+        return HciSdcComplete(status, returnLen);                             \
     }
 
 /*
@@ -1555,9 +1564,39 @@ HCI_SDC_CMD_VP(HciSdcCmdLeExtCreateConn, sdc_hci_cmd_le_ext_create_conn,
  * controller will hold. Adding the streams without this would give a host
  * every command it needs to set one up and no way to feed it.
  */
-HCI_SDC_CMD_NR(HciSdcCmdLeReadBufferSizeV2,
-               sdc_hci_cmd_le_read_buffer_size_v2,
-               sdc_hci_cmd_le_read_buffer_size_v2_return_t)
+static HciCmdResult_t HciSdcCmdLeReadBufferSizeV2(void *pContext,
+                                                  const uint8_t *,
+                                                  size_t,
+                                                  uint8_t *pReturn,
+                                                  size_t ReturnCapacity)
+{
+    sdc_hci_cmd_le_read_buffer_size_v2_return_t result;
+    if (!HciSdcReturnFits(sizeof(result), ReturnCapacity))
+    {
+        return HciSdcComplete(HCI_STATUS_MEMORY_CAPACITY_EXCEEDED, 0U);
+    }
+
+    uint8_t status = sdc_hci_cmd_le_read_buffer_size_v2(&result);
+    if (status == HCI_STATUS_SUCCESS)
+    {
+        /*
+         * V2 carries the same ACL packet count as V1, followed by the ISO
+         * buffer fields. A host that uses V2 is entitled to the same ACL flow
+         * control enforcement as one that used V1.
+         */
+        HciCounters_t *pCounters = static_cast<HciCounters_t *>(pContext);
+        if (pCounters != NULL)
+        {
+            HciSdcSetAclLimit(pCounters->pSdc,
+                              result.total_num_le_acl_data_packets);
+        }
+
+        memcpy(pReturn, &result, sizeof(result));
+        return HciSdcComplete(status, sizeof(result));
+    }
+
+    return HciSdcComplete(status, 0U);
+}
 
 HCI_SDC_CMD_PR(HciSdcCmdLeReadIsoTxSync,
                sdc_hci_cmd_le_read_iso_tx_sync,
@@ -2450,6 +2489,7 @@ HCI_SDC_SPEC_LEN(sdc_hci_cmd_ip_read_local_version_information_return_t, 8U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_ip_read_local_supported_features_return_t, 8U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_ip_read_bd_addr_return_t, 6U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_buffer_size_return_t, 3U);       /* 7.8.2  */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_buffer_size_v2_return_t, 6U);    /* 7.8.132 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_local_supported_features_return_t, 8U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_adv_physical_channel_tx_power_return_t, 1U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_filter_accept_list_size_return_t, 1U);
@@ -2492,6 +2532,11 @@ HCI_SDC_SPEC_LEN(sdc_hci_cmd_ip_read_local_supported_commands_return_t, 64U);
 /* Six octets of address and sixteen of identity root, per the Zephyr command. */
 HCI_SDC_SPEC_LEN(sdc_hci_vs_zephyr_static_address_t, 22U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_vs_zephyr_read_static_addresses_return_t, 1U);
+static_assert(offsetof(sdc_hci_cmd_le_set_cig_params_return_t, array_params) == 2U,
+              "LE Set CIG Parameters return head is not 2 octets");
+static_assert(offsetof(sdc_hci_cmd_le_set_cig_params_test_return_t, array_params) == 2U,
+              "LE Set CIG Parameters Test return head is not 2 octets");
+HCI_SDC_SPEC_LEN(sdc_hci_le_set_cig_params_output_array_params_t, 2U);
 /*
  * The rest of the Zephyr family. Vendor specific, so the lengths come from
  * Nordic and from what Zephyr and BlueZ already send, not from Vol 4 Part E.

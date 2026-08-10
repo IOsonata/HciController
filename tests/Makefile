@@ -44,6 +44,7 @@ MOCK_DEFINES := -DHCI_NRF52840_HFCLK_WAIT_LOOPS=1000 \
 TESTS := hci_h4 \
          hci_cmd_dispatch \
          hci_sdc \
+         hci_sdc_critical \
          hci_intrf_transport \
          hci_controller \
          hci_nrf52840_usb \
@@ -54,6 +55,7 @@ TESTS := hci_h4 \
 hci_h4_SRC             := $(SRC)/hci_h4.cpp
 hci_cmd_dispatch_SRC   := $(SRC)/hci_cmd_dispatch.cpp
 hci_sdc_SRC            := $(SRC)/hci_sdc.cpp $(SRC)/hci_cmd_dispatch.cpp
+hci_sdc_critical_SRC   := $(SRC)/hci_sdc.cpp $(SRC)/hci_cmd_dispatch.cpp
 hci_intrf_transport_SRC := $(SRC)/hci_intrf_transport.cpp $(SRC)/hci_h4.cpp
 hci_controller_SRC     := $(SRC)/hci_controller.cpp \
                           $(SRC)/hci_intrf_transport.cpp $(SRC)/hci_h4.cpp
@@ -104,6 +106,18 @@ SDC_SOURCES := $(UNIT)/hci_sdc_dispatch_test.cpp \
                $(SRC)/hci_cmd_dispatch.cpp \
                $(STUBS)/sdclink/sdc_stub.cpp
 TARGETS += $(SDC_TARGET)
+
+# Focused real-header regressions for command shapes the table-wide dispatch
+# walk cannot exercise: flexible CIG returns and Read Buffer Size V2 side
+# effects on the generic ACL flow-control layer.
+SDC_CRITICAL_TARGET := $(BUILD_DIR)/hci_sdc_critical_dispatch_test
+SDC_CRITICAL_SOURCES := $(UNIT)/hci_sdc_critical_dispatch_test.cpp \
+                        $(SRC)/hci_sdc_nrfxlib.cpp \
+                        $(SRC)/hci_sdc.cpp \
+                        $(SRC)/hci_counters.cpp \
+                        $(SRC)/hci_cmd_dispatch.cpp \
+                        $(STUBS)/sdclink/sdc_stub.cpp
+TARGETS += $(SDC_CRITICAL_TARGET)
 
 # The resource configuration against the real headers. Everything else that
 # includes hci_nrf52840.h is built against the hand written fake sdc.h, so the
@@ -175,6 +189,11 @@ $(SDC_TARGET): $(SDC_SOURCES) | check-root
 	@mkdir -p $(dir $@)
 	$(CXX) -I$(STUBS)/sdclink -I$(STUBS) -I$(SDC_INCLUDE) -I$(ROOT)/include \
 	  -DNRF52840_XXAA -DHCI_TRACE=0 $(CXXFLAGS) $(SDC_SOURCES) -o $@
+
+$(SDC_CRITICAL_TARGET): $(SDC_CRITICAL_SOURCES) | check-root
+	@mkdir -p $(dir $@)
+	$(CXX) -I$(STUBS)/sdclink -I$(STUBS) -I$(SDC_INCLUDE) -I$(ROOT)/include \
+	  -DNRF52840_XXAA -DHCI_TRACE=0 $(CXXFLAGS) $(SDC_CRITICAL_SOURCES) -o $@
 
 # No stubs/sdc on the path, so the real sdc.h is the one that answers.
 $(RESOURCES_TARGET): $(UNIT)/hci_sdc_resources_test.cpp \
@@ -251,8 +270,8 @@ run: all check-project check-boards check-usb-desc check-commands check-smp
 	@echo
 	@echo "All HciController host tests passed."
 	@test -n "$(strip $(SDC_INCLUDE))" || \
-	  echo "Skipped hci_sdc_dispatch_test and hci_sdc_resources_test, \
-set NRFXLIB_DIR to a sdk-nrfxlib checkout."
+	  echo "Skipped hci_sdc_dispatch_test, hci_sdc_critical_dispatch_test and \
+hci_sdc_resources_test, set NRFXLIB_DIR to a sdk-nrfxlib checkout."
 
 print-config:
 	@echo "ROOT=$(ROOT)"

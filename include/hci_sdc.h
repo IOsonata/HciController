@@ -43,10 +43,28 @@ typedef struct {
 } HciSdcOps_t;
 
 /*
- * Connection handles that can owe a flow control credit at the same time. The
- * controller supports far fewer links than this.
+ * Links whose outstanding ACL packets are tracked at once. This has to be at
+ * least the number of connections the controller is configured for, because a
+ * link the table has no room for is not counted, and what is not counted
+ * cannot be enforced or handed back.
  */
-#define HCI_SDC_CREDIT_HANDLES 4U
+#ifndef HCI_SDC_ACL_TRACK_HANDLES
+#define HCI_SDC_ACL_TRACK_HANDLES 8U
+#endif
+
+/*
+ * Connection handles that can owe a flow control credit at the same time.
+ * Every link the ACL guard can track can independently need a synthetic
+ * Number Of Completed Packets entry, so the default follows the tracking
+ * table instead of being a smaller second limit.
+ */
+#ifndef HCI_SDC_CREDIT_HANDLES
+#define HCI_SDC_CREDIT_HANDLES HCI_SDC_ACL_TRACK_HANDLES
+#endif
+
+#if HCI_SDC_CREDIT_HANDLES < HCI_SDC_ACL_TRACK_HANDLES
+#error "HCI_SDC_CREDIT_HANDLES must cover every tracked ACL handle"
+#endif
 
 /*
  * Largest ACL payload the controller will take, Vol 4 Part E 7.8.2. A host
@@ -65,16 +83,6 @@ typedef struct {
 
 /* Vol 4 Part E 7.7.5. */
 #define HCI_SDC_EVENT_DISCONNECTION_COMPLETE 0x05U
-
-/*
- * Links whose outstanding ACL packets are tracked at once. This has to be at
- * least the number of connections the controller is configured for, because a
- * link the table has no room for is not counted, and what is not counted
- * cannot be enforced or handed back.
- */
-#ifndef HCI_SDC_ACL_TRACK_HANDLES
-#define HCI_SDC_ACL_TRACK_HANDLES 8U
-#endif
 
 /*
  * Hold the host to the buffer count the controller advertised in LE Read
@@ -112,6 +120,14 @@ typedef struct {
      * response of the command that produced it.
      */
     bool CommandEventLast;
+
+    /*
+     * Synthetic ACL-credit events share the same controller-facing output
+     * path. At most one may be emitted before the real controller queue is
+     * polled, otherwise a host that repeatedly overruns its allowance can keep
+     * manufacturing credits fast enough to starve SDC indefinitely.
+     */
+    bool CreditEventLast;
 
     /*
      * Host flow control credits owed back for ACL packets the controller

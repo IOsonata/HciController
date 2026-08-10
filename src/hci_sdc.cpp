@@ -161,6 +161,7 @@ void HciSdcResetFlowControl(HciSdc_t *pSdc)
     pSdc->AclTrackEntries = 0U;
     pSdc->AclOutstandingTotal = 0U;
     pSdc->CreditEntries = 0U;
+    pSdc->CreditEventLast = false;
 }
 
 static uint16_t HciSdcHandleOf(const uint8_t *pPacket)
@@ -499,12 +500,16 @@ static HciControllerGetResult_t HciSdcGetPacket(void *pContext,
     }
 
     /*
-     * Credits owed for refused ACL packets go out before the controller queue
-     * is asked. They are bounded by the number of packets the host had in
-     * flight, so this cannot starve the queue.
+     * Credits owed for refused ACL packets are synthetic controller events.
+     * Emit at most one before the real SDC queue gets a turn. The host can
+     * spend returned credits immediately and create more owed credits before
+     * the next Get, so without this fairness bit the synthetic event stream can
+     * be self-sustaining and sdc_hci_get may never be reached.
      */
-    if (HciSdcBuildCreditEvent(pSdc, pPacket, PacketCapacity, pPacketLen))
+    if (!pSdc->CreditEventLast &&
+        HciSdcBuildCreditEvent(pSdc, pPacket, PacketCapacity, pPacketLen))
     {
+        pSdc->CreditEventLast = true;
         *pType = HCI_H4_PACKET_EVENT;
         return HCI_CONTROLLER_GET_PACKET;
     }
@@ -512,8 +517,13 @@ static HciControllerGetResult_t HciSdcGetPacket(void *pContext,
     uint8_t sdcType = HCI_SDC_MSG_TYPE_NONE;
     int32_t result = pSdc->Ops.Get(pSdc->Ops.pContext, pPacket, &sdcType);
 
-    /* The controller queue has had its turn, so the next command may come in. */
+    /*
+     * The controller queue has had its turn, even when it was empty or
+     * returned an error. A new command and a new synthetic credit event may
+     * now use their respective turns.
+     */
     pSdc->CommandEventLast = false;
+    pSdc->CreditEventLast = false;
 
     if (result == pSdc->Ops.RetryError)
     {
