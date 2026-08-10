@@ -1202,6 +1202,8 @@ int main(void)
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_CB_SET_EVENT_MASK,
                          hci_set_event_mask),
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_CB_RESET, hci_reset),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_CB_SET_EVENT_MASK_PAGE_2,
+                         hci_set_event_mask_page_2),
             BITMAP_ENTRY(
                 SDC_HCI_OPCODE_CMD_CB_SET_CONTROLLER_TO_HOST_FLOW_CONTROL,
                 hci_set_controller_to_host_flow_control),
