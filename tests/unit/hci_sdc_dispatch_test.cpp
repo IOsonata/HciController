@@ -1333,6 +1333,8 @@ int main(void)
                          hci_le_set_advertising_set_random_address),
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_EXT_ADV_PARAMS,
                          hci_le_set_extended_advertising_parameters),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_EXT_ADV_PARAMS_V2,
+                         hci_le_set_extended_advertising_parameters_v2),
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_EXT_ADV_DATA,
                          hci_le_set_extended_advertising_data),
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_SET_EXT_SCAN_RESPONSE_DATA,
@@ -1355,6 +1357,8 @@ int main(void)
                          hci_le_set_extended_scan_enable),
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_EXT_CREATE_CONN,
                          hci_le_extended_create_connection),
+            BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_EXT_CREATE_CONN_V2,
+                         hci_le_extended_create_connection_v2),
             BITMAP_ENTRY(SDC_HCI_OPCODE_CMD_LE_ADD_DEVICE_TO_RESOLVING_LIST,
                          hci_le_add_device_to_resolving_list),
             BITMAP_ENTRY(

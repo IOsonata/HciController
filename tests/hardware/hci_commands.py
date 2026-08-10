@@ -462,6 +462,13 @@ _LE_EXT = [
                  "here: TEARDOWN removes it, after the undo pass has stopped "
                  "it advertising",
             phase=PHASE_EXTENDED),
+    Command(0x207F, "LE Set Extended Advertising Parameters v2", COMPLETE,
+            _EXT_ADV_PARAMS + b"\x00\x00",
+            needs=NEEDS_ADV_SET,
+            note="the v1 block with primary and secondary PHY options on the "
+                 "end. Sent against the set 0x2036 already made, so it "
+                 "reconfigures rather than creating a second one",
+            phase=PHASE_EXTENDED),
     Command(0x2035, "LE Set Advertising Set Random Address", COMPLETE,
             bytes([PROBE_ADV_HANDLE]) + bytes.fromhex("0102030405c0"),
             needs=NEEDS_ADV_SET,
@@ -659,6 +666,17 @@ _LE_CONN = [
             note="one PHY set in the mask, so exactly one parameter group "
                  "follows. Getting that count wrong is the mistake this "
                  "command exists to catch",
+            phase=PHASE_EXTENDED),
+    Command(0x2085, "LE Extended Create Connection v2", STATUS,
+            bytes([PROBE_ADV_HANDLE, 0x00])
+            + b"\x00\x00\x00" + bytes.fromhex("0102030405c0") + b"\x01"
+            + struct.pack("<HHHHHHHH", 0x0060, 0x0030, 0x0018, 0x0028, 0,
+                          0x02BC, 0, 0),
+            needs=(NEEDS_ADV_SET, NEEDS_CONSENT), undo=(0x200E, b""),
+            undo_now=True,
+            note="the periodic advertising with responses form: an "
+                 "advertising handle and a subevent ahead of the v1 block. "
+                 "One PHY set in the mask, so one parameter group follows",
             phase=PHASE_EXTENDED),
     Command(0x2076, "LE Enhanced Read Transmit Power Level", COMPLETE,
             lambda ctx: _conn(ctx, b"\x01"), needs=NEEDS_CONN,

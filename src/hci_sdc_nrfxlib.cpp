@@ -344,6 +344,7 @@ static HciCmdResult_t HciSdcCmdReadSupportedCommands(void *,
 
     supported.params.hci_le_set_advertising_set_random_address = 1U;
     supported.params.hci_le_set_extended_advertising_parameters = 1U;
+    supported.params.hci_le_set_extended_advertising_parameters_v2 = 1U;
     supported.params.hci_le_set_extended_advertising_data = 1U;
     supported.params.hci_le_set_extended_scan_response_data = 1U;
     supported.params.hci_le_set_extended_advertising_enable = 1U;
@@ -355,6 +356,7 @@ static HciCmdResult_t HciSdcCmdReadSupportedCommands(void *,
     supported.params.hci_le_set_extended_scan_parameters = 1U;
     supported.params.hci_le_set_extended_scan_enable = 1U;
     supported.params.hci_le_extended_create_connection = 1U;
+    supported.params.hci_le_extended_create_connection_v2 = 1U;
 
     supported.params.hci_le_add_device_to_resolving_list = 1U;
     supported.params.hci_le_remove_device_from_resolving_list = 1U;
@@ -1502,6 +1504,15 @@ HCI_SDC_CMD_P(HciSdcCmdLeSetAdvSetRandomAddr,
 HCI_SDC_CMD_PR(HciSdcCmdLeSetExtAdvParams, sdc_hci_cmd_le_set_ext_adv_params,
                sdc_hci_cmd_le_set_ext_adv_params_t,
                sdc_hci_cmd_le_set_ext_adv_params_return_t)
+/*
+ * The v2 form adds the primary and secondary PHY options that periodic
+ * advertising with responses needs to place its subevents. Everything else is
+ * the v1 parameter block, so the shape and the generator are the same.
+ */
+HCI_SDC_CMD_PR(HciSdcCmdLeSetExtAdvParamsV2,
+               sdc_hci_cmd_le_set_ext_adv_params_v2,
+               sdc_hci_cmd_le_set_ext_adv_params_v2_t,
+               sdc_hci_cmd_le_set_ext_adv_params_v2_return_t)
 HCI_SDC_CMD_VB(HciSdcCmdLeSetExtAdvData, sdc_hci_cmd_le_set_ext_adv_data,
                sdc_hci_cmd_le_set_ext_adv_data_t, adv_data, adv_data_length,
                HciSdcComplete)
@@ -1530,6 +1541,19 @@ HCI_SDC_CMD_P(HciSdcCmdLeSetExtScanEnable, sdc_hci_cmd_le_set_ext_scan_enable,
               sdc_hci_cmd_le_set_ext_scan_enable_t, HciSdcComplete)
 HCI_SDC_CMD_VP(HciSdcCmdLeExtCreateConn, sdc_hci_cmd_le_ext_create_conn,
                sdc_hci_cmd_le_ext_create_conn_t, array_params,
+               initiating_phys, HciSdcStatus)
+
+/*
+ * Vol 4 Part E 7.8.66. The v2 form takes an advertising handle and a subevent
+ * ahead of the v1 block, which is how a device synchronised to a periodic
+ * advertising train with responses initiates the connection. Without it the
+ * whole periodic advertising with responses path stops one command short of a
+ * link, with the pool memory for it already reserved.
+ *
+ * Same array shape as v1: one element per bit set in initiating_phys.
+ */
+HCI_SDC_CMD_VP(HciSdcCmdLeExtCreateConnV2, sdc_hci_cmd_le_ext_create_conn_v2,
+               sdc_hci_cmd_le_ext_create_conn_v2_t, array_params,
                initiating_phys, HciSdcStatus)
 
 /*
@@ -1995,6 +2019,10 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
                      sizeof(sdc_hci_cmd_le_set_ext_adv_params_t),
                      HciSdcCmdLeSetExtAdvParams,
                      sdc_hci_cmd_le_set_ext_adv_params_return_t),
+    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_SET_EXT_ADV_PARAMS_V2,
+                     sizeof(sdc_hci_cmd_le_set_ext_adv_params_v2_t),
+                     HciSdcCmdLeSetExtAdvParamsV2,
+                     sdc_hci_cmd_le_set_ext_adv_params_v2_return_t),
     HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_EXT_ADV_DATA,
                     HCI_CMD_VARIABLE_PARAM_LEN, HciSdcCmdLeSetExtAdvData),
     HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_EXT_SCAN_RESPONSE_DATA,
@@ -2022,6 +2050,8 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
                     HciSdcCmdLeSetExtScanEnable),
     HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_EXT_CREATE_CONN,
                     HCI_CMD_VARIABLE_PARAM_LEN, HciSdcCmdLeExtCreateConn),
+    HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_EXT_CREATE_CONN_V2,
+                    HCI_CMD_VARIABLE_PARAM_LEN, HciSdcCmdLeExtCreateConnV2),
 
     /* Host declared features. */
     HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_HOST_FEATURE,
@@ -2477,6 +2507,7 @@ HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_default_phy_t, 3U);               /* 7.8.48 
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_phy_t, 7U);                       /* 7.8.49 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_adv_set_random_address_t, 7U);    /* 7.8.52 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_ext_adv_params_t, 25U);           /* 7.8.53 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_ext_adv_params_v2_t, 27U);        /* 7.8.53 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_remove_adv_set_t, 1U);                /* 7.8.59 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_ext_scan_enable_t, 6U);           /* 7.8.65 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_lc_read_remote_version_information_t, 2U);
@@ -2495,10 +2526,14 @@ static_assert(sizeof(sdc_hci_cmd_vs_transmitter_carrier_test_t) == 2U,
  */
 HCI_SDC_SPEC_LEN(sdc_hci_le_set_ext_scan_params_array_params_t, 5U);  /* 7.8.64 */
 HCI_SDC_SPEC_LEN(sdc_hci_le_ext_create_conn_array_params_t, 16U);     /* 7.8.66 */
+HCI_SDC_SPEC_LEN(sdc_hci_le_ext_create_conn_v2_array_params_t, 16U);  /* 7.8.66 */
 static_assert(offsetof(sdc_hci_cmd_le_set_ext_scan_params_t, array_params) == 3U,
               "LE Set Extended Scan Parameters fixed part is not 3 octets");
 static_assert(offsetof(sdc_hci_cmd_le_ext_create_conn_t, array_params) == 10U,
               "LE Extended Create Connection fixed part is not 10 octets");
+/* The v2 fixed part is the v1 one behind Advertising_Handle and Subevent. */
+static_assert(offsetof(sdc_hci_cmd_le_ext_create_conn_v2_t, array_params) == 12U,
+              "LE Extended Create Connection v2 fixed part is not 12 octets");
 
 /*
  * The direct test mode commands that carry an antenna switching pattern. All
@@ -2556,6 +2591,7 @@ HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_suggested_default_data_length_return_t, 4U)
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_max_data_length_return_t, 8U);   /* 7.8.46 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_phy_return_t, 4U);               /* 7.8.47 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_ext_adv_params_return_t, 1U);     /* 7.8.53 */
+HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_set_ext_adv_params_v2_return_t, 1U);  /* 7.8.53 */
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_max_adv_data_length_return_t, 2U);
 HCI_SDC_SPEC_LEN(sdc_hci_cmd_le_read_number_of_supported_adv_sets_return_t, 1U);
 /* Min_TX_Power and Max_TX_Power, one octet each. Vol 4 Part E 7.8.74. */
@@ -2682,6 +2718,7 @@ static HciSdcAdvCmdType_t HciSdcAdvCommandType(uint16_t Opcode)
 
         case SDC_HCI_OPCODE_CMD_LE_SET_ADV_SET_RANDOM_ADDRESS:
         case SDC_HCI_OPCODE_CMD_LE_SET_EXT_ADV_PARAMS:
+        case SDC_HCI_OPCODE_CMD_LE_SET_EXT_ADV_PARAMS_V2:
         case SDC_HCI_OPCODE_CMD_LE_READ_NUMBER_OF_SUPPORTED_ADV_SETS:
         case SDC_HCI_OPCODE_CMD_LE_READ_PERIODIC_ADV_LIST_SIZE:
         case SDC_HCI_OPCODE_CMD_LE_READ_MAX_ADV_DATA_LENGTH:
@@ -2697,6 +2734,7 @@ static HciSdcAdvCmdType_t HciSdcAdvCommandType(uint16_t Opcode)
         case SDC_HCI_OPCODE_CMD_LE_SET_EXT_SCAN_PARAMS:
         case SDC_HCI_OPCODE_CMD_LE_SET_EXT_SCAN_ENABLE:
         case SDC_HCI_OPCODE_CMD_LE_EXT_CREATE_CONN:
+        case SDC_HCI_OPCODE_CMD_LE_EXT_CREATE_CONN_V2:
         case SDC_HCI_OPCODE_CMD_LE_PERIODIC_ADV_CREATE_SYNC:
         case SDC_HCI_OPCODE_CMD_LE_PERIODIC_ADV_CREATE_SYNC_CANCEL:
         case SDC_HCI_OPCODE_CMD_LE_PERIODIC_ADV_TERMINATE_SYNC:

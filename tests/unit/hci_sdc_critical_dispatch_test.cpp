@@ -228,6 +228,128 @@ static void TestEventMaskPage2(const HciControllerOps_t *controller)
     printf("[ok] Set Event Mask Page 2 reaches the SDC entry point\n");
 }
 
+/*
+ * The two helpers above both read a Command Complete. LE Extended Create
+ * Connection answers with Command Status on success and on failure alike,
+ * Vol 4 Part E 7.8.66, so it needs its own reader.
+ */
+static uint8_t SendForCommandStatusEvent(const HciControllerOps_t *controller,
+                                         uint16_t Opcode,
+                                         const uint8_t *pParams,
+                                         size_t ParamLen,
+                                         uint8_t *pEvent,
+                                         size_t EventCapacity)
+{
+    assert(ParamLen <= 255U);
+    uint8_t command[258];
+    command[0] = (uint8_t)Opcode;
+    command[1] = (uint8_t)(Opcode >> 8);
+    command[2] = (uint8_t)ParamLen;
+    if (ParamLen != 0U)
+    {
+        memcpy(&command[3], pParams, ParamLen);
+    }
+
+    assert(controller->Put(controller->pContext, HCI_H4_PACKET_COMMAND,
+                           command, 3U + ParamLen));
+
+    HciH4PacketType_t type = HCI_H4_PACKET_NONE;
+    size_t eventLen = 0U;
+    assert(controller->Get(controller->pContext, &type, pEvent,
+                           EventCapacity, &eventLen) ==
+           HCI_CONTROLLER_GET_PACKET);
+    assert(type == HCI_H4_PACKET_EVENT);
+    assert(eventLen == HCI_COMMAND_STATUS_SIZE);
+    assert(pEvent[0] == HCI_EVENT_COMMAND_STATUS);
+    assert(pEvent[4] == (uint8_t)Opcode);
+    assert(pEvent[5] == (uint8_t)(Opcode >> 8));
+    return pEvent[2];
+}
+
+/*
+ * Periodic advertising with responses is configured and paid for in the SDC
+ * pool, and the two v2 commands are the ones a host needs to use it: the v2
+ * advertising parameters carry the PHY options, and the v2 create connection
+ * is the only way a synchronised device turns a train into a link. Both were
+ * absent from the dispatch table while the feature was enabled.
+ */
+static void TestExtendedAdvertisingV2(const HciControllerOps_t *controller)
+{
+    uint8_t event[64];
+
+    HciSdcNrfxlibResetAdvCommandType();
+
+    uint8_t params[sizeof(sdc_hci_cmd_le_set_ext_adv_params_v2_t)] = {0};
+    g_SdcStub.LastCall = NULL;
+    const size_t paramsLen =
+        SendCommand(controller, SDC_HCI_OPCODE_CMD_LE_SET_EXT_ADV_PARAMS_V2,
+                    params, sizeof(params), event, sizeof(event));
+    assert(strcmp(g_SdcStub.LastCall,
+                  "sdc_hci_cmd_le_set_ext_adv_params_v2") == 0);
+    assert(paramsLen ==
+           HCI_COMMAND_COMPLETE_BASE_SIZE +
+               sizeof(sdc_hci_cmd_le_set_ext_adv_params_v2_return_t));
+    GiveControllerQueueItsTurn(controller);
+    printf("[ok] LE Set Extended Advertising Parameters v2 reaches SDC\n");
+
+    /* It belongs to the extended set, so legacy is closed off after it. */
+    uint8_t legacy[sizeof(sdc_hci_cmd_le_set_adv_params_t)] = {0};
+    g_SdcStub.LastCall = NULL;
+    assert(SendCommandStatus(controller, SDC_HCI_OPCODE_CMD_LE_SET_ADV_PARAMS,
+                             legacy, sizeof(legacy), event, sizeof(event)) ==
+           HCI_STATUS_COMMAND_DISALLOWED);
+    assert(g_SdcStub.LastCall == NULL);
+    GiveControllerQueueItsTurn(controller);
+    printf("[ok] LE Set Extended Advertising Parameters v2 selects extended\n");
+
+    /*
+     * One bit in Initiating_PHYs, so exactly one parameter group follows the
+     * twelve octet fixed part. Getting that count wrong is what the variable
+     * length check exists to catch, so both the right length and a wrong one
+     * are driven.
+     */
+    uint8_t conn[offsetof(sdc_hci_cmd_le_ext_create_conn_v2_t, array_params) +
+                 sizeof(sdc_hci_le_ext_create_conn_v2_array_params_t)] = {0};
+    sdc_hci_cmd_le_ext_create_conn_v2_t *pConn =
+        reinterpret_cast<sdc_hci_cmd_le_ext_create_conn_v2_t *>(conn);
+    pConn->initiating_phys = 0x01U;
+
+    g_SdcStub.LastCall = NULL;
+    assert(SendForCommandStatusEvent(
+               controller, SDC_HCI_OPCODE_CMD_LE_EXT_CREATE_CONN_V2, conn,
+               sizeof(conn), event, sizeof(event)) == HCI_STATUS_SUCCESS);
+    assert(strcmp(g_SdcStub.LastCall,
+                  "sdc_hci_cmd_le_ext_create_conn_v2") == 0);
+    GiveControllerQueueItsTurn(controller);
+    printf("[ok] LE Extended Create Connection v2 reaches SDC\n");
+
+    g_SdcStub.LastCall = NULL;
+    assert(SendForCommandStatusEvent(
+               controller, SDC_HCI_OPCODE_CMD_LE_EXT_CREATE_CONN_V2, conn,
+               sizeof(conn) - 1U, event, sizeof(event)) ==
+           HCI_STATUS_INVALID_HCI_PARAMETERS);
+    assert(g_SdcStub.LastCall == NULL);
+    GiveControllerQueueItsTurn(controller);
+    printf("[ok] LE Extended Create Connection v2 counts its PHY groups\n");
+
+    /* Both bits have to be in the map, or a host will never send either. */
+    uint8_t supportedEvent[HCI_COMMAND_COMPLETE_BASE_SIZE +
+                           sizeof(sdc_hci_cmd_ip_read_local_supported_commands_return_t)];
+    (void)SendCommand(controller,
+                      SDC_HCI_OPCODE_CMD_IP_READ_LOCAL_SUPPORTED_COMMANDS,
+                      NULL, 0U, supportedEvent, sizeof(supportedEvent));
+
+    sdc_hci_cmd_ip_read_local_supported_commands_return_t supported;
+    memcpy(supported.raw, &supportedEvent[HCI_COMMAND_COMPLETE_BASE_SIZE],
+           sizeof(supported.raw));
+    assert(supported.params.hci_le_set_extended_advertising_parameters_v2 == 1U);
+    assert(supported.params.hci_le_extended_create_connection_v2 == 1U);
+    GiveControllerQueueItsTurn(controller);
+    printf("[ok] Read Local Supported Commands advertises both v2 commands\n");
+
+    HciSdcNrfxlibResetAdvCommandType();
+}
+
 int main(void)
 {
     HciSdc_t sdc;
@@ -265,6 +387,7 @@ int main(void)
 
     TestAdvertisingSetRandomAddressGuard(controller);
     TestEventMaskPage2(controller);
+    TestExtendedAdvertisingV2(controller);
 
     printf("All critical SDC real-header dispatch tests passed.\n");
     return 0;
