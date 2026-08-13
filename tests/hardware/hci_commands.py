@@ -25,6 +25,23 @@ EXTENDED_PHASE_OPCODES = frozenset((
 for _opcode in EXTENDED_PHASE_OPCODES:
     _catalog.BY_OPCODE[_opcode].phase = PHASE_EXTENDED
 
+# These two commands enable persistent per-connection power-control reporting.
+# Leaving either one enabled contaminates later connection-scoped rows: Nordic's
+# VS Write Remote TX Power can then correctly answer Controller Busy while that
+# link-layer power-control work is active. Exercise the enable, let it run for
+# the probe settle interval, then restore the disabled state before continuing.
+_path_loss_reporting = _catalog.BY_OPCODE[0x2079]
+_path_loss_reporting.undo = (
+    0x2079, lambda ctx: struct.pack("<HB", ctx.handle, 0x00)
+)
+_path_loss_reporting.undo_now = True
+
+_tx_power_reporting = _catalog.BY_OPCODE[0x207A]
+_tx_power_reporting.undo = (
+    0x207A, lambda ctx: struct.pack("<HBB", ctx.handle, 0x00, 0x00)
+)
+_tx_power_reporting.undo_now = True
+
 # The broad probe deliberately does not build a PAwR synchronized state before
 # driving Extended Create Connection v2. In that state Command Disallowed is a
 # valid state-dependent response, just as it is for the neighboring PAwR rows.
