@@ -14,6 +14,11 @@ ordering that depends on asynchronous controller state:
 * once the current connection has gone down, later connection-scoped rows are
   skipped instead of being sent at a dead handle and reported as unrelated
   Unknown Connection Identifier failures;
+* --only narrows the connection-scoped rows too, so it really isolates a
+  command after the connection preamble rather than replaying every link row;
+* VS Write Remote TX Power treats Controller Busy as transient while an
+  earlier power-control procedure finishes. It retries for a bounded interval
+  and still reports 0x3A as a failure if the controller remains busy;
 * a broad probe that reaches an advertised command and gets a status not listed
   for that row is a failed validation run, not a successful diagnostic run.
 """
@@ -37,6 +42,11 @@ _active_probe_hci = None
 _deferred_pairing = None
 _cancel_pending = False
 _PROBE_REFUSAL_RE = re.compile(r"\b(\d+)\s+refused otherwise\b")
+
+_STATUS_CONTROLLER_BUSY = 0x3A
+_OP_VS_WRITE_REMOTE_TX_POWER = 0xFD0A
+_FD0A_BUSY_RETRIES = 10
+_FD0A_BUSY_DELAY = 0.1
 
 
 def _link_down_for(hci, handle):
@@ -160,6 +170,21 @@ def cmd_probe(hci, args):
     _cancel_pending = False
     raw_command = hci.command
 
+    # The implementation filters phase rows for --only, but rebuilt the
+    # connection-scoped list independently from the full catalog. Narrow the
+    # catalog for this invocation so that list sees the same selection. The
+    # preamble and cleanup commands are intentionally not catalog rows and
+    # still run, because they establish and restore the state the selected row
+    # needs.
+    original_commands = _impl.hci_commands.COMMANDS
+    if args.only:
+        selected = set(int(value, 0) for value in
+                       args.only.replace(" ", "").split(","))
+        _impl.hci_commands.COMMANDS = tuple(
+            command for command in original_commands
+            if command.opcode in selected
+        )
+
     # The implementation keeps its counters local to cmd_probe.  Its summary is
     # therefore the one stable boundary available to this sequencing wrapper.
     # Forward every print unchanged while remembering the explicit
@@ -194,6 +219,30 @@ def cmd_probe(hci, args):
         result = raw_command(opcode, payload, timeout=timeout,
                              allow_fail=allow_fail)
 
+        # Nordic may answer Controller Busy while an earlier LL power-control
+        # procedure is still in flight. That is transient, not an expected
+        # terminal answer for VS Write Remote TX Power. Retry only this command
+        # and only when the probe asked to receive failure statuses. A
+        # controller that remains busy after the bounded retries returns 0x3A
+        # to the normal refusal path and still fails validation.
+        if (opcode == _OP_VS_WRITE_REMOTE_TX_POWER and allow_fail
+                and result[0] == _STATUS_CONTROLLER_BUSY):
+            builtins.print(
+                "     0xFD0A Controller Busy; waiting for the prior "
+                "power-control procedure")
+            retries = 0
+            while (result[0] == _STATUS_CONTROLLER_BUSY
+                   and retries < _FD0A_BUSY_RETRIES):
+                retries += 1
+                time.sleep(_FD0A_BUSY_DELAY)
+                result = raw_command(opcode, payload, timeout=timeout,
+                                     allow_fail=True)
+            if result[0] != _STATUS_CONTROLLER_BUSY:
+                builtins.print(
+                    "     0xFD0A busy cleared after %d %s; final %s"
+                    % (retries, "retry" if retries == 1 else "retries",
+                       _impl.status_text(result[0])))
+
         # Command Complete for LE Create Connection Cancel only says that the
         # cancel command was accepted.  The initiating procedure ends on the
         # later LE connection-complete event.  Starting another initiator
@@ -223,6 +272,7 @@ def cmd_probe(hci, args):
         return result
     finally:
         hci.command = raw_command
+        _impl.hci_commands.COMMANDS = original_commands
         if had_module_print:
             _impl.print = previous_print
         else:
