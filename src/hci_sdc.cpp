@@ -298,8 +298,9 @@ static HciCmdResult_t HciSdcVsDtmCommand(void *,
     if (ParamLen != expectedLen || ReturnCapacity < maximumReturnLen)
     {
         HciCmdResult_t error = {
-            ParamLen != expectedLen ? HCI_STATUS_INVALID_HCI_PARAMETERS
-                                    : HCI_STATUS_MEMORY_CAPACITY_EXCEEDED,
+            static_cast<uint8_t>(
+                ParamLen != expectedLen ? HCI_STATUS_INVALID_HCI_PARAMETERS
+                                        : HCI_STATUS_MEMORY_CAPACITY_EXCEEDED),
             HCI_CMD_RESPONSE_COMPLETE,
             0U,
         };
