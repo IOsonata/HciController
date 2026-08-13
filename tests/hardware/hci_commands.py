@@ -35,30 +35,6 @@ if STATUS_COMMAND_DISALLOWED not in _ext_create_v2.expect:
         tuple(_ext_create_v2.expect) + (STATUS_COMMAND_DISALLOWED,)
     )
 
-# Controller/Baseband commands exported by the nRF52 multirole SDC but not
-# present in the older generated dispatch table. The host-flow-control setting
-# is deliberately left disabled by the broad probe; Host Number Of Completed
-# Packets is exercised only with a live handle and correctly expects no event.
-_SDC_CB = (
-    Command(0x0C27, "Read Automatic Flush Timeout", COMPLETE,
-            lambda ctx: struct.pack("<H", ctx.handle),
-            needs=NEEDS_CONN,
-            note="read-only ACL flush timeout for the live connection"),
-    Command(0x0C28, "Write Automatic Flush Timeout", COMPLETE,
-            lambda ctx: struct.pack("<HH", ctx.handle, 0),
-            needs=NEEDS_CONN,
-            note="zero disables automatic flush; normal LE/default behavior"),
-    Command(0x0C31, "Set Controller To Host Flow Control", COMPLETE,
-            b"\x00", note="leave Controller-to-Host flow control disabled"),
-    Command(0x0C33, "Host Buffer Size", COMPLETE,
-            struct.pack("<HBHH", 251, 0, 4, 0),
-            note="declare the normal 251-byte/4-packet ACL host buffer while flow control is off"),
-    Command(0x0C35, "Host Number Of Completed Packets", NONE,
-            lambda ctx: struct.pack("<BHH", 1, ctx.handle, 0),
-            needs=NEEDS_CONN,
-            note="special HCI command: valid success is deliberately silent"),
-)
-
 # Core 6.2 commands routed by src/hci_sdc.cpp rather than the older vendor
 # table. The first two use an unused handle so the probe verifies parsing and
 # reply shape without changing a live connection. The default-rate command is
@@ -143,9 +119,9 @@ _SDC_VS = (
             COMPLETE, b"\x00", note="disabled state; no asynchronous report flood"),
 )
 
-COMMANDS = tuple(_catalog.COMMANDS) + _SDC_CB + _CORE_62 + _SDC_VS
+COMMANDS = tuple(_catalog.COMMANDS) + _CORE_62 + _SDC_VS
 BY_OPCODE = dict(_catalog.BY_OPCODE)
-for _command in _SDC_CB + _CORE_62 + _SDC_VS:
+for _command in _CORE_62 + _SDC_VS:
     if _command.opcode in BY_OPCODE:
         raise AssertionError("opcode 0x%04X listed twice" % _command.opcode)
     BY_OPCODE[_command.opcode] = _command

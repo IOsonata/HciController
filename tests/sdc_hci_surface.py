@@ -25,9 +25,30 @@ from sdc_symbols_release import (
 )
 
 # Exported SDC HCI entry points intentionally not routed by HciController.
-# Every entry below maps to a support API that the nRF52840 profile explicitly
-# excludes because this SoC has no Bluetooth Direction Finding radio support.
+# An exported symbol alone is not proof that the configured controller can use
+# the command. Keep each exclusion tied to its actual configuration or hardware
+# limitation so a future nrfxlib update can re-evaluate it.
 HCI_CLASSIFIED_NOT_ROUTED = {
+    # Nordic exposes these only with LE Flushable ACL Data support. That feature
+    # is experimental and this release intentionally does not call
+    # sdc_support_flushable_acl_data(), so the commands are not advertised.
+    "sdc_hci_cmd_cb_read_automatic_flush_timeout":
+        "LE Flushable ACL Data is experimental and not enabled by this release",
+    "sdc_hci_cmd_cb_write_automatic_flush_timeout":
+        "LE Flushable ACL Data is experimental and not enabled by this release",
+
+    # These symbols exist in the archive, but hardware evidence says the
+    # Controller-to-Host flow-control group is unusable in this nRF52840
+    # multirole configuration. Host Buffer Size returned 0x11; keep all three
+    # hidden until the complete group is proven usable on hardware.
+    "sdc_hci_cmd_cb_set_controller_to_host_flow_control":
+        "exported SDC symbol but unusable on the tested nRF52840 multirole configuration",
+    "sdc_hci_cmd_cb_host_buffer_size":
+        "exported SDC symbol; Host Buffer Size returned 0x11 on tested nRF52840 multirole hardware",
+    "sdc_hci_cmd_cb_host_number_of_completed_packets":
+        "exported SDC symbol but unusable on the tested nRF52840 multirole configuration",
+
+    # nRF52840 has no Bluetooth Direction Finding radio support.
     "sdc_hci_cmd_le_conn_cte_response_enable":
         "nRF52840 has no Direction Finding radio support; connection CTE response support is excluded",
     "sdc_hci_cmd_le_read_antenna_information":
@@ -73,8 +94,6 @@ def main():
     calls = source_hci_calls(table_paths)
     classified = set(HCI_CLASSIFIED_NOT_ROUTED)
 
-    # KNOWN_ABSENT commands are locally implemented compatibility commands and
-    # therefore are not expected to appear in the archive's offered set.
     missing_calls = sorted(c for c in calls
                            if c not in symbols and c not in KNOWN_ABSENT)
     unclassified = sorted(offered - calls - classified)
