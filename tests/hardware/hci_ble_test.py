@@ -16,6 +16,8 @@ ordering that depends on asynchronous controller state:
   Unknown Connection Identifier failures;
 * --only narrows the connection-scoped rows too, so it really isolates a
   command after the connection preamble rather than replaying every link row;
+* LE Set PHY is not complete at Command Status.  The probe waits for its LE PHY
+  Update Complete event before another link-layer control procedure is started;
 * LE Read Remote Transmit Power Level is not complete at Command Status.  The
   probe keeps LE Transmit Power Reporting unmasked and waits for that terminal
   event before another power-control procedure is allowed to start;
@@ -47,11 +49,15 @@ _cancel_pending = False
 _PROBE_REFUSAL_RE = re.compile(r"\b(\d+)\s+refused otherwise\b")
 
 _STATUS_CONTROLLER_BUSY = 0x3A
+_OP_LE_SET_PHY = 0x2032
 _OP_LE_READ_REMOTE_TX_POWER = 0x2077
 _OP_VS_WRITE_REMOTE_TX_POWER = 0xFD0A
+_LE_PHY_UPDATE_COMPLETE = 0x0C
 _LE_TRANSMIT_POWER_REPORTING = 0x21
+_LE_EVENT_MASK_PHY_UPDATE = 1 << 11
 _LE_EVENT_MASK_TRANSMIT_POWER_REPORTING = 1 << 32
 _POWER_REPORT_REASON_READ_REMOTE = 0x02
+_PHY_UPDATE_TIMEOUT = 5.0
 _REMOTE_TX_POWER_TIMEOUT = 5.0
 _FD0A_BUSY_RETRIES = 10
 _FD0A_BUSY_DELAY = 0.1
@@ -88,6 +94,32 @@ def _wait_for_cancel_terminal(hci, timeout=2.0):
             if info is not None:
                 _restore_packets(hci, deferred)
                 return info
+        deferred.append(packet)
+
+    _restore_packets(hci, deferred)
+    return None
+
+
+def _wait_for_phy_update(hci, handle, timeout=_PHY_UPDATE_TIMEOUT):
+    """Wait for the LE PHY Update Complete event belonging to LE Set PHY."""
+    deferred = []
+    deadline = time.time() + timeout
+
+    while time.time() < deadline:
+        if hci.pending:
+            packet = hci.pending.pop(0)
+        else:
+            packet = hci.read_wire(min(0.2, max(0.0, deadline - time.time())))
+        if packet is None:
+            continue
+
+        kind, code, body = packet
+        if (kind == _impl.H4_EVENT and code == _impl.EVT_LE_META
+                and len(body) >= 6 and body[0] == _LE_PHY_UPDATE_COMPLETE):
+            event_handle = struct.unpack("<H", body[2:4])[0] & 0x0FFF
+            if event_handle == handle:
+                _restore_packets(hci, deferred)
+                return body[1], body[4], body[5]
         deferred.append(packet)
 
     _restore_packets(hci, deferred)
@@ -202,7 +234,6 @@ def cmd_probe(hci, args):
     _cancel_pending = False
     raw_command = hci.command
 
-    # The implementation filters phase rows for --only, but rebuilt the
     original_commands = _impl.hci_commands.COMMANDS
     if args.only:
         selected = set(int(value, 0) for value in
@@ -227,12 +258,10 @@ def cmd_probe(hci, args):
     def guarded_command(opcode, payload=b"", timeout=3.0, allow_fail=False):
         global _cancel_pending
 
-        # phases and restores a deliberately narrow LE event mask.  0x2077 is
-        # asynchronous, so its terminal LE Transmit Power Reporting event must
-        # following power-control command. Preserve every bit the caller asked
         if opcode == _impl.OP_LE_SET_EVENT_MASK and len(payload) == 8:
             mask = int.from_bytes(payload, "little")
-            mask |= _LE_EVENT_MASK_TRANSMIT_POWER_REPORTING
+            mask |= (_LE_EVENT_MASK_PHY_UPDATE
+                     | _LE_EVENT_MASK_TRANSMIT_POWER_REPORTING)
             payload = mask.to_bytes(8, "little")
 
         if opcode == _impl.OP_DISCONNECT and len(payload) >= 2:
@@ -245,9 +274,20 @@ def cmd_probe(hci, args):
         result = raw_command(opcode, payload, timeout=timeout,
                              allow_fail=allow_fail)
 
-        # the request, then LE Transmit Power Reporting reason 0x02 says the LL
-        # Power Control Request procedure is finished. Starting another power
-        # Busy for 0xFD0A in the broad probe.
+        if opcode == _OP_LE_SET_PHY and result[0] == 0 and len(payload) >= 2:
+            handle = struct.unpack("<H", payload[:2])[0] & 0x0FFF
+            terminal = _wait_for_phy_update(hci, handle)
+            if terminal is None:
+                raise _impl.HciError(
+                    "no LE PHY Update Complete for 0x2032 handle 0x%04X"
+                    % handle)
+            terminal_status, tx_phy, rx_phy = terminal
+            builtins.print(
+                "     0x2032 PHY update complete: %s, TX 0x%02X RX 0x%02X"
+                % (_impl.status_text(terminal_status), tx_phy, rx_phy))
+            if terminal_status != 0:
+                result = terminal_status, b""
+
         if (opcode == _OP_LE_READ_REMOTE_TX_POWER and result[0] == 0
                 and len(payload) >= 2):
             handle = struct.unpack("<H", payload[:2])[0] & 0x0FFF
@@ -262,8 +302,6 @@ def cmd_probe(hci, args):
             if terminal_status != 0:
                 result = terminal_status, b""
 
-        # Nordic may answer Controller Busy while an earlier LL power-control
-        # terminal answer for VS Write Remote TX Power. Retry only this command
         if (opcode == _OP_VS_WRITE_REMOTE_TX_POWER and allow_fail
                 and result[0] == _STATUS_CONTROLLER_BUSY):
             builtins.print(
