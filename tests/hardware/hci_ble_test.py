@@ -14,6 +14,16 @@ ordering that depends on asynchronous controller state:
 * once the current connection has gone down, later connection-scoped rows are
   skipped instead of being sent at a dead handle and reported as unrelated
   Unknown Connection Identifier failures;
+* --only narrows the connection-scoped rows too, so it really isolates a
+  command after the connection preamble rather than replaying every link row;
+* LE Set PHY is not complete at Command Status.  The probe waits for its LE PHY
+  Update Complete event before another link-layer control procedure is started;
+* LE Read Remote Transmit Power Level is not complete at Command Status.  The
+  probe keeps LE Transmit Power Reporting unmasked and waits for that terminal
+  event before another power-control procedure is allowed to start;
+* VS Write Remote TX Power treats Controller Busy as transient while an
+  earlier power-control procedure finishes. It retries for a bounded interval
+  and still reports 0x3A as a failure if the controller remains busy;
 * a broad probe that reaches an advertised command and gets a status not listed
   for that row is a failed validation run, not a successful diagnostic run.
 """
@@ -37,6 +47,20 @@ _active_probe_hci = None
 _deferred_pairing = None
 _cancel_pending = False
 _PROBE_REFUSAL_RE = re.compile(r"\b(\d+)\s+refused otherwise\b")
+
+_STATUS_CONTROLLER_BUSY = 0x3A
+_OP_LE_SET_PHY = 0x2032
+_OP_LE_READ_REMOTE_TX_POWER = 0x2077
+_OP_VS_WRITE_REMOTE_TX_POWER = 0xFD0A
+_LE_PHY_UPDATE_COMPLETE = 0x0C
+_LE_TRANSMIT_POWER_REPORTING = 0x21
+_LE_EVENT_MASK_PHY_UPDATE = 1 << 11
+_LE_EVENT_MASK_TRANSMIT_POWER_REPORTING = 1 << 32
+_POWER_REPORT_REASON_READ_REMOTE = 0x02
+_PHY_UPDATE_TIMEOUT = 5.0
+_REMOTE_TX_POWER_TIMEOUT = 5.0
+_FD0A_BUSY_RETRIES = 10
+_FD0A_BUSY_DELAY = 0.1
 
 
 def _link_down_for(hci, handle):
@@ -70,6 +94,60 @@ def _wait_for_cancel_terminal(hci, timeout=2.0):
             if info is not None:
                 _restore_packets(hci, deferred)
                 return info
+        deferred.append(packet)
+
+    _restore_packets(hci, deferred)
+    return None
+
+
+def _wait_for_phy_update(hci, handle, timeout=_PHY_UPDATE_TIMEOUT):
+    """Wait for the LE PHY Update Complete event belonging to LE Set PHY."""
+    deferred = []
+    deadline = time.time() + timeout
+
+    while time.time() < deadline:
+        if hci.pending:
+            packet = hci.pending.pop(0)
+        else:
+            packet = hci.read_wire(min(0.2, max(0.0, deadline - time.time())))
+        if packet is None:
+            continue
+
+        kind, code, body = packet
+        if (kind == _impl.H4_EVENT and code == _impl.EVT_LE_META
+                and len(body) >= 6 and body[0] == _LE_PHY_UPDATE_COMPLETE):
+            event_handle = struct.unpack("<H", body[2:4])[0] & 0x0FFF
+            if event_handle == handle:
+                _restore_packets(hci, deferred)
+                return body[1], body[4], body[5]
+        deferred.append(packet)
+
+    _restore_packets(hci, deferred)
+    return None
+
+
+def _wait_for_remote_tx_power_report(hci, handle, timeout=_REMOTE_TX_POWER_TIMEOUT):
+    """Wait for the terminal event belonging to LE Read Remote TX Power."""
+    deferred = []
+    deadline = time.time() + timeout
+
+    while time.time() < deadline:
+        if hci.pending:
+            packet = hci.pending.pop(0)
+        else:
+            packet = hci.read_wire(min(0.2, max(0.0, deadline - time.time())))
+        if packet is None:
+            continue
+
+        kind, code, body = packet
+        if (kind == _impl.H4_EVENT and code == _impl.EVT_LE_META
+                and len(body) >= 5
+                and body[0] == _LE_TRANSMIT_POWER_REPORTING):
+            event_handle = struct.unpack("<H", body[2:4])[0] & 0x0FFF
+            if (event_handle == handle
+                    and body[4] == _POWER_REPORT_REASON_READ_REMOTE):
+                _restore_packets(hci, deferred)
+                return body[1]
         deferred.append(packet)
 
     _restore_packets(hci, deferred)
@@ -131,10 +209,6 @@ def probe_available(command, args, live_handle, ctx):
                 % (ctx.handle, reason, _impl.ERROR_NAMES.get(reason, ""))
             )
 
-    # cmd_probe sorts Disconnect last.  The original implementation waited for
-    # optional pairing before any connection-scoped row, which let an
-    # interactive timeout or phone-side disconnect invalidate the whole group.
-    # Run that wait here instead, after all ordinary rows have had their chance.
     if command.opcode == _impl.OP_DISCONNECT and _deferred_pairing is not None:
         pair_hci, handlers, smp, pair_args = _deferred_pairing
         _deferred_pairing = None
@@ -160,11 +234,15 @@ def cmd_probe(hci, args):
     _cancel_pending = False
     raw_command = hci.command
 
-    # The implementation keeps its counters local to cmd_probe.  Its summary is
-    # therefore the one stable boundary available to this sequencing wrapper.
-    # Forward every print unchanged while remembering the explicit
-    # "refused otherwise" count. Those are statuses not listed in the command
-    # row's expect= set, so any nonzero value is a validation failure.
+    original_commands = _impl.hci_commands.COMMANDS
+    if args.only:
+        selected = set(int(value, 0) for value in
+                       args.only.replace(" ", "").split(","))
+        _impl.hci_commands.COMMANDS = tuple(
+            command for command in original_commands
+            if command.opcode in selected
+        )
+
     had_module_print = "print" in _impl.__dict__
     previous_print = _impl.__dict__.get("print")
     refused_otherwise = None
@@ -180,10 +258,12 @@ def cmd_probe(hci, args):
     def guarded_command(opcode, payload=b"", timeout=3.0, allow_fail=False):
         global _cancel_pending
 
-        # Cleanup after a phone-side disconnect is deliberately quiet.  The
-        # counted Disconnect row is already skipped by probe_available; the
-        # unconditional final cleanup in the implementation need not put one
-        # more command on a handle that no longer exists.
+        if opcode == _impl.OP_LE_SET_EVENT_MASK and len(payload) == 8:
+            mask = int.from_bytes(payload, "little")
+            mask |= (_LE_EVENT_MASK_PHY_UPDATE
+                     | _LE_EVENT_MASK_TRANSMIT_POWER_REPORTING)
+            payload = mask.to_bytes(8, "little")
+
         if opcode == _impl.OP_DISCONNECT and len(payload) >= 2:
             handle = struct.unpack("<H", payload[:2])[0]
             if _link_down_for(hci, handle):
@@ -194,19 +274,58 @@ def cmd_probe(hci, args):
         result = raw_command(opcode, payload, timeout=timeout,
                              allow_fail=allow_fail)
 
-        # Command Complete for LE Create Connection Cancel only says that the
-        # cancel command was accepted.  The initiating procedure ends on the
-        # later LE connection-complete event.  Starting another initiator
-        # before that event is exactly what produced the false 0x0C on 0x2085.
+        if opcode == _OP_LE_SET_PHY and result[0] == 0 and len(payload) >= 2:
+            handle = struct.unpack("<H", payload[:2])[0] & 0x0FFF
+            terminal = _wait_for_phy_update(hci, handle)
+            if terminal is None:
+                raise _impl.HciError(
+                    "no LE PHY Update Complete for 0x2032 handle 0x%04X"
+                    % handle)
+            terminal_status, tx_phy, rx_phy = terminal
+            builtins.print(
+                "     0x2032 PHY update complete: %s, TX 0x%02X RX 0x%02X"
+                % (_impl.status_text(terminal_status), tx_phy, rx_phy))
+            if terminal_status != 0:
+                result = terminal_status, b""
+
+        if (opcode == _OP_LE_READ_REMOTE_TX_POWER and result[0] == 0
+                and len(payload) >= 2):
+            handle = struct.unpack("<H", payload[:2])[0] & 0x0FFF
+            terminal_status = _wait_for_remote_tx_power_report(hci, handle)
+            if terminal_status is None:
+                raise _impl.HciError(
+                    "no LE Transmit Power Reporting reason 0x02 for "
+                    "0x2077 handle 0x%04X" % handle)
+            builtins.print(
+                "     0x2077 remote TX power procedure complete: %s"
+                % _impl.status_text(terminal_status))
+            if terminal_status != 0:
+                result = terminal_status, b""
+
+        if (opcode == _OP_VS_WRITE_REMOTE_TX_POWER and allow_fail
+                and result[0] == _STATUS_CONTROLLER_BUSY):
+            builtins.print(
+                "     0xFD0A Controller Busy; waiting for the prior "
+                "power-control procedure")
+            retries = 0
+            while (result[0] == _STATUS_CONTROLLER_BUSY
+                   and retries < _FD0A_BUSY_RETRIES):
+                retries += 1
+                time.sleep(_FD0A_BUSY_DELAY)
+                result = raw_command(opcode, payload, timeout=timeout,
+                                     allow_fail=True)
+            if result[0] != _STATUS_CONTROLLER_BUSY:
+                builtins.print(
+                    "     0xFD0A busy cleared after %d %s; final %s"
+                    % (retries, "retry" if retries == 1 else "retries",
+                       _impl.status_text(result[0])))
+
         if opcode == _impl.OP_LE_CREATE_CONNECTION_CANCEL and result[0] == 0:
             _cancel_pending = True
             terminal = _wait_for_cancel_terminal(hci, 2.0)
             if terminal is not None:
                 _cancel_pending = False
 
-                # A successful connection means the cancel lost the race.  It
-                # is not the case the probe asks for, but do not leave that
-                # accidental connection around to contaminate later rows.
                 status, handle = terminal[0], terminal[1]
                 if status == 0:
                     raw_command(_impl.OP_DISCONNECT,
@@ -223,6 +342,7 @@ def cmd_probe(hci, args):
         return result
     finally:
         hci.command = raw_command
+        _impl.hci_commands.COMMANDS = original_commands
         if had_module_print:
             _impl.print = previous_print
         else:
@@ -232,9 +352,6 @@ def cmd_probe(hci, args):
         _cancel_pending = False
 
 
-# The implementation's functions resolve these names through its module
-# globals, so installing the guards here fixes both direct CLI use and callers
-# that import cmd_probe from hci_ble_test.
 _impl.probe_available = probe_available
 _impl.probe_wait_for_peer = probe_wait_for_peer
 _impl.probe_wait_for_ltk = probe_wait_for_ltk

@@ -15,6 +15,7 @@
 #include <string.h>
 
 #include "sdc_hci_cmd_controller_baseband.h"
+#include "sdc_hci_vs.h"
 #if HCI_CONTROLLER_TARGET_CORE_VERSION >= HCI_CORE_VERSION_6_2
 #include "sdc_hci_cmd_le.h"
 #endif
@@ -86,7 +87,7 @@ static bool HciSdcPacketLength(HciH4PacketType_t Type,
 }
 
 /* -------------------------------------------------------------------------
- * Supplemental Core HCI commands.
+ * Supplemental Core and SDC vendor-specific HCI commands.
  * ------------------------------------------------------------------------- */
 
 static HciCmdResult_t HciSdcCompatReadConnAcceptTimeout(void *,
@@ -172,6 +173,162 @@ static HciCmdResult_t HciSdcCompatReadSupportedStates(void *,
         HCI_STATUS_SUCCESS,
         HCI_CMD_RESPONSE_COMPLETE,
         sizeof(states),
+    };
+    return result;
+}
+
+#define HCI_SDC_VS_FIXED_HANDLER(Name, Function, ParamType, ResponseKind)       \
+    static HciCmdResult_t Name(void *,                                           \
+                               const uint8_t *pParams,                            \
+                               size_t,                                             \
+                               uint8_t *,                                          \
+                               size_t)                                             \
+    {                                                                              \
+        ParamType params;                                                          \
+        memcpy(&params, pParams, sizeof(params));                                  \
+        HciCmdResult_t result = {Function(&params), ResponseKind, 0U};             \
+        return result;                                                             \
+    }
+
+HCI_SDC_VS_FIXED_HANDLER(HciSdcVsConnEventExtend,
+                         sdc_hci_cmd_vs_conn_event_extend,
+                         sdc_hci_cmd_vs_conn_event_extend_t,
+                         HCI_CMD_RESPONSE_COMPLETE)
+HCI_SDC_VS_FIXED_HANDLER(HciSdcVsEventLengthSet,
+                         sdc_hci_cmd_vs_event_length_set,
+                         sdc_hci_cmd_vs_event_length_set_t,
+                         HCI_CMD_RESPONSE_COMPLETE)
+HCI_SDC_VS_FIXED_HANDLER(HciSdcVsPeriodicAdvEventLengthSet,
+                         sdc_hci_cmd_vs_periodic_adv_event_length_set,
+                         sdc_hci_cmd_vs_periodic_adv_event_length_set_t,
+                         HCI_CMD_RESPONSE_COMPLETE)
+HCI_SDC_VS_FIXED_HANDLER(HciSdcVsPeripheralLatencyModeSet,
+                         sdc_hci_cmd_vs_peripheral_latency_mode_set,
+                         sdc_hci_cmd_vs_peripheral_latency_mode_set_t,
+                         HCI_CMD_RESPONSE_COMPLETE)
+HCI_SDC_VS_FIXED_HANDLER(HciSdcVsWriteRemoteTxPower,
+                         sdc_hci_cmd_vs_write_remote_tx_power,
+                         sdc_hci_cmd_vs_write_remote_tx_power_t,
+                         HCI_CMD_RESPONSE_STATUS)
+HCI_SDC_VS_FIXED_HANDLER(HciSdcVsCompatModeWindowOffsetSet,
+                         sdc_hci_cmd_vs_compat_mode_window_offset_set,
+                         sdc_hci_cmd_vs_compat_mode_window_offset_set_t,
+                         HCI_CMD_RESPONSE_COMPLETE)
+HCI_SDC_VS_FIXED_HANDLER(HciSdcVsSetPowerControlRequestParams,
+                         sdc_hci_cmd_vs_set_power_control_request_params,
+                         sdc_hci_cmd_vs_set_power_control_request_params_t,
+                         HCI_CMD_RESPONSE_COMPLETE)
+HCI_SDC_VS_FIXED_HANDLER(HciSdcVsCentralAclEventSpacingSet,
+                         sdc_hci_cmd_vs_central_acl_event_spacing_set,
+                         sdc_hci_cmd_vs_central_acl_event_spacing_set_t,
+                         HCI_CMD_RESPONSE_COMPLETE)
+HCI_SDC_VS_FIXED_HANDLER(HciSdcVsAllowParallelConnectionEstablishments,
+                         sdc_hci_cmd_vs_allow_parallel_connection_establishments,
+                         sdc_hci_cmd_vs_allow_parallel_connection_establishments_t,
+                         HCI_CMD_RESPONSE_COMPLETE)
+HCI_SDC_VS_FIXED_HANDLER(HciSdcVsMinValOfMaxAclTxPayloadSet,
+                         sdc_hci_cmd_vs_min_val_of_max_acl_tx_payload_set,
+                         sdc_hci_cmd_vs_min_val_of_max_acl_tx_payload_set_t,
+                         HCI_CMD_RESPONSE_COMPLETE)
+HCI_SDC_VS_FIXED_HANDLER(HciSdcVsScanChannelMapSet,
+                         sdc_hci_cmd_vs_scan_channel_map_set,
+                         sdc_hci_cmd_vs_scan_channel_map_set_t,
+                         HCI_CMD_RESPONSE_COMPLETE)
+HCI_SDC_VS_FIXED_HANDLER(HciSdcVsScanAcceptExtAdvPacketsSet,
+                         sdc_hci_cmd_vs_scan_accept_ext_adv_packets_set,
+                         sdc_hci_cmd_vs_scan_accept_ext_adv_packets_set_t,
+                         HCI_CMD_RESPONSE_COMPLETE)
+HCI_SDC_VS_FIXED_HANDLER(HciSdcVsSetRolePriority,
+                         sdc_hci_cmd_vs_set_role_priority,
+                         sdc_hci_cmd_vs_set_role_priority_t,
+                         HCI_CMD_RESPONSE_COMPLETE)
+HCI_SDC_VS_FIXED_HANDLER(HciSdcVsSetEventStartTask,
+                         sdc_hci_cmd_vs_set_event_start_task,
+                         sdc_hci_cmd_vs_set_event_start_task_t,
+                         HCI_CMD_RESPONSE_COMPLETE)
+HCI_SDC_VS_FIXED_HANDLER(HciSdcVsEnablePeriodicAdvEventCounterReports,
+                         sdc_hci_cmd_vs_enable_periodic_adv_event_counter_reports,
+                         sdc_hci_cmd_vs_enable_periodic_adv_event_counter_reports_t,
+                         HCI_CMD_RESPONSE_COMPLETE)
+
+#undef HCI_SDC_VS_FIXED_HANDLER
+
+static HciCmdResult_t HciSdcVsDtmCommand(void *,
+                                         const uint8_t *pParams,
+                                         size_t ParamLen,
+                                         uint8_t *pReturn,
+                                         size_t ReturnCapacity)
+{
+    if (ParamLen < sizeof(sdc_hci_vs_dtm_command_header_t))
+    {
+        HciCmdResult_t error = {
+            HCI_STATUS_INVALID_HCI_PARAMETERS,
+            HCI_CMD_RESPONSE_COMPLETE,
+            0U,
+        };
+        return error;
+    }
+
+    const uint8_t subOpcode = pParams[0];
+    size_t expectedLen = 0U;
+    size_t maximumReturnLen = 0U;
+
+    switch (subOpcode)
+    {
+        case SDC_HCI_VS_DTM_COMMAND_OPCODE_TEST_END:
+            expectedLen = sizeof(sdc_hci_cmd_vs_dtm_test_end_t);
+            maximumReturnLen = sizeof(sdc_hci_cmd_vs_dtm_test_end_return_t);
+            break;
+
+        case SDC_HCI_VS_DTM_COMMAND_OPCODE_TRANSMITTER_CARRIER_TEST:
+            expectedLen = sizeof(sdc_hci_cmd_vs_dtm_transmitter_carrier_test_t);
+            break;
+
+        default:
+        {
+            HciCmdResult_t error = {
+                HCI_STATUS_INVALID_HCI_PARAMETERS,
+                HCI_CMD_RESPONSE_COMPLETE,
+                0U,
+            };
+            return error;
+        }
+    }
+
+    if (ParamLen != expectedLen || ReturnCapacity < maximumReturnLen)
+    {
+        HciCmdResult_t error = {
+            static_cast<uint8_t>(
+                ParamLen != expectedLen ? HCI_STATUS_INVALID_HCI_PARAMETERS
+                                        : HCI_STATUS_MEMORY_CAPACITY_EXCEEDED),
+            HCI_CMD_RESPONSE_COMPLETE,
+            0U,
+        };
+        return error;
+    }
+
+    sdc_hci_cmd_vs_dtm_command_t params;
+    memset(&params, 0, sizeof(params));
+    memcpy(&params, pParams, ParamLen);
+
+    uint8_t returnLen = 0U;
+    const uint8_t status =
+        sdc_hci_cmd_vs_dtm_command(&params, pReturn, &returnLen);
+
+    if ((size_t)returnLen > maximumReturnLen || (size_t)returnLen > ReturnCapacity)
+    {
+        HciCmdResult_t error = {
+            HCI_STATUS_MEMORY_CAPACITY_EXCEEDED,
+            HCI_CMD_RESPONSE_COMPLETE,
+            0U,
+        };
+        return error;
+    }
+
+    HciCmdResult_t result = {
+        status,
+        HCI_CMD_RESPONSE_COMPLETE,
+        status == HCI_STATUS_SUCCESS ? (size_t)returnLen : 0U,
     };
     return result;
 }
@@ -306,6 +463,86 @@ static const HciCmdEntry_t s_HciSdcCompatCommands[] = {
      8U,
      HCI_CMD_RESPONSE_COMPLETE,
      HciSdcCompatReadSupportedStates},
+    {SDC_HCI_OPCODE_CMD_VS_DTM_COMMAND,
+     HCI_CMD_VARIABLE_PARAM_LEN,
+     0U,
+     HCI_CMD_RESPONSE_COMPLETE,
+     HciSdcVsDtmCommand},
+    {SDC_HCI_OPCODE_CMD_VS_CONN_EVENT_EXTEND,
+     (uint16_t)sizeof(sdc_hci_cmd_vs_conn_event_extend_t),
+     0U,
+     HCI_CMD_RESPONSE_COMPLETE,
+     HciSdcVsConnEventExtend},
+    {SDC_HCI_OPCODE_CMD_VS_EVENT_LENGTH_SET,
+     (uint16_t)sizeof(sdc_hci_cmd_vs_event_length_set_t),
+     0U,
+     HCI_CMD_RESPONSE_COMPLETE,
+     HciSdcVsEventLengthSet},
+    {SDC_HCI_OPCODE_CMD_VS_PERIODIC_ADV_EVENT_LENGTH_SET,
+     (uint16_t)sizeof(sdc_hci_cmd_vs_periodic_adv_event_length_set_t),
+     0U,
+     HCI_CMD_RESPONSE_COMPLETE,
+     HciSdcVsPeriodicAdvEventLengthSet},
+    {SDC_HCI_OPCODE_CMD_VS_PERIPHERAL_LATENCY_MODE_SET,
+     (uint16_t)sizeof(sdc_hci_cmd_vs_peripheral_latency_mode_set_t),
+     0U,
+     HCI_CMD_RESPONSE_COMPLETE,
+     HciSdcVsPeripheralLatencyModeSet},
+    {SDC_HCI_OPCODE_CMD_VS_WRITE_REMOTE_TX_POWER,
+     (uint16_t)sizeof(sdc_hci_cmd_vs_write_remote_tx_power_t),
+     0U,
+     HCI_CMD_RESPONSE_STATUS,
+     HciSdcVsWriteRemoteTxPower},
+    {SDC_HCI_OPCODE_CMD_VS_COMPAT_MODE_WINDOW_OFFSET_SET,
+     (uint16_t)sizeof(sdc_hci_cmd_vs_compat_mode_window_offset_set_t),
+     0U,
+     HCI_CMD_RESPONSE_COMPLETE,
+     HciSdcVsCompatModeWindowOffsetSet},
+    {SDC_HCI_OPCODE_CMD_VS_SET_POWER_CONTROL_REQUEST_PARAMS,
+     (uint16_t)sizeof(sdc_hci_cmd_vs_set_power_control_request_params_t),
+     0U,
+     HCI_CMD_RESPONSE_COMPLETE,
+     HciSdcVsSetPowerControlRequestParams},
+    {SDC_HCI_OPCODE_CMD_VS_CENTRAL_ACL_EVENT_SPACING_SET,
+     (uint16_t)sizeof(sdc_hci_cmd_vs_central_acl_event_spacing_set_t),
+     0U,
+     HCI_CMD_RESPONSE_COMPLETE,
+     HciSdcVsCentralAclEventSpacingSet},
+    {SDC_HCI_OPCODE_CMD_VS_ALLOW_PARALLEL_CONNECTION_ESTABLISHMENTS,
+     (uint16_t)sizeof(sdc_hci_cmd_vs_allow_parallel_connection_establishments_t),
+     0U,
+     HCI_CMD_RESPONSE_COMPLETE,
+     HciSdcVsAllowParallelConnectionEstablishments},
+    {SDC_HCI_OPCODE_CMD_VS_MIN_VAL_OF_MAX_ACL_TX_PAYLOAD_SET,
+     (uint16_t)sizeof(sdc_hci_cmd_vs_min_val_of_max_acl_tx_payload_set_t),
+     0U,
+     HCI_CMD_RESPONSE_COMPLETE,
+     HciSdcVsMinValOfMaxAclTxPayloadSet},
+    {SDC_HCI_OPCODE_CMD_VS_SCAN_CHANNEL_MAP_SET,
+     (uint16_t)sizeof(sdc_hci_cmd_vs_scan_channel_map_set_t),
+     0U,
+     HCI_CMD_RESPONSE_COMPLETE,
+     HciSdcVsScanChannelMapSet},
+    {SDC_HCI_OPCODE_CMD_VS_SCAN_ACCEPT_EXT_ADV_PACKETS_SET,
+     (uint16_t)sizeof(sdc_hci_cmd_vs_scan_accept_ext_adv_packets_set_t),
+     0U,
+     HCI_CMD_RESPONSE_COMPLETE,
+     HciSdcVsScanAcceptExtAdvPacketsSet},
+    {SDC_HCI_OPCODE_CMD_VS_SET_ROLE_PRIORITY,
+     (uint16_t)sizeof(sdc_hci_cmd_vs_set_role_priority_t),
+     0U,
+     HCI_CMD_RESPONSE_COMPLETE,
+     HciSdcVsSetRolePriority},
+    {SDC_HCI_OPCODE_CMD_VS_SET_EVENT_START_TASK,
+     (uint16_t)sizeof(sdc_hci_cmd_vs_set_event_start_task_t),
+     0U,
+     HCI_CMD_RESPONSE_COMPLETE,
+     HciSdcVsSetEventStartTask},
+    {SDC_HCI_OPCODE_CMD_VS_ENABLE_PERIODIC_ADV_EVENT_COUNTER_REPORTS,
+     (uint16_t)sizeof(sdc_hci_cmd_vs_enable_periodic_adv_event_counter_reports_t),
+     0U,
+     HCI_CMD_RESPONSE_COMPLETE,
+     HciSdcVsEnablePeriodicAdvEventCounterReports},
 #if HCI_CONTROLLER_TARGET_CORE_VERSION >= HCI_CORE_VERSION_6_2
     {HCI_SDC_SUPP_OPCODE_LE_FRAME_SPACE_UPDATE,
      (uint16_t)sizeof(sdc_hci_cmd_le_frame_space_update_t),
@@ -337,6 +574,22 @@ static bool HciSdcSupplementalOpcode(uint16_t Opcode)
         case HCI_SDC_COMPAT_OPCODE_READ_CONN_ACCEPT_TIMEOUT:
         case HCI_SDC_COMPAT_OPCODE_WRITE_CONN_ACCEPT_TIMEOUT:
         case HCI_SDC_COMPAT_OPCODE_LE_READ_SUPPORTED_STATES:
+        case SDC_HCI_OPCODE_CMD_VS_DTM_COMMAND:
+        case SDC_HCI_OPCODE_CMD_VS_CONN_EVENT_EXTEND:
+        case SDC_HCI_OPCODE_CMD_VS_EVENT_LENGTH_SET:
+        case SDC_HCI_OPCODE_CMD_VS_PERIODIC_ADV_EVENT_LENGTH_SET:
+        case SDC_HCI_OPCODE_CMD_VS_PERIPHERAL_LATENCY_MODE_SET:
+        case SDC_HCI_OPCODE_CMD_VS_WRITE_REMOTE_TX_POWER:
+        case SDC_HCI_OPCODE_CMD_VS_COMPAT_MODE_WINDOW_OFFSET_SET:
+        case SDC_HCI_OPCODE_CMD_VS_SET_POWER_CONTROL_REQUEST_PARAMS:
+        case SDC_HCI_OPCODE_CMD_VS_CENTRAL_ACL_EVENT_SPACING_SET:
+        case SDC_HCI_OPCODE_CMD_VS_ALLOW_PARALLEL_CONNECTION_ESTABLISHMENTS:
+        case SDC_HCI_OPCODE_CMD_VS_MIN_VAL_OF_MAX_ACL_TX_PAYLOAD_SET:
+        case SDC_HCI_OPCODE_CMD_VS_SCAN_CHANNEL_MAP_SET:
+        case SDC_HCI_OPCODE_CMD_VS_SCAN_ACCEPT_EXT_ADV_PACKETS_SET:
+        case SDC_HCI_OPCODE_CMD_VS_SET_ROLE_PRIORITY:
+        case SDC_HCI_OPCODE_CMD_VS_SET_EVENT_START_TASK:
+        case SDC_HCI_OPCODE_CMD_VS_ENABLE_PERIODIC_ADV_EVENT_COUNTER_REPORTS:
 #if HCI_CONTROLLER_TARGET_CORE_VERSION >= HCI_CORE_VERSION_6_2
         case HCI_SDC_SUPP_OPCODE_LE_FRAME_SPACE_UPDATE:
         case HCI_SDC_SUPP_OPCODE_LE_CONNECTION_RATE_REQUEST:

@@ -36,6 +36,8 @@ ERROR_NAMES = {
     0x12: "Invalid HCI Command Parameters",
     0x13: "Remote User Terminated Connection",
     0x16: "Connection Terminated By Local Host",
+    0x1A: "Unsupported Remote Feature",
+    0x3A: "Controller Busy",
     0x3E: "Connection Failed To Be Established",
     0x41: "Unacceptable Connection Parameters",
     0x42: "Unknown Advertising Identifier",
