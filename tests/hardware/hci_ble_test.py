@@ -16,6 +16,9 @@ ordering that depends on asynchronous controller state:
   Unknown Connection Identifier failures;
 * --only narrows the connection-scoped rows too, so it really isolates a
   command after the connection preamble rather than replaying every link row;
+* LE Read Remote Transmit Power Level is not complete at Command Status.  The
+  probe waits for its LE Transmit Power Reporting event before another
+  power-control procedure is allowed to start;
 * VS Write Remote TX Power treats Controller Busy as transient while an
   earlier power-control procedure finishes. It retries for a bounded interval
   and still reports 0x3A as a failure if the controller remains busy;
@@ -44,7 +47,11 @@ _cancel_pending = False
 _PROBE_REFUSAL_RE = re.compile(r"\b(\d+)\s+refused otherwise\b")
 
 _STATUS_CONTROLLER_BUSY = 0x3A
+_OP_LE_READ_REMOTE_TX_POWER = 0x2077
 _OP_VS_WRITE_REMOTE_TX_POWER = 0xFD0A
+_LE_TRANSMIT_POWER_REPORTING = 0x21
+_POWER_REPORT_REASON_READ_REMOTE = 0x02
+_REMOTE_TX_POWER_TIMEOUT = 5.0
 _FD0A_BUSY_RETRIES = 10
 _FD0A_BUSY_DELAY = 0.1
 
@@ -80,6 +87,34 @@ def _wait_for_cancel_terminal(hci, timeout=2.0):
             if info is not None:
                 _restore_packets(hci, deferred)
                 return info
+        deferred.append(packet)
+
+    _restore_packets(hci, deferred)
+    return None
+
+
+def _wait_for_remote_tx_power_report(hci, handle, timeout=_REMOTE_TX_POWER_TIMEOUT):
+    """Wait for the terminal event belonging to LE Read Remote TX Power."""
+    deferred = []
+    deadline = time.time() + timeout
+
+    while time.time() < deadline:
+        if hci.pending:
+            packet = hci.pending.pop(0)
+        else:
+            packet = hci.read_wire(min(0.2, max(0.0, deadline - time.time())))
+        if packet is None:
+            continue
+
+        kind, code, body = packet
+        if (kind == _impl.H4_EVENT and code == _impl.EVT_LE_META
+                and len(body) >= 5
+                and body[0] == _LE_TRANSMIT_POWER_REPORTING):
+            event_handle = struct.unpack("<H", body[2:4])[0] & 0x0FFF
+            if (event_handle == handle
+                    and body[4] == _POWER_REPORT_REASON_READ_REMOTE):
+                _restore_packets(hci, deferred)
+                return body[1]
         deferred.append(packet)
 
     _restore_packets(hci, deferred)
@@ -218,6 +253,25 @@ def cmd_probe(hci, args):
 
         result = raw_command(opcode, payload, timeout=timeout,
                              allow_fail=allow_fail)
+
+        # Vol 4 Part E 7.8.118 is a two-stage command: Command Status accepts
+        # the request, then LE Transmit Power Reporting reason 0x02 says the LL
+        # Power Control Request procedure is finished. Starting another power
+        # control procedure in between is what made Nordic return Controller
+        # Busy for 0xFD0A in the broad probe.
+        if (opcode == _OP_LE_READ_REMOTE_TX_POWER and result[0] == 0
+                and len(payload) >= 2):
+            handle = struct.unpack("<H", payload[:2])[0] & 0x0FFF
+            terminal_status = _wait_for_remote_tx_power_report(hci, handle)
+            if terminal_status is None:
+                raise _impl.HciError(
+                    "no LE Transmit Power Reporting reason 0x02 for "
+                    "0x2077 handle 0x%04X" % handle)
+            builtins.print(
+                "     0x2077 remote TX power procedure complete: %s"
+                % _impl.status_text(terminal_status))
+            if terminal_status != 0:
+                result = terminal_status, b""
 
         # Nordic may answer Controller Busy while an earlier LL power-control
         # procedure is still in flight. That is transient, not an expected
