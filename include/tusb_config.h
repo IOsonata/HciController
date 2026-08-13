@@ -37,7 +37,17 @@
 
 #define CFG_TUD_ENDPOINT0_SIZE 64
 
-#define CFG_TUD_CDC    1
+/*
+ * Two. One is the HCI byte stream and one is a log, and the second exists
+ * because a controller that can only be watched with a debugger cannot be
+ * watched at all on a sealed board or on somebody else's product. The nRF52840
+ * has seven bulk or interrupt endpoints each way and two CDC take four in and
+ * two out, so this is not close to a limit.
+ *
+ * The log one is there whichever port the HCI stream is on. With HCI over
+ * UART the first is simply unused and the log still arrives.
+ */
+#define CFG_TUD_CDC    2
 #define CFG_TUD_MSC    0
 #define CFG_TUD_HID    0
 #define CFG_TUD_MIDI   0

@@ -36,7 +36,7 @@ extern "C" {
 #define HCI_CMD_VARIABLE_PARAM_LEN          0xFFFFU
 
 /*
- * An HCI event carries a single byte length, and Command Complete spends four
+ * An HCI event has a single byte length, and Command Complete spends four
  * of those on the header before the return parameters start.
  */
 #define HCI_CMD_MAX_RETURN_LEN              251U
@@ -73,6 +73,11 @@ typedef HciCmdResult_t (*HciCmdHandler_t)(void *pContext,
  * ReturnLen is the number of return parameter bytes after the status byte, and
  * is zero for a Command Status entry.
  */
+/*
+ * Answers 0 to let a command through, or the status to refuse it with.
+ */
+typedef uint8_t (*HciCmdGuard_t)(void *pContext, uint16_t Opcode);
+
 typedef struct {
     uint16_t Opcode;
     uint16_t ParamLen;
@@ -97,12 +102,54 @@ typedef struct {
     uint32_t InvalidParamLenCount;
     uint32_t HandlerErrorCount;
     uint32_t EventBackpressureCount;
+
+    /*
+     * Commands that made it through table, length, handler-presence, and guard
+     * checks and actually entered their handler. The SDC routing layer needs
+     * this distinction for the one command whose direct vendor call schedules
+     * its Command Complete for later: a guard or local length rejection must
+     * not be mistaken for a command that reached SDC.
+     */
+    uint32_t HandlerCallCount;
+
+/*
+ * What was answered, as the opcode and the status that went with it.
+ *
+ * The commands arriving are already recorded a layer down, and on this board
+ * they all arrive and none is refused, so the question moved to what was said
+ * back. A host that stops after six commands with nothing in its own log has
+ * either been told something it did not like or been told it wrongly, and a
+ * status of zero against every opcode rules out the first.
+ *
+ * Two octets of opcode and one of status, which is the whole of what a host
+ * decides on for most commands. The return parameters are the vendor's own
+ * answers and not this layer's to doubt.
+ */
+#define HCI_CMD_RSP_MARKS 24U
+    struct {
+        uint8_t Opcode[2];
+        uint8_t Status;
+    } RspMark[HCI_CMD_RSP_MARKS];
+    uint8_t RspMarkLen;
+
+    /*
+     * Asked about every command with a row, after the length check and before
+     * the handler. A non zero answer is the status the command is refused
+     * with, and the handler is not called.
+     *
+     * The dispatcher has no opinion about what any opcode means, and this is
+     * how it stays that way while still refusing a command for a reason that
+     * needs opcodes to state. Vol 4 Part E 3.1.1 is the reason it exists: a
+     * host may use the legacy advertising commands or the extended ones and
+     * not both, and the one that comes second is Command Disallowed.
+     */
+    HciCmdGuard_t Guard;
 } HciCmdDispatch_t;
 
 /*
  * Queue the Command Complete for the No Operation opcode, which is how a
  * controller says it is ready to take commands. Vol 4 Part E 7.7.14 gives 0x0000
- * that meaning, and the event carries the command credit and the opcode and
+ * that meaning, and the event returns the command credit and the opcode and
  * nothing else: no status, no return parameters, so it is five octets where
  * every other Command Complete is at least six.
  *
@@ -141,6 +188,22 @@ bool HciCmdDispatchGet(HciCmdDispatch_t *pDispatch,
                        size_t *pEventLen);
 
 bool HciCmdDispatchEventPending(const HciCmdDispatch_t *pDispatch);
+
+/*
+ * Whether this controller implements the opcode, and the length agrees with
+ * what the table says the command takes.
+ *
+ * Not a substitute for dispatching, which still answers an opcode it does not
+ * know with Unknown Command as the specification requires. This is for a
+ * caller that has to decide whether a packet is a command at all, which is a
+ * different question and one the octets cannot answer on their own: a stream
+ * that is not H:4 produces packets that are well formed and mean nothing, and
+ * the only thing separating them from real ones is that a real host sends
+ * opcodes that exist.
+ */
+bool HciCmdDispatchKnows(const HciCmdDispatch_t *pDispatch,
+                         uint16_t Opcode,
+                         size_t ParamLen);
 
 #ifdef __cplusplus
 }

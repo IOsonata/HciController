@@ -16,13 +16,17 @@
 #include <stdint.h>
 
 #include "hci_taktos.h"
+#include "hci_target.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define HCI_NRF52840_DEFAULT_SDC_MEM_SIZE 10000U
-
+/*
+ * The nRF52840 port: its clock, its USB device peripheral, its errata and the
+ * state those need. What the SoftDevice Controller is configured for is not
+ * here, it is in hci_sdc_resources.h, because it is the same on every part.
+ */
 typedef struct {
     HciTaktOs_t *pRuntime;
     uint8_t *pSdcMem;
@@ -46,11 +50,6 @@ typedef struct {
 
     uint32_t RandRetryCount;
 
-    /* Last MPSL or controller assert, kept for a debugger to read. */
-    const char *AssertFile;
-    uint32_t AssertLine;
-    uint32_t AssertCount;
-    bool AssertFromSdc;
     volatile uint32_t UsbIrqCount;
     volatile uint32_t UsbIrqMark;
     volatile uint32_t UsbStuckCauseCount;
@@ -68,6 +67,14 @@ bool HciNrf52840Init(HciNrf52840_t *pTarget,
 
 void HciNrf52840GetTaktOsOps(HciNrf52840_t *pTarget,
                              HciTaktOsOps_t *pOps);
+
+/*
+ * Print the reset reason and, when the previous reset followed an MPSL/SDC
+ * assertion, the retained assertion source and line. Call once after the trace
+ * sink is initialized and before normal target initialization clears runtime
+ * state.
+ */
+void HciNrf52840ResetTrace(void);
 
 /*
  * Enables the USB hardware. Must be called after the USB device stack has been
@@ -88,6 +95,13 @@ void HciNrf52840UsbPassMark(HciNrf52840_t *pTarget);
 void HciNrf52840UsbPowerProcess(HciNrf52840_t *pTarget);
 
 void HciNrf52840Stop(HciNrf52840_t *pTarget);
+
+/*
+ * This part as a target the application can hold without naming it. The
+ * instance is owned here because there is one radio, so there is nothing to
+ * allocate and nothing for the caller to size.
+ */
+HciTarget_t HciNrf52840Target(void);
 
 #ifdef __cplusplus
 }

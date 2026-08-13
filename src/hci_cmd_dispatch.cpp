@@ -31,11 +31,54 @@ static const HciCmdEntry_t *HciCmdFindEntry(const HciCmdDispatch_t *pDispatch,
     return NULL;
 }
 
+bool HciCmdDispatchKnows(const HciCmdDispatch_t *pDispatch,
+                         uint16_t Opcode,
+                         size_t ParamLen)
+{
+    if (pDispatch == NULL)
+    {
+        return false;
+    }
+
+    const HciCmdEntry_t *pEntry = HciCmdFindEntry(pDispatch, Opcode);
+    if (pEntry == NULL)
+    {
+        return false;
+    }
+
+    /*
+     * A variable length command declares no length, so only the opcode can be
+     * checked for those. Everything else has to agree, which is what makes
+     * this worth asking at all: an opcode that exists by accident is unlikely
+     * to arrive with the right number of octets behind it as well.
+     */
+    return pEntry->ParamLen == HCI_CMD_VARIABLE_PARAM_LEN ||
+           pEntry->ParamLen == ParamLen;
+}
+
+static void HciCmdRecordRsp(HciCmdDispatch_t *pDispatch,
+                            uint16_t Opcode,
+                            uint8_t Status)
+{
+    if (pDispatch->RspMarkLen >= HCI_CMD_RSP_MARKS)
+    {
+        return;
+    }
+
+    const uint8_t slot = pDispatch->RspMarkLen;
+    pDispatch->RspMark[slot].Opcode[0] = (uint8_t)Opcode;
+    pDispatch->RspMark[slot].Opcode[1] = (uint8_t)(Opcode >> 8);
+    pDispatch->RspMark[slot].Status = Status;
+    pDispatch->RspMarkLen++;
+}
+
 static void HciCmdBuildComplete(HciCmdDispatch_t *pDispatch,
                                 uint16_t Opcode,
                                 uint8_t Status,
                                 size_t ReturnLen)
 {
+    HciCmdRecordRsp(pDispatch, Opcode, Status);
+
     pDispatch->pEvent[0] = HCI_EVENT_COMMAND_COMPLETE;
     pDispatch->pEvent[1] = (uint8_t)(4U + ReturnLen);
     pDispatch->pEvent[2] = 1U;
@@ -91,6 +134,8 @@ static void HciCmdBuildStatus(HciCmdDispatch_t *pDispatch,
                               uint16_t Opcode,
                               uint8_t Status)
 {
+    HciCmdRecordRsp(pDispatch, Opcode, Status);
+
     pDispatch->pEvent[0] = HCI_EVENT_COMMAND_STATUS;
     pDispatch->pEvent[1] = 4U;
     pDispatch->pEvent[2] = Status;
@@ -215,8 +260,24 @@ bool HciCmdDispatchPut(HciCmdDispatch_t *pDispatch,
         return true;
     }
 
+    /*
+     * After the length check, so a malformed block is still answered for what
+     * is wrong with it rather than for the state it arrived in, and before
+     * the handler, so a refused command never reaches the controller.
+     */
+    if (pDispatch->Guard != NULL)
+    {
+        const uint8_t refuse = pDispatch->Guard(pDispatch->pContext, opcode);
+        if (refuse != HCI_STATUS_SUCCESS)
+        {
+            HciCmdBuildError(pDispatch, pEntry, opcode, refuse);
+            return true;
+        }
+    }
+
     uint8_t *pReturn = &pDispatch->pEvent[HCI_COMMAND_COMPLETE_BASE_SIZE];
     const size_t returnCapacity = pDispatch->EventCapacity - HCI_COMMAND_COMPLETE_BASE_SIZE;
+    pDispatch->HandlerCallCount++;
     HciCmdResult_t result = pEntry->Handler(pDispatch->pContext,
                                             &pPacket[HCI_DISPATCH_COMMAND_HEADER_SIZE],
                                             paramLen,

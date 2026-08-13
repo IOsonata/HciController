@@ -46,8 +46,24 @@ extern "C" {
  * appended and the version raised; renumbering would make an older host read
  * the wrong field and report a fault that is not there.
  *
- * Version 1 carried indices 0 to 15, version 2 appends 16 to 29, and version 3
- * appends 30 and 31.
+ * Version 1 carried indices 0 to 15, version 2 appends 16 to 29, version 3
+ * appends 30 and 31, version 4 appends 32 and 33, and version 5 appends the
+ * four PAwR delayed-completion checkpoints at 34 to 37.
+ *
+ * Indices 32 and 33 are not counters. They are the two numbers that decide
+ * whether the controller starts at all, and they are here for the reason the
+ * rest of this readout exists: a sealed dongle has no console, so the trace
+ * that shows them on a development board reaches nobody on a shipped one.
+ *
+ * The pool is computed from the configuration in hci_nrf52840.h, but the
+ * figure that actually decides is the one sdc_cfg_set answers at run time, and
+ * sdc.h says the memory macros may move between minor releases. So the build
+ * time number can be right and the run time one larger. Reporting both means a
+ * host can see the headroom rather than only finding out when a controller
+ * refuses to enable, and can watch it shrink across an nrfxlib upgrade.
+ *
+ * Both read zero on a stack whose platform layer never filled them in, which
+ * is what the host tests do, so zero means not reported rather than no memory.
  *
  *   0  CommandCount                     commands the dispatch table accepted
  *   1  UnknownCommandCount              opcodes with no entry
@@ -81,9 +97,15 @@ extern "C" {
  *  29  UnsendableControllerPacketCount  controller packet the host would not take
  *  30  AclCreditOverrunCount            host exceeded the buffers it was told
  *  31  AclTrackOverflowCount            more links in flight than tracked
+ *  32  SdcMemRequired                   octets sdc_cfg_set asked for
+ *  33  SdcMemCapacity                   octets the build reserved
+ *  34  PawrDelayedCandidateCount        structurally valid 0x2083 commands seen
+ *  35  PawrDelayedHandlerCallCount      0x2083 commands that entered the handler
+ *  36  PawrSyntheticSuppressedCount     local 0x2083 completions suppressed
+ *  37  PawrSdcCompleteCount             matching real SDC completions received
  */
-#define HCI_COUNTERS_VERSION    3U
-#define HCI_COUNTERS_COUNT      32U
+#define HCI_COUNTERS_VERSION    5U
+#define HCI_COUNTERS_COUNT      38U
 #define HCI_COUNTERS_RETURN_LEN (1U + (HCI_COUNTERS_COUNT * 4U))
 
 /*
@@ -98,11 +120,29 @@ typedef struct {
      */
     HciSdc_t *pSdc;
     const HciController_t *pController;
+
+    /*
+     * Filled in by the platform layer once the controller has answered, and
+     * left at zero everywhere else. Plain integers rather than a pointer to
+     * the target structure, because this layer is portable and that one is
+     * not: the dispatch test builds this file with no nRF52840 in sight.
+     */
+    uint32_t SdcMemRequired;
+    uint32_t SdcMemCapacity;
 } HciCounters_t;
 
 void HciCountersInit(HciCounters_t *pCounters,
                      HciSdc_t *pSdc,
                      const HciController_t *pController);
+
+/*
+ * The pool figures, reported at indices 32 and 33. Separate from the init
+ * above because they are not known until sdc_cfg_set has answered, which
+ * happens after the counter layer has to be wired.
+ */
+void HciCountersSetSdcMem(HciCounters_t *pCounters,
+                          uint32_t Required,
+                          uint32_t Capacity);
 
 /*
  * Command handler. The command context has to be the HciCounters_t; given

@@ -9,11 +9,36 @@
 #define SDC_CFG_TYPE_ADV_COUNT       4
 #define SDC_CFG_TYPE_ADV_BUFFER_CFG  5
 #define SDC_CFG_TYPE_SCAN_BUFFER_CFG 6
+/* Real sdc.h numbers these differently; only distinctness matters here. */
+#define SDC_CFG_TYPE_FAL_SIZE        7
+#define SDC_CFG_TYPE_EXTENDED_FEATURE_PAGE_COUNT 8
+#define SDC_CFG_TYPE_PERIODIC_ADV_COUNT          9
+#define SDC_CFG_TYPE_PERIODIC_SYNC_COUNT        10
+#define SDC_CFG_TYPE_PERIODIC_SYNC_BUFFER_CFG   11
+#define SDC_CFG_TYPE_PERIODIC_ADV_LIST_SIZE     12
+#define SDC_CFG_TYPE_PERIODIC_ADV_RSP_COUNT     13
+#define SDC_CFG_TYPE_PERIODIC_ADV_RSP_BUFFER_CFG 14
+#define SDC_CFG_TYPE_PERIODIC_ADV_RSP_FAILURE_REPORTING_CFG 15
+#define SDC_CFG_TYPE_PERIODIC_SYNC_RSP_TX_BUFFER_CFG 16
+#define SDC_CFG_TYPE_CIG_COUNT                  17
+#define SDC_CFG_TYPE_CIS_COUNT                  18
+#define SDC_CFG_TYPE_BIG_COUNT                  19
+#define SDC_CFG_TYPE_BIS_SOURCE_COUNT           20
+#define SDC_CFG_TYPE_BIS_SINK_COUNT             21
+#define SDC_CFG_TYPE_ISO_BUFFER_CFG             22
 typedef struct { uint8_t count; } sdc_cfg_role_count_t;
 typedef struct { uint8_t rx_packet_size; uint8_t tx_packet_size;
                  uint8_t rx_packet_count; uint8_t tx_packet_count; } sdc_cfg_buffer_cfg_t;
 typedef struct { uint16_t max_adv_data; } sdc_cfg_adv_buffer_cfg_t;
 typedef struct { uint8_t count; } sdc_cfg_scan_buffer_cfg_t;
+typedef struct { uint8_t tx_buffer_count; uint8_t max_tx_data_size;
+                 uint8_t rx_buffer_count; } sdc_cfg_periodic_adv_rsp_buffer_cfg_t;
+/* Member names as the vendor header has them, sizes as it has them too. */
+typedef struct { uint8_t tx_sdu_buffer_count; uint16_t tx_sdu_buffer_size;
+                 uint8_t tx_pdu_buffer_per_stream_count;
+                 uint8_t rx_pdu_buffer_per_stream_count;
+                 uint8_t rx_sdu_buffer_count;
+                 uint16_t rx_sdu_buffer_size; } sdc_cfg_iso_buffer_cfg_t;
 typedef union {
     sdc_cfg_buffer_cfg_t buffer_cfg;
     sdc_cfg_role_count_t peripheral_count;
@@ -21,6 +46,23 @@ typedef union {
     sdc_cfg_role_count_t adv_count;
     sdc_cfg_adv_buffer_cfg_t adv_buffer_cfg;
     sdc_cfg_scan_buffer_cfg_t scan_buffer_cfg;
+    /* A bare integer in the real header, not a role count. */
+    uint16_t fal_size;
+    uint8_t extended_feature_page_count;
+    sdc_cfg_role_count_t periodic_adv_count;
+    sdc_cfg_role_count_t periodic_sync_count;
+    sdc_cfg_scan_buffer_cfg_t periodic_sync_buffer_cfg;
+    uint8_t periodic_adv_list_size;
+    sdc_cfg_role_count_t periodic_adv_rsp_count;
+    sdc_cfg_periodic_adv_rsp_buffer_cfg_t periodic_adv_rsp_buffer_cfg;
+    uint8_t periodic_adv_rsp_failure_reporting_cfg;
+    sdc_cfg_scan_buffer_cfg_t periodic_sync_rsp_tx_buffer_cfg;
+    sdc_cfg_role_count_t cig_count;
+    sdc_cfg_role_count_t cis_count;
+    sdc_cfg_role_count_t big_count;
+    sdc_cfg_role_count_t bis_source_count;
+    sdc_cfg_role_count_t bis_sink_count;
+    sdc_cfg_iso_buffer_cfg_t iso_buffer_cfg;
 } sdc_cfg_t;
 typedef void (*sdc_fault_handler_t)(const char *, uint32_t);
 typedef void (*sdc_callback_t)(void);
@@ -43,22 +85,90 @@ void sdc_support_dle_central(void);
 void sdc_support_phy_update_peripheral(void);
 void sdc_support_phy_update_central(void);
 void sdc_support_direct_test_mode(void);
+void sdc_support_le_privacy(void);
+void sdc_support_qos_channel_survey(void);
+void sdc_support_le_power_control_central(void);
+void sdc_support_le_power_control_peripheral(void);
+void sdc_support_le_path_loss_monitoring(void);
+void sdc_support_sca_central(void);
+void sdc_support_sca_peripheral(void);
+void sdc_support_connection_subrating_central(void);
+void sdc_support_connection_subrating_peripheral(void);
+void sdc_support_extended_feature_set_central(void);
+void sdc_support_extended_feature_set_peripheral(void);
+static inline void sdc_support_frame_space_update_central(void) {}
+static inline void sdc_support_frame_space_update_peripheral(void) {}
+static inline void sdc_support_shorter_connection_intervals_central(void) {}
+static inline void sdc_support_shorter_connection_intervals_peripheral(void) {}
+void sdc_support_parallel_scanning_and_initiating(void);
+void sdc_support_le_periodic_adv(void);
+void sdc_support_le_periodic_sync(void);
+void sdc_support_periodic_adv_sync_transfer_sender_central(void);
+void sdc_support_periodic_adv_sync_transfer_sender_peripheral(void);
+void sdc_support_periodic_adv_sync_transfer_receiver_central(void);
+void sdc_support_periodic_adv_sync_transfer_receiver_peripheral(void);
+void sdc_support_le_periodic_adv_with_rsp(void);
+void sdc_support_le_periodic_sync_with_rsp(void);
+void sdc_support_cis_central(void);
+void sdc_support_cis_peripheral(void);
+void sdc_support_bis_source(void);
+void sdc_support_bis_sink(void);
 #ifdef __cplusplus
 }
 #endif
 
 /*
  * Memory requirement macros, copied verbatim from the real
- * softdevice_controller/include/sdc.h so the build time floor in
- * hci_nrf52840.cpp is checked in the host build too. If these drift from the
- * vendor header the dispatch test, which compiles against the real one, is
- * what catches it.
+ * softdevice_controller/include/sdc.h so the pool in hci_sdc_resources.h is
+ * computed in the host build too.
+ *
+ * These are copies, so they can drift. What catches that is the pair of
+ * hci_nrf52840_usb_test, which builds against this file, and
+ * hci_sdc_resources_test, which builds against the vendor one. Both are
+ * measured against unit/hci_sdc_expected_resources.h, so a copy that no
+ * longer matches fails here while the real header still passes, and which of
+ * the two failed says which side moved.
+ *
+ * An earlier version of this comment credited the dispatch test with that.
+ * It never did: the dispatch test does not include hci_sdc_resources.h and
+ * has no opinion about memory.
  */
+/*
+ * Isochronous channels, copied verbatim from the vendor header like the rest
+ * of this file. hci_sdc_resources_test measures the real ones against the
+ * same expectations, so a copy that drifts fails there while this one still
+ * passes, and which of the two failed says which side moved.
+ */
+#define __MEM_PER_ISO_PDU_POOL(count) ((count) > 0 ? (16 + (count) * 288) : 0)
+
+#define SDC_MEM_PER_CIG(count) ((count) > 0 ? (13 + (count) * 163) : 0)
+#define SDC_MEM_PER_CIS(count) ((count) > 0 ? (13 + (count) * 547) : 0)
+#define SDC_MEM_PER_BIG(count) ((count) > 0 ? (13 + (count) * 331) : 0)
+#define SDC_MEM_PER_BIS(count) ((count) > 0 ? (13 + (count) * 259) : 0)
+
+#define SDC_MEM_ISO_RX_PDU_POOL_PER_STREAM_SIZE(                              \
+        rx_pdu_buffer_per_stream_count, cis_count, bis_sink_count)            \
+    (__MEM_PER_ISO_PDU_POOL(rx_pdu_buffer_per_stream_count) *                 \
+     ((cis_count) + (bis_sink_count)))
+
+#define SDC_MEM_ISO_RX_SDU_POOL_SIZE(count, size)                             \
+    ((count) > 0 ? (8 + (count) * ((size) + 13)) : 0)
+
+#define SDC_MEM_ISO_TX_PDU_POOL_SIZE(tx_pdu_buffer_per_stream_count,          \
+                                     cis_count, bis_source_count)             \
+    ((tx_pdu_buffer_per_stream_count) > 0 ?                                   \
+     __MEM_PER_ISO_PDU_POOL(tx_pdu_buffer_per_stream_count) *                 \
+         ((cis_count) + (bis_source_count)) : 0)
+
+#define SDC_MEM_ISO_TX_SDU_POOL_SIZE(count, size)                             \
+    ((count) > 0 ? (12 + (count) * ((size) + 49)) : 0)
+
+#define SDC_DEFAULT_EXTENDED_FEATURE_PAGE_COUNT 10
 #define SDC_DEFAULT_TX_PACKET_SIZE 27
 #define SDC_DEFAULT_RX_PACKET_SIZE 27
 
-#define __MEM_MINIMAL_CENTRAL_LINK_SIZE    795
-#define __MEM_MINIMAL_PERIPHERAL_LINK_SIZE 891
+#define __MEM_MINIMAL_CENTRAL_LINK_SIZE    811
+#define __MEM_MINIMAL_PERIPHERAL_LINK_SIZE 907
 #define __MEM_TX_BUFFER_OVERHEAD_SIZE 15
 #define __MEM_RX_BUFFER_OVERHEAD_SIZE 15
 
@@ -150,6 +260,29 @@ void sdc_support_direct_test_mode(void);
  *  and initiating at the same time.
  */
 #define SDC_MEM_INITIATOR (384)
+
+#define __MEM_PER_PERIODIC_ADV_SET_LOW(max_adv_data) ((3104+(max_adv_data)*18)/10)
+#define __MEM_PER_PERIODIC_ADV_SET_HIGH(max_adv_data) (498+(max_adv_data))
+#define SDC_MEM_PER_PERIODIC_ADV_SET(max_adv_data) ((max_adv_data<255)?\
+    (__MEM_PER_PERIODIC_ADV_SET_LOW(max_adv_data)):\
+    (__MEM_PER_PERIODIC_ADV_SET_HIGH(max_adv_data)))
+#define SDC_MEM_PER_PERIODIC_SYNC(buffer_count) (256 + (buffer_count) * 278)
+#define SDC_MEM_PERIODIC_ADV_LIST(list_size) ((list_size) * 8)
+#define SDC_DEFAULT_PERIODIC_ADV_RSP_MAX_TX_DATA 73
+#define __MEM_PER_PERIODIC_ADV_RSP_TX_BUFFER(max_tx_data_size) ((max_tx_data_size) + 5)
+#define __MEM_PER_PERIODIC_ADV_RSP_RX_BUFFER (283)
+#define __MEM_MINIMAL_PERIODIC_ADV_RSP_SET_SIZE_WITH_RX (461)
+#define __MEM_MINIMAL_PERIODIC_ADV_RSP_SET_SIZE_WITHOUT_RX (161)
+#define __MEM_FOR_PERIODIC_ADV_RSP_FAILURE_REPORTING (224)
+#define SDC_MEM_PER_PERIODIC_SYNC_RSP(tx_buffer_count, rx_buffer_count) \
+    (671 + (tx_buffer_count - 1) * 255 + (rx_buffer_count) * 279)
+#define SDC_MEM_PER_PERIODIC_ADV_RSP_SET(max_adv_data, tx_buffer_count, rx_buffer_count, max_tx_data_size, failure_reporting_enabled) \
+     (SDC_MEM_PER_PERIODIC_ADV_SET(max_adv_data) \
+     + ((rx_buffer_count) > 0 ? __MEM_MINIMAL_PERIODIC_ADV_RSP_SET_SIZE_WITH_RX : \
+                             __MEM_MINIMAL_PERIODIC_ADV_RSP_SET_SIZE_WITHOUT_RX ) \
+     + (tx_buffer_count) * __MEM_PER_PERIODIC_ADV_RSP_TX_BUFFER(max_tx_data_size) \
+     + (rx_buffer_count) * __MEM_PER_PERIODIC_ADV_RSP_RX_BUFFER \
+     + ((failure_reporting_enabled) ? __MEM_FOR_PERIODIC_ADV_RSP_FAILURE_REPORTING : 0))
 
 /** Memory required for the Filter Accept List */
 #define SDC_MEM_FAL(max_num_entries) ((max_num_entries) > 0 ? (4 + (max_num_entries) * 8) : 0)

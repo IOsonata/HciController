@@ -29,6 +29,22 @@ extern "C" {
 
 #define HCI_SDC_RETRY_ERROR     (-11)
 
+/*
+ * nrfxlib's multirole SDC does not export an entry point for this mandatory LE
+ * Controller command. The generic HCI layer supplies it instead, so the normal
+ * dispatcher and the early-UART suspect filter both have to know the opcode.
+ */
+#define HCI_SDC_COMPAT_OPCODE_LE_READ_SUPPORTED_STATES 0x201CU
+
+/*
+ * The supplemental dispatcher also carries LE Read Minimum Supported
+ * Connection Interval in the Core 6.2 profile. Its largest legal return is a
+ * two-octet header plus 41 six-octet interval groups, and Command Complete adds
+ * six octets in front. Keep the buffer large enough for that full 254-octet
+ * event rather than the fourteen octets the old compatibility-only path used.
+ */
+#define HCI_SDC_COMPAT_EVENT_SIZE                      254U
+
 typedef int32_t (*HciSdcDataPut_t)(void *pContext, const uint8_t *pPacket);
 typedef int32_t (*HciSdcGet_t)(void *pContext, uint8_t *pPacket, uint8_t *pType);
 typedef void (*HciSdcProcess_t)(void *pContext);
@@ -43,10 +59,29 @@ typedef struct {
 } HciSdcOps_t;
 
 /*
- * Connection handles that can owe a flow control credit at the same time. The
- * controller supports far fewer links than this.
+ * Links whose outstanding ACL packets are tracked at once. This has to be at
+ * least the number of connections the controller is configured for, because a
+ * link the table has no room for is not counted, and what is not counted
+ * cannot be enforced or handed back. The shipping profile is 16 peripheral
+ * plus 2 central links, so all 18 handles have a slot.
  */
-#define HCI_SDC_CREDIT_HANDLES 4U
+#ifndef HCI_SDC_ACL_TRACK_HANDLES
+#define HCI_SDC_ACL_TRACK_HANDLES 18U
+#endif
+
+/*
+ * Connection handles that can owe a flow control credit at the same time.
+ * Every link the ACL guard can track can independently need a synthetic
+ * Number Of Completed Packets entry, so the default follows the tracking
+ * table instead of being a smaller second limit.
+ */
+#ifndef HCI_SDC_CREDIT_HANDLES
+#define HCI_SDC_CREDIT_HANDLES HCI_SDC_ACL_TRACK_HANDLES
+#endif
+
+#if HCI_SDC_CREDIT_HANDLES < HCI_SDC_ACL_TRACK_HANDLES
+#error "HCI_SDC_CREDIT_HANDLES must cover every tracked ACL handle"
+#endif
 
 /*
  * Largest ACL payload the controller will take, Vol 4 Part E 7.8.2. A host
@@ -66,9 +101,6 @@ typedef struct {
 /* Vol 4 Part E 7.7.5. */
 #define HCI_SDC_EVENT_DISCONNECTION_COMPLETE 0x05U
 
-/* Links whose outstanding ACL packets are tracked at once. */
-#define HCI_SDC_ACL_TRACK_HANDLES 4U
-
 /*
  * Hold the host to the buffer count the controller advertised in LE Read
  * Buffer Size.
@@ -85,14 +117,29 @@ typedef struct {
  * the connection. Refusing here loses the same packet and hands the buffer
  * back, and counts it, which a host can at least see.
  *
- * Set to 0 to keep the counter and let the packets through to SDC.
+ * The guard used to be on by default. That is unsafe without an internal,
+ * unmasked link-termination signal: the bookkeeping removes a link when it
+ * observes Disconnection Complete on the HCI event stream, and the Host is
+ * allowed to mask that event. A masked disconnection can therefore leave a
+ * stale outstanding count attached to a handle that is later reused. Keep the
+ * guard available for controlled tests, but leave it off until link lifetime
+ * comes from an unmaskable controller indication.
  */
 #ifndef HCI_SDC_ENFORCE_ACL_CREDITS
-#define HCI_SDC_ENFORCE_ACL_CREDITS 1
+#define HCI_SDC_ENFORCE_ACL_CREDITS 0
 #endif
 
 typedef struct {
     HciCmdDispatch_t Commands;
+
+    /*
+     * Supplemental Core HCI behavior. Some rows are Core-required behavior
+     * missing from nrfxlib's main HCI table, while newer rows call real SDC
+     * entry points that are intentionally kept out of the older vendor table.
+     */
+    HciCmdDispatch_t CompatCommands;
+    uint8_t CompatEvent[HCI_SDC_COMPAT_EVENT_SIZE];
+
     HciSdcOps_t Ops;
     HciControllerOps_t ControllerOps;
 
@@ -105,6 +152,36 @@ typedef struct {
      * response of the command that produced it.
      */
     bool CommandEventLast;
+
+    /*
+     * LE Set Periodic Advertising Response Data is unusual in SDC: the direct
+     * command entry point returns success when the response has been accepted,
+     * but its HCI Command Complete is generated later by sdc_hci_get. While
+     * that completion is outstanding the Host has not received its command
+     * credit back, so no following command may enter the controller. The
+     * opcode is retained so an unrelated controller event cannot clear the
+     * pending state.
+     */
+    bool DelayedCommandPending;
+    uint16_t DelayedCommandOpcode;
+
+    /*
+     * PAwR delayed-completion checkpoints. These are deliberately counters,
+     * not trace prints, so one hardware run can show exactly how far 0x2083
+     * travelled without adding timing load to the response-slot path.
+     */
+    uint32_t PawrDelayedCandidateCount;
+    uint32_t PawrDelayedHandlerCallCount;
+    uint32_t PawrSyntheticSuppressedCount;
+    uint32_t PawrSdcCompleteCount;
+
+    /*
+     * Synthetic ACL-credit events share the same controller-facing output
+     * path. At most one may be emitted before the real controller queue is
+     * polled, otherwise a host that repeatedly overruns its allowance can keep
+     * manufacturing credits fast enough to starve SDC indefinitely.
+     */
+    bool CreditEventLast;
 
     /*
      * Host flow control credits owed back for ACL packets the controller
@@ -139,22 +216,37 @@ typedef struct {
 
     /*
      * What the host was told in LE Read Buffer Size, and how many packets it
-     * has in flight per link against that. Zero means the host has not asked
-     * yet, and nothing is enforced until it has, so the limit can never be a
-     * guess. Enforcement also stands down for a link the table has no room
-     * for: refusing traffic a host is entitled to send would be worse than the
-     * loss this guards against.
+     * has in flight against that. Zero means the host has not asked yet, and
+     * nothing is enforced until it has, so the limit can never be a guess.
+     * Enforcement also stands down for a link the table has no room for:
+     * refusing traffic a host is entitled to send would be worse than the loss
+     * this guards against.
+     *
+     * The budget is a total, not an allowance per link. Vol 4 Part E 4.1.1
+     * gives the host one pool of buffers to spend across every connection it
+     * has, and LE Read Buffer Size reports that one number. Testing each link
+     * against it separately let N links hold N times what the controller owns,
+     * which is the overrun this exists to refuse. It was invisible while the
+     * controller was built for a single link, where the two counts are the
+     * same number.
+     *
+     * So AclOutstandingTotal is what the limit is tested against, and the per
+     * link counts stay because the bookkeeping needs them: Number Of Completed
+     * Packets names a handle, and a disconnection takes that link's share of
+     * the total with it. The invariant is that the total is the sum of the
+     * entries, and every path that moves one moves the other.
      */
     uint16_t AclLimit;
     uint16_t AclTrackHandle[HCI_SDC_ACL_TRACK_HANDLES];
     uint16_t AclOutstanding[HCI_SDC_ACL_TRACK_HANDLES];
+    uint16_t AclOutstandingTotal;
     uint8_t AclTrackEntries;
     uint32_t AclCreditOverrunCount;
     uint32_t AclTrackOverflowCount;
 } HciSdc_t;
 
 /*
- * The buffer count the controller answers with. The backend records what SDC
+ * The buffer count the controller answers with. This records what SDC
  * actually reported rather than what the build configured, so the two cannot
  * drift.
  */
@@ -175,6 +267,11 @@ bool HciSdcInit(HciSdc_t *pSdc,
                 void *pCommandContext,
                 uint8_t *pCommandEvent,
                 size_t CommandEventCapacity);
+
+/* Includes both the vendor table and the supplemental Core commands. */
+bool HciSdcKnowsCommand(const HciSdc_t *pSdc,
+                        uint16_t Opcode,
+                        size_t ParamLen);
 
 const HciControllerOps_t *HciSdcGetControllerOps(HciSdc_t *pSdc);
 

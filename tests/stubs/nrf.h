@@ -19,6 +19,7 @@ typedef struct {
     volatile uint32_t EVENTS_USBDETECTED;
     volatile uint32_t EVENTS_USBREMOVED;
     volatile uint32_t EVENTS_USBPWRRDY;
+    volatile uint32_t RESETREAS;
     volatile uint32_t USBREGSTATUS;
 } NRF_POWER_Type;
 extern NRF_POWER_Type *NRF_POWER;
@@ -72,7 +73,7 @@ extern NRF_USBD_Type *NRF_USBD;
 /*
  * PRIMASK on the host. The firmware uses it to make a read and clear of the
  * cable event flags atomic against the POWER_CLOCK handler; the host tests are
- * single threaded, so tracking the value is enough to keep the code honest.
+ * single threaded, so tracking the value is enough to keep the code correct.
  */
 static inline uint32_t __get_PRIMASK(void) { return 0U; }
 static inline void __set_PRIMASK(uint32_t) { }
@@ -96,6 +97,33 @@ typedef struct {
     volatile uint32_t HFCLKSTAT;
 } NRF_CLOCK_Type;
 extern NRF_CLOCK_Type *NRF_CLOCK;
+
+/*
+ * Only the members the UART report reads, with the real names and the real
+ * shape of PSEL, which is a nested structure and not four separate registers.
+ */
+typedef struct {
+    volatile uint32_t RXD;
+    volatile uint32_t TXD;
+    volatile uint32_t CTS;
+    volatile uint32_t RTS;
+} NRF_UARTE_PSEL_Type;
+
+typedef struct {
+    volatile uint32_t ENABLE;
+    volatile uint32_t BAUDRATE;
+    volatile uint32_t ERRORSRC;
+    volatile uint32_t CONFIG;
+    NRF_UARTE_PSEL_Type PSEL;
+} NRF_UARTE_Type;
+extern NRF_UARTE_Type *NRF_UARTE0;
+extern NRF_UARTE_Type *NRF_UARTE1;
+
+typedef struct {
+    volatile uint32_t IN;
+} NRF_GPIO_Type;
+extern NRF_GPIO_Type *NRF_P0;
+extern NRF_GPIO_Type *NRF_P1;
 #define CLOCK_HFCLKSTAT_STATE_Msk (1UL << 16)
 #define CLOCK_HFCLKSTAT_SRC_Pos   (0UL)
 #define CLOCK_HFCLKSTAT_SRC_Msk   (1UL << CLOCK_HFCLKSTAT_SRC_Pos)
@@ -108,4 +136,13 @@ extern NRF_CLOCK_Type *NRF_CLOCK;
 #define POWER_INTENCLR_USBPWRRDY_Msk     POWER_INTENSET_USBPWRRDY_Msk
 #define POWER_USBREGSTATUS_VBUSDETECT_Msk (1UL << 0)
 #define POWER_USBREGSTATUS_OUTPUTRDY_Msk  (1UL << 1)
+#define POWER_RESETREAS_RESETPIN_Msk      (1UL << 0)
+#define POWER_RESETREAS_DOG_Msk           (1UL << 1)
+#define POWER_RESETREAS_SREQ_Msk          (1UL << 2)
+#define POWER_RESETREAS_LOCKUP_Msk        (1UL << 3)
+#define POWER_RESETREAS_OFF_Msk           (1UL << 16)
+#define POWER_RESETREAS_LPCOMP_Msk        (1UL << 17)
+#define POWER_RESETREAS_DIF_Msk           (1UL << 18)
+#define POWER_RESETREAS_NFC_Msk           (1UL << 19)
+#define POWER_RESETREAS_VBUS_Msk          (1UL << 20)
 #endif

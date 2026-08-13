@@ -10,8 +10,12 @@ paths, simulates a peer connecting and driving ATT.
         --args="advertise --seconds 6"
     python3 fake_controller.py --serve                print the pty and stay up
 
-Anything not implemented gets Unknown HCI Command, which is what a real
-controller must do.
+Every opcode the firmware dispatches is answered, with the reply shape
+hci_commands.py declares for it: Command Complete, Command Status, or nothing
+at all. Anything outside that table gets Unknown HCI Command, which is what a
+real controller must do.
+
+    python3 fake_controller.py --script hci_ble_test.py --args=probe
 """
 
 import argparse
@@ -22,6 +26,50 @@ import subprocess
 import sys
 import threading
 import time
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import hci_commands
+
+
+def _sdc_pool():
+    """
+    The two memory figures, read rather than copied.
+
+    They were copied once, and adding isochronous channels moved them by
+    seventeen thousand octets without moving the copy, so the headroom line
+    this prints was a number from an older configuration.
+
+    The required figure comes from tests/unit/hci_sdc_expected_resources.h,
+    which is where it is declared once and checked against the real nrfxlib
+    macros by hci_sdc_resources_test. Reading it here means one number, held
+    in the file the C++ test already proves, rather than a second copy that
+    nothing compares.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    required = None
+    margin = None
+    try:
+        with open(os.path.join(here, "..", "unit",
+                               "hci_sdc_expected_resources.h")) as f:
+            for line in f:
+                if line.startswith("#define EXPECT_REQUIRED"):
+                    required = int(line.split()[2])
+        with open(os.path.join(here, "..", "..", "include",
+                               "hci_sdc_resources.h")) as f:
+            for line in f:
+                if line.startswith("#define HCI_SDC_MEM_MARGIN"):
+                    margin = int(line.split()[2].rstrip("Uu"))
+    except OSError:
+        pass
+    if required is None or margin is None:
+        # Running detached from the tree. Report nothing rather than a
+        # figure from nowhere: zero for both is what a board with no
+        # platform layer reports, and the scripts already say so.
+        return 0, 0
+    return required, required + margin
+
+
+SDC_POOL_REQUIRED, SDC_POOL_RESERVED = _sdc_pool()
 
 H4_COMMAND = 0x01
 H4_ACL = 0x02
@@ -211,15 +259,23 @@ class Controller:
                 opcode, 0x00, bytes([1]) + STATIC_ADDR + IDENTITY_ROOT))
 
         if opcode == OP_VS_READ_COUNTERS:
-            # Version byte then thirty two counters, little endian, as
+            # Version byte then thirty four fields, little endian, as
             # hci_counters.h lays them out. The command count and the ACL
             # success count are the only ones that move here, which is enough
             # to exercise the script's decoder and its flood arithmetic.
+            #
+            # The last two are not counters. They are the memory the
+            # controller asked for and the memory the build reserved, read
+            # from include/hci_sdc_resources.h rather than written here, so
+            # the script's headroom line is exercised with figures that
+            # cannot fall behind the configuration.
             self.command_count += 1
-            counters = [0] * 32
+            counters = [0] * 34
             counters[0] = self.command_count
             counters[16] = self.acl_taken
-            body = bytes([3]) + b"".join(
+            counters[32] = SDC_POOL_REQUIRED
+            counters[33] = SDC_POOL_RESERVED
+            body = bytes([4]) + b"".join(
                 struct.pack("<I", v) for v in counters)
             return self.emit(command_complete(opcode, 0x00, body))
 
@@ -281,7 +337,54 @@ class Controller:
                 self.test_packets = 1234
             return self.emit(command_complete(opcode, 0x00))
 
-        self.emit(command_complete(opcode, 0x01))
+        return self.on_table_command(opcode, payload)
+
+    def on_table_command(self, opcode, payload):
+        """
+        Answer anything else the firmware dispatches, by reply shape.
+
+        hci_commands.py says whether each opcode answers Command Complete,
+        Command Status or nothing, which is what hci_ble_test.py probe
+        checks. That is all this reproduces. It does not reproduce the length
+        of each return block: those are checked against the real nrfxlib
+        headers by tests/unit/hci_sdc_dispatch_test.cpp, and a second set of
+        numbers here would be a second set to keep right.
+
+        Connection scoped commands are refused with Unknown Connection
+        Identifier unless the simulated link is up and the handle matches,
+        because a probe run against a controller with no connection should
+        see what a real one does.
+        """
+        command = hci_commands.BY_OPCODE.get(opcode)
+        if command is None:
+            return self.emit(command_complete(opcode, 0x01))
+
+        if hci_commands.NEEDS_CONN in command.needs:
+            handle = struct.unpack("<H", payload[:2])[0] if len(payload) >= 2 \
+                else 0xFFFF
+            if not self.connected or handle != CONN_HANDLE:
+                if command.reply == hci_commands.STATUS:
+                    return self.emit(command_status(opcode, 0x02))
+                return self.emit(command_complete(opcode, 0x02))
+
+        if hci_commands.NEEDS_SYNC in command.needs:
+            # Nothing here ever has a periodic sync, and Unknown Advertising
+            # Identifier is what a controller answers to a handle it never
+            # issued. The reply shape still has to be the one the table
+            # names: LE BIG Create Sync is refused in a Command Status, and
+            # answering it with a Command Complete would be a fake failure
+            # that reads like a firmware one.
+            if command.reply == hci_commands.STATUS:
+                return self.emit(command_status(opcode, 0x42))
+            return self.emit(command_complete(opcode, 0x42))
+
+        if command.reply == hci_commands.NONE:
+            return None
+
+        if command.reply == hci_commands.STATUS:
+            return self.emit(command_status(opcode, 0x00))
+
+        return self.emit(command_complete(opcode, 0x00))
 
     def on_acl(self, handle, cid, payload):
         # Every ACL packet that arrives is one the routing layer handed on, so
@@ -378,7 +481,7 @@ class Controller:
                     print("   client: found CCCD at 0x%04X" % att_handle)
                     self.cccd_handle = att_handle
 
-            # A response carries one UUID format only, so keep walking.
+            # A response has one UUID format only, so keep walking.
             if self.cccd_handle is None and 0 < last < 0x0015:
                 self.att_send(handle, struct.pack("<BHH",
                                                   ATT_FIND_INFORMATION_REQ,

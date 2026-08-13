@@ -38,11 +38,21 @@
  * are taken by that header, so a local one wants to sit well clear of them.
  */
 
+/*
+ * Nordic Thingy:91. Not I-SYST hardware, so its id sits well clear of the
+ * IOsonata range rather than pretending to belong to it. The nRF52840 on that
+ * board reaches its host over the interconnect UART to the nRF9160, never over
+ * USB, so it is the one board here where VBUS decides nothing about the host.
+ * The socket is still this part's and is where the log goes.
+ */
+#define THINGY91_NRF52840	100
+
 /* -DBOARD=... on the command line wins, which is how the build is checked
  * against every board without editing this file. */
 #ifndef BOARD
 #define BOARD			UDG_NRF52840
 //#define BOARD			IBK_NRF52840
+//#define BOARD			THINGY91_NRF52840
 #endif
 
 //=============================================================================
@@ -88,6 +98,8 @@
 #define BOARD_MODULE_NAME               "I-SYST BLYST840"
 
 /* The USB socket is this part's own, so VBUS is worth reading. */
+#define HCI_USB_SOCKET                  1
+
 #ifndef HCI_HOST_SELECT
 #define HCI_HOST_SELECT                 HCI_HOST_SELECT_AUTO
 #endif
@@ -101,8 +113,8 @@
 #define HCI_LED_GREEN_ACTIVE            UDG_NRF52840_LEDG_ACTIVE
 
 #define HCI_LED_BLUE_PORT               UDG_NRF52840_LEDB_PORT
-#define HCI_LED_BLUE_PIN                UDG_NRF52840_LEDB_PIN
-#define HCI_LED_BLUE_ACTIVE             UDG_NRF52840_LEDB_ACTIVE
+#define HCI_LED_BLUE_PIN                 UDG_NRF52840_LEDB_PIN
+#define HCI_LED_BLUE_ACTIVE              UDG_NRF52840_LEDB_ACTIVE
 
 #define LED_PINS						UDG_NRF52840_LED_PINS_CFG
 
@@ -128,17 +140,23 @@
 //=============================================================================
 
 /*
- * Placeholders. This board reaches its host over USB, so nothing has ever put
- * a signal on these. They become real the moment the image is built with
- * -DHCI_HOST_SELECT=HCI_HOST_SELECT_UART, so check them against the schematic
- * before doing that.
+ * Placeholders, and they were worse than that. P0.25, P1.00, P0.19 and P0.22
+ * are not dongle pins at all: they are the Nordic Thingy:91 nRF52840
+ * interconnect, copied here and then left. The Thingy:91 branch below has that
+ * board's measured mapping.
+ *
+ * So these are named after the header the dongle brings out rather than after
+ * another board's wiring, and they are still placeholders: this board reaches
+ * its host over USB and nothing has put a signal on them. They become real the
+ * moment the image is built with -DHCI_HOST_SELECT=HCI_HOST_SELECT_UART, so
+ * check them against the schematic before doing that.
  */
 #define UART_TX_PORT            0
-#define UART_TX_PIN             25
+#define UART_TX_PIN             24
 #define UART_TX_PINOP           0
 
-#define UART_RX_PORT            1
-#define UART_RX_PIN             0
+#define UART_RX_PORT            0
+#define UART_RX_PIN             23
 #define UART_RX_PINOP           0
 
 #define UART_RTS_PORT           0
@@ -157,6 +175,8 @@
 #elif BOARD == IBK_NRF52840
 
 /* The USB socket is this part's own, so VBUS is worth reading. */
+#define HCI_USB_SOCKET                  1
+
 #ifndef HCI_HOST_SELECT
 #define HCI_HOST_SELECT                 HCI_HOST_SELECT_AUTO
 #endif
@@ -193,6 +213,16 @@
  * RTS and CTS are named even though UART_HW_FLOWCTRL is left at 0, so turning
  * flow control on is one line and not a pin hunt. Nothing drives them until
  * it is turned on.
+ *
+ * These four numbers are not arbitrary. They are the Nordic Thingy:91
+ * nRF52840 interconnect, and they reached three board branches by being copied
+ * between them. They were called crossed here for a while, on the strength of
+ * the sdk-nrf pinctrl node, and they are not: measured on the board, RTS on
+ * P0.19 is what makes the peer transmit. The Thingy:91 branch below has the
+ * same four and says what was measured.
+ *
+ * This branch is still a breakout and its pins are still whatever the bench is
+ * wired to. A Thingy:91 build wants BOARD=THINGY91_NRF52840.
  */
 #define UART_TX_PORT            0
 #define UART_TX_PIN             25
@@ -215,8 +245,198 @@
 #define UART_RATE			1000000
 
 
+#elif BOARD == THINGY91_NRF52840
+
+#define BOARD_NAME                      "Nordic Thingy:91"
+#define BOARD_MODULE_NAME               "Nordic nRF52840"
+
+/*
+ * The host is the nRF9160 on the same board, over the interconnect UART. The
+ * USB socket on this board belongs to the nRF52840, but nothing on the far
+ * side of it speaks HCI, so VBUS decides nothing here and AUTO would come up
+ * talking to a host that is not there.
+ *
+ * The socket is still this part's, so it is where the log goes. That is the
+ * only way anything on this board can be observed: no LED reaches this part,
+ * the UART is the host's, and semihosting needs a debugger on a board that is
+ * usually sealed.
+ */
+#define HCI_USB_SOCKET                  1
+
+#ifndef HCI_HOST_SELECT
+#define HCI_HOST_SELECT                 HCI_HOST_SELECT_UART
+#endif
+
+/*
+ * No LED reaches this part. The Thingy:91 LEDs are driven from the nRF9160
+ * side, so anything driven from here would be driving pins that belong to
+ * something else.
+ */
+#define HCI_STATUS_LEDS                 0
+
+/* The one button this part has, from the board's own device tree. */
+#define BUTTON1_PORT					1
+#define BUTTON1_PIN						13
+#define BUTTON1_PINOP					0
+
+#define BUTTON_PINS { \
+	{BUTTON1_PORT, BUTTON1_PIN, BUTTON1_PINOP, IOPINDIR_INPUT, IOPINRES_PULLUP, IOPINTYPE_NORMAL},}
+
+//=============================================================================
+// UART Pin Definitions
+//=============================================================================
+
+/*
+ * From sdk-nrf, boards/nordic/thingy91/thingy91_nrf52840-pinctrl.dtsi, the
+ * uart1 node, which is the one wired to the nRF9160:
+ *
+ *     UART_TX  P0.25      UART_RX  P1.00
+ *     UART_RTS P0.22      UART_CTS P0.19
+ *
+ * and the far side, thingy91_nrf9160_common-pinctrl.dtsi uart1:
+ *
+ *     UART_TX  P0.22      UART_RX  P0.23
+ *     UART_RTS P0.24      UART_CTS P0.25
+ *
+ * Both board files say current-speed 1000000. TX and RX below are those two
+ * and are confirmed on the hardware. The measured RTS/CTS assignment differs
+ * from the nRF52840 pinctrl labels and is documented immediately below.
+ *
+ * The other UART on each part is that part's own console, at 115200:
+ *
+ *     nRF52840 uart0   TX P0.15  RX P0.11  RTS P0.21  CTS P0.20
+ *     nRF9160  uart0   TX P0.18  RX P0.19  RTS P0.20  CTS P0.21
+ *
+ * Written down because the two pairs are easy to confuse and picking the
+ * wrong one gives a link with somebody's log on it at the wrong speed
+ * rather than a link that fails. Both uart1 nodes ship status "disabled", so
+ * an application that wants this interconnect enables it and chooses what
+ * goes on it, and nothing in the board files can say what that turned out to
+ * be.
+ *
+ * All four wires exist, so flow control is on. Off, this part never asserts
+ * RTS, and a host that has flow control on never sees its CTS asserted and so
+ * never transmits: the first command times out with nothing on the wire in
+ * either direction, and no side can tell why.
+ *
+ * This link holds two things, not one, and that is the whole of what was wrong
+ * with it for weeks. The nRF9160's bootloader prints on it before the
+ * application ever opens it:
+ *
+ *     All pins have been configured as non-secure...
+ *     <esc>[1;34mBooting TF-M...
+ *
+ * captured here off the wire. Then the application starts and uses the same
+ * UART for HCI. The text is a prefix, not a permanent tenant, so the link does
+ * become an HCI link, but this side is handed several hundred octets of it
+ * first, on every reboot of the nRF9160.
+ *
+ * H:4 has no framing, so text that happens to hold an octet in the indicator
+ * range makes this side read a payload length out of more text and wait for a
+ * payload that never comes. The HCI Reset behind it is eaten as that payload.
+ * Nothing in the octets says so, and the host times out after ten seconds with
+ * a link that looks correct from both ends.
+ *
+ * The gap between the banner and the first command is the only thing that
+ * separates them: the banner is printed before Zephyr starts and the Reset
+ * arrives about a hundred milliseconds into the application. So the transport
+ * gives up a half built packet once the link has been quiet, which lands in
+ * that gap and takes the Reset cleanly. See HCI_APP_LINK_IDLE_PASSES.
+ *
+ * The start up No Operation Command Complete is sent on this board, see
+ * HCI_SDC_STARTUP_NOP below. Nordic's own controller for it sends one:
+ * samples/bluetooth/hci_lpuart, boards/thingy91_nrf52840.conf, which sets
+ * CONFIG_BT_WAIT_NOP=y in a CONFIG_BT_HCI_RAW build, where that option makes
+ * the controller emit the event rather than wait for it.
+ *
+ * A host built with the same option holds its command semaphore at zero until
+ * that event arrives, so a controller that never sends it leaves such a host
+ * silent with nothing on the wire to say why. The host on this board is not
+ * one of those, since it sends Reset about a hundred milliseconds in without
+ * being prompted, and the event costs it nothing either: Zephyr reads a
+ * Command Complete for opcode 0x0000 as unsolicited, takes the command credit
+ * from it and completes no command with it. See hci_cmd_done in
+ * subsys/bluetooth/host/hci_core.c.
+ *
+ * What has been checked, against sdk-nrf and the Thingy:91 hardware guide:
+ * the four pins above and their rate, that the low frequency crystal is on
+ * P0.00 and P0.01 so the default LFXO clock configuration is right for this
+ * board, and that the commands a Zephyr host sends during bt_enable are all
+ * dispatched here.
+ */
+#define UART_TX_PORT            0
+#define UART_TX_PIN             25
+#define UART_TX_PINOP           0
+
+#define UART_RX_PORT            1
+#define UART_RX_PIN             0
+#define UART_RX_PINOP           0
+
+/*
+ * RTS is P0.19 and CTS is P0.22, which is the opposite of what the sdk-nrf
+ * pinctrl above assigns, and the hardware is what says so:
+ *
+ *     RTS on P0.19   the peer transmits, thousands of octets a second
+ *     RTS on P0.22   the peer transmits nothing at all
+ *
+ * Measured on the board, both ways round, more than once. RTS is what tells
+ * the peer it may send, so driving the wrong pin leaves the peer's clear to
+ * send never asserted and the peer silent. That is what P0.22 gives. TX and RX
+ * are not affected and stay as the pinctrl has them.
+ *
+ * Why a Nordic board file would disagree about its own peripheral assignment
+ * is not resolved here, and guessing at it is what caused the damage. This
+ * pair has now been changed three times on reasoning rather than measurement,
+ * twice into a state that does not work, and each time the reasoning sounded
+ * good. The measurement is short, repeatable and was available throughout.
+ * Nothing about this pair gets changed again without one.
+ */
+#define UART_RTS_PORT           0
+#define UART_RTS_PIN            19
+#define UART_RTS_PINOP          0
+
+#define UART_CTS_PORT           0
+#define UART_CTS_PIN            22
+#define UART_CTS_PINOP          0
+
+#define UART_HW_FLOWCTRL	1
+
+#define UART_DEVNO			0
+
+#define UART_RATE			1000000
+
+/*
+ * Say the controller is ready with a No Operation Command Complete once the
+ * stack is up, because the reference controller for this board does. The UART
+ * note above has the sample it comes from and what the host makes of it.
+ */
+#define HCI_SDC_STARTUP_NOP             1
+
+
 #else
 #error "No pins defined. Define the pins used by your board."
+#endif
+
+//=============================================================================
+// USB socket
+//=============================================================================
+
+/*
+ * Whether the USB socket on the board is wired to this part.
+ *
+ * A separate question from which port the HCI stream is on, and the Thingy:91
+ * is why: the socket there is the nRF52840's and the host is the nRF9160 on
+ * the other end of the interconnect UART. The socket has no HCI stream on it
+ * and is where the log goes instead.
+ *
+ * A board that says nothing gets 0, and a UART host on it brings no USB up.
+ * That is the right way round: where the socket belongs to another part,
+ * enabling the peripheral would put a device on a bus that is not this one's
+ * to enumerate on, and the cost of the default being wrong the other way is
+ * only a log nobody reads.
+ */
+#ifndef HCI_USB_SOCKET
+#define HCI_USB_SOCKET		0
 #endif
 
 //=============================================================================

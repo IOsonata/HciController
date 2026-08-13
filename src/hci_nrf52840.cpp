@@ -10,6 +10,8 @@
 
 #include "hci_nrf52840.h"
 
+#include "hci_sdc_resources.h"
+
 #include <stdint.h>
 #include <string.h>
 
@@ -44,10 +46,9 @@
 #endif
 
 #ifndef HCI_NRF52840_USB_IRQ_PRIORITY
-#define HCI_NRF52840_USB_IRQ_PRIORITY 6U
+#define HCI_NRF52840_USB_IRQ_PRIORITY 7U
 #endif
 
-/* Set to 1 when the nrfxlib in use predates mpsl_clock_hfclk_src_request. */
 /* Bounded wait for the crystal. Worst case ramp-up is 1400 us. */
 #ifndef HCI_NRF52840_HFCLK_WAIT_LOOPS
 #define HCI_NRF52840_HFCLK_WAIT_LOOPS 1000000U
@@ -90,10 +91,9 @@
 #define HCI_NRF52840_USB_STORM_LIMIT 2000U
 #endif
 
-/*
- * Attempts at the random source before giving up. It is polled from low
- * priority processing, so this bounds a stall rather than a busy wait.
- */
+/* A nonzero latch even when the peripheral exposes no individual event bit. */
+#define HCI_NRF52840_USB_STORM_UNKNOWN 0x80000000UL
+
 /*
  * Attempts allowed when proving the entropy source at start up. This bounds a
  * start up check, not the SDC callback, which must block per sdc_soc.h.
@@ -110,6 +110,8 @@
 #define HCI_NRF52840_ERR_NO_VBUS            (-1004)
 /* The entropy source SDC requires is absent or produces nothing. */
 #define HCI_NRF52840_ERR_NO_ENTROPY         (-1005)
+/* An interrupt source re-asserted faster than the runtime could consume it. */
+#define HCI_NRF52840_ERR_USB_STORM          (-1006)
 
 /*
  * The crystal check the TinyUSB nRF5x port spins on. MPSL reporting the clock
@@ -125,27 +127,45 @@ static bool HciNrf52840HfxoOnXtal(void)
                CLOCK_HFCLKSTAT_SRC_Xtal;
 }
 
-#ifndef HCI_NRF52840_LINK_COUNT
-#define HCI_NRF52840_LINK_COUNT 1U
-#endif
-
-#ifndef HCI_NRF52840_ACL_PACKET_SIZE
-#define HCI_NRF52840_ACL_PACKET_SIZE 251U
-#endif
-
-#ifndef HCI_NRF52840_ACL_PACKET_COUNT
-#define HCI_NRF52840_ACL_PACKET_COUNT 4U
-#endif
-
-#ifndef HCI_NRF52840_SCAN_BUFFER_COUNT
-#define HCI_NRF52840_SCAN_BUFFER_COUNT 4U
-#endif
-
-#ifndef HCI_NRF52840_MAX_ADV_DATA
-#define HCI_NRF52840_MAX_ADV_DATA 255U
-#endif
-
 static HciNrf52840_t *s_pTarget;
+
+/*
+ * MPSL/SDC assert callbacks return to the library, which then resets the part.
+ * Ordinary target state is in .bss and disappears during ResetEntry, so keep a
+ * small assertion record outside .bss. The IOsonata reset code clears only the
+ * .bss range; this NOLOAD/NOBITS input section therefore survives a software
+ * reset and is reported once on the next boot.
+ *
+ * A magic and its inverse make random SRAM after a power-on extraordinarily
+ * unlikely to look like a retained assertion. The magic is written last, after
+ * the payload and a data barrier, so an interrupted write is rejected too.
+ */
+#define HCI_NRF52840_ASSERT_MAGIC     0x48434941U
+#define HCI_NRF52840_ASSERT_FILE_SIZE 48U
+
+typedef struct {
+    uint32_t Magic;
+    uint32_t MagicInverse;
+    uint32_t Line;
+    uint8_t FromSdc;
+    char File[HCI_NRF52840_ASSERT_FILE_SIZE];
+} HciNrf52840AssertRecord_t;
+
+/*
+ * The target linker/startup uses an ELF NOLOAD/NOBITS input section. Native
+ * macOS tests use Mach-O, where the ELF section spelling is invalid and reset
+ * retention is not part of the host test. Keep the object alive there without
+ * changing the nRF52840 image layout.
+ */
+#if defined(__APPLE__)
+#define HCI_NRF52840_ASSERT_STORAGE __attribute__((used))
+#else
+#define HCI_NRF52840_ASSERT_STORAGE \
+    __attribute__((section(".noinit.hci_reset"), used))
+#endif
+
+alignas(4) HCI_NRF52840_ASSERT_STORAGE
+static volatile HciNrf52840AssertRecord_t s_AssertRecord;
 
 /*
  * The USBD startup sequence is driven here rather than through
@@ -264,6 +284,21 @@ static int32_t HciNrf52840HfclkRelease(void)
     return mpsl_clock_hfclk_src_release(MPSL_CLOCK_HF_SRC_XO);
 }
 
+/*
+ * A successful request belongs to this target until USB starts or the request
+ * is explicitly released. An error while waiting for the clock must therefore
+ * unwind the request as well as report the error; otherwise a retry sees
+ * HfclkRequested and incorrectly assumes the crystal is still owned.
+ */
+static bool HciNrf52840HfclkStartFailed(HciNrf52840_t *pTarget,
+                                        int32_t Error)
+{
+    (void)HciNrf52840HfclkRelease();
+    pTarget->HfclkRequested = false;
+    pTarget->LastError = Error;
+    return false;
+}
+
 static bool HciNrf52840HfclkStart(HciNrf52840_t *pTarget)
 {
     if (pTarget->HfclkRequested)
@@ -294,8 +329,7 @@ static bool HciNrf52840HfclkStart(HciNrf52840_t *pTarget)
         result = HciNrf52840HfclkIsRunning(&running);
         if (result != 0)
         {
-            pTarget->LastError = result;
-            return false;
+            return HciNrf52840HfclkStartFailed(pTarget, result);
         }
 
         if (running != 0U)
@@ -308,8 +342,37 @@ static bool HciNrf52840HfclkStart(HciNrf52840_t *pTarget)
     }
 
     HciTrace("hfclk: timeout\r\n");
-    pTarget->LastError = HCI_NRF52840_ERR_HFCLK_TIMEOUT;
-    return false;
+    return HciNrf52840HfclkStartFailed(
+        pTarget, HCI_NRF52840_ERR_HFCLK_TIMEOUT);
+}
+
+/*
+ * Finish shutting down a USB port that the ISR already contained. Clock
+ * ownership belongs to MPSL and is therefore unwound from thread context, not
+ * from USBD_IRQHandler.
+ */
+static void HciNrf52840UsbAbort(HciNrf52840_t *pTarget, int32_t Error)
+{
+    NVIC_DisableIRQ(USBD_IRQn);
+    NRF_USBD->INTEN = 0U;
+    NRF_USBD->USBPULLUP = 0U;
+    NRF_USBD->ENABLE = 0U;
+    __ISB();
+    __DSB();
+
+    NRF_POWER->INTENCLR = HCI_NRF52840_USB_INT_MASK;
+
+    if (pTarget->HfclkRequested)
+    {
+        (void)HciNrf52840HfclkRelease();
+        pTarget->HfclkRequested = false;
+    }
+
+    pTarget->UsbStarted = false;
+    pTarget->UsbReadyDone = false;
+    pTarget->UsbAttachPending = false;
+    pTarget->UsbDetachPending = false;
+    pTarget->LastError = Error;
 }
 
 /*
@@ -365,7 +428,23 @@ static void HciNrf52840UsbPowerIrq(void)
  */
 void HciNrf52840UsbPowerProcess(HciNrf52840_t *pTarget)
 {
-    if (pTarget == nullptr || !pTarget->UsbReadyDone)
+    if (pTarget == nullptr)
+    {
+        return;
+    }
+
+    /*
+     * A storm was already made harmless in the ISR by taking the pull-up and
+     * interrupt away. Complete the shutdown here so the MPSL-owned crystal is
+     * released and the failed port cannot be mistaken for a usable one.
+     */
+    if (pTarget->UsbStormEvents != 0U)
+    {
+        HciNrf52840UsbAbort(pTarget, HCI_NRF52840_ERR_USB_STORM);
+        return;
+    }
+
+    if (!pTarget->UsbReadyDone)
     {
         return;
     }
@@ -391,49 +470,157 @@ void HciNrf52840UsbPowerProcess(HciNrf52840_t *pTarget)
     }
 }
 
+static void HciNrf52840AssertFileCopy(const char *pFile)
+{
+    const char *pBase = pFile != nullptr ? pFile : "?";
+    if (pFile != nullptr)
+    {
+        for (const char *p = pFile; *p != '\0'; p++)
+        {
+            if (*p == '/' || *p == '\\')
+            {
+                pBase = p + 1;
+            }
+        }
+    }
+
+    size_t i = 0U;
+    while (pBase[i] != '\0' && i + 1U < HCI_NRF52840_ASSERT_FILE_SIZE)
+    {
+        s_AssertRecord.File[i] = pBase[i];
+        i++;
+    }
+    s_AssertRecord.File[i] = '\0';
+}
+
 /*
- * mpsl.h and sdc.h both state that the library "will reset the chip if the
- * application returns from this function", and that all interrupts are already
- * disabled on entry. Returning is therefore the documented recovery, and
- * spinning here forfeits it: the device hangs with interrupts off and nothing
- * to show for it.
- *
- * The file and line identify the fault. mpsl_asserts.h and sdc_asserts.h
- * decode the line value, so it is kept where a debugger or a later read of the
- * target state can find it rather than discarded.
+ * mpsl.h and sdc.h both state that the library resets the chip after the
+ * application returns from this callback. Store enough information outside
+ * .bss to explain that next reset instead of losing the only useful evidence.
  */
-static void HciNrf52840RecordAssert(HciNrf52840_t *pTarget,
-                                    const char *pFile,
+static void HciNrf52840RecordAssert(const char *pFile,
                                     uint32_t Line,
                                     bool FromSdc)
 {
-    if (pTarget == nullptr)
-    {
-        return;
-    }
-
-    pTarget->AssertFile = pFile;
-    pTarget->AssertLine = Line;
-    pTarget->AssertFromSdc = FromSdc;
-    pTarget->AssertCount++;
+    s_AssertRecord.Magic = 0U;
+    s_AssertRecord.MagicInverse = 0U;
+    s_AssertRecord.Line = Line;
+    s_AssertRecord.FromSdc = FromSdc ? 1U : 0U;
+    HciNrf52840AssertFileCopy(pFile);
+    __DSB();
+    s_AssertRecord.MagicInverse = ~HCI_NRF52840_ASSERT_MAGIC;
+    s_AssertRecord.Magic = HCI_NRF52840_ASSERT_MAGIC;
+    __DSB();
 }
 
 static void HciNrf52840MpslAssert(const char *file, uint32_t line)
 {
-    HciNrf52840RecordAssert(s_pTarget, file, line, false);
+    HciNrf52840RecordAssert(file, line, false);
     /* Return, so MPSL resets the chip. */
 }
 
 static void HciNrf52840SdcAssert(const char *file, uint32_t line)
 {
-    HciNrf52840RecordAssert(s_pTarget, file, line, true);
+    HciNrf52840RecordAssert(file, line, true);
     /* Return, so the controller resets the chip. */
+}
+
+static void HciNrf52840ResetCauseAppend(char *pText,
+                                        size_t Capacity,
+                                        const char *pCause)
+{
+    size_t at = strlen(pText);
+    if (at != 0U && at + 1U < Capacity)
+    {
+        pText[at++] = '|';
+        pText[at] = '\0';
+    }
+
+    while (*pCause != '\0' && at + 1U < Capacity)
+    {
+        pText[at++] = *pCause++;
+    }
+    pText[at] = '\0';
+}
+
+void HciNrf52840ResetTrace(void)
+{
+    const uint32_t reason = NRF_POWER->RESETREAS;
+    char causes[96] = {};
+
+    /*
+     * nRF52840 anomaly 136 can set unrelated RESETREAS bits after a pin reset.
+     * If RESETPIN is present, report that as the cause and leave the raw value
+     * alongside it rather than presenting spurious secondary causes as fact.
+     */
+    if ((reason & POWER_RESETREAS_RESETPIN_Msk) != 0U)
+    {
+        HciNrf52840ResetCauseAppend(causes, sizeof(causes), "pin-reset");
+    }
+    else
+    {
+        if ((reason & POWER_RESETREAS_DOG_Msk) != 0U)
+            HciNrf52840ResetCauseAppend(causes, sizeof(causes), "watchdog");
+        if ((reason & POWER_RESETREAS_SREQ_Msk) != 0U)
+            HciNrf52840ResetCauseAppend(causes, sizeof(causes), "software-reset");
+        if ((reason & POWER_RESETREAS_LOCKUP_Msk) != 0U)
+            HciNrf52840ResetCauseAppend(causes, sizeof(causes), "CPU-lockup");
+        if ((reason & POWER_RESETREAS_OFF_Msk) != 0U)
+            HciNrf52840ResetCauseAppend(causes, sizeof(causes), "GPIO-wake-from-off");
+        if ((reason & POWER_RESETREAS_LPCOMP_Msk) != 0U)
+            HciNrf52840ResetCauseAppend(causes, sizeof(causes), "LPCOMP-wake-from-off");
+        if ((reason & POWER_RESETREAS_DIF_Msk) != 0U)
+            HciNrf52840ResetCauseAppend(causes, sizeof(causes), "debug-wake-from-off");
+        if ((reason & POWER_RESETREAS_NFC_Msk) != 0U)
+            HciNrf52840ResetCauseAppend(causes, sizeof(causes), "NFC-wake-from-off");
+        if ((reason & POWER_RESETREAS_VBUS_Msk) != 0U)
+            HciNrf52840ResetCauseAppend(causes, sizeof(causes), "VBUS-wake-from-off");
+    }
+
+    if (causes[0] == '\0')
+    {
+        HciTrace("reset: cause=power-on/brownout-or-unlatched raw=0x%08lX\r\n",
+                 (unsigned long)reason);
+    }
+    else
+    {
+        HciTrace("reset: cause=%s raw=0x%08lX\r\n",
+                 causes, (unsigned long)reason);
+    }
+
+    /* RESETREAS is write-one-to-clear. Start the next reset with a clean slate. */
+    NRF_POWER->RESETREAS = reason;
+
+    const bool retained =
+        s_AssertRecord.Magic == HCI_NRF52840_ASSERT_MAGIC &&
+        s_AssertRecord.MagicInverse == ~HCI_NRF52840_ASSERT_MAGIC;
+
+    if (retained)
+    {
+        char file[HCI_NRF52840_ASSERT_FILE_SIZE];
+        size_t i = 0U;
+        while (i + 1U < sizeof(file) && s_AssertRecord.File[i] != '\0')
+        {
+            file[i] = s_AssertRecord.File[i];
+            i++;
+        }
+        file[i] = '\0';
+
+        HciTrace("reset: previous=%s-assert file=%s line=%lu\r\n",
+                 s_AssertRecord.FromSdc != 0U ? "SDC" : "MPSL",
+                 file,
+                 (unsigned long)s_AssertRecord.Line);
+
+        s_AssertRecord.Magic = 0U;
+        s_AssertRecord.MagicInverse = 0U;
+        __DSB();
+    }
 }
 
 /*
  * The entropy source SDC uses for pairing and for resolvable addresses.
  *
- * sdc_soc.h states the contract without an escape: "This function must block
+ * sdc_soc.h states the requirement without an escape: "This function must block
  * until length bytes of random numbers were written to p_buff", and the source
  * "must conform to Core Spec Vol 2, Part H, Section 2". The signature returns
  * void because failure is not a permitted outcome. Handing back zeros would
@@ -558,49 +745,6 @@ static bool HciNrf52840MpslInit(HciNrf52840_t *pTarget)
     return true;
 }
 
-static bool HciNrf52840CfgSet(HciNrf52840_t *pTarget,
-                              uint8_t Type,
-                              const sdc_cfg_t *pCfg)
-{
-    int32_t required = sdc_cfg_set(SDC_DEFAULT_RESOURCE_CFG_TAG, Type, pCfg);
-    HciTrace("sdc: cfg type=%u result=%ld\r\n", (unsigned)Type, (long)required);
-    if (required < 0)
-    {
-        pTarget->LastError = required;
-        return false;
-    }
-
-    pTarget->RequiredSdcMem = required;
-    return true;
-}
-
-/*
- * A build time floor for the memory pool, computed from the SDC_MEM_* macros
- * for the resources configured below. sdc.h notes that "The values of the
- * memory requirement defines may change between minor releases", so this is a
- * check that the pool still fits after an nrfxlib update, not a substitute for
- * the runtime query. Getting it wrong at run time means the controller refuses
- * to start, which is the one failure the application cannot work around.
- */
-#define HCI_NRF52840_SDC_MEM_REQUIRED                                         \
-    (SDC_MEM_PER_PERIPHERAL_LINK(HCI_NRF52840_ACL_PACKET_SIZE,                \
-                                 HCI_NRF52840_ACL_PACKET_SIZE,                \
-                                 HCI_NRF52840_ACL_PACKET_COUNT,               \
-                                 HCI_NRF52840_ACL_PACKET_COUNT) *             \
-         HCI_NRF52840_LINK_COUNT +                                            \
-     SDC_MEM_PER_CENTRAL_LINK(HCI_NRF52840_ACL_PACKET_SIZE,                   \
-                              HCI_NRF52840_ACL_PACKET_SIZE,                   \
-                              HCI_NRF52840_ACL_PACKET_COUNT,                  \
-                              HCI_NRF52840_ACL_PACKET_COUNT) *                \
-         HCI_NRF52840_LINK_COUNT +                                            \
-     SDC_MEM_PERIPHERAL_LINKS_SHARED + SDC_MEM_CENTRAL_LINKS_SHARED +         \
-     SDC_MEM_SCAN_EXT(HCI_NRF52840_SCAN_BUFFER_COUNT) +                       \
-     SDC_MEM_PER_ADV_SET(HCI_NRF52840_MAX_ADV_DATA))
-
-static_assert(HCI_NRF52840_DEFAULT_SDC_MEM_SIZE >=
-                  HCI_NRF52840_SDC_MEM_REQUIRED,
-              "SDC memory pool is smaller than the configured resources need");
-
 static bool HciNrf52840SdcInit(HciNrf52840_t *pTarget)
 {
     int32_t result = sdc_init(HciNrf52840SdcAssert);
@@ -624,45 +768,12 @@ static bool HciNrf52840SdcInit(HciNrf52840_t *pTarget)
         return false;
     }
 
-    sdc_support_ext_adv();
-    sdc_support_peripheral();
-    sdc_support_ext_central();
-    sdc_support_le_2m_phy();
-    sdc_support_le_coded_phy();
-    sdc_support_dle_peripheral();
-    sdc_support_dle_central();
-    sdc_support_phy_update_peripheral();
-    sdc_support_phy_update_central();
-    sdc_support_direct_test_mode();
-
-    sdc_cfg_t cfg = {};
-    cfg.buffer_cfg.rx_packet_size = HCI_NRF52840_ACL_PACKET_SIZE;
-    cfg.buffer_cfg.tx_packet_size = HCI_NRF52840_ACL_PACKET_SIZE;
-    cfg.buffer_cfg.rx_packet_count = HCI_NRF52840_ACL_PACKET_COUNT;
-    cfg.buffer_cfg.tx_packet_count = HCI_NRF52840_ACL_PACKET_COUNT;
-    if (!HciNrf52840CfgSet(pTarget, SDC_CFG_TYPE_BUFFER_CFG, &cfg)) return false;
-
-    cfg = {};
-    cfg.peripheral_count.count = HCI_NRF52840_LINK_COUNT;
-    if (!HciNrf52840CfgSet(pTarget, SDC_CFG_TYPE_PERIPHERAL_COUNT, &cfg)) return false;
-
-    cfg = {};
-    cfg.central_count.count = HCI_NRF52840_LINK_COUNT;
-    if (!HciNrf52840CfgSet(pTarget, SDC_CFG_TYPE_CENTRAL_COUNT, &cfg)) return false;
-
-    cfg = {};
-    cfg.adv_count.count = 1U;
-    if (!HciNrf52840CfgSet(pTarget, SDC_CFG_TYPE_ADV_COUNT, &cfg)) return false;
-
-    cfg = {};
-    cfg.adv_buffer_cfg.max_adv_data = HCI_NRF52840_MAX_ADV_DATA;
-    if (!HciNrf52840CfgSet(pTarget, SDC_CFG_TYPE_ADV_BUFFER_CFG, &cfg)) return false;
-
-    cfg = {};
-    cfg.scan_buffer_cfg.count = HCI_NRF52840_SCAN_BUFFER_COUNT;
-    if (!HciNrf52840CfgSet(pTarget, SDC_CFG_TYPE_SCAN_BUFFER_CFG, &cfg)) return false;
-
-    result = sdc_cfg_set(SDC_DEFAULT_RESOURCE_CFG_TAG, SDC_CFG_TYPE_NONE, nullptr);
+    /*
+     * What the controller is configured for is not a property of this part,
+     * so it lives in hci_sdc_resources.cpp with the pool that is computed from
+     * it. This layer supplies the clock, the entropy and the host interface.
+     */
+    result = HciSdcResourcesApply();
     if (result < 0)
     {
         pTarget->LastError = result;
@@ -732,10 +843,12 @@ static void HciNrf52840ProcessMpsl(void *pContext)
 
     /*
      * POWER and CLOCK are one peripheral and MPSL owns it, so it can drop the
-     * USB bits from the shared enable register. Put them back each pass.
+     * USB bits from the shared enable register. Put them back each pass, unless
+     * a storm deliberately quenched the port.
      */
     HciNrf52840_t *pTarget = static_cast<HciNrf52840_t *>(pContext);
-    if (pTarget != nullptr && pTarget->UsbStarted)
+    if (pTarget != nullptr && pTarget->UsbStarted &&
+        pTarget->UsbStormEvents == 0U)
     {
         NRF_POWER->INTENSET = HCI_NRF52840_USB_INT_MASK;
     }
@@ -797,6 +910,17 @@ bool HciNrf52840UsbStart(HciNrf52840_t *pTarget)
     if (pTarget == nullptr || pTarget != s_pTarget || !pTarget->UsbEnabled ||
         !pTarget->MpslInitialized)
     {
+        return false;
+    }
+
+    /*
+     * A storm is latched until target reinitialization. Re-enabling the same
+     * peripheral immediately would reproduce the interrupt starvation before
+     * the runtime had a chance to report or contain anything.
+     */
+    if (pTarget->UsbStormEvents != 0U)
+    {
+        pTarget->LastError = HCI_NRF52840_ERR_USB_STORM;
         return false;
     }
 
@@ -1129,8 +1253,10 @@ extern "C" void USBD_IRQHandler(void)
 
         /*
          * Too many entries inside one pump pass means an event is re-asserting
-         * faster than it is being consumed. Record what is pending once, so
-         * the offending source can be named instead of guessed at.
+         * faster than it is being consumed. Capture what is pending, then
+         * contain the source immediately. Logging a storm while leaving a
+         * level-sensitive source enabled only guarantees this handler keeps
+         * starving the thread that was supposed to report it.
          */
         if (s_pTarget->UsbStormEvents == 0U &&
             (s_pTarget->UsbIrqCount - s_pTarget->UsbIrqMark) >
@@ -1138,7 +1264,25 @@ extern "C" void USBD_IRQHandler(void)
         {
             s_pTarget->UsbStormInten = NRF_USBD->INTEN;
             s_pTarget->UsbStormCause = NRF_USBD->EVENTCAUSE;
-            s_pTarget->UsbStormEvents = HciNrf52840UsbdPendingEvents();
+            uint32_t pending = HciNrf52840UsbdPendingEvents();
+            s_pTarget->UsbStormEvents = pending != 0U ? pending :
+                                        HCI_NRF52840_USB_STORM_UNKNOWN;
+            s_pTarget->LastError = HCI_NRF52840_ERR_USB_STORM;
+
+            NRF_USBD->INTEN = 0U;
+            NRF_USBD->USBPULLUP = 0U;
+            NRF_POWER->INTENCLR = HCI_NRF52840_USB_INT_MASK;
+            NVIC_DisableIRQ(USBD_IRQn);
+            s_pTarget->UsbStarted = false;
+            s_pTarget->UsbReadyDone = false;
+            __ISB();
+            __DSB();
+
+            if (s_pTarget->pRuntime != nullptr)
+            {
+                HciTaktOsWake(s_pTarget->pRuntime, HCI_TAKTOS_EVENT_HOST);
+            }
+            return;
         }
 
         /*
@@ -1153,11 +1297,259 @@ extern "C" void USBD_IRQHandler(void)
             s_pTarget->UsbEventCause |= cause;
             s_pTarget->UsbStuckCauseCount++;
             NRF_USBD->EVENTCAUSE = cause;
-            NRF_USBD->EVENTS_USBEVENT = 0U;
             __ISB();
             __DSB();
+
+            /*
+             * Take the umbrella event away only when no cause that TinyUSB
+             * consumes remains. Clearing EVENTS_USBEVENT while SUSPEND,
+             * RESUME or USBWUALLOWED is still set prevents the port from ever
+             * seeing that state transition.
+             */
+            if ((NRF_USBD->EVENTCAUSE &
+                 (uint32_t)HCI_NRF52840_USBD_PORT_EVENTCAUSE) == 0U)
+            {
+                NRF_USBD->EVENTS_USBEVENT = 0U;
+                __ISB();
+                __DSB();
+            }
         }
 
         tusb_int_handler(0U, true);
     }
+}
+
+/*
+ * The target interface. Thin wrappers rather than casting the function
+ * pointers, so the compiler checks each signature rather than trusting a cast.
+ */
+static bool HciNrf52840TargetInit(void *pContext,
+                                  HciTaktOs_t *pRuntime,
+                                  uint8_t *pSdcMem,
+                                  size_t SdcMemCapacity,
+                                  bool UsbEnabled)
+{
+    return HciNrf52840Init(static_cast<HciNrf52840_t *>(pContext), pRuntime,
+                           pSdcMem, SdcMemCapacity, UsbEnabled);
+}
+
+static void HciNrf52840TargetGetTaktOsOps(void *pContext,
+                                          HciTaktOsOps_t *pOps)
+{
+    HciNrf52840GetTaktOsOps(static_cast<HciNrf52840_t *>(pContext), pOps);
+}
+
+static bool HciNrf52840TargetUsbStart(void *pContext)
+{
+    return HciNrf52840UsbStart(static_cast<HciNrf52840_t *>(pContext));
+}
+
+static void HciNrf52840TargetUsbPassMark(void *pContext)
+{
+    HciNrf52840UsbPassMark(static_cast<HciNrf52840_t *>(pContext));
+}
+
+static void HciNrf52840TargetUsbPowerProcess(void *pContext)
+{
+    HciNrf52840UsbPowerProcess(static_cast<HciNrf52840_t *>(pContext));
+}
+
+/*
+ * A storm is the USBD peripheral raising events with no interrupt source the
+ * driver recognises. Nothing later in the settling loop clears it, so once it
+ * is seen there is no point waiting out the remaining passes.
+ */
+static bool HciNrf52840TargetUsbStuck(const void *pContext)
+{
+    const HciNrf52840_t *pTarget =
+        static_cast<const HciNrf52840_t *>(pContext);
+
+    return pTarget != nullptr && pTarget->UsbStormEvents != 0U;
+}
+
+static void HciNrf52840TargetUsbTrace(const void *pContext,
+                                      const char *pLabel,
+                                      uint32_t Pass)
+{
+    const HciNrf52840_t *pTarget =
+        static_cast<const HciNrf52840_t *>(pContext);
+
+    if (pTarget == nullptr)
+    {
+        return;
+    }
+
+    HciTrace("host: %s pass=%lu irq=%lu stuck=%lu evtcause=0x%08lX "
+             "inten=0x%08lX storm=0x%08lX stormcause=0x%08lX\r\n",
+             pLabel,
+             (unsigned long)Pass,
+             (unsigned long)pTarget->UsbIrqCount,
+             (unsigned long)pTarget->UsbStuckCauseCount,
+             (unsigned long)pTarget->UsbEventCause,
+             (unsigned long)pTarget->UsbStormInten,
+             (unsigned long)pTarget->UsbStormEvents,
+             (unsigned long)pTarget->UsbStormCause);
+
+    /* HciTrace discards its arguments when tracing is off. */
+    (void)pLabel;
+    (void)Pass;
+}
+
+/*
+ * A PSEL register holds the pin a peripheral function ended up on, or a
+ * disconnected marker in the top bit. Bit 5 is the port and the low five bits
+ * are the pin.
+ */
+#define HCI_NRF52840_PSEL_DISCONNECTED 0x80000000UL
+#define HCI_NRF52840_UARTE_HWFC_MASK   0x00000001UL
+
+static bool HciNrf52840PselLevel(uint32_t Psel, bool *pHigh)
+{
+    if ((Psel & HCI_NRF52840_PSEL_DISCONNECTED) != 0U)
+    {
+        return false;
+    }
+
+    const uint32_t port = (Psel >> 5) & 0x01U;
+    const uint32_t pin = Psel & 0x1FU;
+    const NRF_GPIO_Type *pGpio = port == 0U ? NRF_P0 : NRF_P1;
+
+    *pHigh = (pGpio->IN & (1UL << pin)) != 0U;
+    return true;
+}
+
+static void HciNrf52840PselName(uint32_t Psel, char Name[6])
+{
+    if ((Psel & HCI_NRF52840_PSEL_DISCONNECTED) != 0U)
+    {
+        Name[0] = 'N';
+        Name[1] = 'C';
+        Name[2] = '\0';
+        return;
+    }
+
+    const uint32_t port = (Psel >> 5) & 0x01U;
+    const uint32_t pin = Psel & 0x1FU;
+    Name[0] = 'P';
+    Name[1] = (char)('0' + port);
+    Name[2] = '.';
+    Name[3] = (char)('0' + (pin / 10U));
+    Name[4] = (char)('0' + (pin % 10U));
+    Name[5] = '\0';
+}
+
+static uint32_t HciNrf52840Baud(uint32_t RegisterValue)
+{
+    /* BAUDRATE = baud * 2^32 / 16 MHz. Round back to the nearest baud. */
+    return (uint32_t)((((uint64_t)RegisterValue * 16000000ULL) +
+                       0x80000000ULL) >> 32);
+}
+
+static void HciNrf52840TargetUartTrace(const void *, uint8_t DevNo)
+{
+    NRF_UARTE_Type *pReg = DevNo == 0U ? NRF_UARTE0 : NRF_UARTE1;
+    char rxd[6];
+    char txd[6];
+    char cts[6];
+    char rts[6];
+    HciNrf52840PselName(pReg->PSEL.RXD, rxd);
+    HciNrf52840PselName(pReg->PSEL.TXD, txd);
+    HciNrf52840PselName(pReg->PSEL.CTS, cts);
+    HciNrf52840PselName(pReg->PSEL.RTS, rts);
+
+    bool ctsHigh = false;
+    const bool ctsKnown = HciNrf52840PselLevel(pReg->PSEL.CTS, &ctsHigh);
+    const bool hwfc = (pReg->CONFIG & HCI_NRF52840_UARTE_HWFC_MASK) != 0U;
+
+    if (pReg->ERRORSRC == 0U)
+    {
+        HciTrace("uart%u: enabled=%s hwfc=%s baud=%lu errors=none "
+                 "cts=%s RXD=%s TXD=%s CTS=%s RTS=%s\r\n",
+                 (unsigned)DevNo,
+                 pReg->ENABLE != 0U ? "yes" : "no",
+                 hwfc ? "on" : "off",
+                 (unsigned long)HciNrf52840Baud(pReg->BAUDRATE),
+                 ctsKnown ? (ctsHigh ? "high(peer-not-ready)" :
+                                       "low(peer-ready)") : "not-connected",
+                 rxd, txd, cts, rts);
+    }
+    else
+    {
+        HciTrace("uart%u: enabled=%s hwfc=%s baud=%lu errors=0x%08lX "
+                 "cts=%s RXD=%s TXD=%s CTS=%s RTS=%s\r\n",
+                 (unsigned)DevNo,
+                 pReg->ENABLE != 0U ? "yes" : "no",
+                 hwfc ? "on" : "off",
+                 (unsigned long)HciNrf52840Baud(pReg->BAUDRATE),
+                 (unsigned long)pReg->ERRORSRC,
+                 ctsKnown ? (ctsHigh ? "high(peer-not-ready)" :
+                                       "low(peer-ready)") : "not-connected",
+                 rxd, txd, cts, rts);
+    }
+
+    /* HciTrace discards its arguments when tracing is off. */
+    (void)DevNo;
+}
+
+static void HciNrf52840TargetStop(void *pContext)
+{
+    HciNrf52840Stop(static_cast<HciNrf52840_t *>(pContext));
+}
+
+static void HciNrf52840TargetGetSdcMem(const void *pContext,
+                                       uint32_t *pRequired,
+                                       uint32_t *pCapacity)
+{
+    const HciNrf52840_t *pTarget =
+        static_cast<const HciNrf52840_t *>(pContext);
+
+    if (pTarget == nullptr)
+    {
+        return;
+    }
+
+    if (pRequired != nullptr)
+    {
+        *pRequired = pTarget->RequiredSdcMem > 0 ?
+                     (uint32_t)pTarget->RequiredSdcMem : 0U;
+    }
+
+    if (pCapacity != nullptr)
+    {
+        *pCapacity = (uint32_t)pTarget->SdcMemCapacity;
+    }
+}
+
+static int32_t HciNrf52840TargetLastError(const void *pContext)
+{
+    const HciNrf52840_t *pTarget =
+        static_cast<const HciNrf52840_t *>(pContext);
+
+    return pTarget != nullptr ? pTarget->LastError : 0;
+}
+
+static const HciTargetOps_t s_Nrf52840Ops = {
+    HciNrf52840TargetInit,
+    HciNrf52840TargetGetTaktOsOps,
+    HciNrf52840TargetUsbStart,
+    HciNrf52840TargetUsbPassMark,
+    HciNrf52840TargetUsbPowerProcess,
+    HciNrf52840TargetUsbStuck,
+    HciNrf52840TargetUsbTrace,
+    HciNrf52840TargetUartTrace,
+    HciNrf52840TargetStop,
+    HciNrf52840TargetGetSdcMem,
+    HciNrf52840TargetLastError,
+};
+
+/*
+ * One radio, so one instance, owned here. The application holds the pair and
+ * never has to know how large this is.
+ */
+static HciNrf52840_t s_Nrf52840;
+
+HciTarget_t HciNrf52840Target(void)
+{
+    HciTarget_t target = { &s_Nrf52840Ops, &s_Nrf52840 };
+    return target;
 }

@@ -23,6 +23,30 @@
 
 static HciTinyUsb_t *s_pUsb;
 
+/*
+ * Whether a callback is about the interface this file owns, and if not,
+ * whether that is worth counting.
+ */
+static bool HciTinyUsbCallbackIsOurs(uint8_t Interface)
+{
+    if (s_pUsb == nullptr)
+    {
+        return false;
+    }
+
+    if (Interface == s_pUsb->Interface)
+    {
+        return true;
+    }
+
+    if (Interface >= CFG_TUD_CDC)
+    {
+        s_pUsb->CallbackInterfaceErrorCount++;
+    }
+
+    return false;
+}
+
 static void HciTinyUsbWake(HciTinyUsb_t *pUsb)
 {
     if (pUsb != nullptr && pUsb->Wake != nullptr)
@@ -55,17 +79,28 @@ bool HciTinyUsbInit(HciTinyUsb_t *pUsb,
 
 bool HciTinyUsbStart(HciTinyUsb_t *pUsb)
 {
-    if (pUsb == nullptr || pUsb != s_pUsb || pUsb->Started)
+    if (pUsb == nullptr || pUsb != s_pUsb)
     {
         return false;
+    }
+
+    /*
+     * TinyUSB is initialized before the part-specific USB peripheral is
+     * started. If the hardware start fails because VBUS is absent or a bounded
+     * ready wait expires, TaktOS retries the host start. The stack itself is
+     * already initialized at that point, so succeeding here is what lets the
+     * retry reach the hardware again instead of wedging on Started forever.
+     */
+    if (pUsb->Started)
+    {
+        return true;
     }
 
     /*
      * tusb_rhport_init, not tud_init. tud_init is a static inline that calls
      * tud_rhport_init directly and never reaches tusb.c, so the roothub port
      * role stays TUSB_ROLE_INVALID. tusb_int_handler dispatches on that role,
-     * so with tud_init the interrupt handler does nothing at all: no event is
-     * ever cleared and no setup packet is ever seen.
+     * so with tud_init the interrupt handler does nothing at all.
      */
     tusb_rhport_init_t rhInit;
     memset(&rhInit, 0, sizeof(rhInit));
@@ -80,9 +115,51 @@ bool HciTinyUsbStart(HciTinyUsb_t *pUsb)
 
     HciTrace("tinyusb: rhport init ok inited=%u\r\n", (unsigned)tusb_inited());
     pUsb->Started = true;
-    pUsb->RequestedOpen = (tud_cdc_n_get_line_state(pUsb->Interface) & 0x01U) != 0U;
+    pUsb->RequestedOpen =
+        (tud_cdc_n_get_line_state(pUsb->Interface) & 0x01U) != 0U;
     pUsb->LineStatePending = true;
     return true;
+}
+
+void HciTinyUsbStop(HciTinyUsb_t *pUsb)
+{
+    if (pUsb == nullptr || pUsb != s_pUsb)
+    {
+        return;
+    }
+
+    /*
+     * The target has already disabled the USB peripheral and its interrupt by
+     * the time the application calls this. Tear the software stack down next,
+     * then release this wrapper's singleton so a later application instance
+     * can own it.
+     *
+     * TinyUSB 0.19 added tusb_deinit(), which also clears tusb.c's roothub
+     * role. Older versions already provide tud_deinit(); on those versions a
+     * later tusb_rhport_init() overwrites the role before interrupts are
+     * enabled again.
+     */
+    if (pUsb->Started)
+    {
+#if defined(TUSB_VERSION_NUMBER) && TUSB_VERSION_NUMBER >= 1900
+        if (!tusb_deinit(HCI_TINYUSB_RHPORT))
+        {
+            HciTrace("tinyusb: tusb_deinit failed\r\n");
+        }
+#else
+        if (!tud_deinit(HCI_TINYUSB_RHPORT))
+        {
+            HciTrace("tinyusb: tud_deinit failed\r\n");
+        }
+#endif
+    }
+
+    pUsb->Started = false;
+    pUsb->RequestedOpen = false;
+    pUsb->LineStatePending = false;
+    pUsb->TxPendingOffset = 0U;
+    pUsb->TxPendingLen = 0U;
+    s_pUsb = nullptr;
 }
 
 static void HciTinyUsbProcessRx(HciTinyUsb_t *pUsb)
@@ -118,7 +195,8 @@ static void HciTinyUsbProcessRx(HciTinyUsb_t *pUsb)
         int written = CFifoWrite(pUsb->pIntrf->hRxFifo, data, (int)actual);
         if (written != (int)actual)
         {
-            pUsb->RxDropCount += actual - (uint32_t)(written > 0 ? written : 0);
+            pUsb->RxDropCount +=
+                actual - (uint32_t)(written > 0 ? written : 0);
             break;
         }
 
@@ -132,6 +210,61 @@ static void HciTinyUsbProcessRx(HciTinyUsb_t *pUsb)
     }
 }
 
+static bool HciTinyUsbWritePending(HciTinyUsb_t *pUsb)
+{
+    if (pUsb->TxPendingOffset >= pUsb->TxPendingLen)
+    {
+        pUsb->TxPendingOffset = 0U;
+        pUsb->TxPendingLen = 0U;
+        return true;
+    }
+
+    uint32_t available = tud_cdc_n_write_available(pUsb->Interface);
+    if (available == 0U)
+    {
+        pUsb->WriteBusyCount++;
+        return false;
+    }
+
+    size_t remaining = pUsb->TxPendingLen - pUsb->TxPendingOffset;
+    size_t len = remaining;
+    if (len > (size_t)available)
+    {
+        len = (size_t)available;
+    }
+
+    const uint32_t written = tud_cdc_n_write(
+        pUsb->Interface,
+        &pUsb->pIntrf->TransBuff[pUsb->TxPendingOffset],
+        (uint32_t)len);
+
+    if (written > len)
+    {
+        pUsb->WriteErrorCount++;
+        return false;
+    }
+
+    pUsb->TxPendingOffset += (size_t)written;
+
+    if (written != len)
+    {
+        /*
+         * Nothing is discarded. The unwritten tail remains in TransBuff and
+         * the next pump resumes exactly where this call stopped.
+         */
+        pUsb->WriteErrorCount++;
+        return false;
+    }
+
+    if (pUsb->TxPendingOffset == pUsb->TxPendingLen)
+    {
+        pUsb->TxPendingOffset = 0U;
+        pUsb->TxPendingLen = 0U;
+    }
+
+    return true;
+}
+
 static void HciTinyUsbProcessTx(HciTinyUsb_t *pUsb)
 {
     if (!pUsb->RequestedOpen)
@@ -139,8 +272,23 @@ static void HciTinyUsbProcessTx(HciTinyUsb_t *pUsb)
         return;
     }
 
-    while (CFifoUsed(pUsb->pIntrf->hTxFifo) > 0)
+    for (;;)
     {
+        if (pUsb->TxPendingLen != 0U)
+        {
+            if (!HciTinyUsbWritePending(pUsb))
+            {
+                break;
+            }
+            continue;
+        }
+
+        int used = CFifoUsed(pUsb->pIntrf->hTxFifo);
+        if (used <= 0)
+        {
+            break;
+        }
+
         uint32_t available = tud_cdc_n_write_available(pUsb->Interface);
         if (available == 0U)
         {
@@ -148,7 +296,7 @@ static void HciTinyUsbProcessTx(HciTinyUsb_t *pUsb)
             break;
         }
 
-        int len = CFifoUsed(pUsb->pIntrf->hTxFifo);
+        int len = used;
         if (len > (int)sizeof(pUsb->pIntrf->TransBuff))
         {
             len = sizeof(pUsb->pIntrf->TransBuff);
@@ -166,12 +314,10 @@ static void HciTinyUsbProcessTx(HciTinyUsb_t *pUsb)
             break;
         }
 
-        uint32_t written = tud_cdc_n_write(pUsb->Interface,
-                                           pUsb->pIntrf->TransBuff,
-                                           (uint32_t)count);
-        if (written != (uint32_t)count)
+        pUsb->TxPendingOffset = 0U;
+        pUsb->TxPendingLen = (size_t)count;
+        if (!HciTinyUsbWritePending(pUsb))
         {
-            pUsb->WriteErrorCount++;
             break;
         }
     }
@@ -207,14 +353,51 @@ bool HciTinyUsbIsMounted(const HciTinyUsb_t *pUsb)
     return pUsb != nullptr && pUsb->Started && tud_mounted();
 }
 
+bool HciTinyUsbPortIsOpen(uint8_t Interface)
+{
+    return tud_mounted() &&
+           (tud_cdc_n_get_line_state(Interface) & 0x01U) != 0U;
+}
+
+size_t HciTinyUsbWrite(uint8_t Interface, const uint8_t *pData, size_t Len)
+{
+    if (pData == NULL || Len == 0U || !tud_mounted())
+    {
+        return 0U;
+    }
+
+    /*
+     * Nothing opened means nobody is reading. Writing anyway fills the
+     * endpoint buffer once and then blocks every later write, so the log
+     * would stop at the first line and stay stopped even after a terminal
+     * arrived.
+     */
+    if ((tud_cdc_n_get_line_state(Interface) & 0x01U) == 0U)
+    {
+        return 0U;
+    }
+
+    const uint32_t room = tud_cdc_n_write_available(Interface);
+    if (room == 0U)
+    {
+        return 0U;
+    }
+
+    size_t len = Len;
+    if (len > room)
+    {
+        len = room;
+    }
+
+    const uint32_t written = tud_cdc_n_write(Interface, pData, (uint32_t)len);
+    (void)tud_cdc_n_write_flush(Interface);
+    return (size_t)written;
+}
+
 extern "C" void tud_cdc_rx_cb(uint8_t itf)
 {
-    if (s_pUsb == nullptr || itf != s_pUsb->Interface)
+    if (!HciTinyUsbCallbackIsOurs(itf))
     {
-        if (s_pUsb != nullptr)
-        {
-            s_pUsb->CallbackInterfaceErrorCount++;
-        }
         return;
     }
 
@@ -223,12 +406,8 @@ extern "C" void tud_cdc_rx_cb(uint8_t itf)
 
 extern "C" void tud_cdc_tx_complete_cb(uint8_t itf)
 {
-    if (s_pUsb == nullptr || itf != s_pUsb->Interface)
+    if (!HciTinyUsbCallbackIsOurs(itf))
     {
-        if (s_pUsb != nullptr)
-        {
-            s_pUsb->CallbackInterfaceErrorCount++;
-        }
         return;
     }
 
@@ -239,16 +418,17 @@ extern "C" void tud_cdc_line_state_cb(uint8_t itf, bool dtr, bool rts)
 {
     (void)rts;
 
-    if (s_pUsb == nullptr || itf != s_pUsb->Interface)
+    if (!HciTinyUsbCallbackIsOurs(itf))
     {
-        if (s_pUsb != nullptr)
-        {
-            s_pUsb->CallbackInterfaceErrorCount++;
-        }
+        /*
+         * The other function is the log. A drain that had nothing to write
+         * when it was last called stops until something wakes this thread, so
+         * a terminal opening the port has to be one of the things that does.
+         */
+        HciTinyUsbWake(s_pUsb);
         return;
     }
 
-    HciTrace("tinyusb: line state dtr=%u\r\n", (unsigned)dtr);
     s_pUsb->RequestedOpen = dtr;
     s_pUsb->LineStatePending = true;
     HciTinyUsbWake(s_pUsb);

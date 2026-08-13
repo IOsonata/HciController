@@ -20,6 +20,100 @@ static bool HciIntrfPacketTypeValid(HciH4PacketType_t Type)
     return Type >= HCI_H4_PACKET_COMMAND && Type <= HCI_H4_PACKET_ISO;
 }
 
+/*
+ * An octet refused at a packet boundary is the only evidence in the stream
+ * that it is not H:4, and it is evidence about everything after it as well as
+ * about itself. Compared against the count at the last quiet moment, so it
+ * says "since the stream last started" rather than "ever".
+ */
+bool HciIntrfTransportSuspect(const HciIntrfTransport_t *pTransport)
+{
+    return pTransport != nullptr &&
+           pTransport->Parser.InvalidTypeCount != pTransport->RejectedMark;
+}
+
+static bool HciIntrfTransportCount(void *pContext,
+                                   HciH4PacketType_t Type,
+                                   const uint8_t *pPacket,
+                                   size_t PacketLen)
+{
+    HciIntrfTransport_t *pTransport =
+        static_cast<HciIntrfTransport_t *>(pContext);
+
+    /*
+     * Suspect means the stream held something that is not H:4 since it last
+     * went quiet. It is recorded and it is not acted on, and that is a change
+     * made against evidence.
+     *
+     * Refusing suspect packets was meant to stop this side answering commands
+     * manufactured out of a bootloader banner, because those answers
+     * desynchronise the host's parser. It did that. It also refused eight real
+     * HCI Resets, which the log named one at a time: "pkt: 01 03 0C drop". A
+     * command that is thrown away is a link that never starts. Answers to
+     * accidental commands only cost the host a resynchronisation, and the host
+     * drains its own port when it opens the transport, so the ones sent before
+     * that moment reach nobody.
+     *
+     * The two failures are not the same size. This layer cannot tell an
+     * accidental command from a real one, since only the opcode table can and
+     * that is another layer up, so between refusing real commands and
+     * answering false ones it now answers.
+     */
+    const bool suspect = HciIntrfTransportSuspect(pTransport);
+
+    /*
+     * Only commands have an opcode that the layer above can validate. Passing
+     * suspect ACL/SCO/ISO packets through the command filter used to drop them
+     * unconditionally because the filter quite correctly had no opcode to
+     * check. For ACL that also loses a host flow-control credit: the host spent
+     * the credit when it sent the packet and no controller completion can ever
+     * return it for a packet discarded here.
+     *
+     * Data packets therefore bypass this filter. If they are real, they must
+     * reach the controller; if they were manufactured out of foreign bytes,
+     * there is no information at this layer or above that can distinguish them
+     * without also discarding legitimate data.
+     */
+    if (suspect && Type == HCI_H4_PACKET_COMMAND &&
+        pTransport->SuspectFilter != nullptr &&
+        !pTransport->SuspectFilter(pTransport->pFilterContext, Type, pPacket,
+                                   PacketLen))
+    {
+        pTransport->DroppedPacketCount++;
+        return true;
+    }
+
+    /*
+     * A refused packet is offered again on the next pass, so both the count
+     * and the record are taken only once the packet has stopped being offered.
+     * Counting on every attempt was the first version of this and it inflated
+     * exactly the number a reader would trust most.
+     */
+    if (!pTransport->Handler(pTransport->pHandlerContext, Type, pPacket,
+                             PacketLen))
+    {
+        return false;
+    }
+
+    if (pTransport->PktMarkLen < HCI_INTRF_PKT_MARKS)
+    {
+        const uint8_t slot = pTransport->PktMarkLen;
+        pTransport->PktMark[slot].Type = (uint8_t)Type;
+        pTransport->PktMark[slot].Head[0] = PacketLen > 0U ? pPacket[0] : 0U;
+        pTransport->PktMark[slot].Head[1] = PacketLen > 1U ? pPacket[1] : 0U;
+        pTransport->PktMark[slot].Suspect = suspect;
+        pTransport->PktMarkLen++;
+    }
+
+    if (suspect)
+    {
+        pTransport->SuspectPacketCount++;
+    }
+
+    pTransport->RxPacketCount++;
+    return true;
+}
+
 bool HciIntrfTransportInit(HciIntrfTransport_t *pTransport,
                            DevIntrf_t *pIntrf,
                            uint8_t *pHciRxPacket,
@@ -36,20 +130,87 @@ bool HciIntrfTransportInit(HciIntrfTransport_t *pTransport,
 
     memset(pTransport, 0, sizeof(*pTransport));
     pTransport->pIntrf = pIntrf;
+    pTransport->Handler = PacketHandler;
+    pTransport->pHandlerContext = pPacketContext;
 
+    /*
+     * The parser calls in here and this passes the packet on, so a packet that
+     * was accepted can be counted in the one place that knows it was. A count
+     * of packets next to a count of octets is what separates a link with H:4
+     * on it from a link with merely traffic on it.
+     */
     return HciH4ParserInit(&pTransport->Parser,
                            pHciRxPacket,
                            HciRxPacketCapacity,
-                           PacketHandler,
-                           pPacketContext);
+                           HciIntrfTransportCount,
+                           pTransport);
+}
+
+/*
+ * Bounded, so a port that hands back data forever cannot hold start up.
+ */
+#define HCI_INTRF_FLUSH_PASSES 64U
+
+void HciIntrfTransportSetSuspectFilter(HciIntrfTransport_t *pTransport,
+                                       HciH4PacketHandler_t Filter,
+                                       void *pContext)
+{
+    if (pTransport != nullptr)
+    {
+        pTransport->SuspectFilter = Filter;
+        pTransport->pFilterContext = pContext;
+    }
 }
 
 void HciIntrfTransportOpen(HciIntrfTransport_t *pTransport)
 {
-    if (pTransport != nullptr)
+    if (pTransport == nullptr)
     {
-        pTransport->Open = true;
+        return;
     }
+
+    pTransport->Open = true;
+
+    /*
+     * Throw away whatever arrived before anyone was listening.
+     *
+     * The port's own buffer fills from the moment the driver is configured,
+     * which on this application is several hundred milliseconds before the
+     * controller behind it can answer anything. So the first read after
+     * opening returns a run of octets that were spread over that whole time,
+     * with every gap between them gone.
+     *
+     * That matters because a gap is the only thing separating one sender's
+     * output from another's, and it is the only thing this layer has to
+     * recover from a stream that is not H:4. On the Thingy:91 the nRF9160's
+     * bootloader banner and the HCI Reset behind it are hundreds of
+     * milliseconds apart on the wire and adjacent in the buffer, so the Reset
+     * was read as part of the banner's burst and refused with it. The log said
+     * so in as many words: "pkt: 01 03 0C drop".
+     *
+     * Nothing is lost that was not already lost. A host that sends before this
+     * side can answer gets no answer either way, and H:4 has no retry, so the
+     * choice is between discarding those octets and misreading them. The host
+     * asks again.
+     */
+    for (uint32_t pass = 0U; pass < HCI_INTRF_FLUSH_PASSES; pass++)
+    {
+        const int received = DeviceIntrfRx(pTransport->pIntrf,
+                                           0U,
+                                           pTransport->RxChunk,
+                                           (int)sizeof(pTransport->RxChunk));
+        if (received <= 0)
+        {
+            break;
+        }
+
+        pTransport->FlushedOctetCount += (uint32_t)received;
+    }
+
+    pTransport->RxChunkLen = 0U;
+    pTransport->RxChunkOffset = 0U;
+    HciH4ParserReset(&pTransport->Parser);
+    pTransport->RejectedMark = pTransport->Parser.InvalidTypeCount;
 }
 
 void HciIntrfTransportClose(HciIntrfTransport_t *pTransport)
@@ -104,12 +265,95 @@ static void HciIntrfTransportProcessRx(HciIntrfTransport_t *pTransport)
 
         if (received == 0)
         {
+            /*
+             * The port has nothing more right now, so this burst has ended.
+             *
+             * That is the moment suspicion should lift, and waiting for pump
+             * passes to notice it was too slow. The nRF9160 stops printing
+             * about eleven milliseconds before it sends its first command, and
+             * the caller's idle rule needed twenty, so the Reset arrived while
+             * the banner in front of it still counted against it. Every real
+             * Reset after the first was labelled suspect for that reason.
+             *
+             * A drained port is a stronger signal than a count of passes and it
+             * costs nothing to read: the octets of one packet are handed over
+             * together, so a read that comes back empty at a packet boundary
+             * cannot be the middle of anything.
+             */
+            if (!HciH4ParserIsMidPacket(&pTransport->Parser) &&
+                HciIntrfTransportSuspect(pTransport))
+            {
+                pTransport->RejectedMark = pTransport->Parser.InvalidTypeCount;
+                pTransport->SuspectClearCount++;
+            }
             return;
         }
 
+        if (pTransport->FirstRxLen < sizeof(pTransport->FirstRx))
+        {
+            size_t room = sizeof(pTransport->FirstRx) - pTransport->FirstRxLen;
+            size_t keep = (size_t)received;
+            if (keep > room)
+            {
+                keep = room;
+            }
+            memcpy(&pTransport->FirstRx[pTransport->FirstRxLen],
+                   pTransport->RxChunk, keep);
+            pTransport->FirstRxLen += (uint8_t)keep;
+        }
+
+        pTransport->RxOctetCount += (uint32_t)received;
         pTransport->RxChunkLen = (size_t)received;
         pTransport->RxChunkOffset = 0U;
     }
+}
+
+void HciIntrfTransportIdle(HciIntrfTransport_t *pTransport)
+{
+    if (pTransport == nullptr)
+    {
+        return;
+    }
+
+    const bool suspect = HciIntrfTransportSuspect(pTransport);
+
+    if (!HciH4ParserIsMidPacket(&pTransport->Parser))
+    {
+        /*
+         * A clean packet boundary is always a safe place to forget earlier
+         * foreign octets. Nothing is being abandoned here.
+         */
+        pTransport->RejectedMark = pTransport->Parser.InvalidTypeCount;
+        return;
+    }
+
+    /*
+     * Do not tear down a clean H:4 packet merely because its sender paused.
+     * Once a valid indicator and header have been accepted, the remaining
+     * payload octets are still payload. Resetting the parser here made a
+     * continuation beginning 01 03 0C 00 become an HCI_Reset command and let
+     * arbitrary payload bytes act on the controller.
+     *
+     * The idle heuristic is only justified after the stream has independently
+     * shown that it is not H:4. That is the Thingy:91 boot-banner case this
+     * recovery was added for: invalid indicators precede the false packet, and
+     * the long gap separates the banner from the real HCI stream.
+     */
+    if (!suspect)
+    {
+        return;
+    }
+
+    /*
+     * The chunk goes with the suspect packet. Whatever is left in it belongs
+     * to the packet being abandoned, and feeding it after the reset would
+     * rebuild the same wrong packet from the same wrong octets.
+     */
+    pTransport->RejectedMark = pTransport->Parser.InvalidTypeCount;
+    HciH4ParserReset(&pTransport->Parser);
+    pTransport->RxChunkLen = 0U;
+    pTransport->RxChunkOffset = 0U;
+    pTransport->ResyncCount++;
 }
 
 static void HciIntrfTransportProcessTx(HciIntrfTransport_t *pTransport)
@@ -135,6 +379,7 @@ static void HciIntrfTransportProcessTx(HciIntrfTransport_t *pTransport)
             return;
         }
 
+        pTransport->TxOctetCount += (uint32_t)sent;
         pTransport->TxStreamOffset += (size_t)sent;
         if (pTransport->TxStreamOffset >= pTransport->TxStreamLen)
         {

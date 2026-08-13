@@ -7,10 +7,27 @@
 #include "sdc_hci_cmd_link_control.h"
 #include "sdc_hci_cmd_info_params.h"
 #include "sdc_hci_cmd_le.h"
+#include "sdc_hci_cmd_status_params.h"
 #include "sdc_hci_vs.h"
 #include "sdc_stub.h"
 
 SdcStubState_t g_SdcStub;
+
+uint8_t sdc_hci_cmd_cb_host_buffer_size(const sdc_hci_cmd_cb_host_buffer_size_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_cb_host_buffer_size";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_cb_host_number_of_completed_packets(const sdc_hci_cmd_cb_host_number_of_completed_packets_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_cb_host_number_of_completed_packets";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
 
 uint8_t sdc_hci_cmd_cb_read_authenticated_payload_timeout(const sdc_hci_cmd_cb_read_authenticated_payload_timeout_t * a0, sdc_hci_cmd_cb_read_authenticated_payload_timeout_return_t * a1)
 {
@@ -21,10 +38,27 @@ uint8_t sdc_hci_cmd_cb_read_authenticated_payload_timeout(const sdc_hci_cmd_cb_r
     return g_SdcStub.NextStatus;
 }
 
+uint8_t sdc_hci_cmd_cb_read_transmit_power_level(const sdc_hci_cmd_cb_read_transmit_power_level_t * a0, sdc_hci_cmd_cb_read_transmit_power_level_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_cb_read_transmit_power_level";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_cb_read_transmit_power_level_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
 uint8_t sdc_hci_cmd_cb_reset(void)
 {
     g_SdcStub.LastCall = "sdc_hci_cmd_cb_reset";
     g_SdcStub.Calls++;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_cb_set_controller_to_host_flow_control(const sdc_hci_cmd_cb_set_controller_to_host_flow_control_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_cb_set_controller_to_host_flow_control";
+    g_SdcStub.Calls++;
+    (void)a0;
     return g_SdcStub.NextStatus;
 }
 
@@ -85,11 +119,52 @@ uint8_t sdc_hci_cmd_lc_read_remote_version_information(const sdc_hci_cmd_lc_read
     return g_SdcStub.NextStatus;
 }
 
+uint8_t sdc_hci_cmd_le_accept_cis_request(const sdc_hci_cmd_le_accept_cis_request_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_accept_cis_request";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
 uint8_t sdc_hci_cmd_le_add_device_to_filter_accept_list(const sdc_hci_cmd_le_add_device_to_filter_accept_list_t * a0)
 {
     g_SdcStub.LastCall = "sdc_hci_cmd_le_add_device_to_filter_accept_list";
     g_SdcStub.Calls++;
     (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_add_device_to_periodic_adv_list(const sdc_hci_cmd_le_add_device_to_periodic_adv_list_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_add_device_to_periodic_adv_list";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_add_device_to_resolving_list(const sdc_hci_cmd_le_add_device_to_resolving_list_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_add_device_to_resolving_list";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_big_create_sync(const sdc_hci_cmd_le_big_create_sync_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_big_create_sync";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_big_terminate_sync(const sdc_hci_cmd_le_big_terminate_sync_t * a0, sdc_hci_cmd_le_big_terminate_sync_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_big_terminate_sync";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_le_big_terminate_sync_return_t)); }
     return g_SdcStub.NextStatus;
 }
 
@@ -107,9 +182,47 @@ uint8_t sdc_hci_cmd_le_clear_filter_accept_list(void)
     return g_SdcStub.NextStatus;
 }
 
+uint8_t sdc_hci_cmd_le_clear_periodic_adv_list(void)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_clear_periodic_adv_list";
+    g_SdcStub.Calls++;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_clear_resolving_list(void)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_clear_resolving_list";
+    g_SdcStub.Calls++;
+    return g_SdcStub.NextStatus;
+}
+
 uint8_t sdc_hci_cmd_le_conn_update(const sdc_hci_cmd_le_conn_update_t * a0)
 {
     g_SdcStub.LastCall = "sdc_hci_cmd_le_conn_update";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_create_big(const sdc_hci_cmd_le_create_big_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_create_big";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_create_big_test(const sdc_hci_cmd_le_create_big_test_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_create_big_test";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_create_cis(const sdc_hci_cmd_le_create_cis_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_create_cis";
     g_SdcStub.Calls++;
     (void)a0;
     return g_SdcStub.NextStatus;
@@ -147,11 +260,56 @@ uint8_t sdc_hci_cmd_le_encrypt(const sdc_hci_cmd_le_encrypt_t * a0, sdc_hci_cmd_
     return g_SdcStub.NextStatus;
 }
 
+uint8_t sdc_hci_cmd_le_enhanced_read_transmit_power_level(const sdc_hci_cmd_le_enhanced_read_transmit_power_level_t * a0, sdc_hci_cmd_le_enhanced_read_transmit_power_level_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_enhanced_read_transmit_power_level";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_le_enhanced_read_transmit_power_level_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
 uint8_t sdc_hci_cmd_le_ext_create_conn(const sdc_hci_cmd_le_ext_create_conn_t * a0)
 {
     g_SdcStub.LastCall = "sdc_hci_cmd_le_ext_create_conn";
     g_SdcStub.Calls++;
     (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_iso_read_test_counters(const sdc_hci_cmd_le_iso_read_test_counters_t * a0, sdc_hci_cmd_le_iso_read_test_counters_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_iso_read_test_counters";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_le_iso_read_test_counters_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_iso_receive_test(const sdc_hci_cmd_le_iso_receive_test_t * a0, sdc_hci_cmd_le_iso_receive_test_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_iso_receive_test";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_le_iso_receive_test_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_iso_test_end(const sdc_hci_cmd_le_iso_test_end_t * a0, sdc_hci_cmd_le_iso_test_end_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_iso_test_end";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_le_iso_test_end_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_iso_transmit_test(const sdc_hci_cmd_le_iso_transmit_test_t * a0, sdc_hci_cmd_le_iso_transmit_test_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_iso_transmit_test";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_le_iso_transmit_test_return_t)); }
     return g_SdcStub.NextStatus;
 }
 
@@ -173,6 +331,47 @@ uint8_t sdc_hci_cmd_le_long_term_key_request_reply(const sdc_hci_cmd_le_long_ter
     return g_SdcStub.NextStatus;
 }
 
+uint8_t sdc_hci_cmd_le_periodic_adv_create_sync(const sdc_hci_cmd_le_periodic_adv_create_sync_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_periodic_adv_create_sync";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_periodic_adv_create_sync_cancel(void)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_periodic_adv_create_sync_cancel";
+    g_SdcStub.Calls++;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_periodic_adv_set_info_transfer(const sdc_hci_cmd_le_periodic_adv_set_info_transfer_t * a0, sdc_hci_cmd_le_periodic_adv_set_info_transfer_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_periodic_adv_set_info_transfer";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_le_periodic_adv_set_info_transfer_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_periodic_adv_sync_transfer(const sdc_hci_cmd_le_periodic_adv_sync_transfer_t * a0, sdc_hci_cmd_le_periodic_adv_sync_transfer_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_periodic_adv_sync_transfer";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_le_periodic_adv_sync_transfer_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_periodic_adv_terminate_sync(const sdc_hci_cmd_le_periodic_adv_terminate_sync_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_periodic_adv_terminate_sync";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
 uint8_t sdc_hci_cmd_le_rand(sdc_hci_cmd_le_rand_return_t * a0)
 {
     g_SdcStub.LastCall = "sdc_hci_cmd_le_rand";
@@ -189,11 +388,27 @@ uint8_t sdc_hci_cmd_le_read_adv_physical_channel_tx_power(sdc_hci_cmd_le_read_ad
     return g_SdcStub.NextStatus;
 }
 
+uint8_t sdc_hci_cmd_le_read_all_remote_features(const sdc_hci_cmd_le_read_all_remote_features_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_read_all_remote_features";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
 uint8_t sdc_hci_cmd_le_read_buffer_size(sdc_hci_cmd_le_read_buffer_size_return_t * a0)
 {
     g_SdcStub.LastCall = "sdc_hci_cmd_le_read_buffer_size";
     g_SdcStub.Calls++;
     if (a0 != NULL) { memset(a0, 0x5A, sizeof(sdc_hci_cmd_le_read_buffer_size_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_read_buffer_size_v2(sdc_hci_cmd_le_read_buffer_size_v2_return_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_read_buffer_size_v2";
+    g_SdcStub.Calls++;
+    if (a0 != NULL) { memset(a0, 0x5A, sizeof(sdc_hci_cmd_le_read_buffer_size_v2_return_t)); }
     return g_SdcStub.NextStatus;
 }
 
@@ -211,6 +426,24 @@ uint8_t sdc_hci_cmd_le_read_filter_accept_list_size(sdc_hci_cmd_le_read_filter_a
     g_SdcStub.LastCall = "sdc_hci_cmd_le_read_filter_accept_list_size";
     g_SdcStub.Calls++;
     if (a0 != NULL) { memset(a0, 0x5A, sizeof(sdc_hci_cmd_le_read_filter_accept_list_size_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_read_iso_link_quality(const sdc_hci_cmd_le_read_iso_link_quality_t * a0, sdc_hci_cmd_le_read_iso_link_quality_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_read_iso_link_quality";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_le_read_iso_link_quality_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_read_iso_tx_sync(const sdc_hci_cmd_le_read_iso_tx_sync_t * a0, sdc_hci_cmd_le_read_iso_tx_sync_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_read_iso_tx_sync";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_le_read_iso_tx_sync_return_t)); }
     return g_SdcStub.NextStatus;
 }
 
@@ -246,6 +479,14 @@ uint8_t sdc_hci_cmd_le_read_number_of_supported_adv_sets(sdc_hci_cmd_le_read_num
     return g_SdcStub.NextStatus;
 }
 
+uint8_t sdc_hci_cmd_le_read_periodic_adv_list_size(sdc_hci_cmd_le_read_periodic_adv_list_size_return_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_read_periodic_adv_list_size";
+    g_SdcStub.Calls++;
+    if (a0 != NULL) { memset(a0, 0x5A, sizeof(sdc_hci_cmd_le_read_periodic_adv_list_size_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
 uint8_t sdc_hci_cmd_le_read_phy(const sdc_hci_cmd_le_read_phy_t * a0, sdc_hci_cmd_le_read_phy_return_t * a1)
 {
     g_SdcStub.LastCall = "sdc_hci_cmd_le_read_phy";
@@ -260,6 +501,30 @@ uint8_t sdc_hci_cmd_le_read_remote_features(const sdc_hci_cmd_le_read_remote_fea
     g_SdcStub.LastCall = "sdc_hci_cmd_le_read_remote_features";
     g_SdcStub.Calls++;
     (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_read_remote_transmit_power_level(const sdc_hci_cmd_le_read_remote_transmit_power_level_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_read_remote_transmit_power_level";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_read_resolving_list_size(sdc_hci_cmd_le_read_resolving_list_size_return_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_read_resolving_list_size";
+    g_SdcStub.Calls++;
+    if (a0 != NULL) { memset(a0, 0x5A, sizeof(sdc_hci_cmd_le_read_resolving_list_size_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_read_rf_path_compensation(sdc_hci_cmd_le_read_rf_path_compensation_return_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_read_rf_path_compensation";
+    g_SdcStub.Calls++;
+    if (a0 != NULL) { memset(a0, 0x5A, sizeof(sdc_hci_cmd_le_read_rf_path_compensation_return_t)); }
     return g_SdcStub.NextStatus;
 }
 
@@ -295,6 +560,31 @@ uint8_t sdc_hci_cmd_le_receiver_test_v1(const sdc_hci_cmd_le_receiver_test_v1_t 
     return g_SdcStub.NextStatus;
 }
 
+uint8_t sdc_hci_cmd_le_receiver_test_v2(const sdc_hci_cmd_le_receiver_test_v2_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_receiver_test_v2";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_receiver_test_v3(const sdc_hci_cmd_le_receiver_test_v3_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_receiver_test_v3";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_reject_cis_request(const sdc_hci_cmd_le_reject_cis_request_t * a0, sdc_hci_cmd_le_reject_cis_request_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_reject_cis_request";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_le_reject_cis_request_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
 uint8_t sdc_hci_cmd_le_remove_adv_set(const sdc_hci_cmd_le_remove_adv_set_t * a0)
 {
     g_SdcStub.LastCall = "sdc_hci_cmd_le_remove_adv_set";
@@ -303,9 +593,59 @@ uint8_t sdc_hci_cmd_le_remove_adv_set(const sdc_hci_cmd_le_remove_adv_set_t * a0
     return g_SdcStub.NextStatus;
 }
 
+uint8_t sdc_hci_cmd_le_remove_cig(const sdc_hci_cmd_le_remove_cig_t * a0, sdc_hci_cmd_le_remove_cig_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_remove_cig";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_le_remove_cig_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
 uint8_t sdc_hci_cmd_le_remove_device_from_filter_accept_list(const sdc_hci_cmd_le_remove_device_from_filter_accept_list_t * a0)
 {
     g_SdcStub.LastCall = "sdc_hci_cmd_le_remove_device_from_filter_accept_list";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_remove_device_from_periodic_adv_list(const sdc_hci_cmd_le_remove_device_from_periodic_adv_list_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_remove_device_from_periodic_adv_list";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_remove_device_from_resolving_list(const sdc_hci_cmd_le_remove_device_from_resolving_list_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_remove_device_from_resolving_list";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_remove_iso_data_path(const sdc_hci_cmd_le_remove_iso_data_path_t * a0, sdc_hci_cmd_le_remove_iso_data_path_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_remove_iso_data_path";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_le_remove_iso_data_path_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_request_peer_sca(const sdc_hci_cmd_le_request_peer_sca_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_request_peer_sca";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_set_address_resolution_enable(const sdc_hci_cmd_le_set_address_resolution_enable_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_set_address_resolution_enable";
     g_SdcStub.Calls++;
     (void)a0;
     return g_SdcStub.NextStatus;
@@ -343,6 +683,24 @@ uint8_t sdc_hci_cmd_le_set_adv_set_random_address(const sdc_hci_cmd_le_set_adv_s
     return g_SdcStub.NextStatus;
 }
 
+uint8_t sdc_hci_cmd_le_set_cig_params(const sdc_hci_cmd_le_set_cig_params_t * a0, sdc_hci_cmd_le_set_cig_params_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_set_cig_params";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_le_set_cig_params_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_set_cig_params_test(const sdc_hci_cmd_le_set_cig_params_test_t * a0, sdc_hci_cmd_le_set_cig_params_test_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_set_cig_params_test";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_le_set_cig_params_test_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
 uint8_t sdc_hci_cmd_le_set_data_length(const sdc_hci_cmd_le_set_data_length_t * a0, sdc_hci_cmd_le_set_data_length_return_t * a1)
 {
     g_SdcStub.LastCall = "sdc_hci_cmd_le_set_data_length";
@@ -352,9 +710,33 @@ uint8_t sdc_hci_cmd_le_set_data_length(const sdc_hci_cmd_le_set_data_length_t * 
     return g_SdcStub.NextStatus;
 }
 
+uint8_t sdc_hci_cmd_le_set_data_related_address_changes(const sdc_hci_cmd_le_set_data_related_address_changes_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_set_data_related_address_changes";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_set_default_periodic_adv_sync_transfer_params(const sdc_hci_cmd_le_set_default_periodic_adv_sync_transfer_params_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_set_default_periodic_adv_sync_transfer_params";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
 uint8_t sdc_hci_cmd_le_set_default_phy(const sdc_hci_cmd_le_set_default_phy_t * a0)
 {
     g_SdcStub.LastCall = "sdc_hci_cmd_le_set_default_phy";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_set_default_subrate(const sdc_hci_cmd_le_set_default_subrate_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_set_default_subrate";
     g_SdcStub.Calls++;
     (void)a0;
     return g_SdcStub.NextStatus;
@@ -417,6 +799,117 @@ uint8_t sdc_hci_cmd_le_set_ext_scan_response_data(const sdc_hci_cmd_le_set_ext_s
     return g_SdcStub.NextStatus;
 }
 
+uint8_t sdc_hci_cmd_le_set_host_channel_classification(const sdc_hci_cmd_le_set_host_channel_classification_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_set_host_channel_classification";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_set_host_feature(const sdc_hci_cmd_le_set_host_feature_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_set_host_feature";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_set_path_loss_reporting_enable(const sdc_hci_cmd_le_set_path_loss_reporting_enable_t * a0, sdc_hci_cmd_le_set_path_loss_reporting_enable_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_set_path_loss_reporting_enable";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_le_set_path_loss_reporting_enable_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_set_path_loss_reporting_params(const sdc_hci_cmd_le_set_path_loss_reporting_params_t * a0, sdc_hci_cmd_le_set_path_loss_reporting_params_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_set_path_loss_reporting_params";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_le_set_path_loss_reporting_params_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_set_periodic_adv_data(const sdc_hci_cmd_le_set_periodic_adv_data_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_set_periodic_adv_data";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_set_periodic_adv_enable(const sdc_hci_cmd_le_set_periodic_adv_enable_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_set_periodic_adv_enable";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_set_periodic_adv_params(const sdc_hci_cmd_le_set_periodic_adv_params_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_set_periodic_adv_params";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_set_periodic_adv_params_v2(const sdc_hci_cmd_le_set_periodic_adv_params_v2_t * a0, sdc_hci_cmd_le_set_periodic_adv_params_v2_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_set_periodic_adv_params_v2";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_le_set_periodic_adv_params_v2_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_set_periodic_adv_receive_enable(const sdc_hci_cmd_le_set_periodic_adv_receive_enable_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_set_periodic_adv_receive_enable";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_set_periodic_adv_response_data(const sdc_hci_cmd_le_set_periodic_adv_response_data_t * a0, sdc_hci_cmd_le_set_periodic_adv_response_data_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_set_periodic_adv_response_data";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_le_set_periodic_adv_response_data_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_set_periodic_adv_subevent_data(const sdc_hci_cmd_le_set_periodic_adv_subevent_data_t * a0, sdc_hci_cmd_le_set_periodic_adv_subevent_data_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_set_periodic_adv_subevent_data";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_le_set_periodic_adv_subevent_data_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_set_periodic_adv_sync_transfer_params(const sdc_hci_cmd_le_set_periodic_adv_sync_transfer_params_t * a0, sdc_hci_cmd_le_set_periodic_adv_sync_transfer_params_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_set_periodic_adv_sync_transfer_params";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_le_set_periodic_adv_sync_transfer_params_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_set_periodic_sync_subevent(const sdc_hci_cmd_le_set_periodic_sync_subevent_t * a0, sdc_hci_cmd_le_set_periodic_sync_subevent_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_set_periodic_sync_subevent";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_le_set_periodic_sync_subevent_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
 uint8_t sdc_hci_cmd_le_set_phy(const sdc_hci_cmd_le_set_phy_t * a0)
 {
     g_SdcStub.LastCall = "sdc_hci_cmd_le_set_phy";
@@ -425,9 +918,25 @@ uint8_t sdc_hci_cmd_le_set_phy(const sdc_hci_cmd_le_set_phy_t * a0)
     return g_SdcStub.NextStatus;
 }
 
+uint8_t sdc_hci_cmd_le_set_privacy_mode(const sdc_hci_cmd_le_set_privacy_mode_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_set_privacy_mode";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
 uint8_t sdc_hci_cmd_le_set_random_address(const sdc_hci_cmd_le_set_random_address_t * a0)
 {
     g_SdcStub.LastCall = "sdc_hci_cmd_le_set_random_address";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_set_resolvable_private_address_timeout(const sdc_hci_cmd_le_set_resolvable_private_address_timeout_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_set_resolvable_private_address_timeout";
     g_SdcStub.Calls++;
     (void)a0;
     return g_SdcStub.NextStatus;
@@ -457,6 +966,40 @@ uint8_t sdc_hci_cmd_le_set_scan_response_data(const sdc_hci_cmd_le_set_scan_resp
     return g_SdcStub.NextStatus;
 }
 
+uint8_t sdc_hci_cmd_le_set_transmit_power_reporting_enable(const sdc_hci_cmd_le_set_transmit_power_reporting_enable_t * a0, sdc_hci_cmd_le_set_transmit_power_reporting_enable_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_set_transmit_power_reporting_enable";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_le_set_transmit_power_reporting_enable_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_setup_iso_data_path(const sdc_hci_cmd_le_setup_iso_data_path_t * a0, sdc_hci_cmd_le_setup_iso_data_path_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_setup_iso_data_path";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_le_setup_iso_data_path_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_subrate_request(const sdc_hci_cmd_le_subrate_request_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_subrate_request";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_terminate_big(const sdc_hci_cmd_le_terminate_big_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_terminate_big";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
 uint8_t sdc_hci_cmd_le_test_end(sdc_hci_cmd_le_test_end_return_t * a0)
 {
     g_SdcStub.LastCall = "sdc_hci_cmd_le_test_end";
@@ -468,6 +1011,38 @@ uint8_t sdc_hci_cmd_le_test_end(sdc_hci_cmd_le_test_end_return_t * a0)
 uint8_t sdc_hci_cmd_le_transmitter_test_v1(const sdc_hci_cmd_le_transmitter_test_v1_t * a0)
 {
     g_SdcStub.LastCall = "sdc_hci_cmd_le_transmitter_test_v1";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_transmitter_test_v2(const sdc_hci_cmd_le_transmitter_test_v2_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_transmitter_test_v2";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_transmitter_test_v3(const sdc_hci_cmd_le_transmitter_test_v3_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_transmitter_test_v3";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_transmitter_test_v4(const sdc_hci_cmd_le_transmitter_test_v4_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_transmitter_test_v4";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_le_write_rf_path_compensation(const sdc_hci_cmd_le_write_rf_path_compensation_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_le_write_rf_path_compensation";
     g_SdcStub.Calls++;
     (void)a0;
     return g_SdcStub.NextStatus;
@@ -501,6 +1076,138 @@ int32_t sdc_hci_iso_data_put(uint8_t const *p_data_in)
  * count is what the handler measures the return length with, so a stub that
  * filled it with the usual 0x5A would claim ninety addresses.
  */
+uint8_t sdc_hci_cmd_sp_read_rssi(const sdc_hci_cmd_sp_read_rssi_t * a0, sdc_hci_cmd_sp_read_rssi_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_sp_read_rssi";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_sp_read_rssi_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_vs_big_reserved_time_set(const sdc_hci_cmd_vs_big_reserved_time_set_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_vs_big_reserved_time_set";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_vs_cig_reserved_time_set(const sdc_hci_cmd_vs_cig_reserved_time_set_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_vs_cig_reserved_time_set";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_vs_cis_subevent_length_set(const sdc_hci_cmd_vs_cis_subevent_length_set_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_vs_cis_subevent_length_set";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_vs_conn_anchor_point_update_event_report_enable(const sdc_hci_cmd_vs_conn_anchor_point_update_event_report_enable_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_vs_conn_anchor_point_update_event_report_enable";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_vs_conn_update(const sdc_hci_cmd_vs_conn_update_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_vs_conn_update";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_vs_get_next_conn_event_counter(const sdc_hci_cmd_vs_get_next_conn_event_counter_t * a0, sdc_hci_cmd_vs_get_next_conn_event_counter_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_vs_get_next_conn_event_counter";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_vs_get_next_conn_event_counter_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_vs_iso_read_tx_timestamp(const sdc_hci_cmd_vs_iso_read_tx_timestamp_t * a0, sdc_hci_cmd_vs_iso_read_tx_timestamp_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_vs_iso_read_tx_timestamp";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_vs_iso_read_tx_timestamp_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_vs_llpm_mode_set(const sdc_hci_cmd_vs_llpm_mode_set_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_vs_llpm_mode_set";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_vs_qos_channel_survey_enable(const sdc_hci_cmd_vs_qos_channel_survey_enable_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_vs_qos_channel_survey_enable";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_vs_qos_conn_event_report_enable(const sdc_hci_cmd_vs_qos_conn_event_report_enable_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_vs_qos_conn_event_report_enable";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_vs_read_average_rssi(const sdc_hci_cmd_vs_read_average_rssi_t * a0, sdc_hci_cmd_vs_read_average_rssi_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_vs_read_average_rssi";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_vs_read_average_rssi_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_vs_set_adv_randomness(const sdc_hci_cmd_vs_set_adv_randomness_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_vs_set_adv_randomness";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_vs_transmitter_carrier_test(const sdc_hci_cmd_vs_transmitter_carrier_test_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_vs_transmitter_carrier_test";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_vs_zephyr_read_chip_temp(sdc_hci_cmd_vs_zephyr_read_chip_temp_return_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_vs_zephyr_read_chip_temp";
+    g_SdcStub.Calls++;
+    if (a0 != NULL) { memset(a0, 0x5A, sizeof(sdc_hci_cmd_vs_zephyr_read_chip_temp_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_vs_zephyr_read_key_hierarchy_roots(sdc_hci_cmd_vs_zephyr_read_key_hierarchy_roots_return_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_vs_zephyr_read_key_hierarchy_roots";
+    g_SdcStub.Calls++;
+    if (a0 != NULL) { memset(a0, 0x5A, sizeof(sdc_hci_cmd_vs_zephyr_read_key_hierarchy_roots_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
 uint8_t sdc_hci_cmd_vs_zephyr_read_static_addresses(sdc_hci_cmd_vs_zephyr_read_static_addresses_return_t * a0)
 {
     g_SdcStub.LastCall = "sdc_hci_cmd_vs_zephyr_read_static_addresses";
@@ -511,6 +1218,48 @@ uint8_t sdc_hci_cmd_vs_zephyr_read_static_addresses(sdc_hci_cmd_vs_zephyr_read_s
         memset(&a0->addresses[0], 0x5A, sizeof(sdc_hci_vs_zephyr_static_address_t));
         a0->addresses[0].address[5] = 0xC0 | 0x1A;
     }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_vs_zephyr_read_supported_commands(sdc_hci_cmd_vs_zephyr_read_supported_commands_return_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_vs_zephyr_read_supported_commands";
+    g_SdcStub.Calls++;
+    if (a0 != NULL) { memset(a0, 0x5A, sizeof(sdc_hci_cmd_vs_zephyr_read_supported_commands_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_vs_zephyr_read_tx_power(const sdc_hci_cmd_vs_zephyr_read_tx_power_t * a0, sdc_hci_cmd_vs_zephyr_read_tx_power_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_vs_zephyr_read_tx_power";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_vs_zephyr_read_tx_power_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_vs_zephyr_read_version_info(sdc_hci_cmd_vs_zephyr_read_version_info_return_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_vs_zephyr_read_version_info";
+    g_SdcStub.Calls++;
+    if (a0 != NULL) { memset(a0, 0x5A, sizeof(sdc_hci_cmd_vs_zephyr_read_version_info_return_t)); }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_vs_zephyr_write_bd_addr(const sdc_hci_cmd_vs_zephyr_write_bd_addr_t * a0)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_vs_zephyr_write_bd_addr";
+    g_SdcStub.Calls++;
+    (void)a0;
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_vs_zephyr_write_tx_power(const sdc_hci_cmd_vs_zephyr_write_tx_power_t * a0, sdc_hci_cmd_vs_zephyr_write_tx_power_return_t * a1)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_vs_zephyr_write_tx_power";
+    g_SdcStub.Calls++;
+    (void)a0;
+    if (a1 != NULL) { memset(a1, 0x5A, sizeof(sdc_hci_cmd_vs_zephyr_write_tx_power_return_t)); }
     return g_SdcStub.NextStatus;
 }
 

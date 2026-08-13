@@ -29,6 +29,37 @@ typedef struct {
     HciH4Parser_t Parser;
     DevIntrf_t *pIntrf;
 
+    /*
+     * The parser calls this layer and this layer calls on, so an accepted
+     * packet can be counted where it is known to have been accepted.
+     */
+    HciH4PacketHandler_t Handler;
+    void *pHandlerContext;
+
+    /*
+     * Asked only about a command packet built out of a stream that has shown
+     * itself not to be H:4. Returning false drops that command unheard.
+     *
+     * It exists because this layer cannot answer the question and the layer
+     * above can. A command manufactured out of a bootloader banner is well
+     * formed and means nothing, and the only thing separating it from a real
+     * one is whether the opcode exists. Answering the false ones is not
+     * harmless: the replies are well formed H:4 going the other way, and they
+     * desynchronise the host's parser so that the answer it is waiting for
+     * arrives in the middle of something else.
+     *
+     * Data packets do not pass through this filter. They carry a connection
+     * handle rather than an opcode, so there is nothing the filter can validate
+     * without also rejecting legitimate data. In particular an ACL packet
+     * discarded here would consume a host buffer credit permanently because
+     * it never reaches the controller that could complete it.
+     *
+     * Null leaves every command delivered, which is what a port with no such
+     * layer above it wants.
+     */
+    HciH4PacketHandler_t SuspectFilter;
+    void *pFilterContext;
+
     uint8_t RxChunk[HCI_INTRF_IO_CHUNK_SIZE];
     size_t RxChunkLen;
     size_t RxChunkOffset;
@@ -43,6 +74,95 @@ typedef struct {
     uint32_t TxErrorCount;
     uint32_t TxBusyCount;
     uint32_t TxOversizeCount;
+
+    /*
+     * Octets that crossed the port, counted here because this is the last
+     * place they are still octets rather than packets.
+     *
+     * They answer a question no packet count can: whether anything arrived at
+     * all. A host that is not talking and a host whose framing is wrong both
+     * produce zero packets, and the two want different things looked at.
+     */
+    uint32_t RxOctetCount;
+    uint32_t TxOctetCount;
+
+    /* Packets that reached the handler, and packets abandoned mid way. */
+    uint32_t RxPacketCount;
+    uint32_t ResyncCount;
+
+    /*
+     * Whether the stream has shown itself not to be H:4 since it last went
+     * quiet. Recorded against every packet built out of it, and not acted on.
+     *
+     * A real H:4 stream never holds an octet outside the indicator range at a
+     * packet boundary. One that does is either not H:4 or is being read from
+     * the wrong place, and in both cases every packet that follows it in the
+     * same burst is likely an accident of where the reading started. Refusing
+     * those was tried and cost eight real HCI Resets, so it is a label now and
+     * not a decision.
+     *
+     * Held as the rejected count at the last quiet moment rather than as a
+     * flag, because the flag has to be right at the instant a packet is
+     * handed over and the parser hands it over from inside the same call that
+     * rejected the octets. A mark compared on the spot cannot be set too late;
+     * a flag set after the call already was.
+     */
+    uint32_t RejectedMark;
+    uint32_t SuspectPacketCount;
+    uint32_t DroppedPacketCount;
+
+    /* How often a burst ended and the stream got the benefit of the doubt. */
+    uint32_t SuspectClearCount;
+
+    /*
+     * Octets thrown away at open, because they arrived while the driver was
+     * configured and nothing behind it could answer yet. A large number here
+     * is ordinary on a board whose peer talks during its own start up.
+     */
+    uint32_t FlushedOctetCount;
+
+/*
+ * The first packets this side built, whether they were handed on or thrown
+ * away, as the indicator and the two octets behind it. For a command those two
+ * are the opcode, so 01 03 0C is an HCI Reset arriving and is the one thing
+ * worth being certain about on a link that is not working.
+ *
+ * Each is flagged with whether the stream it came out of had already shown
+ * itself not to be H:4. That flag used to decide whether the packet was thrown
+ * away and now only describes it, because throwing them away threw away real
+ * HCI Resets along with the accidents.
+ *
+ * Three octets rather than the packet, because what is wanted here is which
+ * packet it was, not what was in it.
+ *
+ * Twenty four of them, because a Zephyr host sends about twenty commands
+ * during bt_enable and eight showed only that it had started. Where the
+ * sequence stops is the useful part, and eight never reached it.
+ */
+#define HCI_INTRF_PKT_MARKS 24U
+    struct {
+        uint8_t Type;
+        uint8_t Head[2];
+        bool Suspect;
+    } PktMark[HCI_INTRF_PKT_MARKS];
+    uint8_t PktMarkLen;
+
+/*
+ * The first octets that ever arrived, kept so they can be looked at.
+ *
+ * A count says something is on the wire. It cannot say what, and the answers
+ * are not close together: a host stack talking H:4, a log console on the wrong
+ * wire, and an unconnected pin picking up noise all read as a busy link. The
+ * octets themselves separate them at a glance.
+ *
+ * Filled across as many reads as it takes rather than from one of them. A
+ * first read that returned three octets gave three octets to look at, which
+ * was enough to see that the wire held text and not enough to see whose text
+ * it was. Long enough now to hold a line of it.
+ */
+#define HCI_INTRF_FIRST_RX_SIZE 64U
+    uint8_t FirstRx[HCI_INTRF_FIRST_RX_SIZE];
+    uint8_t FirstRxLen;
 } HciIntrfTransport_t;
 
 bool HciIntrfTransportInit(HciIntrfTransport_t *pTransport,
@@ -55,6 +175,42 @@ bool HciIntrfTransportInit(HciIntrfTransport_t *pTransport,
 void HciIntrfTransportOpen(HciIntrfTransport_t *pTransport);
 void HciIntrfTransportClose(HciIntrfTransport_t *pTransport);
 void HciIntrfTransportProcess(HciIntrfTransport_t *pTransport);
+
+/*
+ * The link has been quiet long enough that a stream already known not to be
+ * H:4 may be resynchronised at the gap.
+ *
+ * A half-built packet is abandoned only when invalid H:4 indicators have also
+ * been seen since the previous quiet point. That independent evidence matters:
+ * a legitimate H:4 sender can pause after a valid header, and resetting a clean
+ * parser in the middle of that packet makes the payload that follows become
+ * new packet indicators. A payload beginning 01 03 0C 00 would otherwise be
+ * executed as HCI_Reset.
+ *
+ * The recovery is for the mixed-stream case. An octet of bootloader text that
+ * happens to look like an indicator can make this side read a bogus payload
+ * length and swallow the real packet after it. Once the preceding invalid
+ * indicators establish that the burst was not H:4, the gap is a safe reason
+ * to abandon that false packet and give the next burst a fresh boundary.
+ *
+ * At a clean packet boundary this simply clears the suspect mark. On a clean
+ * packet that is still being collected it does nothing.
+ */
+void HciIntrfTransportIdle(HciIntrfTransport_t *pTransport);
+
+/*
+ * Whether the stream has shown itself not to be H:4 since it last went quiet.
+ * Packets built out of such a stream are labelled and still delivered.
+ */
+bool HciIntrfTransportSuspect(const HciIntrfTransport_t *pTransport);
+
+/*
+ * Set what decides whether a command built out of a suspect stream is worth
+ * delivering. Data packets are not passed to this filter.
+ */
+void HciIntrfTransportSetSuspectFilter(HciIntrfTransport_t *pTransport,
+                                       HciH4PacketHandler_t Filter,
+                                       void *pContext);
 
 bool HciIntrfTransportSend(HciIntrfTransport_t *pTransport,
                            HciH4PacketType_t Type,

@@ -33,19 +33,31 @@ static_assert(HCI_APP_PACKET_SIZE + 1U <= HCI_INTRF_TX_STREAM_SIZE,
  * Isochronous Channels the provided buffer should be large enough to contain
  * the maximum supported SDU size."
  *
- * ISO is what makes the difference: 258 bytes without it, 4107 with. The
- * second assertion is what stops a future sdc_support_cis_* or
- * sdc_support_bis_* call from silently turning sdc_hci_get into an overflow of
- * HciApp_t, which no downstream length check could catch. Enabling ISO means
- * raising HCI_APP_PACKET_SIZE and defining HCI_APP_ISO_ENABLED with it.
+ * Isochronous channels are enabled, so the second sentence applies. The size
+ * that matters is the one configured in sdc_cfg_iso_buffer_cfg_t, not the 4095
+ * octet ceiling the specification allows: a controller told its receive SDU
+ * buffer is 251 octets never hands back more than that plus the isochronous
+ * data header. HCI_SDC_ISO_PACKET_SIZE is that sum, and it moves with the
+ * configuration, so raising the configured SDU size without raising
+ * HCI_APP_PACKET_SIZE stops the build instead of overflowing HciApp_t, which
+ * no downstream length check could catch.
  */
 static_assert(HCI_APP_PACKET_SIZE >= HCI_MSG_BUFFER_MAX_SIZE,
               "controller packet must hold the largest SDC message");
 
-#ifdef HCI_APP_ISO_ENABLED
-static_assert(HCI_APP_PACKET_SIZE >= HCI_MSG_BUFFER_ISO_MAX_SIZE,
-              "controller packet must hold the largest SDC ISO message");
-#endif
+static_assert(HCI_APP_PACKET_SIZE >= HCI_SDC_ISO_PACKET_SIZE,
+              "controller packet must hold the largest configured ISO SDU");
+
+/*
+ * Every link the controller can hold has to be trackable, or the ACL credit
+ * guard stands down for the ones that do not fit and the host can overrun the
+ * advertised buffer count on those without being refused. This is the one
+ * place both numbers are in scope, the routing layer's table size and the
+ * target's link counts.
+ */
+static_assert(HCI_SDC_ACL_TRACK_HANDLES >=
+                  HCI_SDC_PERIPHERAL_COUNT + HCI_SDC_CENTRAL_COUNT,
+              "HCI_SDC_ACL_TRACK_HANDLES is smaller than the link count");
 
 /*
  * Which UART instance the board's pins belong to. board.h says, since a board
@@ -133,7 +145,25 @@ static int HciAppUartEvent(UARTDev_t * const,
     return BufferLen;
 }
 
-static bool HciAppInitUsb(HciApp_t *pApp)
+/*
+ * Whether the USB socket on the board is wired to this part. board.h says,
+ * because it is a property of the PCB and nothing here can read it.
+ *
+ * It decides one thing: whether a board whose HCI stream is on the UART brings
+ * the device stack up anyway, so the log has a port to reach a person on.
+ * Where the socket belongs to another part, bringing it up would enumerate a
+ * device on somebody else's bus.
+ */
+#ifndef HCI_USB_SOCKET
+#define HCI_USB_SOCKET 0
+#endif
+
+/*
+ * Bring up the CDC interface and the device stack, without saying what the
+ * ports are for. The caller decides whether the first function is the HCI
+ * stream or is left unused with only the log on the second.
+ */
+static bool HciAppUsbSetup(HciApp_t *pApp)
 {
     UsbdCdcIntrfCfg_t cfg = {};
     cfg.bBlocking = true;
@@ -157,8 +187,27 @@ static bool HciAppInitUsb(HciApp_t *pApp)
         return false;
     }
 
-    pApp->pHostIntrf = &pApp->UsbIntrf.DevIntrf;
+    pApp->UsbRunning = true;
     return true;
+}
+
+/*
+ * Release the software side of a USB setup and its singleton ownership.
+ *
+ * The caller must stop the target USB hardware first if it was ever started;
+ * normal HciAppStop does that through Target.Stop. The initialization-failure
+ * paths call this before the runtime has started the target, so there is no
+ * live USB interrupt there either.
+ */
+static void HciAppUsbRelease(HciApp_t *pApp)
+{
+    if (pApp == nullptr || !pApp->UsbRunning)
+    {
+        return;
+    }
+
+    HciTinyUsbStop(&pApp->Usb);
+    pApp->UsbRunning = false;
 }
 
 /*
@@ -202,12 +251,62 @@ static bool HciAppInitUart(HciApp_t *pApp)
         return false;
     }
 
+    /*
+     * Read back what the peripheral actually got once, after the driver has
+     * programmed it. This is a boot diagnostic only; it is not sampled again
+     * in the streaming path.
+     */
+    HciTargetUartTrace(&pApp->Target, HCI_APP_UART_DEVICE);
+
     pApp->pHostIntrf = &pApp->Uart.DevIntrf;
     return true;
 #else
 
     return false;
 #endif
+}
+
+/*
+ * Whether a packet built out of a stream that is not H:4 is worth answering.
+ *
+ * Only the opcode table can say. A command manufactured out of the nRF9160's
+ * bootloader banner is as well formed as a real one and the octets do not
+ * distinguish them, but a real host sends opcodes that exist and text does not:
+ * a hundred and fifty of sixty five thousand, with the parameter length having
+ * to agree as well.
+ *
+ * It matters because answering the false ones is not free. Each answer is well
+ * formed H:4 going the other way, so it desynchronises the host's parser, and
+ * with hardware flow control they leave this side only when the host asserts
+ * its ready line, which is the moment it opens the transport and starts
+ * reading. Measured on the board: three hundred and nineteen packets out of
+ * three hundred and twenty five were manufactured, and the host reported every
+ * octet of the answers as an unknown H:4 type, the answer it wanted among
+ * them.
+ *
+ * Refusing every suspect packet instead was tried and threw away real Resets.
+ * This refuses the ones that cannot be commands and keeps the ones that can.
+ */
+static bool HciAppSuspectFilter(void *pContext,
+                                HciH4PacketType_t Type,
+                                const uint8_t *pPacket,
+                                size_t PacketLen)
+{
+    const HciApp_t *pApp = static_cast<const HciApp_t *>(pContext);
+
+    /*
+     * Only commands are judged. A data packet holds a connection handle and no
+     * opcode, so there is nothing to check it against, and a controller with no
+     * connection open has nothing it could refer to anyway.
+     */
+    if (Type != HCI_H4_PACKET_COMMAND || PacketLen < 3U)
+    {
+        return false;
+    }
+
+    const uint16_t opcode = (uint16_t)pPacket[0] | ((uint16_t)pPacket[1] << 8);
+
+    return HciSdcKnowsCommand(&pApp->Sdc, opcode, pPacket[2]);
 }
 
 static void HciAppSetHostOpen(HciApp_t *pApp, bool Open)
@@ -226,6 +325,42 @@ static void HciAppSetHostOpen(HciApp_t *pApp, bool Open)
     {
         HciControllerPortClose(&pApp->Controller);
     }
+}
+
+/*
+ * Bring the port up for the log alone, with the HCI stream on the UART.
+ *
+ * No settling loop here, unlike the path below. A host on the UART may send
+ * its first command in the first millisecond, and spending a hundred of them
+ * waiting for a terminal that may never be plugged in would lose it. The stack
+ * enumerates in the background instead, pumped from the same place as
+ * everything else, and the ring holds the log until it does.
+ *
+ * A failure to start is not one. With no cable there is no VBUS and the
+ * peripheral cannot come up at all, which is the ordinary state of a board on
+ * a battery. It is recorded, the pumping stops, and the HCI link is untouched.
+ * A cable arriving after this point does not bring it back: the port clears
+ * the power interrupt when it gives up, so a log wanted on a board already
+ * running means plugging in and resetting.
+ */
+static void HciAppStartLogPort(HciApp_t *pApp)
+{
+    if (!HciTinyUsbStart(&pApp->Usb))
+    {
+        HciTrace("log: HciTinyUsbStart failed\r\n");
+        HciAppUsbRelease(pApp);
+        return;
+    }
+
+    if (!pApp->Target.pOps->UsbStart(pApp->Target.pContext))
+    {
+        HciTrace("log: target UsbStart failed err=%ld\r\n",
+                 (long)HciTargetLastError(&pApp->Target));
+        HciAppUsbRelease(pApp);
+        return;
+    }
+
+    HciTrace("log: usb up on cdc %u\r\n", (unsigned)HCI_APP_LOG_INTERFACE);
 }
 
 static bool HciAppHostStart(void *pContext)
@@ -248,10 +383,10 @@ static bool HciAppHostStart(void *pContext)
             return false;
         }
 
-        if (!HciNrf52840UsbStart(&pApp->Target))
+        if (!pApp->Target.pOps->UsbStart(pApp->Target.pContext))
         {
-            HciTrace("host: HciNrf52840UsbStart failed err=%ld\r\n",
-                     (long)pApp->Target.LastError);
+            HciTrace("host: target UsbStart failed err=%ld\r\n",
+                     (long)HciTargetLastError(&pApp->Target));
             return false;
         }
 
@@ -273,8 +408,21 @@ static bool HciAppHostStart(void *pContext)
                 pApp->Runtime.Ops.ProcessMpsl(pApp->Runtime.Ops.pContext);
             }
 
-            HciNrf52840UsbPowerProcess(&pApp->Target);
-            HciNrf52840UsbPassMark(&pApp->Target);
+            pApp->Target.pOps->UsbPowerProcess(pApp->Target.pContext);
+
+            /*
+             * A storm is not a slow enumeration. The target has already
+             * contained the interrupt source; report startup failure so the
+             * runtime does not mark a dead USB path as successfully started.
+             */
+            if (HciTargetUsbStuck(&pApp->Target))
+            {
+                HciTargetUsbTrace(&pApp->Target, "storm", pass + 1U);
+                HciAppSetHostOpen(pApp, false);
+                return false;
+            }
+
+            pApp->Target.pOps->UsbPassMark(pApp->Target.pContext);
             HciTinyUsbProcess(&pApp->Usb);
 
             if (HciTinyUsbIsMounted(&pApp->Usb))
@@ -289,43 +437,125 @@ static bool HciAppHostStart(void *pContext)
                 break;
             }
 
-            if (pApp->Target.UsbStormEvents != 0U)
-            {
-                HciTrace("host: storm pass=%lu irq=%lu inten=0x%08lX "
-                         "events=0x%08lX cause=0x%08lX\r\n",
-                         (unsigned long)pass + 1UL,
-                         (unsigned long)pApp->Target.UsbIrqCount,
-                         (unsigned long)pApp->Target.UsbStormInten,
-                         (unsigned long)pApp->Target.UsbStormEvents,
-                         (unsigned long)pApp->Target.UsbStormCause);
-                break;
-            }
-
             if ((pass % HCI_APP_USB_SETTLE_REPORT) == (HCI_APP_USB_SETTLE_REPORT - 1U))
             {
-                HciTrace("host: settling pass=%lu irq=%lu stuck=%lu cause=0x%08lX\r\n",
-                         (unsigned long)pass + 1UL,
-                         (unsigned long)pApp->Target.UsbIrqCount,
-                         (unsigned long)pApp->Target.UsbStuckCauseCount,
-                         (unsigned long)pApp->Target.UsbEventCause);
+                HciTargetUsbTrace(&pApp->Target, "settling", pass + 1U);
             }
         }
 
         HciAppSetHostOpen(pApp, HciTinyUsbIsOpen(&pApp->Usb));
-        HciTrace("host: usb up mounted=%u open=%u irq=%lu task=%lu stuck=%lu cause=0x%08lX\r\n",
+        HciTrace("host: usb up mounted=%u open=%u task=%lu\r\n",
                  (unsigned)HciTinyUsbIsMounted(&pApp->Usb),
                  (unsigned)pApp->HostOpen,
-                 (unsigned long)pApp->Target.UsbIrqCount,
-                 (unsigned long)pApp->Usb.TaskCount,
-                 (unsigned long)pApp->Target.UsbStuckCauseCount,
-                 (unsigned long)pApp->Target.UsbEventCause);
+                 (unsigned long)pApp->Usb.TaskCount);
+        HciTargetUsbTrace(&pApp->Target, "usb up", 0U);
     }
     else
     {
+        if (pApp->UsbRunning)
+        {
+            HciAppStartLogPort(pApp);
+        }
+
         HciAppSetHostOpen(pApp, true);
     }
 
     return true;
+}
+
+/*
+ * Hand the log to the second CDC function.
+ *
+ * Only from here, which is the thread that pumps the device stack, because
+ * the TinyUSB event queue is protected against this context and no other.
+ */
+static size_t HciAppLogWrite(void *, const uint8_t *pData, size_t Len)
+{
+    return HciTinyUsbWrite(HCI_APP_LOG_INTERFACE, pData, Len);
+}
+
+/*
+ * Say something the moment a terminal opens the log, whatever is queued.
+ *
+ * Without this, an empty port has three explanations and no way to tell them
+ * apart: the port is dead, or nothing was ever written to the log, or
+ * everything was written before there was anywhere to put it. A line that
+ * appears on open rules out the first, and the counts in it answer the other
+ * two, which turns silence into one question rather than three.
+ *
+ * Written into the ring rather than to the port directly, so it comes out
+ * ahead of what was queued rather than in the middle of it.
+ */
+static void HciAppLogPortOpened(HciApp_t *pApp)
+{
+    const bool open = HciTinyUsbPortIsOpen(HCI_APP_LOG_INTERFACE);
+    if (open == pApp->LogPortOpen)
+    {
+        return;
+    }
+
+    pApp->LogPortOpen = open;
+    if (!open)
+    {
+        return;
+    }
+
+    HciSyslogPrint(HciSyslogDefault(),
+                   "log: port open, %u octet(s) queued, host=%s",
+                   (unsigned)HciSyslogPending(HciSyslogDefault()),
+                   pApp->HostType == HCI_APP_HOST_USB ? "usb" : "uart");
+}
+
+/*
+ * How many quiet pump passes mean the link has stopped rather than paused.
+ *
+ * A pass is one poll interval, five milliseconds, so four of them is twenty.
+ * At a megabit that is two thousand octet times, and a host sends a packet in
+ * one go, so nothing real is still on its way after that. Long enough that no
+ * host pausing inside a packet could be cut off, short enough that a stream
+ * which was never H:4 is abandoned before the packet that matters arrives.
+ *
+ * The Thingy:91 is why this exists. The nRF9160's secure firmware prints its
+ * boot banner on the same UART the HCI stream uses, so this side is handed
+ * text before it is handed packets. An octet of that text that happens to look
+ * like an indicator makes this side read a payload length out of more text,
+ * and a length taken from text is usually long enough to swallow the HCI Reset
+ * that follows. Nothing in the octets says so; only the gap between the banner
+ * and the first command does, and that gap is hundreds of milliseconds.
+ *
+ * This is parser recovery, not diagnostics. Keep it in the hot path; the
+ * periodic link/cmd report that used to surround it was removed because
+ * formatting and draining those reports interfered with BLE streaming.
+ */
+#ifndef HCI_APP_LINK_IDLE_PASSES
+#define HCI_APP_LINK_IDLE_PASSES 4U
+#endif
+
+static void HciAppResyncOnIdle(HciApp_t *pApp)
+{
+    HciIntrfTransport_t *pHost = &pApp->Controller.Host;
+
+    if (pHost->RxOctetCount != pApp->LinkIdleOctets)
+    {
+        pApp->LinkIdleOctets = pHost->RxOctetCount;
+        pApp->LinkIdlePasses = 0U;
+        return;
+    }
+
+    if (pApp->LinkIdlePasses < HCI_APP_LINK_IDLE_PASSES)
+    {
+        pApp->LinkIdlePasses++;
+        if (pApp->LinkIdlePasses == HCI_APP_LINK_IDLE_PASSES)
+        {
+            HciIntrfTransportIdle(pHost);
+        }
+    }
+}
+
+static void HciAppDrainLog(HciApp_t *pApp)
+{
+    HciAppLogPortOpened(pApp);
+    HciSyslogDrain(HciSyslogDefault(), HciAppLogWrite, pApp);
 }
 
 static void HciAppHostProcess(void *pContext)
@@ -336,38 +566,80 @@ static void HciAppHostProcess(void *pContext)
         return;
     }
 
-    if (pApp->HostType == HCI_APP_HOST_USB)
+    if (pApp->UsbRunning)
     {
         /*
          * Cable attach and detach are recorded by POWER_CLOCK and applied
          * here, in the same context that pumps the device stack, because the
          * TinyUSB event queue is only protected against this context.
          */
-        HciNrf52840UsbPowerProcess(&pApp->Target);
+        pApp->Target.pOps->UsbPowerProcess(pApp->Target.pContext);
 
+        /*
+         * A latched USBD storm has already been contained by the target. Do
+         * not call into TinyUSB against disabled hardware; return the runtime
+         * to its host-start state instead.
+         */
+        if (HciTargetUsbStuck(&pApp->Target))
+        {
+            HciTargetUsbTrace(&pApp->Target, "runtime storm", 0U);
+            if (pApp->HostType == HCI_APP_HOST_USB)
+            {
+                HciAppSetHostOpen(pApp, false);
+            }
+            HciTaktOsHostDown(&pApp->Runtime);
+            return;
+        }
+
+        pApp->Target.pOps->UsbPassMark(pApp->Target.pContext);
         HciTinyUsbProcess(&pApp->Usb);
-        HciAppSetHostOpen(pApp, HciTinyUsbIsOpen(&pApp->Usb));
+
+        /*
+         * Only where the HCI stream is on this port does opening it mean the
+         * host is there. With the stream on the UART the port is the log's
+         * alone, and whether a terminal is attached to it says nothing about
+         * the host, which is another part on the same PCB.
+         */
+        if (pApp->HostType == HCI_APP_HOST_USB)
+        {
+            HciAppSetHostOpen(pApp, HciTinyUsbIsOpen(&pApp->Usb));
+        }
+
+        HciAppDrainLog(pApp);
     }
 
     HciControllerProcess(&pApp->Controller);
+    HciAppResyncOnIdle(pApp);
 
-    if (pApp->HostType == HCI_APP_HOST_USB)
+    if (pApp->UsbRunning)
     {
         HciTinyUsbProcess(&pApp->Usb);
     }
 }
 
-bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType)
+bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType, HciTarget_t Target)
 {
+    if (!HciTargetValid(&Target) ||
+        (HostType == HCI_APP_HOST_USB && !HciTargetHasUsb(&Target)))
+    {
+        return false;
+    }
+
+    /*
+     * A live application owns the singleton even when the caller presents the
+     * same address again. This is what prevents a stop timeout from being
+     * followed by memset() of storage a still-running runtime thread uses.
+     */
     if (pApp == nullptr ||
         (HostType != HCI_APP_HOST_UART && HostType != HCI_APP_HOST_USB) ||
-        (s_pApp != nullptr && s_pApp != pApp))
+        s_pApp != nullptr)
     {
         return false;
     }
 
     memset(pApp, 0, sizeof(*pApp));
     pApp->HostType = HostType;
+    pApp->Target = Target;
     s_pApp = pApp;
 
     /*
@@ -375,6 +647,13 @@ bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType)
      * whatever order those layers are brought up in, so it is wired here
      * before anything else needs it.
      */
+    /*
+     * Nothing to do for the log. It has been taking lines since before this
+     * function was called, including the ones main wrote about which port was
+     * chosen and why, and nothing drains it until the device stack runs. The
+     * ring holds them until then, which is the whole point of a ring.
+     */
+
     HciCountersInit(&pApp->Counters, &pApp->Sdc, &pApp->Controller);
 
     if (!HciSdcNrfxlibInit(&pApp->Sdc,
@@ -398,12 +677,39 @@ bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType)
     HciSdcNrfxlibQueueStartupNop(&pApp->Sdc);
 #endif
 
-    bool hostReady = HostType == HCI_APP_HOST_USB ?
-                     HciAppInitUsb(pApp) : HciAppInitUart(pApp);
+    bool hostReady;
+    if (HostType == HCI_APP_HOST_USB)
+    {
+        hostReady = HciAppUsbSetup(pApp);
+        if (hostReady)
+        {
+            pApp->pHostIntrf = &pApp->UsbIntrf.DevIntrf;
+        }
+    }
+    else
+    {
+        hostReady = HciAppInitUart(pApp);
+
+        /*
+         * The HCI stream is on the UART and the socket is this part's, so the
+         * port is free and the log goes on it. Not being able to set it up is
+         * not a bring up failure: an HCI controller that refused to run
+         * because it had nowhere to print would be worse than one that runs
+         * silently, which is what every build did until now.
+         */
+        if (hostReady && HCI_USB_SOCKET && HciTargetHasUsb(&pApp->Target) &&
+            !HciAppUsbSetup(pApp))
+        {
+            HciTrace("init: log port setup failed, running without it\r\n");
+            pApp->UsbRunning = false;
+        }
+    }
+
     if (!hostReady)
     {
         HciTrace("init: host interface failed type=%u\r\n", (unsigned)HostType);
         pApp->LastError = -2;
+        HciAppUsbRelease(pApp);
         s_pApp = nullptr;
         return false;
     }
@@ -420,36 +726,62 @@ bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType)
     {
         HciTrace("init: HciControllerInit failed\r\n");
         pApp->LastError = -3;
+        HciAppUsbRelease(pApp);
         s_pApp = nullptr;
         return false;
     }
 
-    if (!HciNrf52840Init(&pApp->Target,
+    /*
+     * The transport asks this before answering anything built out of a stream
+     * that is not H:4, and only then. Wired here because this is the one place
+     * that holds both the transport and the opcode table.
+     */
+    HciIntrfTransportSetSuspectFilter(&pApp->Controller.Host,
+                                      HciAppSuspectFilter, pApp);
+
+    if (!pApp->Target.pOps->Init(pApp->Target.pContext,
                          &pApp->Runtime,
                          reinterpret_cast<uint8_t *>(pApp->SdcMem),
                          sizeof(pApp->SdcMem),
-                         HostType == HCI_APP_HOST_USB))
+                         pApp->UsbRunning))
     {
-        HciTrace("init: HciNrf52840Init failed\r\n");
+        HciTrace("init: target Init failed\r\n");
         pApp->LastError = -4;
+        HciAppUsbRelease(pApp);
         s_pApp = nullptr;
         return false;
     }
 
+    /*
+     * Now that sdc_cfg_set has answered, hand the two pool figures to the
+     * counter readout so a host can ask for them. On a sealed dongle the trace
+     * that holds them reaches nobody.
+     */
+    uint32_t sdcRequired = 0U;
+    uint32_t sdcCapacity = 0U;
+    HciTargetGetSdcMem(&pApp->Target, &sdcRequired, &sdcCapacity);
+    HciCountersSetSdcMem(&pApp->Counters, sdcRequired, sdcCapacity);
+
     HciTaktOsOps_t runtimeOps = {};
-    HciNrf52840GetTaktOsOps(&pApp->Target, &runtimeOps);
+    pApp->Target.pOps->GetTaktOsOps(pApp->Target.pContext, &runtimeOps);
 
     HciTaktOsHostOps_t hostOps = {};
     hostOps.Start = HciAppHostStart;
     hostOps.Process = HciAppHostProcess;
     hostOps.pContext = pApp;
-    hostOps.PollIntervalMs = HostType == HCI_APP_HOST_USB ?
-                             HCI_APP_USB_POLL_MS : 0U;
+    /*
+     * A port with no interrupt that reaches this thread has to be looked at on
+     * a tick, and the device stack is one whichever stream is on it. A UART
+     * host wakes this thread from its own interrupt as well, so the tick costs
+     * it nothing but the passes.
+     */
+    hostOps.PollIntervalMs = pApp->UsbRunning ? HCI_APP_USB_POLL_MS : 0U;
 
     if (!HciTaktOsInit(&pApp->Runtime, &runtimeOps, &hostOps))
     {
         HciTrace("init: HciTaktOsInit failed\r\n");
         pApp->LastError = -5;
+        HciAppUsbRelease(pApp);
         s_pApp = nullptr;
         return false;
     }
@@ -476,13 +808,24 @@ void HciAppStop(HciApp_t *pApp)
      */
     if (!HciTaktOsWaitStopped(&pApp->Runtime, HCI_APP_STOP_TIMEOUT_MS))
     {
-        HciTrace("stop: runtime still running, target left up\r\n");
-        pApp->Initialized = false;
-        s_pApp = nullptr;
+        /*
+         * Keep ownership as well as the target. The runtime may still
+         * dereference this HciApp_t, so clearing Initialized/s_pApp would allow
+         * a later HciAppInit to memset live storage underneath it.
+         */
+        HciTrace("stop: runtime still running, target and app left owned\r\n");
+        pApp->LastError = -6;
         return;
     }
 
-    HciNrf52840Stop(&pApp->Target);
+    /*
+     * Hardware first, software stack second. Target.Stop masks USBD and removes
+     * the pull-up before HciTinyUsbStop releases TinyUSB's root-port state and
+     * callback owner, so no interrupt can race the deinitialization.
+     */
+    pApp->Target.pOps->Stop(pApp->Target.pContext);
+    HciAppUsbRelease(pApp);
+
     if (pApp->pHostIntrf != nullptr)
     {
         DeviceIntrfDisable(pApp->pHostIntrf);

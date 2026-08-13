@@ -9,8 +9,30 @@
  */
 
 #include "hci_sdc.h"
+#include "hci_core_profile.h"
 
+#include <stddef.h>
 #include <string.h>
+
+#include "sdc_hci_cmd_controller_baseband.h"
+#if HCI_CONTROLLER_TARGET_CORE_VERSION >= HCI_CORE_VERSION_6_2
+#include "sdc_hci_cmd_le.h"
+#endif
+
+#define HCI_SDC_COMPAT_OPCODE_READ_CONN_ACCEPT_TIMEOUT  0x0C15U
+#define HCI_SDC_COMPAT_OPCODE_WRITE_CONN_ACCEPT_TIMEOUT 0x0C16U
+#define HCI_SDC_OPCODE_LE_SET_PERIODIC_ADV_RESPONSE_DATA 0x2083U
+#define HCI_SDC_PAW_RESPONSE_FIXED_PARAM_LEN             8U
+#define HCI_SDC_PAW_RESPONSE_DATA_LEN_OFFSET             7U
+#define HCI_SDC_PAW_RESPONSE_RETURN_LEN                  2U
+
+#if HCI_CONTROLLER_TARGET_CORE_VERSION >= HCI_CORE_VERSION_6_2
+#define HCI_SDC_SUPP_OPCODE_LE_FRAME_SPACE_UPDATE                  0x209DU
+#define HCI_SDC_SUPP_OPCODE_LE_CONNECTION_RATE_REQUEST              0x20A1U
+#define HCI_SDC_SUPP_OPCODE_LE_SET_DEFAULT_RATE_PARAMETERS          0x20A2U
+#define HCI_SDC_SUPP_OPCODE_LE_READ_MIN_SUPPORTED_CONN_INTERVAL     0x20A3U
+#define HCI_SDC_MIN_INTERVAL_MAX_GROUPS                             41U
+#endif
 
 static uint16_t HciSdcReadLe16(const uint8_t *pData)
 {
@@ -62,6 +84,321 @@ static bool HciSdcPacketLength(HciH4PacketType_t Type,
     *pPacketLen = packetLen;
     return true;
 }
+
+/* -------------------------------------------------------------------------
+ * Supplemental Core HCI commands.
+ * ------------------------------------------------------------------------- */
+
+static HciCmdResult_t HciSdcCompatReadConnAcceptTimeout(void *,
+                                                         const uint8_t *,
+                                                         size_t,
+                                                         uint8_t *pReturn,
+                                                         size_t ReturnCapacity)
+{
+    sdc_hci_cmd_cb_read_conn_accept_timeout_return_t value;
+
+    if (ReturnCapacity < sizeof(value))
+    {
+        HciCmdResult_t error = {
+            HCI_STATUS_MEMORY_CAPACITY_EXCEEDED,
+            HCI_CMD_RESPONSE_COMPLETE,
+            0U,
+        };
+        return error;
+    }
+
+    const uint8_t status = sdc_hci_cmd_cb_read_conn_accept_timeout(&value);
+    if (status == HCI_STATUS_SUCCESS)
+    {
+        memcpy(pReturn, &value, sizeof(value));
+    }
+
+    HciCmdResult_t result = {
+        status,
+        HCI_CMD_RESPONSE_COMPLETE,
+        status == HCI_STATUS_SUCCESS ? sizeof(value) : 0U,
+    };
+    return result;
+}
+
+static HciCmdResult_t HciSdcCompatWriteConnAcceptTimeout(void *,
+                                                          const uint8_t *pParams,
+                                                          size_t,
+                                                          uint8_t *,
+                                                          size_t)
+{
+    sdc_hci_cmd_cb_write_conn_accept_timeout_t value;
+    memcpy(&value, pParams, sizeof(value));
+
+    HciCmdResult_t result = {
+        sdc_hci_cmd_cb_write_conn_accept_timeout(&value),
+        HCI_CMD_RESPONSE_COMPLETE,
+        0U,
+    };
+    return result;
+}
+
+static HciCmdResult_t HciSdcCompatReadSupportedStates(void *,
+                                                       const uint8_t *,
+                                                       size_t,
+                                                       uint8_t *pReturn,
+                                                       size_t ReturnCapacity)
+{
+    /*
+     * Core Vol 4 Part E 7.8.27. States 0 to 41 set, 42 to 63 reserved and
+     * zero. This is a product-level concurrency claim rather than a vendor
+     * return value. The multirole profile reserves multiple Central and
+     * Peripheral links, advertising and scanning resources, and explicitly
+     * enables parallel scanning and initiating. tests/command_coverage.py
+     * verifies those prerequisites independently, and the hardware profile
+     * test pins this exact value on the wire.
+     */
+    static const uint8_t states[8] = {
+        0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFFU, 0x03U, 0x00U, 0x00U
+    };
+
+    if (ReturnCapacity < sizeof(states))
+    {
+        HciCmdResult_t error = {
+            HCI_STATUS_MEMORY_CAPACITY_EXCEEDED,
+            HCI_CMD_RESPONSE_COMPLETE,
+            0U,
+        };
+        return error;
+    }
+
+    memcpy(pReturn, states, sizeof(states));
+    HciCmdResult_t result = {
+        HCI_STATUS_SUCCESS,
+        HCI_CMD_RESPONSE_COMPLETE,
+        sizeof(states),
+    };
+    return result;
+}
+
+#if HCI_CONTROLLER_TARGET_CORE_VERSION >= HCI_CORE_VERSION_6_2
+static HciCmdResult_t HciSdcLeFrameSpaceUpdate(void *,
+                                                const uint8_t *pParams,
+                                                size_t,
+                                                uint8_t *,
+                                                size_t)
+{
+    sdc_hci_cmd_le_frame_space_update_t params;
+    memcpy(&params, pParams, sizeof(params));
+    HciCmdResult_t result = {
+        sdc_hci_cmd_le_frame_space_update(&params),
+        HCI_CMD_RESPONSE_STATUS,
+        0U,
+    };
+    return result;
+}
+
+static HciCmdResult_t HciSdcLeConnectionRateRequest(void *,
+                                                     const uint8_t *pParams,
+                                                     size_t,
+                                                     uint8_t *,
+                                                     size_t)
+{
+    sdc_hci_cmd_le_conn_rate_request_t params;
+    memcpy(&params, pParams, sizeof(params));
+    HciCmdResult_t result = {
+        sdc_hci_cmd_le_conn_rate_request(&params),
+        HCI_CMD_RESPONSE_STATUS,
+        0U,
+    };
+    return result;
+}
+
+static HciCmdResult_t HciSdcLeSetDefaultRateParameters(void *,
+                                                        const uint8_t *pParams,
+                                                        size_t,
+                                                        uint8_t *,
+                                                        size_t)
+{
+    sdc_hci_cmd_le_set_default_rate_params_t params;
+    memcpy(&params, pParams, sizeof(params));
+    HciCmdResult_t result = {
+        sdc_hci_cmd_le_set_default_rate_params(&params),
+        HCI_CMD_RESPONSE_COMPLETE,
+        0U,
+    };
+    return result;
+}
+
+static HciCmdResult_t HciSdcLeReadMinSupportedConnInterval(
+    void *,
+    const uint8_t *,
+    size_t,
+    uint8_t *pReturn,
+    size_t ReturnCapacity)
+{
+    static const size_t fixed =
+        offsetof(sdc_hci_cmd_le_read_min_supported_conn_interval_return_t,
+                 groups);
+    static const size_t group =
+        sizeof(sdc_hci_le_read_min_supported_conn_interval_group_t);
+    static const size_t maximum =
+        fixed + HCI_SDC_MIN_INTERVAL_MAX_GROUPS * group;
+
+    static_assert(
+        offsetof(sdc_hci_cmd_le_read_min_supported_conn_interval_return_t,
+                 groups) == 2U,
+        "LE Read Minimum Supported Connection Interval header is not 2 octets");
+    static_assert(sizeof(sdc_hci_le_read_min_supported_conn_interval_group_t) ==
+                      6U,
+                  "LE minimum interval group is not 6 octets");
+
+    if (ReturnCapacity < maximum)
+    {
+        HciCmdResult_t error = {
+            HCI_STATUS_MEMORY_CAPACITY_EXCEEDED,
+            HCI_CMD_RESPONSE_COMPLETE,
+            0U,
+        };
+        return error;
+    }
+
+    sdc_hci_cmd_le_read_min_supported_conn_interval_return_t *result =
+        reinterpret_cast<
+            sdc_hci_cmd_le_read_min_supported_conn_interval_return_t *>(
+                pReturn);
+    const uint8_t status =
+        sdc_hci_cmd_le_read_min_supported_conn_interval(result);
+
+    if (status != HCI_STATUS_SUCCESS)
+    {
+        HciCmdResult_t error = {status, HCI_CMD_RESPONSE_COMPLETE, 0U};
+        return error;
+    }
+
+    if (result->num_groups > HCI_SDC_MIN_INTERVAL_MAX_GROUPS)
+    {
+        HciCmdResult_t error = {
+            HCI_STATUS_MEMORY_CAPACITY_EXCEEDED,
+            HCI_CMD_RESPONSE_COMPLETE,
+            0U,
+        };
+        return error;
+    }
+
+    HciCmdResult_t ok = {
+        status,
+        HCI_CMD_RESPONSE_COMPLETE,
+        fixed + (size_t)result->num_groups * group,
+    };
+    return ok;
+}
+#endif
+
+static const HciCmdEntry_t s_HciSdcCompatCommands[] = {
+    {HCI_SDC_COMPAT_OPCODE_READ_CONN_ACCEPT_TIMEOUT,
+     0U,
+     2U,
+     HCI_CMD_RESPONSE_COMPLETE,
+     HciSdcCompatReadConnAcceptTimeout},
+    {HCI_SDC_COMPAT_OPCODE_WRITE_CONN_ACCEPT_TIMEOUT,
+     2U,
+     0U,
+     HCI_CMD_RESPONSE_COMPLETE,
+     HciSdcCompatWriteConnAcceptTimeout},
+    {HCI_SDC_COMPAT_OPCODE_LE_READ_SUPPORTED_STATES,
+     0U,
+     8U,
+     HCI_CMD_RESPONSE_COMPLETE,
+     HciSdcCompatReadSupportedStates},
+#if HCI_CONTROLLER_TARGET_CORE_VERSION >= HCI_CORE_VERSION_6_2
+    {HCI_SDC_SUPP_OPCODE_LE_FRAME_SPACE_UPDATE,
+     (uint16_t)sizeof(sdc_hci_cmd_le_frame_space_update_t),
+     0U,
+     HCI_CMD_RESPONSE_STATUS,
+     HciSdcLeFrameSpaceUpdate},
+    {HCI_SDC_SUPP_OPCODE_LE_CONNECTION_RATE_REQUEST,
+     (uint16_t)sizeof(sdc_hci_cmd_le_conn_rate_request_t),
+     0U,
+     HCI_CMD_RESPONSE_STATUS,
+     HciSdcLeConnectionRateRequest},
+    {HCI_SDC_SUPP_OPCODE_LE_SET_DEFAULT_RATE_PARAMETERS,
+     (uint16_t)sizeof(sdc_hci_cmd_le_set_default_rate_params_t),
+     0U,
+     HCI_CMD_RESPONSE_COMPLETE,
+     HciSdcLeSetDefaultRateParameters},
+    {HCI_SDC_SUPP_OPCODE_LE_READ_MIN_SUPPORTED_CONN_INTERVAL,
+     0U,
+     0U,
+     HCI_CMD_RESPONSE_COMPLETE,
+     HciSdcLeReadMinSupportedConnInterval},
+#endif
+};
+
+static bool HciSdcSupplementalOpcode(uint16_t Opcode)
+{
+    switch (Opcode)
+    {
+        case HCI_SDC_COMPAT_OPCODE_READ_CONN_ACCEPT_TIMEOUT:
+        case HCI_SDC_COMPAT_OPCODE_WRITE_CONN_ACCEPT_TIMEOUT:
+        case HCI_SDC_COMPAT_OPCODE_LE_READ_SUPPORTED_STATES:
+#if HCI_CONTROLLER_TARGET_CORE_VERSION >= HCI_CORE_VERSION_6_2
+        case HCI_SDC_SUPP_OPCODE_LE_FRAME_SPACE_UPDATE:
+        case HCI_SDC_SUPP_OPCODE_LE_CONNECTION_RATE_REQUEST:
+        case HCI_SDC_SUPP_OPCODE_LE_SET_DEFAULT_RATE_PARAMETERS:
+        case HCI_SDC_SUPP_OPCODE_LE_READ_MIN_SUPPORTED_CONN_INTERVAL:
+#endif
+            return true;
+
+        default:
+            return false;
+    }
+}
+
+/*
+ * Read Local Supported Commands is supplied by nrfxlib, but supplemental
+ * commands must describe the complete HCI controller, not merely the vendor
+ * table. The compatibility rows add the timeout pair and LE Read Supported
+ * States. Core 6.2 adds Frame Space Update and the three Shorter Connection
+ * Intervals commands in octet 48.
+ */
+static void HciSdcPatchSupportedCommands(uint8_t *pEvent, size_t EventLen)
+{
+    const uint16_t readSupportedCommands = 0x1002U;
+    const size_t timeoutByte = HCI_COMMAND_COMPLETE_BASE_SIZE + 7U;
+    const size_t statesByte = HCI_COMMAND_COMPLETE_BASE_SIZE + 28U;
+
+    if (EventLen <= statesByte || pEvent[0] != HCI_EVENT_COMMAND_COMPLETE ||
+        HciSdcReadLe16(&pEvent[3]) != readSupportedCommands ||
+        pEvent[5] != HCI_STATUS_SUCCESS)
+    {
+        return;
+    }
+
+    pEvent[timeoutByte] |= (uint8_t)((1U << 2) | (1U << 3));
+    pEvent[statesByte] |= (1U << 3);
+
+#if HCI_CONTROLLER_TARGET_CORE_VERSION >= HCI_CORE_VERSION_6_2
+    const size_t core62Byte = HCI_COMMAND_COMPLETE_BASE_SIZE + 48U;
+    if (EventLen > core62Byte)
+    {
+        pEvent[core62Byte] |=
+            (uint8_t)((1U << 1) | (1U << 5) | (1U << 6) | (1U << 7));
+    }
+#endif
+}
+
+bool HciSdcKnowsCommand(const HciSdc_t *pSdc,
+                        uint16_t Opcode,
+                        size_t ParamLen)
+{
+    if (pSdc == NULL)
+    {
+        return false;
+    }
+
+    return HciCmdDispatchKnows(&pSdc->Commands, Opcode, ParamLen) ||
+           HciCmdDispatchKnows(&pSdc->CompatCommands, Opcode, ParamLen);
+}
+
+/* -------------------------------------------------------------------------
+ * ACL credit accounting.
+ * ------------------------------------------------------------------------- */
 
 /*
  * Remember a flow control credit owed back for an ACL packet the controller
@@ -159,7 +496,9 @@ void HciSdcResetFlowControl(HciSdc_t *pSdc)
      * connection handles the same section has already made meaningless.
      */
     pSdc->AclTrackEntries = 0U;
+    pSdc->AclOutstandingTotal = 0U;
     pSdc->CreditEntries = 0U;
+    pSdc->CreditEventLast = false;
 }
 
 static uint16_t HciSdcHandleOf(const uint8_t *pPacket)
@@ -196,12 +535,21 @@ static int HciSdcAclSlot(HciSdc_t *pSdc, uint16_t Handle, bool Create)
     return (int)(pSdc->AclTrackEntries - 1U);
 }
 
-#if HCI_SDC_ENFORCE_ACL_CREDITS
 /*
- * True when the host already has as many packets in flight on this link as it
- * was told it could. Unknown limit or an untracked link answers false, so the
- * packet goes through: this refuses only what it can prove is over.
+ * Off by default, and HCI_SDC_ENFORCE_ACL_CREDITS in the header says why: the
+ * link lifetime this depends on comes from Disconnection Complete on the event
+ * stream, which a Host is allowed to mask. What follows is what the guard does
+ * when a build turns it on.
+ *
+ * True when the host already has as many packets in flight, across every link
+ * together, as it was told it could. Unknown limit answers false, and so does
+ * a link the table cannot hold, because a packet that will not be counted must
+ * not be refused either: this refuses only what it can prove is over.
+ *
+ * The slot is taken here rather than after the decision so that the answer and
+ * the counting agree about which links are tracked.
  */
+#if HCI_SDC_ENFORCE_ACL_CREDITS
 static bool HciSdcAclAtLimit(HciSdc_t *pSdc, const uint8_t *pPacket)
 {
     if (pSdc->AclLimit == 0U)
@@ -215,7 +563,7 @@ static bool HciSdcAclAtLimit(HciSdc_t *pSdc, const uint8_t *pPacket)
         return false;
     }
 
-    return pSdc->AclOutstanding[slot] >= pSdc->AclLimit;
+    return pSdc->AclOutstandingTotal >= pSdc->AclLimit;
 }
 #endif
 
@@ -225,6 +573,7 @@ static void HciSdcAclPutTracked(HciSdc_t *pSdc, const uint8_t *pPacket)
     if (slot >= 0)
     {
         pSdc->AclOutstanding[slot]++;
+        pSdc->AclOutstandingTotal++;
     }
 }
 
@@ -234,6 +583,17 @@ static void HciSdcAclForget(HciSdc_t *pSdc, uint16_t Handle)
     if (slot < 0)
     {
         return;
+    }
+
+    /* The link takes its share of the total with it. */
+    if (pSdc->AclOutstandingTotal > pSdc->AclOutstanding[slot])
+    {
+        pSdc->AclOutstandingTotal =
+            (uint16_t)(pSdc->AclOutstandingTotal - pSdc->AclOutstanding[slot]);
+    }
+    else
+    {
+        pSdc->AclOutstandingTotal = 0U;
     }
 
     const uint8_t last = (uint8_t)(pSdc->AclTrackEntries - 1U);
@@ -247,6 +607,10 @@ static void HciSdcAclForget(HciSdc_t *pSdc, uint16_t Handle)
  * packets a link has in flight. Number Of Completed Packets frees them, and a
  * disconnection discards whatever the controller still held for that link
  * without ever counting those back, so the entry goes with the link.
+ *
+ * The counting runs whether or not the guard above is compiled in: the figures
+ * are read back through the vendor counter block, and a disabled guard must
+ * still not leave stale ones behind.
  */
 static void HciSdcAclTrackEvent(HciSdc_t *pSdc,
                                 const uint8_t *pEvent,
@@ -280,15 +644,19 @@ static void HciSdcAclTrackEvent(HciSdc_t *pSdc,
                 continue;
             }
 
-            if (pSdc->AclOutstanding[slot] > done)
-            {
-                pSdc->AclOutstanding[slot] =
-                    (uint16_t)(pSdc->AclOutstanding[slot] - done);
-            }
-            else
-            {
-                pSdc->AclOutstanding[slot] = 0U;
-            }
+            /*
+             * Take off what the link actually had, not what the event claims,
+             * so a count larger than anything outstanding cannot drive the
+             * total below the sum of the other links.
+             */
+            const uint16_t freed = pSdc->AclOutstanding[slot] < done
+                                       ? pSdc->AclOutstanding[slot]
+                                       : done;
+
+            pSdc->AclOutstanding[slot] =
+                (uint16_t)(pSdc->AclOutstanding[slot] - freed);
+            pSdc->AclOutstandingTotal =
+                (uint16_t)(pSdc->AclOutstandingTotal - freed);
         }
         return;
     }
@@ -315,6 +683,79 @@ static void HciSdcAclTrackEvent(HciSdc_t *pSdc,
     }
 }
 
+/* -------------------------------------------------------------------------
+ * Controller routing.
+ * ------------------------------------------------------------------------- */
+
+/*
+ * LE Set Periodic Advertising Response Data is variable length. Its direct SDC
+ * entry point is reached only after the fixed eight-octet head is present and
+ * Response_Data_Length agrees exactly with the bytes that follow. Mirror that
+ * small structural check here so HandlerCallCount can distinguish an SDC call
+ * from a guard/local rejection without teaching the generic dispatcher about
+ * this opcode.
+ */
+static bool HciSdcDelayedCommandCandidate(const HciCmdDispatch_t *pDispatch,
+                                          const uint8_t *pPacket,
+                                          size_t PacketLen)
+{
+    if (pDispatch == NULL || pPacket == NULL ||
+        PacketLen < HCI_DISPATCH_COMMAND_HEADER_SIZE)
+    {
+        return false;
+    }
+
+    const uint16_t opcode = HciSdcReadLe16(pPacket);
+    const size_t paramLen = pPacket[2];
+    if (opcode != HCI_SDC_OPCODE_LE_SET_PERIODIC_ADV_RESPONSE_DATA ||
+        PacketLen != HCI_DISPATCH_COMMAND_HEADER_SIZE + paramLen ||
+        paramLen < HCI_SDC_PAW_RESPONSE_FIXED_PARAM_LEN ||
+        pDispatch->EventCapacity <
+            HCI_COMMAND_COMPLETE_BASE_SIZE + HCI_SDC_PAW_RESPONSE_RETURN_LEN)
+    {
+        return false;
+    }
+
+    const uint8_t dataLen =
+        pPacket[HCI_DISPATCH_COMMAND_HEADER_SIZE +
+                HCI_SDC_PAW_RESPONSE_DATA_LEN_OFFSET];
+    return paramLen - HCI_SDC_PAW_RESPONSE_FIXED_PARAM_LEN ==
+           (size_t)dataLen;
+}
+
+/*
+ * SDC raises the real Command Complete for the command above later through
+ * sdc_hci_get. Once the structurally valid command actually entered its
+ * handler, suppress the dispatcher's temporary completion and wait for that
+ * controller event. Unknown HCI Command is the exception documented by Nordic:
+ * an SDC build that does not support the command has no delayed event coming.
+ */
+static bool HciSdcDelayCommandComplete(HciSdc_t *pSdc,
+                                       uint16_t Opcode,
+                                       uint8_t RspMarkLenBefore)
+{
+    HciCmdDispatch_t *pDispatch = &pSdc->Commands;
+
+    if (Opcode != HCI_SDC_OPCODE_LE_SET_PERIODIC_ADV_RESPONSE_DATA ||
+        !pDispatch->EventPending ||
+        pDispatch->EventLen < HCI_COMMAND_COMPLETE_BASE_SIZE ||
+        pDispatch->pEvent[0] != HCI_EVENT_COMMAND_COMPLETE ||
+        HciSdcReadLe16(&pDispatch->pEvent[3]) != Opcode ||
+        pDispatch->pEvent[5] == HCI_STATUS_UNKNOWN_HCI_COMMAND)
+    {
+        return false;
+    }
+
+    /* The local event never reaches the Host, so it is not a response mark. */
+    pDispatch->RspMarkLen = RspMarkLenBefore;
+    pDispatch->EventLen = 0U;
+    pDispatch->EventPending = false;
+    pSdc->DelayedCommandPending = true;
+    pSdc->DelayedCommandOpcode = Opcode;
+    pSdc->PawrSyntheticSuppressedCount++;
+    return true;
+}
+
 static bool HciSdcPutPacket(void *pContext,
                             HciH4PacketType_t Type,
                             const uint8_t *pPacket,
@@ -325,6 +766,7 @@ static bool HciSdcPutPacket(void *pContext,
     switch (Type)
     {
         case HCI_H4_PACKET_COMMAND:
+        {
             /*
              * Hold the next command until the controller queue has had the
              * outgoing slot. Without this a host that keeps a command in
@@ -333,23 +775,63 @@ static bool HciSdcPutPacket(void *pContext,
              * every pass and sdc_hci_get is never reached. Refusing here is
              * ordinary backpressure: the parser keeps the packet and offers it
              * again next pass.
+             *
+             * There are two command dispatchers, so the pending check spans
+             * both. Otherwise a vendor command could occupy one event slot
+             * while a supplemental command occupies the other, granting a
+             * second command credit the controller never intended to grant.
+             *
+             * A delayed SDC completion is the same command-credit condition,
+             * except there is no dispatcher event to expose it. Keep the next
+             * command at the parser until that real completion is forwarded.
              */
-            if (pSdc->CommandEventLast)
+            if (pSdc->DelayedCommandPending ||
+                pSdc->CommandEventLast ||
+                HciCmdDispatchEventPending(&pSdc->Commands) ||
+                HciCmdDispatchEventPending(&pSdc->CompatCommands))
             {
                 pSdc->CommandDeferredCount++;
                 return false;
             }
+
+            if (PacketLen >= HCI_DISPATCH_COMMAND_HEADER_SIZE)
+            {
+                const uint16_t opcode = HciSdcReadLe16(pPacket);
+                if (HciSdcSupplementalOpcode(opcode))
+                {
+                    return HciCmdDispatchPut(&pSdc->CompatCommands,
+                                             pPacket, PacketLen);
+                }
+
+                const bool delayedCandidate =
+                    HciSdcDelayedCommandCandidate(&pSdc->Commands,
+                                                  pPacket, PacketLen);
+                if (delayedCandidate)
+                {
+                    pSdc->PawrDelayedCandidateCount++;
+                }
+
+                const uint32_t handlerCallsBefore =
+                    pSdc->Commands.HandlerCallCount;
+                const uint8_t rspMarkLenBefore = pSdc->Commands.RspMarkLen;
+
+                const bool accepted =
+                    HciCmdDispatchPut(&pSdc->Commands, pPacket, PacketLen);
+                if (accepted && delayedCandidate &&
+                    pSdc->Commands.HandlerCallCount != handlerCallsBefore)
+                {
+                    pSdc->PawrDelayedHandlerCallCount++;
+                    (void)HciSdcDelayCommandComplete(pSdc, opcode,
+                                                     rspMarkLenBefore);
+                }
+                return accepted;
+            }
+
             return HciCmdDispatchPut(&pSdc->Commands, pPacket, PacketLen);
+        }
 
         case HCI_H4_PACKET_ACL:
         {
-            /*
-             * The parser frames the packet but does not judge its size. The
-             * controller advertises a maximum payload in LE Read Buffer Size
-             * and a host is not entitled to exceed it, so refuse an oversize
-             * packet here rather than let the controller decide what to do
-             * with it. The credit still has to come back, Vol 4 Part E 4.1.1.
-             */
             if (PacketLen < HCI_SDC_ACL_HEADER_SIZE ||
                 PacketLen - HCI_SDC_ACL_HEADER_SIZE > HCI_SDC_ACL_MAX_PAYLOAD)
             {
@@ -364,11 +846,6 @@ static bool HciSdcPutPacket(void *pContext,
 #if HCI_SDC_ENFORCE_ACL_CREDITS
             if (HciSdcAclAtLimit(pSdc, pPacket))
             {
-                /*
-                 * Over the advertised count. Handing this to the controller
-                 * loses the packet and the host's buffer with it, so it is
-                 * refused here and the credit owed back instead.
-                 */
                 pSdc->AclCreditOverrunCount++;
                 HciSdcOweCredit(pSdc, pPacket);
                 return true;
@@ -383,12 +860,6 @@ static bool HciSdcPutPacket(void *pContext,
             }
             if (result != 0)
             {
-                /*
-                 * The packet is gone but the host still spent a buffer on it,
-                 * and nothing else will ever hand that buffer back. Owe the
-                 * credit here so it is returned in the next Number Of
-                 * Completed Packets event.
-                 */
                 pSdc->AclPutErrorCount++;
                 HciSdcOweCredit(pSdc, pPacket);
             }
@@ -411,13 +882,6 @@ static bool HciSdcPutPacket(void *pContext,
             int32_t result = pSdc->Ops.IsoPut(pSdc->Ops.pContext, pPacket);
             if (result == pSdc->Ops.RetryError)
             {
-                /*
-                 * For ISO the shared retry code means the SDU arrived too late
-                 * for its transmission point, which retrying can only make
-                 * worse. Refusing would pin the packet in the parser and stop
-                 * the whole host to controller direction, so it is dropped.
-                 * ISO has no packet based flow control, so no credit is owed.
-                 */
                 pSdc->IsoDropCount++;
                 return true;
             }
@@ -437,17 +901,24 @@ static bool HciSdcPutPacket(void *pContext,
     }
 }
 
-static HciControllerGetResult_t HciSdcGetCommandEvent(HciSdc_t *pSdc,
-                                                       HciH4PacketType_t *pType,
-                                                       uint8_t *pPacket,
-                                                       size_t PacketCapacity,
-                                                       size_t *pPacketLen)
+static HciControllerGetResult_t HciSdcGetDispatchEvent(
+    HciSdc_t *pSdc,
+    HciCmdDispatch_t *pDispatch,
+    bool PatchSupportedCommands,
+    HciH4PacketType_t *pType,
+    uint8_t *pPacket,
+    size_t PacketCapacity,
+    size_t *pPacketLen)
 {
-    if (!HciCmdDispatchGet(&pSdc->Commands, pPacket, PacketCapacity,
-                           pPacketLen))
+    if (!HciCmdDispatchGet(pDispatch, pPacket, PacketCapacity, pPacketLen))
     {
         pSdc->InvalidOutputLengthCount++;
         return HCI_CONTROLLER_GET_ERROR;
+    }
+
+    if (PatchSupportedCommands)
+    {
+        HciSdcPatchSupportedCommands(pPacket, *pPacketLen);
     }
 
     pSdc->CommandEventLast = true;
@@ -463,27 +934,24 @@ static HciControllerGetResult_t HciSdcGetPacket(void *pContext,
 {
     HciSdc_t *pSdc = static_cast<HciSdc_t *>(pContext);
 
-    /*
-     * A pending command event always goes first. A command handler runs while
-     * the command is accepted, so anything it queues in the controller was
-     * queued after the response was built, and Vol 4 Part E 7.8.13 and the
-     * general rule in 4.4 require the response to reach the host first. Fair
-     * sharing of the outgoing slot is handled where the command is accepted,
-     * not here, so that nothing can overtake a response.
-     */
     if (HciCmdDispatchEventPending(&pSdc->Commands))
     {
-        return HciSdcGetCommandEvent(pSdc, pType, pPacket, PacketCapacity,
-                                     pPacketLen);
+        return HciSdcGetDispatchEvent(pSdc, &pSdc->Commands, true,
+                                      pType, pPacket, PacketCapacity,
+                                      pPacketLen);
     }
 
-    /*
-     * Credits owed for refused ACL packets go out before the controller queue
-     * is asked. They are bounded by the number of packets the host had in
-     * flight, so this cannot starve the queue.
-     */
-    if (HciSdcBuildCreditEvent(pSdc, pPacket, PacketCapacity, pPacketLen))
+    if (HciCmdDispatchEventPending(&pSdc->CompatCommands))
     {
+        return HciSdcGetDispatchEvent(pSdc, &pSdc->CompatCommands, false,
+                                      pType, pPacket, PacketCapacity,
+                                      pPacketLen);
+    }
+
+    if (!pSdc->CreditEventLast &&
+        HciSdcBuildCreditEvent(pSdc, pPacket, PacketCapacity, pPacketLen))
+    {
+        pSdc->CreditEventLast = true;
         *pType = HCI_H4_PACKET_EVENT;
         return HCI_CONTROLLER_GET_PACKET;
     }
@@ -491,8 +959,14 @@ static HciControllerGetResult_t HciSdcGetPacket(void *pContext,
     uint8_t sdcType = HCI_SDC_MSG_TYPE_NONE;
     int32_t result = pSdc->Ops.Get(pSdc->Ops.pContext, pPacket, &sdcType);
 
-    /* The controller queue has had its turn, so the next command may come in. */
+    /*
+     * The controller queue has had its turn, even when it was empty or
+     * returned an error. A new command and a new synthetic credit event may
+     * now use their respective turns. A delayed command is intentionally not
+     * released here: an empty poll is not its Command Complete.
+     */
     pSdc->CommandEventLast = false;
+    pSdc->CreditEventLast = false;
 
     if (result == pSdc->Ops.RetryError)
     {
@@ -532,6 +1006,21 @@ static HciControllerGetResult_t HciSdcGetPacket(void *pContext,
 
     if (*pType == HCI_H4_PACKET_EVENT)
     {
+        /*
+         * Only the real Command Complete for the outstanding opcode returns
+         * the Host's command credit. LE Meta events, ACL completions, and any
+         * other controller traffic are forwarded without disturbing it.
+         */
+        if (pSdc->DelayedCommandPending &&
+            *pPacketLen >= HCI_COMMAND_COMPLETE_BASE_SIZE &&
+            pPacket[0] == HCI_EVENT_COMMAND_COMPLETE &&
+            HciSdcReadLe16(&pPacket[3]) == pSdc->DelayedCommandOpcode)
+        {
+            pSdc->PawrSdcCompleteCount++;
+            pSdc->DelayedCommandPending = false;
+            pSdc->DelayedCommandOpcode = 0U;
+        }
+
         HciSdcAclTrackEvent(pSdc, pPacket, *pPacketLen);
     }
 
@@ -573,6 +1062,17 @@ bool HciSdcInit(HciSdc_t *pSdc,
                             pCommandContext,
                             pCommandEvent,
                             CommandEventCapacity))
+    {
+        return false;
+    }
+
+    if (!HciCmdDispatchInit(
+            &pSdc->CompatCommands,
+            s_HciSdcCompatCommands,
+            sizeof(s_HciSdcCompatCommands) / sizeof(s_HciSdcCompatCommands[0]),
+            pSdc,
+            pSdc->CompatEvent,
+            sizeof(pSdc->CompatEvent)))
     {
         return false;
     }

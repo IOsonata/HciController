@@ -20,6 +20,7 @@
 #include "coredev/iopincfg.h"
 #include "coredev/system_core_clock.h"
 #include "hci_app.h"
+#include "hci_nrf52840.h"
 #include "hci_trace.h"
 #include "iopinctrl.h"
 #include "miscdev/led.h"
@@ -162,6 +163,7 @@ int main(void)
     HciStatusSet(false, false, false);
 
     HciTraceInit();
+    HciNrf52840ResetTrace();
 
     uint32_t usbReg = NRF_POWER->USBREGSTATUS;
     HciAppHost_t host = HciSelectHost();
@@ -189,6 +191,8 @@ int main(void)
     TaktOSCfg_t kernelCfg = {};
     kernelCfg.KernClockHz = SystemCoreClockGet();
     kernelCfg.TickHz = 1000U;
+    kernelCfg.TickPriority = TAKTOS_TICK_PRIORITY_DEFAULT;
+
     HciTrace("boot: coreclk=%lu\r\n", (unsigned long)kernelCfg.KernClockHz);
     if (TaktOSInit(&kernelCfg) != TAKTOS_OK)
     {
@@ -196,19 +200,27 @@ int main(void)
         HciFatal();
     }
 
-    if (!HciAppInit(&s_HciApp, host))
+    if (!HciAppInit(&s_HciApp, host, HciNrf52840Target()))
     {
         HciTrace("fatal: HciAppInit err=%d target=%ld\r\n",
-                 s_HciApp.LastError, (long)s_HciApp.Target.LastError);
+                 s_HciApp.LastError,
+                 (long)HciTargetLastError(&s_HciApp.Target));
         HciFatal();
     }
 
+    /*
+     * Mark the runtime as owning a thread before the kernel can schedule it.
+     * A stop in the interval between task creation and the task's first
+     * instruction must wait rather than tear SDC/MPSL down under that task.
+     */
+    HciTaktOsThreadArm(&s_HciApp.Runtime);
     if (TaktOSThreadCreate(s_HciThreadMem,
                            sizeof(s_HciThreadMem),
                            HciAppThread,
                            &s_HciApp,
                            TAKTOS_PRIORITY_HIGHEST) == nullptr)
     {
+        HciTaktOsThreadDisarm(&s_HciApp.Runtime);
         HciTrace("fatal: hci thread create\r\n");
         HciFatal();
     }

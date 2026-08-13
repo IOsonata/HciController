@@ -61,7 +61,14 @@ typedef struct {
     volatile bool Running;
     volatile bool StopRequested;
     bool HostStarted;
-    /* Set on entry to the thread body, cleared as it leaves. */
+
+    /*
+     * Armed is set before the kernel thread is created. Live is set on entry
+     * to HciTaktOsThread. They are deliberately separate: between thread
+     * creation and the first instruction of the thread body there is a real
+     * task that a stop must wait for even though ThreadLive is still false.
+     */
+    volatile bool ThreadArmed;
     volatile bool ThreadLive;
 
     uint32_t WakeCount;
@@ -69,6 +76,12 @@ typedef struct {
     uint32_t LoopCount;
     uint32_t EmptyWakeCount;
     uint32_t SemaphoreFullCount;
+
+    /*
+     * Wakes that asked for an event already pending, so the semaphore was not
+     * touched. Under load this is most of them.
+     */
+    uint32_t WakeFoldCount;
     uint32_t StartErrorCount;
     uint32_t HostRetryCount;
     uint32_t PollWakeCount;
@@ -78,8 +91,24 @@ bool HciTaktOsInit(HciTaktOs_t *pRuntime,
                    const HciTaktOsOps_t *pOps,
                    const HciTaktOsHostOps_t *pHostOps);
 
+/*
+ * Arm before creating the kernel thread. If creation itself fails, disarm it.
+ * This closes the interval where a stop could otherwise mistake a scheduled
+ * but not-yet-entered thread for no thread at all and tear down SDC/MPSL below
+ * it.
+ */
+void HciTaktOsThreadArm(HciTaktOs_t *pRuntime);
+void HciTaktOsThreadDisarm(HciTaktOs_t *pRuntime);
+
 void HciTaktOsWake(HciTaktOs_t *pRuntime, uint32_t Events);
 void HciTaktOsStop(HciTaktOs_t *pRuntime);
+
+/*
+ * Called only from the runtime thread when the host transport has become
+ * unusable after it was started. The next service pass runs HostOps.Start
+ * again instead of continuing to pump a failed transport.
+ */
+void HciTaktOsHostDown(HciTaktOs_t *pRuntime);
 
 /*
  * Wait for the runtime thread to leave its loop after a stop. Returns false on

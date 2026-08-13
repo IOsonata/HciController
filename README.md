@@ -16,6 +16,9 @@ supports two host connections:
 The HCI controller, the H:4 parser, the SDC binding and the TaktOS execution
 path are identical for both.
 
+A second USB CDC function is a plain text log, present whichever port the HCI
+stream is on. See [The log port](#the-log-port).
+
 ## Host interface selection
 
 Which port the controller talks to its host on is a build option,
@@ -70,6 +73,62 @@ The UART connection is crossed at the product level:
 BLYST840 P0.24 TXD -> nRF9151 RXD
 BLYST840 P0.23 RXD <- nRF9151 TXD
 ```
+
+## The log port
+
+The device presents two USB CDC functions. The first is the HCI byte stream.
+The second is a plain text log, and it exists because up to now the only way to
+see what the firmware was doing was semihosting, which needs a debugger
+attached and reaches nobody without one. On a sealed dongle, on a customer's
+board, or on somebody else's product, that meant a controller that could not be
+observed at all.
+
+Open the second port with any terminal. Nothing on it is framed and nothing
+parses it.
+
+```text
+CDC 0   HCI H:4 byte stream
+CDC 1   text log
+```
+
+The log is a ring in RAM that the firmware writes into and the runtime thread
+drains. It never blocks and it cannot fail a caller, because the first thing
+anyone logs is a path that is already going wrong and a log that stalls that
+path turns one fault into two. A full ring gives up whole lines from the oldest
+end and says how many octets it lost, so what survives can still be read.
+Everything `HciTrace` writes goes here, in every build. `HCI_TRACE=1` adds the
+semihosting copy on top and nothing else; it is not what turns the log on. The
+two were one switch at first, which meant an ordinary build wrote nothing to
+the log and the build that would have written to it faults on the first line
+without a debugger attached, so the port enumerated and stayed empty either
+way.
+
+The ring is in BSS and needs no initialising, so it is taking lines from the
+first instruction that runs. Lines written before the HCI layer exists, or by a
+start up that never reaches it, are still in there to be read when a terminal
+opens the port.
+
+The second function is present whichever port the HCI stream is on. That is the
+point of it: on a board whose host is another part on the same PCB, the UART
+belongs to the host and the socket is free.
+
+`nRF52840/src/board.h` says whether the USB socket is wired to the nRF52840,
+with `HCI_USB_SOCKET`. Where it is, a UART host image still brings the device
+stack up so the log has somewhere to go. Where it is not, the board leaves
+`HCI_USB_SOCKET` at 0 and no USB comes up, because enabling the peripheral
+would put a device on a bus that is not this part's to enumerate on.
+
+The Nordic Thingy:91 is the case this was built for. Its nRF52840 answers to
+the nRF9160 over the interconnect UART, no LED on that board reaches this part,
+and the enclosure is sealed, so the USB socket is the only thing about it that
+can be observed.
+
+Bring up for the log runs without the settling loop the USB host path uses. A
+host on the UART can send its first command in the first millisecond, and
+waiting a hundred of them for a terminal that may never be plugged in would
+lose it. With no cable there is no VBUS, the peripheral does not come up at
+all, and a cable plugged in afterwards does not change that until the next
+reset.
 
 ## The dongle
 
@@ -126,9 +185,61 @@ tests/              host tests and hardware tools
 
 ## Boards
 
-`nRF52840/src/board.h` selects the board with `BOARD`, and carries the I-SYST
-boards this firmware is developed and tested on: the UDG-NRF52840x dongle and
-the IBK-NRF52840 breakout.
+`nRF52840/src/board.h` selects the board with `BOARD`. It holds the I-SYST
+boards this firmware is developed and tested on, the UDG-NRF52840x dongle and
+the IBK-NRF52840 breakout, and one board that is not I-SYST hardware: the
+Nordic Thingy:91, whose nRF52840 reaches its host over the interconnect UART
+to the nRF9160.
+
+The Thingy:91 UART uses the measured nRF52840 pin assignment in `board.h`:
+
+```text
+nRF52840 side   TX P0.25   RX P1.00   RTS P0.19   CTS P0.22
+nRF9160 side    TX P0.22   RX P0.23   RTS P0.24   CTS P0.25
+Rate            1,000,000 bit/s, both board files
+Flow control    hardware, all four wires exist
+```
+
+The sdk-nrf nRF52840 pinctrl file names P0.22 as RTS and P0.19 as CTS, but that
+assignment does not work on the hardware. The mapping above was measured both
+ways round on the board: driving nRF52840 RTS on P0.19 lets the peer transmit;
+driving it on P0.22 leaves the peer silent. The firmware therefore uses the
+measured assignment rather than the pinctrl labels.
+
+That board defaults to `HCI_HOST_SELECT_UART`, because its USB socket has
+nothing behind it that speaks HCI and AUTO would come up talking to a host
+that is not there. It also sets `HCI_STATUS_LEDS 0`, since the Thingy:91 LEDs
+are driven from the nRF9160.
+
+The nRF9160 side needs one Kconfig setting beyond the pins:
+
+```text
+CONFIG_BT_WAIT_NOP=y
+```
+
+The nRF9160 holds this part in reset and releases it while bringing the HCI
+transport up. `sdk-nrf`, `boards/nordic/thingy91/nrf52840_reset.c`, drives
+nRF9160 P0.10 low, waits 10 ms, drains the port and lets go, and Zephyr then
+sends HCI Reset at once. Ten milliseconds is not enough for this firmware to
+come out of reset and bring up TaktOS, the radio and the port, so those four
+octets reach a part that is not listening and nothing retries them. The
+symptom is an `hci_core.c` assertion on opcode `0x0c03` timing out after ten
+seconds with the link otherwise correct.
+
+With `CONFIG_BT_WAIT_NOP=y` the host holds its command semaphore at zero
+until a Command Complete for the No Operation opcode arrives. This firmware
+queues exactly that at startup and sends it first, so the host waits for the
+controller rather than racing it. A host that cannot be configured cannot be
+told to do this, and whether the race is real on such a host has not been
+measured.
+
+The rest of the board has been checked against `sdk-nrf` and the Thingy:91
+hardware guide: the pins and rate above, the low frequency crystal on P0.00
+and P0.01 so the default clock configuration is right, and that every command
+a Zephyr host sends during `bt_enable` is dispatched here. Note also that the
+stock nRF52840 image on that board boots through MCUboot, so how a
+replacement image is programmed decides whether it runs at all.
+
 
 Other hardware is a port, and it is a small one. A board says four things
 beyond its pins:
@@ -303,6 +414,189 @@ The H:4 transport uses only `DeviceIntrfRx()` and `DeviceIntrfTx()`. It does not
 The TinyUSB adapter services the IOsonata `UsbdCdcIntrf` FIFOs. When the RX FIFO has no space, it stops reading the TinyUSB OUT endpoint so USB backpressure is preserved rather than dropping HCI bytes.
 
 The UART path uses IOsonata's interrupt-driven FIFO/DMA UART implementation. Its 4 KiB RX and TX FIFOs absorb complete HCI packets and host scheduling latency.
+
+## Ports
+
+The tree is split so that a part supplies hardware and nothing else.
+
+```text
+include/hci_target.h          what the application needs from a part
+include/hci_sdc_resources.h   what the controller is configured for
+src/hci_sdc_resources.cpp     every sdc_support_ call, the sdc_cfg_set sequence
+include/hci_nrf52840.h        the nRF52840 port: clock, USB, errata
+src/hci_nrf52840.cpp          its bring up, and the HciTarget_t it publishes
+```
+
+Nothing above the radio names a part. `hci_app` holds an `HciTarget_t`, which
+is a table of function pointers and an opaque instance the port owns, and
+`main.cpp` decides which port that is in one line.
+
+The resource configuration is deliberately not part of a port. nrfxlib ships
+one `sdc.h` covering nrf52, nrf53, nrf54h, nrf54l, nrf54lm, nrf54ls, nrf54lv
+and nrf71, and every `SDC_MEM_` macro the pool is computed from comes from it.
+A port does not get an opinion about how many links the controller supports.
+
+Adding a part means one header and one source:
+
+| | |
+| --- | --- |
+| a state structure | whatever its clock, USB and errata need |
+| `Init` | MPSL, the entropy source, `sdc_init`, then `HciSdcResourcesApply()`, then `sdc_enable` |
+| `GetTaktOsOps` | how the runtime starts it and pumps MPSL |
+| `UsbStart`, `UsbPassMark`, `UsbPowerProcess` | or null on a part with no USB device peripheral, and the application skips them |
+| `Stop` | |
+| `LastError` | |
+| one `HciTarget_t` returned by value | the instance is static in the port, because a board has one radio |
+
+The dispatch table, the H:4 parser, the transport, the bridge, the counters and
+the resource configuration are then already correct for it.
+
+## Capacity
+
+What one image is configured for, and what it costs in the SoftDevice
+Controller memory pool. Every value is a constant in
+`include/hci_sdc_resources.h`, and the pool is computed from them, so changing
+a count grows the array that holds it rather than needing a second edit. There are no build options here:
+configuring the controller differently means editing the value.
+
+| | | Pool cost |
+| --- | ---: | ---: |
+| Peripheral links | 16 | 2951 each |
+| Central links | 2 | 2855 each |
+| ACL payload, each way | 251 octets | in the per-link cost |
+| ACL buffers, each way | 4 | in the per-link cost |
+| Advertising sets | 3 | 961 each |
+| Advertising data | 255 octets | in the per-set cost |
+| Scan buffers | 4 | 1688 for four |
+| Filter accept list | 8 | 68 for eight |
+| Channel survey | on | 40 |
+| LE Power Control | on | 2227 for eighteen links |
+| Connection subrating | on | 1092 for eighteen links |
+| Extended feature pages | 10 | 4673 for eighteen links |
+| Frame Space Update | on | 1236 for eighteen links |
+| Shorter Connection Intervals | on | 948 for eighteen links |
+| Scan and initiate together | on | 384 |
+| Periodic advertising sets | 1 | 753 each |
+| Periodic syncs | 2 | 1787 each, four buffers, with responses |
+| Periodic advertiser list | 8 | 64 for eight |
+| Periodic sync transfer | on | 2515 for eighteen links |
+| Periodic sets with responses | 1 | 1575 each |
+| Connected isochronous groups | 2 | 339 for two |
+| Connected isochronous streams | 4 | 2201 for four |
+| Broadcast isochronous groups | 2 | 675 for two |
+| Broadcast isochronous streams | 2 source, 2 sink | 1049 for four |
+| Isochronous SDU, transmit | 247 octets, 4 buffers | 1196 |
+| Isochronous SDU, receive | 251 octets, 4 buffers | 1064 |
+| Isochronous PDU, per stream | 3 each way | 5280 transmit, 5280 receive |
+| | | **93768 required** |
+
+The pool is that total plus a 512 octet margin, **94280 octets allocated**,
+because sdk-nrfxlib says the memory macros may move between minor releases and
+the number that decides whether the controller starts is the one `sdc_cfg_set`
+answers at run time.
+
+Isochronous channels remain 17084 octets of the pool. They have their own
+section below, because what this part does and does not do with them takes more
+than a paragraph.
+
+The ACL payload is worth calling out. 251 octets is the data length extension
+maximum, and it is what the controller reports in LE Read Buffer Size, so a
+host is entitled to use it. The common alternative is 27, which caps
+throughput at about a ninth of what the radio can carry.
+
+The buffer count is a total across every link, not an allowance each. Vol 4
+Part E 4.1.1 gives the host one pool to spend, and the controller refuses a
+packet past it rather than letting the SoftDevice Controller take the packet
+and the host's buffer with it. `AclCreditOverrunCount`, counter 30, says how
+often that has happened.
+
+## Isochronous channels
+
+The short version: unencrypted isochronous works on this part, encrypted does
+not, and the reason is one missing register rather than anything about
+isochronous transport or about the part's cryptography.
+
+### What works
+
+Every isochronous entry point is present in the nRF52 SoftDevice Controller
+library and all four roles are enabled here:
+
+| Role | `sdc_support_` call |
+| --- | --- |
+| Connected stream, central | `sdc_support_cis_central` |
+| Connected stream, peripheral | `sdc_support_cis_peripheral` |
+| Broadcast stream, source | `sdc_support_bis_source` |
+| Broadcast stream, sink | `sdc_support_bis_sink` |
+
+That is 24 opcodes, the group and stream setup, the data path, the four
+isochronous test commands, and `sdc_hci_iso_data_put` for the data itself.
+`LE Read Buffer Size v2` is part of the set rather than an extra: version 1
+reports only the ACL packet length and count, so without v2 a host has every
+command it needs to build a stream and no way to flow control it.
+
+### What does not, and why
+
+sdk-nrfxlib `README.rst` states the limit:
+
+> For the Isochronous Channels features, nRF52820 and nRF52833 are the nRF52
+> Series devices that support encrypting and decrypting the Isochronous
+> Channels packets.
+
+nRF52840 is not in that list. The cause is visible in the register maps. CCM
+authenticates the PDU header octet, and which bits of it are authenticated
+differ between an ACL data PDU and an isochronous one:
+
+```text
+nrf52840  CCM: ... MAXPACKETSIZE, RATEOVERRIDE
+nrf52833  CCM: ... MAXPACKETSIZE, RATEOVERRIDE, HEADERMASK
+nrf52820  CCM: ... MAXPACKETSIZE, RATEOVERRIDE, HEADERMASK
+```
+
+`CCM.HEADERMASK` is documented as the header (S0) mask, eight bits wide.
+Without it the CCM applies the fixed ACL mask, which is the wrong additional
+authenticated data for an isochronous PDU and so the wrong MIC.
+
+This is worth stating plainly because it inverts the obvious reading: the
+nRF52840 is the one of the three parts with a CryptoCell. It has more
+cryptographic hardware than the other two, not less. What it lacks is one
+register in the CCM accelerator that sits in the radio datapath, and nothing
+in software reaches around it. IOsonata's crypto engines are host side and
+cannot substitute: the one Bluetooth adjacent engine, `CryptoCtlrSdc`, sends
+HCI `LE Encrypt` to borrow the controller's AES block for pairing, which is a
+different thing entirely from link layer CCM inside the controller.
+
+### What this means in practice
+
+**Broadcast is unaffected.** Encryption is per group and optional: pass
+`Encryption = 0` to LE Create BIG and it is a public broadcast. Nothing about
+an unencrypted broadcast is degraded or non-conformant.
+
+**Connected streams have an open question.** A CIS does not have its own
+encryption switch the way a BIG does. What happens when a CIS is created over
+an already encrypted ACL link has not been measured on this part, and this
+document will not guess at it. The test is cheap now that pairing works:
+bring up an encrypted link, send LE Set CIG Parameters and then LE Create
+CIS, and read the status. Until that is run, treat unencrypted CIS between
+two of these dongles as the supported case.
+
+If encrypted isochronous is a requirement, it is a part change to nRF52820 or
+nRF52833. It is not something this firmware can be made to do.
+
+### Configuration
+
+Two connected groups, four connected streams, two broadcast groups, two
+broadcast source and two broadcast sink streams. Transmit SDU 247 octets,
+receive SDU 251, four buffers each way, three protocol units per stream each
+way. 17084 octets of the pool, the largest single item in it.
+
+The receive SDU size is also what the packet buffer above the controller is
+sized against, rather than the 4095 octet ceiling the specification allows,
+because `sdc_hci.h` ties the `sdc_hci_get` requirement to
+`sdc_cfg_iso_buffer_cfg_t::rx_sdu_buffer_size`. 251 plus the 12 octet
+isochronous header is 263, which the existing 1024 octet packet buffer holds,
+so isochronous costs no extra packet buffer at all. `src/hci_app.cpp` asserts
+this against the configured size, so raising the SDU without raising the
+buffer stops the build.
 
 ## TaktOS execution model
 

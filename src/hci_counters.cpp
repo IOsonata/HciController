@@ -31,6 +31,21 @@ void HciCountersInit(HciCounters_t *pCounters,
 
     pCounters->pSdc = pSdc;
     pCounters->pController = pController;
+    pCounters->SdcMemRequired = 0U;
+    pCounters->SdcMemCapacity = 0U;
+}
+
+void HciCountersSetSdcMem(HciCounters_t *pCounters,
+                          uint32_t Required,
+                          uint32_t Capacity)
+{
+    if (pCounters == NULL)
+    {
+        return;
+    }
+
+    pCounters->SdcMemRequired = Required;
+    pCounters->SdcMemCapacity = Capacity;
 }
 
 HciCmdResult_t HciCountersRead(void *pContext,
@@ -86,6 +101,10 @@ HciCmdResult_t HciCountersRead(void *pContext,
         values[17] = pSdc->IsoPutCount;
         values[30] = pSdc->AclCreditOverrunCount;
         values[31] = pSdc->AclTrackOverflowCount;
+        values[34] = pSdc->PawrDelayedCandidateCount;
+        values[35] = pSdc->PawrDelayedHandlerCallCount;
+        values[36] = pSdc->PawrSyntheticSuppressedCount;
+        values[37] = pSdc->PawrSdcCompleteCount;
     }
 
     const HciController_t *pController = pCounters->pController;
@@ -104,6 +123,14 @@ HciCmdResult_t HciCountersRead(void *pContext,
         values[28] = pController->InvalidControllerPacketCount;
         values[29] = pController->UnsendableControllerPacketCount;
     }
+
+    /*
+     * Not counters, and not read through a layer pointer: the platform fills
+     * these in directly once the controller has answered. Zero where it never
+     * did.
+     */
+    values[32] = pCounters->SdcMemRequired;
+    values[33] = pCounters->SdcMemCapacity;
 
     pReturn[0] = (uint8_t)HCI_COUNTERS_VERSION;
     for (size_t i = 0U; i < HCI_COUNTERS_COUNT; i++)

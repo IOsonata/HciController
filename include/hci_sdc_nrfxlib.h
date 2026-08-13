@@ -43,6 +43,17 @@ bool HciSdcNrfxlibInit(HciSdc_t *pSdc,
  */
 void HciSdcNrfxlibQueueStartupNop(HciSdc_t *pSdc);
 
+/*
+ * Give up the advertising command set the host has chosen.
+ *
+ * Vol 4 Part E 3.1.1 lets a host use the legacy advertising, scanning and
+ * initiating commands or the extended ones, not both, and ties the choice to
+ * the last reset. The dispatch layer refuses the second set, so this is what
+ * HCI Reset calls, and what a test that walks the whole table needs between
+ * rows.
+ */
+void HciSdcNrfxlibResetAdvCommandType(void);
+
 #ifdef __cplusplus
 }
 #endif

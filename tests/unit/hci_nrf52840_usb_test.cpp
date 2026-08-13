@@ -3,6 +3,9 @@
  */
 
 #include "hci_nrf52840.h"
+#include "hci_sdc_resources.h"
+#include "hci_syslog.h"
+#include "hci_target.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -13,6 +16,21 @@
 #include "sdc.h"
 #include "coredev/system_core_clock.h"
 #include "crypto_rng_nrf.h"
+
+#include "hci_sdc_expected_resources.h"
+
+/*
+ * The fake sdc.h this file builds against has hand written copies of the
+ * vendor SDC_MEM_ macros. hci_sdc_resources_test measures the real ones
+ * against the same expectations, so a copy that drifts from the vendor header
+ * fails here while the real one still passes, and the pair says which moved.
+ *
+ * Compile time rather than a printed check: a fake that disagrees about how
+ * much memory the controller wants makes every other number in this file a
+ * measurement of the wrong thing.
+ */
+static_assert(HCI_SDC_MEM_REQUIRED == EXPECT_REQUIRED,
+              "the fake sdc.h and the vendor one disagree about the pool");
 
 static NRF_POWER_Type gPower;
 NRF_POWER_Type *NRF_POWER = &gPower;
@@ -70,6 +88,19 @@ extern "C" bool nrf52_errata_187(void) { return true; }
 static NRF_CLOCK_Type gClock;
 NRF_CLOCK_Type *NRF_CLOCK = &gClock;
 
+/* Drain a log into a buffer, so a trace line can be read back and checked. */
+static size_t SyslogTake(HciSyslog_t *pLog, char *pOut, size_t Capacity);
+
+static NRF_UARTE_Type gUarte0;
+static NRF_UARTE_Type gUarte1;
+NRF_UARTE_Type *NRF_UARTE0 = &gUarte0;
+NRF_UARTE_Type *NRF_UARTE1 = &gUarte1;
+
+static NRF_GPIO_Type gP0;
+static NRF_GPIO_Type gP1;
+NRF_GPIO_Type *NRF_P0 = &gP0;
+NRF_GPIO_Type *NRF_P1 = &gP1;
+
 static CryptoRngNrf gRng;
 static OscDesc_t gLfOsc = { OSC_TYPE_XTAL, 32768U, 20U, 0U };
 
@@ -84,6 +115,7 @@ static unsigned gLowPrioProcess;
 static bool gHfclkRuns;
 static unsigned gHfclkStartAfter;
 static bool gXtalSelected = true;
+static sdc_fault_handler_t gSdcAssert;
 
 extern "C" const OscDesc_t *GetLowFreqOscDesc(void) { return &gLfOsc; }
 extern "C" uint32_t SystemCoreClockGet(void) { return 64000000U; }
@@ -159,7 +191,11 @@ extern "C" int32_t mpsl_clock_hfclk_src_is_running(mpsl_clock_hfclk_src_t, uint3
     return 0;
 }
 
-extern "C" int32_t sdc_init(sdc_fault_handler_t) { return 0; }
+extern "C" int32_t sdc_init(sdc_fault_handler_t Handler)
+{
+    gSdcAssert = Handler;
+    return 0;
+}
 extern "C" int32_t sdc_rand_source_register(const sdc_rand_source_t *) { return 0; }
 extern "C" int32_t sdc_cfg_set(uint8_t, uint8_t, const sdc_cfg_t *) { return 4096; }
 extern "C" int32_t sdc_enable(sdc_callback_t, uint8_t *) { return 0; }
@@ -174,6 +210,30 @@ extern "C" void sdc_support_dle_central(void) {}
 extern "C" void sdc_support_phy_update_peripheral(void) {}
 extern "C" void sdc_support_phy_update_central(void) {}
 extern "C" void sdc_support_direct_test_mode(void) {}
+extern "C" void sdc_support_le_privacy(void) {}
+extern "C" void sdc_support_qos_channel_survey(void) {}
+extern "C" void sdc_support_le_power_control_central(void) {}
+extern "C" void sdc_support_le_power_control_peripheral(void) {}
+extern "C" void sdc_support_le_path_loss_monitoring(void) {}
+extern "C" void sdc_support_sca_central(void) {}
+extern "C" void sdc_support_sca_peripheral(void) {}
+extern "C" void sdc_support_connection_subrating_central(void) {}
+extern "C" void sdc_support_connection_subrating_peripheral(void) {}
+extern "C" void sdc_support_extended_feature_set_central(void) {}
+extern "C" void sdc_support_extended_feature_set_peripheral(void) {}
+extern "C" void sdc_support_parallel_scanning_and_initiating(void) {}
+extern "C" void sdc_support_le_periodic_adv(void) {}
+extern "C" void sdc_support_le_periodic_sync(void) {}
+extern "C" void sdc_support_periodic_adv_sync_transfer_sender_central(void) {}
+extern "C" void sdc_support_periodic_adv_sync_transfer_sender_peripheral(void) {}
+extern "C" void sdc_support_periodic_adv_sync_transfer_receiver_central(void) {}
+extern "C" void sdc_support_periodic_adv_sync_transfer_receiver_peripheral(void) {}
+extern "C" void sdc_support_le_periodic_adv_with_rsp(void) {}
+extern "C" void sdc_support_le_periodic_sync_with_rsp(void) {}
+extern "C" void sdc_support_cis_central(void) {}
+extern "C" void sdc_support_cis_peripheral(void) {}
+extern "C" void sdc_support_bis_source(void) {}
+extern "C" void sdc_support_bis_sink(void) {}
 
 extern "C" void HciTaktOsWake(HciTaktOs_t *, uint32_t) {}
 
@@ -194,10 +254,15 @@ static void ResetCounters(void)
     gHfclkStartAfter = 0U;
     gUsbdReadyRaises = true;
     gXtalSelected = true;
+    gSdcAssert = nullptr;
     gFakeUsed = 0U;
     memset(&gPower, 0, sizeof(gPower));
     memset(&gUsbd, 0, sizeof(gUsbd));
     memset(&gClock, 0, sizeof(gClock));
+    memset(&gUarte0, 0, sizeof(gUarte0));
+    memset(&gUarte1, 0, sizeof(gUarte1));
+    memset(&gP0, 0, sizeof(gP0));
+    memset(&gP1, 0, sizeof(gP1));
 }
 
 static void TestBringUpOrder(void)
@@ -335,7 +400,16 @@ static void TestHfclkTimeoutDoesNotHang(void)
     assert(!HciNrf52840UsbStart(&target));
     assert(target.LastError == -1000);
     assert(!target.UsbStarted);
+    assert(gHfclkRequests == 1U);
+    assert(gHfclkReleases == 1U);
+    assert(!target.HfclkRequested);
     assert(gUsbPowerEvents[0] == 0U && gUsbPowerEvents[2] == 0U);
+
+    /* A retry must make a fresh MPSL request rather than trust stale state. */
+    gHfclkStartAfter = gLowPrioProcess + 1U;
+    assert(HciNrf52840UsbStart(&target));
+    assert(gHfclkRequests == 2U);
+    assert(target.HfclkRequested);
 
     /* The first recorded cause survives the generic fault report. */
     ops.Fault(ops.pContext, -1);
@@ -343,7 +417,8 @@ static void TestHfclkTimeoutDoesNotHang(void)
     assert(target.FaultCount == 1U);
 
     HciNrf52840Stop(&target);
-    printf("[ok] crystal wait is bounded and the cause is kept\n");
+    assert(gHfclkReleases == 2U);
+    printf("[ok] crystal timeout releases its request and retry re-requests it\n");
 }
 
 static void TestUsbRegulatorTimeout(void)
@@ -505,6 +580,32 @@ static void TestEventCauseStormIsBroken(void)
     assert((gUsbd.EVENTCAUSE.Value & USBD_EVENTCAUSE_SUSPEND_Msk) != 0U);
     assert(target.UsbStuckCauseCount == 1U);
 
+    /*
+     * Both kinds at once, which is the case that decides it. Clearing the one
+     * the port ignores must not take EVENTS_USBEVENT with it while a cause the
+     * port still has to read is behind it. The port never looks at EVENTCAUSE
+     * unless the event is there, so a suspend or a resume dropped here is a
+     * suspend or a resume the port never learns about.
+     */
+    gUsbd.EVENTCAUSE.Value = USBD_EVENTCAUSE_READY_Msk |
+                             USBD_EVENTCAUSE_SUSPEND_Msk;
+    gUsbd.EVENTS_USBEVENT = 1U;
+    USBD_IRQHandler();
+
+    assert((gUsbd.EVENTCAUSE.Value & USBD_EVENTCAUSE_READY_Msk) == 0U);
+    assert((gUsbd.EVENTCAUSE.Value & USBD_EVENTCAUSE_SUSPEND_Msk) != 0U);
+    assert(gUsbd.EVENTS_USBEVENT == 1U);
+    assert(target.UsbStuckCauseCount == 2U);
+
+    /* And with nothing left behind it the event still has to go. */
+    gUsbd.EVENTCAUSE.Value = USBD_EVENTCAUSE_READY_Msk;
+    gUsbd.EVENTS_USBEVENT = 1U;
+    USBD_IRQHandler();
+
+    assert(gUsbd.EVENTCAUSE.Value == 0U);
+    assert(gUsbd.EVENTS_USBEVENT == 0U);
+    assert(target.UsbStuckCauseCount == 3U);
+
     /* A source that keeps re-asserting is captured and named, not guessed. */
     gUsbd.EVENTCAUSE.Value = 0U;
     gUsbd.EVENTS_USBEVENT = 0U;
@@ -554,6 +655,143 @@ static void TestUartModeLeavesUsbAlone(void)
     printf("[ok] uart mode leaves the usb hardware alone\n");
 }
 
+static char *s_pTakeOut;
+static size_t s_TakeCapacity;
+static size_t s_TakeLen;
+
+static size_t SyslogTakeWrite(void *, const uint8_t *pData, size_t Len)
+{
+    if (s_TakeLen + Len >= s_TakeCapacity)
+    {
+        Len = s_TakeCapacity - s_TakeLen - 1U;
+    }
+    memcpy(&s_pTakeOut[s_TakeLen], pData, Len);
+    s_TakeLen += Len;
+    return Len;
+}
+
+static size_t SyslogTake(HciSyslog_t *pLog, char *pOut, size_t Capacity)
+{
+    s_pTakeOut = pOut;
+    s_TakeCapacity = Capacity;
+    s_TakeLen = 0U;
+    HciSyslogDrain(pLog, SyslogTakeWrite, NULL);
+    return s_TakeLen;
+}
+
+static void TestUartTraceUsesDatasheetPinNames(void)
+{
+    HciSyslog_t log;
+    char text[512];
+
+    HciSyslogInit(&log);
+    HciSyslogAttachTrace(&log);
+
+    const HciTarget_t target = HciNrf52840Target();
+
+    gUarte0.ENABLE = 8U;
+    gUarte0.BAUDRATE = 0x10000000UL;
+    gUarte0.ERRORSRC = 0U;
+    gUarte0.CONFIG = 1U;
+    gUarte0.PSEL.RXD = 32U; /* P1.00 */
+    gUarte0.PSEL.TXD = 25U; /* P0.25 */
+    gUarte0.PSEL.CTS = 22U; /* P0.22 */
+    gUarte0.PSEL.RTS = 19U; /* P0.19 */
+    gP0.IN = 0U;
+    gP1.IN = 0xFFFFFFFFU;
+
+    HciSyslogInit(&log);
+    HciTargetUartTrace(&target, 0U);
+    text[SyslogTake(&log, text, sizeof(text))] = '\0';
+    assert(strstr(text, "uart0: enabled=yes") != NULL);
+    assert(strstr(text, "hwfc=on") != NULL);
+    assert(strstr(text, "baud=1000000") != NULL);
+    assert(strstr(text, "errors=none") != NULL);
+    assert(strstr(text, "cts=low(peer-ready)") != NULL);
+    assert(strstr(text, "RXD=P1.00") != NULL);
+    assert(strstr(text, "TXD=P0.25") != NULL);
+    assert(strstr(text, "CTS=P0.22") != NULL);
+    assert(strstr(text, "RTS=P0.19") != NULL);
+
+    /* Same CTS pin high means the peer is applying backpressure. */
+    gP0.IN = 1UL << 22;
+    HciSyslogInit(&log);
+    HciTargetUartTrace(&target, 0U);
+    text[SyslogTake(&log, text, sizeof(text))] = '\0';
+    assert(strstr(text, "cts=high(peer-not-ready)") != NULL);
+
+    /* Port bit 5 must survive decoding into the datasheet pin name. */
+    gUarte0.PSEL.CTS = 32U;
+    gP0.IN = 0xFFFFFFFFU;
+    gP1.IN = 0U;
+    HciSyslogInit(&log);
+    HciTargetUartTrace(&target, 0U);
+    text[SyslogTake(&log, text, sizeof(text))] = '\0';
+    assert(strstr(text, "cts=low(peer-ready)") != NULL);
+    assert(strstr(text, "CTS=P1.00") != NULL);
+
+    /* A pin the driver never connected is reported as NC, not a hex PSEL. */
+    gUarte0.PSEL.CTS = 0x80000000UL;
+    HciSyslogInit(&log);
+    HciTargetUartTrace(&target, 0U);
+    text[SyslogTake(&log, text, sizeof(text))] = '\0';
+    assert(strstr(text, "cts=not-connected") != NULL);
+    assert(strstr(text, "CTS=NC") != NULL);
+
+    /* The second instance is a different peripheral, not the first again. */
+    gUarte1.ENABLE = 8U;
+    gUarte1.PSEL.CTS = 0x80000000UL;
+    HciSyslogInit(&log);
+    HciTargetUartTrace(&target, 1U);
+    text[SyslogTake(&log, text, sizeof(text))] = '\0';
+    assert(strstr(text, "uart1: enabled=yes") != NULL);
+
+    HciSyslogAttachTrace(HciSyslogDefault());
+    printf("[ok] uart trace uses datasheet pin names and decoded settings\n");
+}
+
+static void TestResetTraceKeepsSdcAssert(void)
+{
+    ResetCounters();
+
+    HciSyslog_t log;
+    char text[512];
+    HciSyslogInit(&log);
+    HciSyslogAttachTrace(&log);
+
+    alignas(8) static uint8_t mem[10000];
+    HciTaktOs_t runtime = {};
+    HciNrf52840_t target;
+    HciTaktOsOps_t ops = {};
+
+    assert(HciNrf52840Init(&target, &runtime, mem, sizeof(mem), false));
+    HciNrf52840GetTaktOsOps(&target, &ops);
+    assert(ops.Start(ops.pContext));
+    assert(gSdcAssert != nullptr);
+
+    /* The real library resets after this callback returns. */
+    gSdcAssert("controller_fault.c", 321U);
+    gPower.RESETREAS = POWER_RESETREAS_SREQ_Msk;
+
+    HciSyslogInit(&log);
+    HciNrf52840ResetTrace();
+    text[SyslogTake(&log, text, sizeof(text))] = '\0';
+    assert(strstr(text, "cause=software-reset") != NULL);
+    assert(strstr(text, "previous=SDC-assert") != NULL);
+    assert(strstr(text, "file=controller_fault.c") != NULL);
+    assert(strstr(text, "line=321") != NULL);
+
+    /* The retained assertion is consumed once, not repeated every boot log. */
+    HciSyslogInit(&log);
+    HciNrf52840ResetTrace();
+    text[SyslogTake(&log, text, sizeof(text))] = '\0';
+    assert(strstr(text, "previous=SDC-assert") == NULL);
+
+    HciNrf52840Stop(&target);
+    HciSyslogAttachTrace(HciSyslogDefault());
+    printf("[ok] reset trace keeps the SDC assertion across reset state\n");
+}
+
 int main(void)
 {
     TestBringUpOrder();
@@ -564,6 +802,8 @@ int main(void)
     TestHfxoNotOnCrystal();
     TestEventCauseStormIsBroken();
     TestUartModeLeavesUsbAlone();
+    TestUartTraceUsesDatasheetPinNames();
+    TestResetTraceKeepsSdcAssert();
     printf("All nRF52840 USB bring up tests passed.\n");
     return 0;
 }

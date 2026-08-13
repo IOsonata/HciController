@@ -26,6 +26,12 @@ static bool HciTaktOsIsInIsr(void)
 #endif
 }
 
+/*
+ * The thread side of the pending word. A critical section is right here and
+ * not in HciTaktOsWake: this runs on the thread, where masking briefly is
+ * ordinary, and masking is what makes the read and the clear one operation
+ * against the interrupt that sets bits.
+ */
 static uint32_t HciTaktOsTakeEvents(HciTaktOs_t *pRuntime)
 {
     uint32_t state = TaktOSEnterCritical();
@@ -58,6 +64,33 @@ bool HciTaktOsInit(HciTaktOs_t *pRuntime,
     return TaktOSSemInit(&pRuntime->WakeSem, 0U, 1U) == TAKTOS_OK;
 }
 
+void HciTaktOsThreadArm(HciTaktOs_t *pRuntime)
+{
+    if (pRuntime == nullptr)
+    {
+        return;
+    }
+
+    uint32_t state = TaktOSEnterCritical();
+    pRuntime->ThreadArmed = true;
+    TaktOSExitCritical(state);
+}
+
+void HciTaktOsThreadDisarm(HciTaktOs_t *pRuntime)
+{
+    if (pRuntime == nullptr)
+    {
+        return;
+    }
+
+    uint32_t state = TaktOSEnterCritical();
+    if (!pRuntime->ThreadLive)
+    {
+        pRuntime->ThreadArmed = false;
+    }
+    TaktOSExitCritical(state);
+}
+
 void HciTaktOsWake(HciTaktOs_t *pRuntime, uint32_t Events)
 {
     if (pRuntime == nullptr || Events == 0U)
@@ -65,17 +98,38 @@ void HciTaktOsWake(HciTaktOs_t *pRuntime, uint32_t Events)
         return;
     }
 
-    uint32_t state = TaktOSEnterCritical();
-    pRuntime->PendingEvents |= Events;
-    pRuntime->WakeCount++;
-    TaktOSExitCritical(state);
+    /*
+     * This is the one function here an interrupt reaches: the USB one through
+     * the device stack's event hook, and the MPSL one. Keep the pending-word
+     * update atomic so this path does not need a second explicit critical
+     * section before TaktOSSemGive performs its own short kernel-protected
+     * update.
+     *
+     * The pair still holds. HciTaktOsTakeEvents masks while it reads the word
+     * and clears it, so no interrupt can land between those two, and the
+     * fetch_or here is indivisible against anything. Release, so whatever was
+     * written before the bit goes in is in front of it.
+     */
+    const uint32_t was =
+        __atomic_fetch_or(&pRuntime->PendingEvents, Events, __ATOMIC_RELEASE);
+    __atomic_fetch_add(&pRuntime->WakeCount, 1U, __ATOMIC_RELAXED);
+
+    /*
+     * Nothing more to do when the thread had already been told. Whoever set
+     * the bit first gave the semaphore and the thread has not taken the word
+     * since, or it would be clear, so the thread is already on its way and
+     * will find this event with the one that is already there.
+     */
+    if ((was & Events) == Events)
+    {
+        __atomic_fetch_add(&pRuntime->WakeFoldCount, 1U, __ATOMIC_RELAXED);
+        return;
+    }
 
     TaktOSErr_t result = TaktOSSemGive(&pRuntime->WakeSem, HciTaktOsIsInIsr());
     if (result == TAKTOS_ERR_FULL)
     {
-        state = TaktOSEnterCritical();
-        pRuntime->SemaphoreFullCount++;
-        TaktOSExitCritical(state);
+        __atomic_fetch_add(&pRuntime->SemaphoreFullCount, 1U, __ATOMIC_RELAXED);
     }
 }
 
@@ -93,6 +147,14 @@ void HciTaktOsStop(HciTaktOs_t *pRuntime)
     HciTaktOsWake(pRuntime, HCI_TAKTOS_EVENT_STOP);
 }
 
+void HciTaktOsHostDown(HciTaktOs_t *pRuntime)
+{
+    if (pRuntime != nullptr)
+    {
+        pRuntime->HostStarted = false;
+    }
+}
+
 bool HciTaktOsWaitStopped(HciTaktOs_t *pRuntime, uint32_t TimeoutMs)
 {
     if (pRuntime == nullptr)
@@ -100,21 +162,20 @@ bool HciTaktOsWaitStopped(HciTaktOs_t *pRuntime, uint32_t TimeoutMs)
         return true;
     }
 
-    if (!pRuntime->ThreadLive)
+    uint32_t state = TaktOSEnterCritical();
+    const bool threadExists = pRuntime->ThreadArmed || pRuntime->ThreadLive;
+    TaktOSExitCritical(state);
+
+    if (!threadExists)
     {
-        /*
-         * The thread body was never entered, so there is nothing inside SDC or
-         * MPSL to wait for. Gating on Started instead would short circuit for
-         * the whole of bring up, which is exactly when the thread is deepest
-         * inside mpsl_low_priority_process.
-         */
         return true;
     }
 
     /*
      * The caller is about to tear down SDC and MPSL, which the runtime thread
-     * calls into, so it has to be out of its loop first. The thread gives
-     * StoppedSem as it leaves.
+     * calls into, so it has to be out of its loop first. ThreadArmed makes this
+     * include the interval after task creation and before the task has entered
+     * HciTaktOsThread.
      */
     return TaktOSSemTake(&pRuntime->StoppedSem, true, TimeoutMs) == TAKTOS_OK;
 }
@@ -140,6 +201,23 @@ static void HciTaktOsServiceHost(HciTaktOs_t *pRuntime)
     pRuntime->HostOps.Process(pRuntime->HostOps.pContext);
 }
 
+static void HciTaktOsThreadLeave(HciTaktOs_t *pRuntime)
+{
+    uint32_t state = TaktOSEnterCritical();
+    pRuntime->Running = false;
+    pRuntime->ThreadLive = false;
+    pRuntime->ThreadArmed = false;
+    TaktOSExitCritical(state);
+
+    /*
+     * Wake a stop that began while the thread was live or merely armed. The
+     * armed bit is cleared before the token is given, so a later waiter can
+     * also return immediately without depending on the token still being
+     * present.
+     */
+    (void)TaktOSSemGive(&pRuntime->StoppedSem, false);
+}
+
 void HciTaktOsThread(void *pContext)
 {
     HciTaktOs_t *pRuntime = static_cast<HciTaktOs_t *>(pContext);
@@ -149,10 +227,22 @@ void HciTaktOsThread(void *pContext)
     }
 
     /*
-     * Set before anything is brought up. From here on a stop has to wait for
-     * this thread, because everything below calls into MPSL and SDC.
+     * Set before anything is brought up. ThreadArmed was set before the kernel
+     * task was created and remains set until ThreadLeave, closing the scheduler
+     * gap before this first instruction executes.
      */
     pRuntime->ThreadLive = true;
+
+    /*
+     * A stop may have arrived after task creation but before this task first
+     * ran. In that case there is nothing to start: just complete the stop
+     * handshake so the caller may safely tear down the still-unstarted target.
+     */
+    if (pRuntime->StopRequested)
+    {
+        HciTaktOsThreadLeave(pRuntime);
+        return;
+    }
 
     HciTrace("runtime: target start\r\n");
     if (!pRuntime->Ops.Start(pRuntime->Ops.pContext))
@@ -163,6 +253,7 @@ void HciTaktOsThread(void *pContext)
         {
             pRuntime->Ops.Fault(pRuntime->Ops.pContext, -1);
         }
+        HciTaktOsThreadLeave(pRuntime);
         return;
     }
 
@@ -171,7 +262,7 @@ void HciTaktOsThread(void *pContext)
      * and mpsl_low_priority_process has a deadline. Leaving this function
      * would stop the only caller of it, so a host that fails to start marks
      * the host down and the loop below is entered anyway. The host is retried
-     * on every pass, so a cable arriving late still brings it up.
+     * on every pass.
      */
     HciTrace("runtime: host start\r\n");
     pRuntime->HostStarted = pRuntime->HostOps.Start(pRuntime->HostOps.pContext);
@@ -241,9 +332,5 @@ void HciTaktOsThread(void *pContext)
         }
     }
 
-    pRuntime->Running = false;
-    pRuntime->ThreadLive = false;
-
-    /* Release anything waiting to tear the target down behind us. */
-    (void)TaktOSSemGive(&pRuntime->StoppedSem, false);
+    HciTaktOsThreadLeave(pRuntime);
 }
