@@ -4,6 +4,7 @@
 
 #include "hci_sdc.h"
 #include "hci_core_profile.h"
+#include "sdc_hci_vs.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -267,6 +268,137 @@ static void TestCore62SupplementalCommands(void)
 #endif
 }
 
+static void TestVendorSupplementalCommands(void)
+{
+    struct VendorCase
+    {
+        uint16_t Opcode;
+        size_t ParamLen;
+        HciCmdResponse_t Response;
+    };
+
+    static const VendorCase commands[] = {
+        {SDC_HCI_OPCODE_CMD_VS_CONN_EVENT_EXTEND,
+         sizeof(sdc_hci_cmd_vs_conn_event_extend_t), HCI_CMD_RESPONSE_COMPLETE},
+        {SDC_HCI_OPCODE_CMD_VS_EVENT_LENGTH_SET,
+         sizeof(sdc_hci_cmd_vs_event_length_set_t), HCI_CMD_RESPONSE_COMPLETE},
+        {SDC_HCI_OPCODE_CMD_VS_PERIODIC_ADV_EVENT_LENGTH_SET,
+         sizeof(sdc_hci_cmd_vs_periodic_adv_event_length_set_t), HCI_CMD_RESPONSE_COMPLETE},
+        {SDC_HCI_OPCODE_CMD_VS_PERIPHERAL_LATENCY_MODE_SET,
+         sizeof(sdc_hci_cmd_vs_peripheral_latency_mode_set_t), HCI_CMD_RESPONSE_COMPLETE},
+        {SDC_HCI_OPCODE_CMD_VS_WRITE_REMOTE_TX_POWER,
+         sizeof(sdc_hci_cmd_vs_write_remote_tx_power_t), HCI_CMD_RESPONSE_STATUS},
+        {SDC_HCI_OPCODE_CMD_VS_COMPAT_MODE_WINDOW_OFFSET_SET,
+         sizeof(sdc_hci_cmd_vs_compat_mode_window_offset_set_t), HCI_CMD_RESPONSE_COMPLETE},
+        {SDC_HCI_OPCODE_CMD_VS_SET_POWER_CONTROL_REQUEST_PARAMS,
+         sizeof(sdc_hci_cmd_vs_set_power_control_request_params_t), HCI_CMD_RESPONSE_COMPLETE},
+        {SDC_HCI_OPCODE_CMD_VS_CENTRAL_ACL_EVENT_SPACING_SET,
+         sizeof(sdc_hci_cmd_vs_central_acl_event_spacing_set_t), HCI_CMD_RESPONSE_COMPLETE},
+        {SDC_HCI_OPCODE_CMD_VS_ALLOW_PARALLEL_CONNECTION_ESTABLISHMENTS,
+         sizeof(sdc_hci_cmd_vs_allow_parallel_connection_establishments_t), HCI_CMD_RESPONSE_COMPLETE},
+        {SDC_HCI_OPCODE_CMD_VS_MIN_VAL_OF_MAX_ACL_TX_PAYLOAD_SET,
+         sizeof(sdc_hci_cmd_vs_min_val_of_max_acl_tx_payload_set_t), HCI_CMD_RESPONSE_COMPLETE},
+        {SDC_HCI_OPCODE_CMD_VS_SCAN_CHANNEL_MAP_SET,
+         sizeof(sdc_hci_cmd_vs_scan_channel_map_set_t), HCI_CMD_RESPONSE_COMPLETE},
+        {SDC_HCI_OPCODE_CMD_VS_SCAN_ACCEPT_EXT_ADV_PACKETS_SET,
+         sizeof(sdc_hci_cmd_vs_scan_accept_ext_adv_packets_set_t), HCI_CMD_RESPONSE_COMPLETE},
+        {SDC_HCI_OPCODE_CMD_VS_SET_ROLE_PRIORITY,
+         sizeof(sdc_hci_cmd_vs_set_role_priority_t), HCI_CMD_RESPONSE_COMPLETE},
+        {SDC_HCI_OPCODE_CMD_VS_SET_EVENT_START_TASK,
+         sizeof(sdc_hci_cmd_vs_set_event_start_task_t), HCI_CMD_RESPONSE_COMPLETE},
+        {SDC_HCI_OPCODE_CMD_VS_ENABLE_PERIODIC_ADV_EVENT_COUNTER_REPORTS,
+         sizeof(sdc_hci_cmd_vs_enable_periodic_adv_event_counter_reports_t), HCI_CMD_RESPONSE_COMPLETE},
+    };
+
+    HciSdc_t sdc;
+    FakeSdc backend = {};
+    uint8_t commandEvent[80];
+    Init(&sdc, &backend, commandEvent, sizeof(commandEvent));
+
+    uint8_t params[16] = {};
+    uint8_t packet[80];
+    for (size_t i = 0U; i < sizeof(commands) / sizeof(commands[0]); ++i)
+    {
+        assert(HciSdcKnowsCommand(&sdc, commands[i].Opcode,
+                                  commands[i].ParamLen));
+        assert(commands[i].ParamLen != 0U);
+        assert(!HciSdcKnowsCommand(&sdc, commands[i].Opcode,
+                                   commands[i].ParamLen - 1U));
+
+        const size_t packetLen =
+            RunSupplementalCommand(commands[i].Opcode, params,
+                                   commands[i].ParamLen,
+                                   packet, sizeof(packet));
+        if (commands[i].Response == HCI_CMD_RESPONSE_STATUS)
+        {
+            assert(packetLen == HCI_COMMAND_STATUS_SIZE);
+            assert(packet[0] == HCI_EVENT_COMMAND_STATUS);
+            assert(packet[2] == HCI_STATUS_SUCCESS);
+            assert(packet[4] == (uint8_t)commands[i].Opcode);
+            assert(packet[5] == (uint8_t)(commands[i].Opcode >> 8));
+        }
+        else
+        {
+            assert(packetLen == HCI_COMMAND_COMPLETE_BASE_SIZE);
+            assert(packet[0] == HCI_EVENT_COMMAND_COMPLETE);
+            assert(packet[3] == (uint8_t)commands[i].Opcode);
+            assert(packet[4] == (uint8_t)(commands[i].Opcode >> 8));
+            assert(packet[5] == HCI_STATUS_SUCCESS);
+        }
+    }
+
+    size_t packetLen = RunSupplementalCommand(
+        SDC_HCI_OPCODE_CMD_VS_CONN_EVENT_EXTEND, params, 0U,
+        packet, sizeof(packet));
+    assert(packetLen == HCI_COMMAND_COMPLETE_BASE_SIZE);
+    assert(packet[5] == HCI_STATUS_INVALID_HCI_PARAMETERS);
+
+    packetLen = RunSupplementalCommand(
+        SDC_HCI_OPCODE_CMD_VS_WRITE_REMOTE_TX_POWER, params,
+        sizeof(sdc_hci_cmd_vs_write_remote_tx_power_t) - 1U,
+        packet, sizeof(packet));
+    assert(packetLen == HCI_COMMAND_STATUS_SIZE);
+    assert(packet[0] == HCI_EVENT_COMMAND_STATUS);
+    assert(packet[2] == HCI_STATUS_INVALID_HCI_PARAMETERS);
+
+    const uint8_t dtmEnd[] = {SDC_HCI_VS_DTM_COMMAND_OPCODE_TEST_END};
+    packetLen = RunSupplementalCommand(SDC_HCI_OPCODE_CMD_VS_DTM_COMMAND,
+                                       dtmEnd, sizeof(dtmEnd),
+                                       packet, sizeof(packet));
+    assert(packetLen == HCI_COMMAND_COMPLETE_BASE_SIZE +
+                        sizeof(sdc_hci_cmd_vs_dtm_test_end_return_t));
+    assert(packet[0] == HCI_EVENT_COMMAND_COMPLETE);
+    assert(packet[5] == HCI_STATUS_SUCCESS);
+    assert(packet[6] == 0x5AU && packet[7] == 0x5AU);
+
+    const uint8_t dtmCarrier[] = {
+        SDC_HCI_VS_DTM_COMMAND_OPCODE_TRANSMITTER_CARRIER_TEST, 0U, 0U
+    };
+    packetLen = RunSupplementalCommand(SDC_HCI_OPCODE_CMD_VS_DTM_COMMAND,
+                                       dtmCarrier, sizeof(dtmCarrier),
+                                       packet, sizeof(packet));
+    assert(packetLen == HCI_COMMAND_COMPLETE_BASE_SIZE);
+    assert(packet[5] == HCI_STATUS_SUCCESS);
+
+    const uint8_t dtmInvalid[] = {0xFFU};
+    packetLen = RunSupplementalCommand(SDC_HCI_OPCODE_CMD_VS_DTM_COMMAND,
+                                       dtmInvalid, sizeof(dtmInvalid),
+                                       packet, sizeof(packet));
+    assert(packetLen == HCI_COMMAND_COMPLETE_BASE_SIZE);
+    assert(packet[5] == HCI_STATUS_INVALID_HCI_PARAMETERS);
+
+    const uint8_t dtmWrongLength[] = {
+        SDC_HCI_VS_DTM_COMMAND_OPCODE_TEST_END, 0U
+    };
+    packetLen = RunSupplementalCommand(SDC_HCI_OPCODE_CMD_VS_DTM_COMMAND,
+                                       dtmWrongLength, sizeof(dtmWrongLength),
+                                       packet, sizeof(packet));
+    assert(packetLen == HCI_COMMAND_COMPLETE_BASE_SIZE);
+    assert(packet[5] == HCI_STATUS_INVALID_HCI_PARAMETERS);
+
+    printf("[ok] nRF52840 SDC vendor supplemental commands route and validate\n");
+}
+
 static void TestEveryFailedAclCanReturnItsCredit(void)
 {
     HciSdc_t sdc;
@@ -384,6 +516,7 @@ int main(void)
     TestReadSupportedStatesCompatibilityCommand();
     TestSupportedCommandsAdvertisesCompatibilityCommand();
     TestCore62SupplementalCommands();
+    TestVendorSupplementalCommands();
     TestEveryFailedAclCanReturnItsCredit();
     TestSyntheticCreditsCannotStarveControllerQueue();
     TestUnsafeDefensiveCreditGuardIsOffByDefault();
