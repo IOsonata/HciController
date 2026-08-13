@@ -42,6 +42,17 @@ _tx_power_reporting.undo = (
 )
 _tx_power_reporting.undo_now = True
 
+# A peer is allowed not to support LE Power Control. 0x2077 can therefore
+# complete asynchronously with Unsupported Remote Feature, and Nordic's vendor
+# remote-power request can return the same status once that peer capability is
+# known. Those answers describe the peer, not a missing local HCI command.
+STATUS_UNSUPPORTED_REMOTE_FEATURE = 0x1A
+_remote_tx_power = _catalog.BY_OPCODE[0x2077]
+if STATUS_UNSUPPORTED_REMOTE_FEATURE not in _remote_tx_power.expect:
+    _remote_tx_power.expect = (
+        tuple(_remote_tx_power.expect) + (STATUS_UNSUPPORTED_REMOTE_FEATURE,)
+    )
+
 # The broad probe deliberately does not build a PAwR synchronized state before
 # driving Extended Create Connection v2. In that state Command Disallowed is a
 # valid state-dependent response, just as it is for the neighboring PAwR rows.
@@ -101,8 +112,10 @@ _SDC_VS = (
     Command(0xFD0A, "VS Write Remote TX Power", STATUS,
             lambda ctx: struct.pack("<HBb", ctx.handle, 0x01, 0),
             needs=NEEDS_CONN,
-            expect=(STATUS_COMMAND_DISALLOWED, STATUS_UNSUPPORTED_FEATURE),
-            note="1M PHY, delta 0 requests information without a power change"),
+            expect=(STATUS_COMMAND_DISALLOWED, STATUS_UNSUPPORTED_FEATURE,
+                    STATUS_UNSUPPORTED_REMOTE_FEATURE),
+            note="1M PHY, delta 0 requests information without a power change; "
+                 "0x1A means the peer does not support LE Power Control"),
     Command(0xFD0D, "VS Compatibility Mode Window Offset Set", COMPLETE,
             b"\x00", note="disabled/default state retained across HCI Reset"),
     Command(0xFD10, "VS Set Power Control Request Parameters", COMPLETE,

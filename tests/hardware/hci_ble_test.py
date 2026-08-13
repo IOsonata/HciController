@@ -17,8 +17,8 @@ ordering that depends on asynchronous controller state:
 * --only narrows the connection-scoped rows too, so it really isolates a
   command after the connection preamble rather than replaying every link row;
 * LE Read Remote Transmit Power Level is not complete at Command Status.  The
-  probe waits for its LE Transmit Power Reporting event before another
-  power-control procedure is allowed to start;
+  probe keeps LE Transmit Power Reporting unmasked and waits for that terminal
+  event before another power-control procedure is allowed to start;
 * VS Write Remote TX Power treats Controller Busy as transient while an
   earlier power-control procedure finishes. It retries for a bounded interval
   and still reports 0x3A as a failure if the controller remains busy;
@@ -50,6 +50,7 @@ _STATUS_CONTROLLER_BUSY = 0x3A
 _OP_LE_READ_REMOTE_TX_POWER = 0x2077
 _OP_VS_WRITE_REMOTE_TX_POWER = 0xFD0A
 _LE_TRANSMIT_POWER_REPORTING = 0x21
+_LE_EVENT_MASK_TRANSMIT_POWER_REPORTING = 1 << 32
 _POWER_REPORT_REASON_READ_REMOTE = 0x02
 _REMOTE_TX_POWER_TIMEOUT = 5.0
 _FD0A_BUSY_RETRIES = 10
@@ -176,10 +177,6 @@ def probe_available(command, args, live_handle, ctx):
                 % (ctx.handle, reason, _impl.ERROR_NAMES.get(reason, ""))
             )
 
-    # cmd_probe sorts Disconnect last.  The original implementation waited for
-    # optional pairing before any connection-scoped row, which let an
-    # interactive timeout or phone-side disconnect invalidate the whole group.
-    # Run that wait here instead, after all ordinary rows have had their chance.
     if command.opcode == _impl.OP_DISCONNECT and _deferred_pairing is not None:
         pair_hci, handlers, smp, pair_args = _deferred_pairing
         _deferred_pairing = None
@@ -206,11 +203,6 @@ def cmd_probe(hci, args):
     raw_command = hci.command
 
     # The implementation filters phase rows for --only, but rebuilt the
-    # connection-scoped list independently from the full catalog. Narrow the
-    # catalog for this invocation so that list sees the same selection. The
-    # preamble and cleanup commands are intentionally not catalog rows and
-    # still run, because they establish and restore the state the selected row
-    # needs.
     original_commands = _impl.hci_commands.COMMANDS
     if args.only:
         selected = set(int(value, 0) for value in
@@ -220,11 +212,6 @@ def cmd_probe(hci, args):
             if command.opcode in selected
         )
 
-    # The implementation keeps its counters local to cmd_probe.  Its summary is
-    # therefore the one stable boundary available to this sequencing wrapper.
-    # Forward every print unchanged while remembering the explicit
-    # "refused otherwise" count. Those are statuses not listed in the command
-    # row's expect= set, so any nonzero value is a validation failure.
     had_module_print = "print" in _impl.__dict__
     previous_print = _impl.__dict__.get("print")
     refused_otherwise = None
@@ -240,10 +227,14 @@ def cmd_probe(hci, args):
     def guarded_command(opcode, payload=b"", timeout=3.0, allow_fail=False):
         global _cancel_pending
 
-        # Cleanup after a phone-side disconnect is deliberately quiet.  The
-        # counted Disconnect row is already skipped by probe_available; the
-        # unconditional final cleanup in the implementation need not put one
-        # more command on a handle that no longer exists.
+        # phases and restores a deliberately narrow LE event mask.  0x2077 is
+        # asynchronous, so its terminal LE Transmit Power Reporting event must
+        # following power-control command. Preserve every bit the caller asked
+        if opcode == _impl.OP_LE_SET_EVENT_MASK and len(payload) == 8:
+            mask = int.from_bytes(payload, "little")
+            mask |= _LE_EVENT_MASK_TRANSMIT_POWER_REPORTING
+            payload = mask.to_bytes(8, "little")
+
         if opcode == _impl.OP_DISCONNECT and len(payload) >= 2:
             handle = struct.unpack("<H", payload[:2])[0]
             if _link_down_for(hci, handle):
@@ -254,10 +245,8 @@ def cmd_probe(hci, args):
         result = raw_command(opcode, payload, timeout=timeout,
                              allow_fail=allow_fail)
 
-        # Vol 4 Part E 7.8.118 is a two-stage command: Command Status accepts
         # the request, then LE Transmit Power Reporting reason 0x02 says the LL
         # Power Control Request procedure is finished. Starting another power
-        # control procedure in between is what made Nordic return Controller
         # Busy for 0xFD0A in the broad probe.
         if (opcode == _OP_LE_READ_REMOTE_TX_POWER and result[0] == 0
                 and len(payload) >= 2):
@@ -274,11 +263,7 @@ def cmd_probe(hci, args):
                 result = terminal_status, b""
 
         # Nordic may answer Controller Busy while an earlier LL power-control
-        # procedure is still in flight. That is transient, not an expected
         # terminal answer for VS Write Remote TX Power. Retry only this command
-        # and only when the probe asked to receive failure statuses. A
-        # controller that remains busy after the bounded retries returns 0x3A
-        # to the normal refusal path and still fails validation.
         if (opcode == _OP_VS_WRITE_REMOTE_TX_POWER and allow_fail
                 and result[0] == _STATUS_CONTROLLER_BUSY):
             builtins.print(
@@ -297,19 +282,12 @@ def cmd_probe(hci, args):
                     % (retries, "retry" if retries == 1 else "retries",
                        _impl.status_text(result[0])))
 
-        # Command Complete for LE Create Connection Cancel only says that the
-        # cancel command was accepted.  The initiating procedure ends on the
-        # later LE connection-complete event.  Starting another initiator
-        # before that event is exactly what produced the false 0x0C on 0x2085.
         if opcode == _impl.OP_LE_CREATE_CONNECTION_CANCEL and result[0] == 0:
             _cancel_pending = True
             terminal = _wait_for_cancel_terminal(hci, 2.0)
             if terminal is not None:
                 _cancel_pending = False
 
-                # A successful connection means the cancel lost the race.  It
-                # is not the case the probe asks for, but do not leave that
-                # accidental connection around to contaminate later rows.
                 status, handle = terminal[0], terminal[1]
                 if status == 0:
                     raw_command(_impl.OP_DISCONNECT,
@@ -336,9 +314,6 @@ def cmd_probe(hci, args):
         _cancel_pending = False
 
 
-# The implementation's functions resolve these names through its module
-# globals, so installing the guards here fixes both direct CLI use and callers
-# that import cmd_probe from hci_ble_test.
 _impl.probe_available = probe_available
 _impl.probe_wait_for_peer = probe_wait_for_peer
 _impl.probe_wait_for_ltk = probe_wait_for_ltk
