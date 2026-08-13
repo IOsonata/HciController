@@ -53,7 +53,7 @@ def _run_row(label, hci, row, ctx, counts):
 
     counts["failed"] += 1
     print("[!!] %-10s 0x%04X %-50s %s"
-          % (label, row.opcode, row.name, status_text(status))
+          % (label, row.opcode, row.name, status_text(status)))
 
 
 def run_role(label, role, hci, handle, addr_type, selected, counts):
