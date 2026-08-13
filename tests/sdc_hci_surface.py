@@ -4,8 +4,7 @@ Audit the complete SDC HCI command surface against HciController routing.
 
 Every sdc_hci_cmd_* entry point exported by the selected nRF52 multirole SDC
 archive must be either routed by HciController or explicitly classified below.
-This is intentionally stricter than sdc_symbols.py, which verifies the current
-release-selected feature profile.
+This is intentionally stricter than the release-profile audit.
 
     python3 tests/sdc_hci_surface.py
     python3 tests/sdc_hci_surface.py /path/to/libsoftdevice_controller_multirole.a
@@ -17,7 +16,7 @@ verified against the SDC headers/documentation and the nRF52840 capability set.
 import os
 import sys
 
-from sdc_symbols import (
+from sdc_symbols_release import (
     DEFAULT_LIB,
     KNOWN_ABSENT,
     TABLE_SOURCES,
