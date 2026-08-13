@@ -25,10 +25,19 @@ from sdc_symbols_release import (
 )
 
 # Exported SDC HCI entry points intentionally not routed by HciController.
-# Keep this empty until each candidate is individually verified. Values must
-# state the concrete reason (alternate/deprecated API, unavailable hardware,
-# unusable configuration, or an intentional optional exclusion).
+# Every entry below maps to a support API that the nRF52840 profile explicitly
+# excludes because this SoC has no Bluetooth Direction Finding radio support.
 HCI_CLASSIFIED_NOT_ROUTED = {
+    "sdc_hci_cmd_le_conn_cte_response_enable":
+        "nRF52840 has no Direction Finding radio support; connection CTE response support is excluded",
+    "sdc_hci_cmd_le_read_antenna_information":
+        "nRF52840 has no Direction Finding radio support or antenna-switching capability exposed by SDC",
+    "sdc_hci_cmd_le_set_conn_cte_transmit_params":
+        "nRF52840 has no Direction Finding radio support; connection CTE transmit parameters are unusable",
+    "sdc_hci_cmd_le_set_connless_cte_transmit_enable":
+        "nRF52840 has no Direction Finding radio support; connectionless CTE transmitter support is excluded",
+    "sdc_hci_cmd_le_set_connless_cte_transmit_params":
+        "nRF52840 has no Direction Finding radio support; connectionless CTE transmit parameters are unusable",
 }
 
 

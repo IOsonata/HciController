@@ -4,6 +4,7 @@
 
 #include "hci_sdc.h"
 #include "hci_core_profile.h"
+#include "sdc_hci_cmd_controller_baseband.h"
 #include "sdc_hci_vs.h"
 
 #include <assert.h>
@@ -191,6 +192,11 @@ static void TestSupportedCommandsAdvertisesCompatibilityCommand(void)
     assert(type == HCI_H4_PACKET_EVENT);
     assert(packetLen == 70U);
     assert(packet[5] == HCI_STATUS_SUCCESS);
+    assert((packet[6U + 9U] & (1U << 4)) != 0U);
+    assert((packet[6U + 9U] & (1U << 5)) != 0U);
+    assert((packet[6U + 10U] & (1U << 5)) != 0U);
+    assert((packet[6U + 10U] & (1U << 6)) != 0U);
+    assert((packet[6U + 10U] & (1U << 7)) != 0U);
     assert((packet[6U + 28U] & (1U << 3)) != 0U);
 #if HCI_CONTROLLER_TARGET_CORE_VERSION >= HCI_CORE_VERSION_6_2
     assert((packet[6U + 48U] & (1U << 1)) != 0U);
@@ -200,6 +206,96 @@ static void TestSupportedCommandsAdvertisesCompatibilityCommand(void)
 #endif
 
     printf("[ok] Read Local Supported Commands advertises supplemental commands\n");
+}
+
+static void TestControllerBasebandSupplementalCommands(void)
+{
+    uint8_t packet[80];
+
+    const uint8_t readFlush[] = {0x34U, 0x12U};
+    size_t packetLen = RunSupplementalCommand(
+        SDC_HCI_OPCODE_CMD_CB_READ_AUTOMATIC_FLUSH_TIMEOUT,
+        readFlush, sizeof(readFlush), packet, sizeof(packet));
+    assert(packetLen == HCI_COMMAND_COMPLETE_BASE_SIZE + 4U);
+    assert(packet[0] == HCI_EVENT_COMMAND_COMPLETE);
+    assert(packet[3] == 0x27U && packet[4] == 0x0CU);
+    assert(packet[5] == HCI_STATUS_SUCCESS);
+    assert(packet[6] == 0x34U && packet[7] == 0x12U);
+    assert(packet[8] == 0U && packet[9] == 0U);
+
+    const uint8_t writeFlush[] = {0x34U, 0x12U, 0x00U, 0x00U};
+    packetLen = RunSupplementalCommand(
+        SDC_HCI_OPCODE_CMD_CB_WRITE_AUTOMATIC_FLUSH_TIMEOUT,
+        writeFlush, sizeof(writeFlush), packet, sizeof(packet));
+    assert(packetLen == HCI_COMMAND_COMPLETE_BASE_SIZE + 2U);
+    assert(packet[0] == HCI_EVENT_COMMAND_COMPLETE);
+    assert(packet[3] == 0x28U && packet[4] == 0x0CU);
+    assert(packet[5] == HCI_STATUS_SUCCESS);
+    assert(packet[6] == 0x34U && packet[7] == 0x12U);
+
+    const uint8_t flowOff[] = {0x00U};
+    packetLen = RunSupplementalCommand(
+        SDC_HCI_OPCODE_CMD_CB_SET_CONTROLLER_TO_HOST_FLOW_CONTROL,
+        flowOff, sizeof(flowOff), packet, sizeof(packet));
+    assert(packetLen == HCI_COMMAND_COMPLETE_BASE_SIZE);
+    assert(packet[5] == HCI_STATUS_SUCCESS);
+
+    const uint8_t hostBuffer[] = {
+        0xFBU, 0x00U, 0x00U, 0x04U, 0x00U, 0x00U, 0x00U
+    };
+    packetLen = RunSupplementalCommand(
+        SDC_HCI_OPCODE_CMD_CB_HOST_BUFFER_SIZE,
+        hostBuffer, sizeof(hostBuffer), packet, sizeof(packet));
+    assert(packetLen == HCI_COMMAND_COMPLETE_BASE_SIZE);
+    assert(packet[5] == HCI_STATUS_SUCCESS);
+
+    HciSdc_t sdc;
+    FakeSdc backend = {};
+    uint8_t commandEvent[80];
+    Init(&sdc, &backend, commandEvent, sizeof(commandEvent));
+    const HciControllerOps_t *controller = HciSdcGetControllerOps(&sdc);
+
+    const uint8_t reset[] = {0x03U, 0x0CU, 0x00U};
+    assert(controller->Put(controller->pContext, HCI_H4_PACKET_COMMAND,
+                           reset, sizeof(reset)));
+
+    const uint8_t hostCompleted[] = {
+        0x35U, 0x0CU, 0x05U,
+        0x01U, 0x34U, 0x12U, 0x00U, 0x00U
+    };
+    assert(controller->Put(controller->pContext, HCI_H4_PACKET_COMMAND,
+                           hostCompleted, sizeof(hostCompleted)));
+    assert(!HciCmdDispatchEventPending(&sdc.CompatCommands));
+
+    HciH4PacketType_t type = HCI_H4_PACKET_NONE;
+    packetLen = 0U;
+    assert(controller->Get(controller->pContext, &type, packet,
+                           sizeof(packet), &packetLen) ==
+           HCI_CONTROLLER_GET_PACKET);
+    assert(type == HCI_H4_PACKET_EVENT);
+    assert(packet[0] == HCI_EVENT_COMMAND_COMPLETE);
+    assert(packet[3] == 0x03U && packet[4] == 0x0CU);
+
+    backend.GetResult = HCI_SDC_RETRY_ERROR;
+    assert(controller->Get(controller->pContext, &type, packet,
+                           sizeof(packet), &packetLen) ==
+           HCI_CONTROLLER_GET_EMPTY);
+
+    const uint8_t malformedCompleted[] = {
+        0x35U, 0x0CU, 0x05U,
+        0x02U, 0x34U, 0x12U, 0x00U, 0x00U
+    };
+    assert(controller->Put(controller->pContext, HCI_H4_PACKET_COMMAND,
+                           malformedCompleted, sizeof(malformedCompleted)));
+    assert(controller->Get(controller->pContext, &type, packet,
+                           sizeof(packet), &packetLen) ==
+           HCI_CONTROLLER_GET_PACKET);
+    assert(packetLen == HCI_COMMAND_COMPLETE_BASE_SIZE);
+    assert(packet[0] == HCI_EVENT_COMMAND_COMPLETE);
+    assert(packet[3] == 0x35U && packet[4] == 0x0CU);
+    assert(packet[5] == HCI_STATUS_INVALID_HCI_PARAMETERS);
+
+    printf("[ok] SDC Controller/Baseband supplemental commands route with correct replies\n");
 }
 
 static void TestCore62SupplementalCommands(void)
@@ -515,6 +611,7 @@ int main(void)
 {
     TestReadSupportedStatesCompatibilityCommand();
     TestSupportedCommandsAdvertisesCompatibilityCommand();
+    TestControllerBasebandSupplementalCommands();
     TestCore62SupplementalCommands();
     TestVendorSupplementalCommands();
     TestEveryFailedAclCanReturnItsCredit();

@@ -177,6 +177,148 @@ static HciCmdResult_t HciSdcCompatReadSupportedStates(void *,
     return result;
 }
 
+static HciCmdResult_t HciSdcCbReadAutomaticFlushTimeout(
+    void *,
+    const uint8_t *pParams,
+    size_t,
+    uint8_t *pReturn,
+    size_t ReturnCapacity)
+{
+    sdc_hci_cmd_cb_read_automatic_flush_timeout_t params;
+    sdc_hci_cmd_cb_read_automatic_flush_timeout_return_t value;
+
+    if (ReturnCapacity < sizeof(value))
+    {
+        HciCmdResult_t error = {
+            HCI_STATUS_MEMORY_CAPACITY_EXCEEDED,
+            HCI_CMD_RESPONSE_COMPLETE,
+            0U,
+        };
+        return error;
+    }
+
+    memcpy(&params, pParams, sizeof(params));
+    const uint8_t status =
+        sdc_hci_cmd_cb_read_automatic_flush_timeout(&params, &value);
+    if (status == HCI_STATUS_SUCCESS)
+    {
+        memcpy(pReturn, &value, sizeof(value));
+    }
+
+    HciCmdResult_t result = {
+        status,
+        HCI_CMD_RESPONSE_COMPLETE,
+        status == HCI_STATUS_SUCCESS ? sizeof(value) : 0U,
+    };
+    return result;
+}
+
+static HciCmdResult_t HciSdcCbWriteAutomaticFlushTimeout(
+    void *,
+    const uint8_t *pParams,
+    size_t,
+    uint8_t *pReturn,
+    size_t ReturnCapacity)
+{
+    sdc_hci_cmd_cb_write_automatic_flush_timeout_t params;
+    sdc_hci_cmd_cb_write_automatic_flush_timeout_return_t value;
+
+    if (ReturnCapacity < sizeof(value))
+    {
+        HciCmdResult_t error = {
+            HCI_STATUS_MEMORY_CAPACITY_EXCEEDED,
+            HCI_CMD_RESPONSE_COMPLETE,
+            0U,
+        };
+        return error;
+    }
+
+    memcpy(&params, pParams, sizeof(params));
+    const uint8_t status =
+        sdc_hci_cmd_cb_write_automatic_flush_timeout(&params, &value);
+    if (status == HCI_STATUS_SUCCESS)
+    {
+        memcpy(pReturn, &value, sizeof(value));
+    }
+
+    HciCmdResult_t result = {
+        status,
+        HCI_CMD_RESPONSE_COMPLETE,
+        status == HCI_STATUS_SUCCESS ? sizeof(value) : 0U,
+    };
+    return result;
+}
+
+static HciCmdResult_t HciSdcCbSetControllerToHostFlowControl(
+    void *,
+    const uint8_t *pParams,
+    size_t,
+    uint8_t *,
+    size_t)
+{
+    sdc_hci_cmd_cb_set_controller_to_host_flow_control_t params;
+    memcpy(&params, pParams, sizeof(params));
+    HciCmdResult_t result = {
+        sdc_hci_cmd_cb_set_controller_to_host_flow_control(&params),
+        HCI_CMD_RESPONSE_COMPLETE,
+        0U,
+    };
+    return result;
+}
+
+static HciCmdResult_t HciSdcCbHostBufferSize(void *,
+                                              const uint8_t *pParams,
+                                              size_t,
+                                              uint8_t *,
+                                              size_t)
+{
+    sdc_hci_cmd_cb_host_buffer_size_t params;
+    memcpy(&params, pParams, sizeof(params));
+    HciCmdResult_t result = {
+        sdc_hci_cmd_cb_host_buffer_size(&params),
+        HCI_CMD_RESPONSE_COMPLETE,
+        0U,
+    };
+    return result;
+}
+
+static HciCmdResult_t HciSdcCbHostNumberOfCompletedPackets(
+    void *,
+    const uint8_t *pParams,
+    size_t ParamLen,
+    uint8_t *,
+    size_t)
+{
+    static const size_t headerLen = 1U;
+    static const size_t itemLen =
+        sizeof(sdc_hci_cb_host_number_of_completed_packets_array_params_t);
+
+    if (ParamLen < headerLen ||
+        ParamLen != headerLen + (size_t)pParams[0] * itemLen)
+    {
+        HciCmdResult_t error = {
+            HCI_STATUS_INVALID_HCI_PARAMETERS,
+            HCI_CMD_RESPONSE_COMPLETE,
+            0U,
+        };
+        return error;
+    }
+
+    const sdc_hci_cmd_cb_host_number_of_completed_packets_t *params =
+        reinterpret_cast<
+            const sdc_hci_cmd_cb_host_number_of_completed_packets_t *>(pParams);
+    const uint8_t status =
+        sdc_hci_cmd_cb_host_number_of_completed_packets(params);
+
+    HciCmdResult_t result = {
+        status,
+        status == HCI_STATUS_SUCCESS ? HCI_CMD_RESPONSE_NONE
+                                     : HCI_CMD_RESPONSE_COMPLETE,
+        0U,
+    };
+    return result;
+}
+
 #define HCI_SDC_VS_FIXED_HANDLER(Name, Function, ParamType, ResponseKind)       \
     static HciCmdResult_t Name(void *,                                           \
                                const uint8_t *pParams,                            \
@@ -463,6 +605,31 @@ static const HciCmdEntry_t s_HciSdcCompatCommands[] = {
      8U,
      HCI_CMD_RESPONSE_COMPLETE,
      HciSdcCompatReadSupportedStates},
+    {SDC_HCI_OPCODE_CMD_CB_READ_AUTOMATIC_FLUSH_TIMEOUT,
+     (uint16_t)sizeof(sdc_hci_cmd_cb_read_automatic_flush_timeout_t),
+     (uint16_t)sizeof(sdc_hci_cmd_cb_read_automatic_flush_timeout_return_t),
+     HCI_CMD_RESPONSE_COMPLETE,
+     HciSdcCbReadAutomaticFlushTimeout},
+    {SDC_HCI_OPCODE_CMD_CB_WRITE_AUTOMATIC_FLUSH_TIMEOUT,
+     (uint16_t)sizeof(sdc_hci_cmd_cb_write_automatic_flush_timeout_t),
+     (uint16_t)sizeof(sdc_hci_cmd_cb_write_automatic_flush_timeout_return_t),
+     HCI_CMD_RESPONSE_COMPLETE,
+     HciSdcCbWriteAutomaticFlushTimeout},
+    {SDC_HCI_OPCODE_CMD_CB_SET_CONTROLLER_TO_HOST_FLOW_CONTROL,
+     (uint16_t)sizeof(sdc_hci_cmd_cb_set_controller_to_host_flow_control_t),
+     0U,
+     HCI_CMD_RESPONSE_COMPLETE,
+     HciSdcCbSetControllerToHostFlowControl},
+    {SDC_HCI_OPCODE_CMD_CB_HOST_BUFFER_SIZE,
+     (uint16_t)sizeof(sdc_hci_cmd_cb_host_buffer_size_t),
+     0U,
+     HCI_CMD_RESPONSE_COMPLETE,
+     HciSdcCbHostBufferSize},
+    {SDC_HCI_OPCODE_CMD_CB_HOST_NUMBER_OF_COMPLETED_PACKETS,
+     HCI_CMD_VARIABLE_PARAM_LEN,
+     0U,
+     HCI_CMD_RESPONSE_NONE,
+     HciSdcCbHostNumberOfCompletedPackets},
     {SDC_HCI_OPCODE_CMD_VS_DTM_COMMAND,
      HCI_CMD_VARIABLE_PARAM_LEN,
      0U,
@@ -574,6 +741,11 @@ static bool HciSdcSupplementalOpcode(uint16_t Opcode)
         case HCI_SDC_COMPAT_OPCODE_READ_CONN_ACCEPT_TIMEOUT:
         case HCI_SDC_COMPAT_OPCODE_WRITE_CONN_ACCEPT_TIMEOUT:
         case HCI_SDC_COMPAT_OPCODE_LE_READ_SUPPORTED_STATES:
+        case SDC_HCI_OPCODE_CMD_CB_READ_AUTOMATIC_FLUSH_TIMEOUT:
+        case SDC_HCI_OPCODE_CMD_CB_WRITE_AUTOMATIC_FLUSH_TIMEOUT:
+        case SDC_HCI_OPCODE_CMD_CB_SET_CONTROLLER_TO_HOST_FLOW_CONTROL:
+        case SDC_HCI_OPCODE_CMD_CB_HOST_BUFFER_SIZE:
+        case SDC_HCI_OPCODE_CMD_CB_HOST_NUMBER_OF_COMPLETED_PACKETS:
         case SDC_HCI_OPCODE_CMD_VS_DTM_COMMAND:
         case SDC_HCI_OPCODE_CMD_VS_CONN_EVENT_EXTEND:
         case SDC_HCI_OPCODE_CMD_VS_EVENT_LENGTH_SET:
@@ -606,14 +778,16 @@ static bool HciSdcSupplementalOpcode(uint16_t Opcode)
 /*
  * Read Local Supported Commands is supplied by nrfxlib, but supplemental
  * commands must describe the complete HCI controller, not merely the vendor
- * table. The compatibility rows add the timeout pair and LE Read Supported
- * States. Core 6.2 adds Frame Space Update and the three Shorter Connection
- * Intervals commands in octet 48.
+ * table. The compatibility rows add the timeout pair, automatic flush timeout,
+ * Host flow-control commands and LE Read Supported States. Core 6.2 adds Frame
+ * Space Update and the three Shorter Connection Intervals commands in octet 48.
  */
 static void HciSdcPatchSupportedCommands(uint8_t *pEvent, size_t EventLen)
 {
     const uint16_t readSupportedCommands = 0x1002U;
     const size_t timeoutByte = HCI_COMMAND_COMPLETE_BASE_SIZE + 7U;
+    const size_t automaticFlushByte = HCI_COMMAND_COMPLETE_BASE_SIZE + 9U;
+    const size_t hostFlowByte = HCI_COMMAND_COMPLETE_BASE_SIZE + 10U;
     const size_t statesByte = HCI_COMMAND_COMPLETE_BASE_SIZE + 28U;
 
     if (EventLen <= statesByte || pEvent[0] != HCI_EVENT_COMMAND_COMPLETE ||
@@ -624,6 +798,8 @@ static void HciSdcPatchSupportedCommands(uint8_t *pEvent, size_t EventLen)
     }
 
     pEvent[timeoutByte] |= (uint8_t)((1U << 2) | (1U << 3));
+    pEvent[automaticFlushByte] |= (uint8_t)((1U << 4) | (1U << 5));
+    pEvent[hostFlowByte] |= (uint8_t)((1U << 5) | (1U << 6) | (1U << 7));
     pEvent[statesByte] |= (1U << 3);
 
 #if HCI_CONTROLLER_TARGET_CORE_VERSION >= HCI_CORE_VERSION_6_2
@@ -1021,27 +1197,22 @@ static bool HciSdcPutPacket(void *pContext,
         case HCI_H4_PACKET_COMMAND:
         {
             /*
-             * Hold the next command until the controller queue has had the
-             * outgoing slot. Without this a host that keeps a command in
-             * flight, which it is entitled to do because every Command
-             * Complete hands back a credit, produces a fresh command event on
-             * every pass and sdc_hci_get is never reached. Refusing here is
-             * ordinary backpressure: the parser keeps the packet and offers it
-             * again next pass.
-             *
-             * There are two command dispatchers, so the pending check spans
-             * both. Otherwise a vendor command could occupy one event slot
-             * while a supplemental command occupies the other, granting a
-             * second command credit the controller never intended to grant.
-             *
-             * A delayed SDC completion is the same command-credit condition,
-             * except there is no dispatcher event to expose it. Keep the next
-             * command at the parser until that real completion is forwarded.
+             * Hold an ordinary command until the controller queue has had the
+             * outgoing slot. Host Number Of Completed Packets is the Core
+             * exception: Vol 4 Part E 7.3.40 excludes it from normal command
+             * flow control, so a valid silent instance may pass while another
+             * command is awaiting its event.
              */
-            if (pSdc->DelayedCommandPending ||
-                pSdc->CommandEventLast ||
-                HciCmdDispatchEventPending(&pSdc->Commands) ||
-                HciCmdDispatchEventPending(&pSdc->CompatCommands))
+            const bool independentHostFlowCommand =
+                PacketLen >= HCI_DISPATCH_COMMAND_HEADER_SIZE &&
+                HciSdcReadLe16(pPacket) ==
+                    SDC_HCI_OPCODE_CMD_CB_HOST_NUMBER_OF_COMPLETED_PACKETS;
+
+            if (!independentHostFlowCommand &&
+                (pSdc->DelayedCommandPending ||
+                 pSdc->CommandEventLast ||
+                 HciCmdDispatchEventPending(&pSdc->Commands) ||
+                 HciCmdDispatchEventPending(&pSdc->CompatCommands)))
             {
                 pSdc->CommandDeferredCount++;
                 return false;

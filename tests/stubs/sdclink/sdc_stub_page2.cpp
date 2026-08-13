@@ -112,6 +112,34 @@ uint8_t sdc_hci_cmd_cb_write_conn_accept_timeout(
     return g_SdcStub.NextStatus;
 }
 
+uint8_t sdc_hci_cmd_cb_read_automatic_flush_timeout(
+    const sdc_hci_cmd_cb_read_automatic_flush_timeout_t *pParams,
+    sdc_hci_cmd_cb_read_automatic_flush_timeout_return_t *pReturn)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_cb_read_automatic_flush_timeout";
+    g_SdcStub.Calls++;
+    (void)pParams;
+    if (pReturn != NULL)
+    {
+        memset(pReturn, 0x5A, sizeof(*pReturn));
+    }
+    return g_SdcStub.NextStatus;
+}
+
+uint8_t sdc_hci_cmd_cb_write_automatic_flush_timeout(
+    const sdc_hci_cmd_cb_write_automatic_flush_timeout_t *pParams,
+    sdc_hci_cmd_cb_write_automatic_flush_timeout_return_t *pReturn)
+{
+    g_SdcStub.LastCall = "sdc_hci_cmd_cb_write_automatic_flush_timeout";
+    g_SdcStub.Calls++;
+    (void)pParams;
+    if (pReturn != NULL)
+    {
+        memset(pReturn, 0x5A, sizeof(*pReturn));
+    }
+    return g_SdcStub.NextStatus;
+}
+
 uint8_t sdc_hci_cmd_le_read_all_local_supported_features(
     sdc_hci_cmd_le_read_all_local_supported_features_return_t *pReturn)
 {
