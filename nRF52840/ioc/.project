@@ -121,6 +121,11 @@
 			<locationURI>PARENT-2-PROJECT_LOC/include/hci_trace.h</locationURI>
 		</link>
 		<link>
+			<name>include/hci_version.h</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/include/hci_version.h</locationURI>
+		</link>
+		<link>
 			<name>include/hci_usb.h</name>
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/include/hci_usb.h</locationURI>
