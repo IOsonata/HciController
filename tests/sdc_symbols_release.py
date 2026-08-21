@@ -37,13 +37,14 @@ TABLE_SOURCES = (
 )
 RESOURCE_SOURCE = ("src", "hci_sdc_resources.cpp")
 
-# Core 6.2 HCI entry points that current nRF52 multirole SDC must provide and
+# HCI entry points that current nRF52 multirole SDC must provide and
 # HciController must route. These are release requirements now, not candidates.
 REQUIRED_HCI = {
     "sdc_hci_cmd_le_frame_space_update",
     "sdc_hci_cmd_le_conn_rate_request",
     "sdc_hci_cmd_le_set_default_rate_params",
     "sdc_hci_cmd_le_read_min_supported_conn_interval",
+    "sdc_hci_cmd_vs_dtm_command",
 }
 
 # Support APIs that must be present in the configured release-1 profile.
