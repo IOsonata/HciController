@@ -14,6 +14,7 @@
 
 #include "nrf.h"
 
+#include "istddef.h"
 #include "TaktOS.h"
 #include "TaktOSThread.h"
 #include "board.h"
@@ -22,9 +23,11 @@
 #include "hci_app.h"
 #include "hci_nrf52840.h"
 #include "hci_trace.h"
+#include "hci_version.h"
 #include "iopinctrl.h"
 #include "miscdev/led.h"
 
+#define DEVICE_NAME             "HciController"
 #define HCI_THREAD_STACK_SIZE    3072U
 #define STATUS_THREAD_STACK_SIZE 512U
 #define STATUS_UPDATE_MS         100U
@@ -39,6 +42,13 @@
 #ifdef MCU_OSC
 McuOsc_t g_McuOsc = MCU_OSC;
 #endif
+
+__attribute__ ((section(".Version"), used))
+const AppInfo_t g_AppInfo = {
+    DEVICE_NAME,
+    {FIRMWARE_VERSION, 0U, BUILDN},
+    {0},
+};
 
 /*
  * A board without a status LED reachable from this part, which is any board
