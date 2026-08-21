@@ -40,6 +40,16 @@ static_assert((HCI_SDC_PERIODIC_ADV_COUNT + HCI_SDC_PERIODIC_ADV_RSP_COUNT) <=
 
 static int32_t s_Required;
 
+/*
+ * hci_counters.cpp carries a weak zero-valued fallback with this name so its
+ * portable host tests do not have to link nrfxlib. Firmware links this strong
+ * definition and therefore reports the final sdc_cfg_set value at read time.
+ */
+extern "C" int32_t HciSdcResourcesRequired(void)
+{
+    return s_Required;
+}
+
 static bool HciSdcCfgSet(uint8_t Type, const sdc_cfg_t *pCfg)
 {
     int32_t required = sdc_cfg_set(SDC_DEFAULT_RESOURCE_CFG_TAG, Type, pCfg);
@@ -356,13 +366,7 @@ int32_t HciSdcResourcesApply(void)
         return s_Required;
     }
 
-
-    int32_t required =
+    s_Required =
         sdc_cfg_set(SDC_DEFAULT_RESOURCE_CFG_TAG, SDC_CFG_TYPE_NONE, nullptr);
-    if (required < 0)
-    {
-        return required;
-    }
-
-    return required;
+    return s_Required;
 }

@@ -245,7 +245,7 @@ check-usb-desc:
 ifneq ($(strip $(TINYUSB_SRC)),)
 	@echo "[TEST] usb_descriptors.c against TinyUSB"
 	@$(CC) -fsyntax-only -I$(STUBS)/nrfficr -I$(ROOT)/include \
-	  -I$(TINYUSB_DIR)/src -DCFG_TUSB_MCU=OPT_MCU_NRF5X \
+	  -I$(TINYUSB_DIR)/src -I$(STUBS) -DCFG_TUSB_MCU=OPT_MCU_NRF5X \
 	  -std=c11 -Wall -Wextra -Werror $(SRC)/usb_descriptors.c
 	@echo "[ok] descriptor length matches what it declares"
 else
@@ -313,26 +313,24 @@ check-boards:
 	@echo "[TEST] board_pins.py"
 	@$(PYTHON) $(THIS_DIR)/board_pins.py $(ROOT)
 
-# The connection complete parser is shared by advertise, connect, probe and the
-# two controller CIS run, and the only thing that had ever exercised it was a
-# board. Enhanced v2 arriving on the wire is what showed that up. This replays
-# the event bodies captured from that run, so it needs no hardware, and it
-# imports hci_events rather than hci_ble_test so it needs no pyserial either.
+# The connection complete parser is shared by the radio probe and the
+# two-controller CIS harness. Replay captured event bodies without a board.
 check-events:
 	@command -v $(PYTHON) >/dev/null 2>&1 || { \
 	  echo "[TEST] hci_connection_event_test.py skipped, no $(PYTHON)"; exit 0; }
 	@echo "[TEST] hci_connection_event_test.py"
-	@cd $(THIS_DIR)/hardware && $(PYTHON) hci_connection_event_test.py
+	@PYTHONPATH=$(THIS_DIR)/harness/lib $(PYTHON) \
+	  $(THIS_DIR)/harness/hcicontroller/hci_connection_event_test.py
 
 # A two controller run ended with LE Set Host Feature refused on both dongles
 # and the test printing PASS regardless, because teardown swallowed the status.
-# This drives the teardown against a recorded controller, so the ordering is
-# checked without two boards on the bench.
+# Drive the teardown against a recorded controller so ordering stays host-testable.
 check-cis-cleanup:
 	@command -v $(PYTHON) >/dev/null 2>&1 || { \
 	  echo "[TEST] hci_cis_cleanup_test.py skipped, no $(PYTHON)"; exit 0; }
 	@echo "[TEST] hci_cis_cleanup_test.py"
-	@cd $(THIS_DIR)/hardware && $(PYTHON) hci_cis_cleanup_test.py
+	@PYTHONPATH=$(THIS_DIR)/harness/lib $(PYTHON) \
+	  $(THIS_DIR)/harness/hcicontroller/hci_cis_cleanup_test.py
 
 run: all check-project check-boards check-usb-desc check-usb-runtime \
      check-commands check-sdc-symbols check-smp check-events check-cis-cleanup

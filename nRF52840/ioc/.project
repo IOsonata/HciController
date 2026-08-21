@@ -121,6 +121,11 @@
 			<locationURI>PARENT-2-PROJECT_LOC/include/hci_trace.h</locationURI>
 		</link>
 		<link>
+			<name>include/hci_usb.h</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/include/hci_usb.h</locationURI>
+		</link>
+		<link>
 			<name>include/tusb_config.h</name>
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/include/tusb_config.h</locationURI>
@@ -129,6 +134,11 @@
 			<name>src/TinyUSB</name>
 			<type>2</type>
 			<locationURI>virtual:/virtual</locationURI>
+		</link>
+		<link>
+			<name>src/dcd_nrf5x_hci.c</name>
+			<type>1</type>
+			<locationURI>PARENT-1-PROJECT_LOC/src/dcd_nrf5x_hci.c</locationURI>
 		</link>
 		<link>
 			<name>src/hci_app.cpp</name>
@@ -196,6 +206,26 @@
 			<locationURI>PARENT-2-PROJECT_LOC/src/hci_tinyusb.cpp</locationURI>
 		</link>
 		<link>
+			<name>src/hci_usb.cpp</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/src/hci_usb.cpp</locationURI>
+		</link>
+		<link>
+			<name>src/hci_usb_priv.h</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/src/hci_usb_priv.h</locationURI>
+		</link>
+		<link>
+			<name>src/hci_usb_rx.cpp</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/src/hci_usb_rx.cpp</locationURI>
+		</link>
+		<link>
+			<name>src/hci_usb_tinyusb.cpp</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/src/hci_usb_tinyusb.cpp</locationURI>
+		</link>
+		<link>
 			<name>src/main.cpp</name>
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/src/main.cpp</locationURI>
@@ -222,11 +252,6 @@
 		</link>
 		<link>
 			<name>src/TinyUSB/src/device</name>
-			<type>2</type>
-			<locationURI>virtual:/virtual</locationURI>
-		</link>
-		<link>
-			<name>src/TinyUSB/src/portable</name>
 			<type>2</type>
 			<locationURI>virtual:/virtual</locationURI>
 		</link>
@@ -271,11 +296,6 @@
 			<locationURI>PARENT-3-PROJECT_LOC/external/tinyusb/src/device/usbd.h</locationURI>
 		</link>
 		<link>
-			<name>src/TinyUSB/src/portable/nordic</name>
-			<type>2</type>
-			<locationURI>virtual:/virtual</locationURI>
-		</link>
-		<link>
 			<name>src/TinyUSB/src/class/cdc/cdc_device.c</name>
 			<type>1</type>
 			<locationURI>PARENT-3-PROJECT_LOC/external/tinyusb/src/class/cdc/cdc_device.c</locationURI>
@@ -284,16 +304,6 @@
 			<name>src/TinyUSB/src/class/cdc/cdc_device.h</name>
 			<type>1</type>
 			<locationURI>PARENT-3-PROJECT_LOC/external/tinyusb/src/class/cdc/cdc_device.h</locationURI>
-		</link>
-		<link>
-			<name>src/TinyUSB/src/portable/nordic/nrf5x</name>
-			<type>2</type>
-			<locationURI>virtual:/virtual</locationURI>
-		</link>
-		<link>
-			<name>src/TinyUSB/src/portable/nordic/nrf5x/dcd_nrf5x.c</name>
-			<type>1</type>
-			<locationURI>PARENT-3-PROJECT_LOC/external/tinyusb/src/portable/nordic/nrf5x/dcd_nrf5x.c</locationURI>
 		</link>
 	</linkedResources>
 </projectDescription>

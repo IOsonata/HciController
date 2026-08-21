@@ -54,13 +54,15 @@ def drain(hcis, seconds):
                 pass
 
 
-def wait_disconnected(hci, handle, timeout=2.0):
+def wait_disconnected(hci, handle, timeout=5.0):
     """
     Read until Disconnection Complete for this handle, or give up.
 
     Returns True when the link is confirmed gone. Command Status only says
     the controller accepted the request; the link is still up until the
     event arrives, and LE Set Host Feature is refused for as long as it is.
+    The default exceeds the 4 second supervision timeout used by the pair
+    tests, so a valid terminal event is not rejected by a shorter host timer.
     """
     deadline = time.time() + timeout
     while time.time() < deadline:

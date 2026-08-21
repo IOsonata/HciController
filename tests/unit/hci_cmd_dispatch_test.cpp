@@ -44,6 +44,16 @@ static HciCmdResult_t NoEventHandler(void *,
     return {HCI_STATUS_SUCCESS, HCI_CMD_RESPONSE_NONE, 0U};
 }
 
+static HciCmdResult_t WrongResponseHandler(void *,
+                                           const uint8_t *,
+                                           size_t,
+                                           uint8_t *,
+                                           size_t)
+{
+    /* The table says Command Complete. A handler may not change that shape. */
+    return {HCI_STATUS_SUCCESS, HCI_CMD_RESPONSE_STATUS, 0U};
+}
+
 int main()
 {
     static const HciCmdEntry_t entries[] = {
@@ -51,6 +61,7 @@ int main()
         {0x2345U, 0U, 0U, HCI_CMD_RESPONSE_STATUS, StatusHandler},
         {0x3456U, HCI_CMD_VARIABLE_PARAM_LEN, 0U, HCI_CMD_RESPONSE_NONE,
          NoEventHandler},
+        {0x4567U, 0U, 0U, HCI_CMD_RESPONSE_COMPLETE, WrongResponseHandler},
     };
 
     TestContext context = {};
@@ -113,6 +124,24 @@ int main()
     const uint8_t noEventCmd[] = {0x56U, 0x34U, 0x02U, 0x01U, 0x02U};
     assert(HciCmdDispatchPut(&dispatch, noEventCmd, sizeof(noEventCmd)));
     assert(!HciCmdDispatchEventPending(&dispatch));
+
+    /*
+     * The response kind belongs to the table row. A broken handler that says
+     * Command Status for a Command Complete opcode is contained locally and
+     * answered in the table-declared shape instead of changing the HCI wire
+     * protocol.
+     */
+    const uint32_t handlerErrorsBefore = dispatch.HandlerErrorCount;
+    const uint8_t wrongResponseCmd[] = {0x67U, 0x45U, 0x00U};
+    assert(HciCmdDispatchPut(&dispatch,
+                             wrongResponseCmd,
+                             sizeof(wrongResponseCmd)));
+    assert(HciCmdDispatchGet(&dispatch, event, sizeof(event), &eventLen));
+    assert(eventLen == HCI_COMMAND_COMPLETE_BASE_SIZE);
+    assert(event[0] == HCI_EVENT_COMMAND_COMPLETE);
+    assert(event[3] == 0x67U && event[4] == 0x45U);
+    assert(event[5] == 0x1FU); /* Unspecified Error */
+    assert(dispatch.HandlerErrorCount == handlerErrorsBefore + 1U);
 
     /*
      * The No Operation Command Complete a controller uses to say it is ready.

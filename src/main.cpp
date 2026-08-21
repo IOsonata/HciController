@@ -131,6 +131,16 @@ static void HciFatal(void)
 #endif
 
 /*
+ * The UDG dongle's UART pins in board.h are explicitly placeholders. Do not
+ * let a command-line override turn an unverified pin map into a build that
+ * looks supported. Remove this guard only after the TX/RX mapping has been
+ * checked against the schematic or measured on hardware.
+ */
+#if BOARD == UDG_NRF52840 && HCI_HOST_SELECT == HCI_HOST_SELECT_UART
+#error "UDG_NRF52840 forced UART is disabled until its UART pin map is validated"
+#endif
+
+/*
  * A UART host with no pins to reach it on would otherwise fail deep inside the
  * UART_PINS expansion on an undeclared identifier, which does not say what is
  * missing. Testing UART_PINS itself proves nothing: board.h defines it for

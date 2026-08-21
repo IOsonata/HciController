@@ -11,31 +11,43 @@ import subprocess
 import sys
 
 _HARNESS_DIR = Path(__file__).resolve().parents[1]
+_LIB_DIR = _HARNESS_DIR / "lib"
 _TESTS_DIR = _HARNESS_DIR.parent
-_HARDWARE_DIR = _TESTS_DIR / "hardware"
 _REPO_ROOT = _TESTS_DIR.parent
 if str(_HARNESS_DIR) not in sys.path:
     sys.path.insert(0, str(_HARNESS_DIR))
-if str(_HARDWARE_DIR) not in sys.path:
-    sys.path.insert(0, str(_HARDWARE_DIR))
+if str(_LIB_DIR) not in sys.path:
+    sys.path.insert(0, str(_LIB_DIR))
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from lib.bis_features import run_bis_phase
+from lib import bis_features
+from lib import stress_features
 from lib.connected_features_pair import run_connected_feature_phase, run_subrate_phase
 from lib.core_advanced import run_core_advanced_phase
-from lib.hci_pair import Hci, HciError, resolve_pair_ports
+from lib.hci_cis_usb_pair_test import NativeIsoHci
+from lib.hci_pair import Hci, HciError
+from lib.hci_transport import SelectionError
+from lib.pair_transport import (
+    bulk_spec,
+    resolve_pair,
+    spec_selector,
+    transport_cli_args,
+)
 from lib.periodic_features import run_past_phase, run_pawr_phase, run_periodic_sync_phase
 from lib.profile import read_controller_capabilities
 from lib.recovery_features import run_recovery_phase
-from lib.results import ResultBook
-from lib.stress_features import DEFAULT_STRESS_COUNT, run_stress_phase
+from lib.results import FAIL, ResultBook
+from lib.stress_features import DEFAULT_STRESS_COUNT
 from pair_smoke_test import check_profile
 
+_ESTABLISHMENT_ATTEMPTS = 3
+_ESTABLISHMENT_REASON = 0x3E
 
-def run_profile_phase(book, port_a, port_b, raw):
-    a = Hci(port_a, raw=raw)
-    b = Hci(port_b, raw=raw)
+
+def run_profile_phase(book, spec_a, spec_b, raw):
+    a = Hci(spec_a, raw=raw)
+    b = Hci(spec_b, raw=raw)
     try:
         try:
             check_profile(book, "A", read_controller_capabilities(a))
@@ -50,9 +62,9 @@ def run_profile_phase(book, port_a, port_b, raw):
         b.close()
 
 
-def with_pair(port_a, port_b, raw, callback, *args):
-    a = Hci(port_a, raw=raw)
-    b = Hci(port_b, raw=raw)
+def with_pair(spec_a, spec_b, raw, callback, *args):
+    a = Hci(spec_a, raw=raw)
+    b = Hci(spec_b, raw=raw)
     try:
         callback(*args, a, b)
     finally:
@@ -60,9 +72,107 @@ def with_pair(port_a, port_b, raw, callback, *args):
         b.close()
 
 
-def run_probe(book, label, port, raw):
-    script = _TESTS_DIR / "hardware" / "hci_ble_test.py"
-    command = [sys.executable, str(script), "--port", port]
+def _link_establishment_failed(hci):
+    down = getattr(hci, "link_down", None)
+    return (
+        down is not None
+        and len(down) >= 3
+        and down[2] == _ESTABLISHMENT_REASON
+    )
+
+
+def _first_failure(book):
+    for result in book.results:
+        if result.status == FAIL:
+            return result
+    return None
+
+
+def _retryable_establishment_attempt(book, a, b):
+    """Return the first failure when this attempt ended in LE 0x3E."""
+    failure = _first_failure(book)
+    if failure is None:
+        return None
+
+    detail = failure.detail or ""
+    explicit_status = (
+        "connection failed: 0x3E" in detail
+        or "Connection Failed To Be Established" in detail
+    )
+    link_down = _link_establishment_failed(a) or _link_establishment_failed(b)
+
+    if explicit_status:
+        return failure
+
+    if not link_down:
+        return None
+
+    if "timed out waiting for both ACL connection events" in detail:
+        return failure
+    if "no LE Read Remote Features Complete event" in detail:
+        return failure
+
+    # Recovery prefixes the connection error with the step name.
+    if "ACL recovery after advanced-state resets" in detail:
+        return failure
+
+    return None
+
+
+def with_pair_establishment_retry(
+    spec_a,
+    spec_b,
+    raw,
+    callback,
+    book,
+    label,
+    attempts=_ESTABLISHMENT_ATTEMPTS,
+):
+    """Retry only a fresh-pair attempt that demonstrably ended with LE 0x3E."""
+    for attempt in range(1, attempts + 1):
+        attempt_book = ResultBook(book.title)
+        a = Hci(spec_a, raw=raw)
+        b = Hci(spec_b, raw=raw)
+        retry_failure = None
+        try:
+            callback(attempt_book, label, a, b)
+            retry_failure = _retryable_establishment_attempt(
+                attempt_book, a, b
+            )
+        finally:
+            a.close()
+            b.close()
+
+        if retry_failure is not None and attempt < attempts:
+            print(
+                "HOST-RETRY: %s attempt %u/%u ended in LE 0x3E; "
+                "retrying the complete phase"
+                % (label, attempt, attempts)
+            )
+            continue
+
+        book.results.extend(attempt_book.results)
+
+        if retry_failure is None and attempt > 1:
+            print(
+                "HOST-RETRY: %s recovered on attempt %u/%u"
+                % (label, attempt, attempts)
+            )
+        elif retry_failure is not None:
+            print(
+                "HOST-RETRY: %s still failed with LE 0x3E after %u attempts"
+                % (label, attempts)
+            )
+        return
+
+
+def run_probe(book, label, spec, raw):
+    script = Path(__file__).resolve().parent / "probe_test.py"
+    try:
+        command = [sys.executable, str(script)] + transport_cli_args(spec)
+    except SelectionError as err:
+        book.failed("Broad command probe", label, str(err))
+        return
     if raw:
         command.append("--raw")
     command += ["probe", "--consent", "--verbose"]
@@ -74,13 +184,26 @@ def run_probe(book, label, port, raw):
                     "exit %d" % result.returncode)
 
 
-def run_cis(book, port_a, port_b, raw):
-    script = Path(__file__).resolve().parent / "cis_pair_test.py"
+def run_cis(book, spec_a, spec_b, raw):
+    if spec_a.kind == "usb":
+        script = Path(__file__).resolve().parent / "cis_usb_pair_test.py"
+    else:
+        script = Path(__file__).resolve().parent / "cis_pair_test.py"
+
+    try:
+        central = spec_selector(spec_a)
+        peripheral = spec_selector(spec_b)
+    except SelectionError as err:
+        book.failed(
+            "ISO", "CIS Central/Peripheral + bidirectional HCI ISO", str(err)
+        )
+        return
+
     command = [
         sys.executable,
         str(script),
-        "--central", port_a,
-        "--peripheral", port_b,
+        "--central", central,
+        "--peripheral", peripheral,
     ]
     if raw:
         command.append("--raw")
@@ -92,15 +215,51 @@ def run_cis(book, port_a, port_b, raw):
                     "exit %d" % result.returncode)
 
 
+def run_iso_phase(module, callback, book, label, spec_a, spec_b,
+                  raw=False, **kwargs):
+    """Run an ISO phase over H:4 or native USB Bulk Serialization."""
+    old_iso_hci = module.IsoHci
+    phase_a = spec_a
+    phase_b = spec_b
+    if spec_a.kind == "usb":
+        module.IsoHci = NativeIsoHci
+        phase_a = bulk_spec(spec_a)
+        phase_b = bulk_spec(spec_b)
+    try:
+        callback(
+            book, label, phase_a, phase_b,
+            raw=raw, **kwargs
+        )
+    finally:
+        module.IsoHci = old_iso_hci
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Run release-strict validation with two HciController dongles"
     )
-    parser.add_argument("--a", help="first HciController H:4 serial port")
-    parser.add_argument("--b", help="second HciController H:4 serial port")
-    parser.add_argument("--raw", action="store_true", help="show raw H:4 traffic")
+    parser.add_argument(
+        "--transport", choices=("auto", "serial", "usb"), default="auto",
+        help="host transport; auto prefers native USB when present",
+    )
+    parser.add_argument(
+        "--a",
+        help="first controller selector: serial device or native USB serial number",
+    )
+    parser.add_argument(
+        "--b",
+        help="second controller selector: serial device or native USB serial number",
+    )
+    parser.add_argument("--raw", action="store_true", help="show raw HCI traffic")
     parser.add_argument("--only-pawr", action="store_true",
                         help="run only the PAwR advertiser/scanner phase")
+    parser.add_argument("--only-recovery", action="store_true",
+                        help="run only the advanced-state recovery phase")
+    parser.add_argument(
+        "--only-bis-recovery",
+        action="store_true",
+        help="run only BIS teardown followed immediately by legacy recovery",
+    )
     parser.add_argument("--skip-probe", action="store_true",
                         help="skip the per-dongle broad command probes")
     parser.add_argument("--skip-cis", action="store_true",
@@ -120,76 +279,109 @@ def main():
 
     if args.stress_count <= 0:
         parser.error("--stress-count must be positive")
+    only_modes = sum((args.only_pawr, args.only_recovery,
+                      args.only_bis_recovery))
+    if only_modes > 1:
+        parser.error(
+            "--only-pawr, --only-recovery and --only-bis-recovery are mutually exclusive"
+        )
 
     try:
-        port_a, port_b = resolve_pair_ports(args.a, args.b)
-    except HciError as err:
+        spec_a, spec_b = resolve_pair(args.a, args.b, kind=args.transport)
+    except (HciError, SelectionError) as err:
         print("FAIL: %s" % err, file=sys.stderr)
         return 2
 
-    print("Dongle A: %s" % port_a)
-    print("Dongle B: %s" % port_b)
+    print("Dongle A: %s" % spec_a)
+    print("Dongle B: %s" % spec_b)
 
     book = ResultBook("HciController nRF52840 + SDC HEAD release validation")
 
     if args.only_pawr:
         with_pair(
-            port_a, port_b, args.raw,
+            spec_a, spec_b, args.raw,
             run_pawr_phase,
             book, "A Advertiser / B Scanner",
         )
         book.print_report()
         return book.exit_code()
 
-    run_profile_phase(book, port_a, port_b, args.raw)
+    if args.only_recovery:
+        with_pair_establishment_retry(
+            spec_a, spec_b, args.raw,
+            run_recovery_phase,
+            book, "A Advertiser / B Scanner",
+        )
+        book.print_report()
+        return book.exit_code()
+
+    if args.only_bis_recovery:
+        run_iso_phase(
+            bis_features,
+            bis_features.run_bis_phase,
+            book,
+            "A Source / B Sink",
+            spec_a,
+            spec_b,
+            raw=args.raw,
+        )
+        with_pair_establishment_retry(
+            spec_a, spec_b, args.raw,
+            run_recovery_phase,
+            book, "A Advertiser / B Scanner",
+        )
+        book.print_report()
+        return book.exit_code()
+
+    run_profile_phase(book, spec_a, spec_b, args.raw)
 
     if args.skip_probe:
         book.incomplete("Broad command probe", "Dongle A", "skipped by command line")
         book.incomplete("Broad command probe", "Dongle B", "skipped by command line")
     else:
-        run_probe(book, "Dongle A", port_a, args.raw)
-        run_probe(book, "Dongle B", port_b, args.raw)
+        run_probe(book, "Dongle A", spec_a, args.raw)
+        run_probe(book, "Dongle B", spec_b, args.raw)
 
-    with_pair(
-        port_a, port_b, args.raw,
+    with_pair_establishment_retry(
+        spec_a, spec_b, args.raw,
         run_connected_feature_phase,
         book, "A Central -> B Peripheral",
     )
-    with_pair(
-        port_b, port_a, args.raw,
+    with_pair_establishment_retry(
+        spec_b, spec_a, args.raw,
         run_connected_feature_phase,
         book, "B Central -> A Peripheral",
     )
 
-    with_pair(
-        port_a, port_b, args.raw,
+    with_pair_establishment_retry(
+        spec_a, spec_b, args.raw,
         run_subrate_phase,
         book, "A Central -> B Peripheral",
     )
-    with_pair(
-        port_b, port_a, args.raw,
+    with_pair_establishment_retry(
+        spec_b, spec_a, args.raw,
         run_subrate_phase,
         book, "B Central -> A Peripheral",
     )
 
-    with_pair(
-        port_a, port_b, args.raw,
+    with_pair_establishment_retry(
+        spec_a, spec_b, args.raw,
         run_core_advanced_phase,
         book, "A Central / B Peripheral",
     )
 
     with_pair(
-        port_a, port_b, args.raw,
+        spec_a, spec_b, args.raw,
         run_periodic_sync_phase,
         book, "A Advertiser / B Scanner",
     )
-    with_pair(
-        port_a, port_b, args.raw,
+    with_pair_establishment_retry(
+        spec_a, spec_b, args.raw,
         run_past_phase,
         book, "A Sender / B Receiver",
     )
     with_pair(
-        port_a, port_b, args.raw,
+        spec_a, spec_b, args.raw,
         run_pawr_phase,
         book, "A Advertiser / B Scanner",
     )
@@ -198,14 +390,20 @@ def main():
         book.incomplete("ISO", "CIS Central/Peripheral + bidirectional HCI ISO",
                         "skipped by command line")
     else:
-        run_cis(book, port_a, port_b, args.raw)
+        run_cis(book, spec_a, spec_b, args.raw)
 
-    run_bis_phase(
-        book, "A Source / B Sink", port_a, port_b, raw=args.raw
+    run_iso_phase(
+        bis_features,
+        bis_features.run_bis_phase,
+        book,
+        "A Source / B Sink",
+        spec_a,
+        spec_b,
+        raw=args.raw,
     )
 
-    with_pair(
-        port_a, port_b, args.raw,
+    with_pair_establishment_retry(
+        spec_a, spec_b, args.raw,
         run_recovery_phase,
         book, "A Advertiser / B Scanner",
     )
@@ -220,11 +418,13 @@ def main():
         # A raw dump of 10k stress iterations is not useful as a default
         # release artifact. The focused phases above still honor --raw; stress
         # reports progress and the exact failing iteration if anything breaks.
-        run_stress_phase(
+        run_iso_phase(
+            stress_features,
+            stress_features.run_stress_phase,
             book,
             "A Central / B Peripheral",
-            port_a,
-            port_b,
+            spec_a,
+            spec_b,
             raw=False,
             count=args.stress_count,
         )

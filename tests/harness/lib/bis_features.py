@@ -40,12 +40,14 @@ OP_LE_SETUP_ISO_DATA_PATH = 0x206E
 OP_LE_REMOVE_ISO_DATA_PATH = 0x206F
 
 LE_BIG_COMPLETE = 0x1B
+LE_TERMINATE_BIG_COMPLETE = 0x1C
 LE_BIG_SYNC_ESTABLISHED = 0x1D
 LE_BIGINFO_ADV_REPORT = 0x22
 
 SOURCE_BIG_HANDLE = 0
 SINK_BIG_HANDLE = 1
 BIS_INDEX = 1
+BIG_TERMINATE_REASON = 0x16
 BIS_MARKER = b"BIS source->sink"
 
 
@@ -129,6 +131,46 @@ def _create_big_sync(sink, periodic_sync):
     return struct.unpack("<H", body[15:17])[0] & 0x0FFF
 
 
+def _wait_big_terminated(source, timeout=8.0):
+    body = _base.wait_le_subevent(
+        source,
+        LE_TERMINATE_BIG_COMPLETE,
+        predicate=lambda event: (
+            len(event) >= 3
+            and event[1] == SOURCE_BIG_HANDLE
+        ),
+        timeout=timeout,
+    )
+    if body is None:
+        raise HciError("no LE Terminate BIG Complete event")
+    if body[2] != BIG_TERMINATE_REASON:
+        raise HciError(
+            "LE Terminate BIG Complete reason 0x%02X, expected 0x%02X"
+            % (body[2], BIG_TERMINATE_REASON)
+        )
+
+
+def _terminate_big(source):
+    status, _ = source.command(
+        OP_LE_TERMINATE_BIG,
+        bytes([SOURCE_BIG_HANDLE, BIG_TERMINATE_REASON]),
+        allow_fail=True,
+    )
+    if status != 0:
+        raise HciError("LE Terminate BIG returned %s" % status_text(status))
+    _wait_big_terminated(source)
+
+
+def _terminate_big_sync(sink):
+    status, _ = sink.command(
+        OP_LE_BIG_TERMINATE_SYNC,
+        bytes([SINK_BIG_HANDLE]),
+        allow_fail=True,
+    )
+    if status != 0:
+        raise HciError("LE BIG Terminate Sync returned %s" % status_text(status))
+
+
 def _remove_iso_path(hci, handle, direction_mask):
     try:
         hci.command(
@@ -183,11 +225,40 @@ def run_bis_phase(book, label, source_port, sink_port, raw=False):
         if source_taken is not None and source_taken < 1:
             raise HciError("BIS source ISO packet never reached SDC")
 
+        # A successful data transfer is not the end of the BIS phase. The sink
+        # termination is complete when LE BIG Terminate Sync completes; BIG Sync
+        # Lost reports an unrequested loss and is not expected here. The source
+        # termination is asynchronous, so wait for LE Terminate BIG Complete.
+        _remove_iso_path(source, source_bis, 0x01)
+        source_bis = None
+        _remove_iso_path(sink, sink_bis, 0x02)
+        sink_bis = None
+
+        _terminate_big_sync(sink)
+        big_synced = False
+        _terminate_big(source)
+        big_created = False
+
+        _terminate_sync(sink, periodic_sync)
+        periodic_sync = None
+
+        # Before either Bulk-Serialization USB interface is closed or switched
+        # back to legacy HCI, prove the former BIS sink can create a fresh
+        # periodic synchronization to the still-running advertising train. A
+        # failure here is controller/SDC state left by BIG-sink teardown, not a
+        # USB alternate-setting transition.
+        _create_periodic_sync(sink, source_id, source_type)
+        periodic_sync, _ = _wait_sync_established(sink)
+        _wait_periodic_report(sink, periodic_sync, PERIODIC_MARKER)
+        _terminate_sync(sink, periodic_sync)
+        periodic_sync = None
+        _stop_periodic(source)
+
         book.passed(
             "ISO",
             "BIS Source -> Sink",
-            "%s unencrypted BIG, BIS 0x%04X -> 0x%04X, OTA SDU"
-            % (label, source_bis, sink_bis),
+            "%s unencrypted BIG, OTA SDU + synchronous BIG teardown + sink resync"
+            % label,
         )
     except (HciError, HciGone) as err:
         book.failed("ISO", "BIS Source -> Sink", str(err))
@@ -209,7 +280,7 @@ def run_bis_phase(book, label, source_port, sink_port, raw=False):
             try:
                 source.command(
                     OP_LE_TERMINATE_BIG,
-                    bytes([SOURCE_BIG_HANDLE, 0x16]),
+                    bytes([SOURCE_BIG_HANDLE, BIG_TERMINATE_REASON]),
                     allow_fail=True,
                 )
             except (HciError, HciGone):

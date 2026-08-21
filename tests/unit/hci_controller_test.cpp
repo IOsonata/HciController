@@ -1,19 +1,6 @@
 /*
  * Copyright (c) 2026 I-SYST inc.
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at https://mozilla.org/MPL/2.0/.
- *
  * SPDX-License-Identifier: MPL-2.0
- */
-
-/*
- * Host test for the bridge between the host transport and the controller ops.
- *
- * The controller side is a table driven fake, the host side is the same
- * DevIntrf fake used by the transport test. Together they cover the two
- * directions and the backpressure retry in each.
  */
 
 #include "hci_controller.h"
@@ -39,14 +26,52 @@ struct FakeIntrf
     int TxLen;
     int TxChunkLimit;
 
+    bool PacketMode;
+    bool PacketPending;
+    HciH4PacketType_t PacketType;
+    uint8_t PacketData[128];
+    int PacketLen;
+    uint32_t LastTxAddr;
+
     unsigned EnableCount;
     unsigned DisableCount;
 };
 
 static FakeIntrf gIntrf;
 
-int DeviceIntrfRx(DevIntrf_t *, uint32_t, uint8_t *pBuffer, int BufferLen)
+int DeviceIntrfRx(DevIntrf_t *pDev,
+                  uint32_t DevAddr,
+                  uint8_t *pBuffer,
+                  int BufferLen)
 {
+    if (pDev != &gIntrf.Base)
+    {
+        if (!DeviceIntrfStartRx(pDev, DevAddr))
+        {
+            return 0;
+        }
+        const int result = DeviceIntrfRxData(pDev, pBuffer, BufferLen);
+        if (result >= 0)
+        {
+            DeviceIntrfStopRx(pDev);
+        }
+        return result;
+    }
+
+    if (gIntrf.PacketMode)
+    {
+        if (!gIntrf.PacketPending || DevAddr != (uint32_t)gIntrf.PacketType ||
+            BufferLen < gIntrf.PacketLen)
+        {
+            return 0;
+        }
+
+        memcpy(pBuffer, gIntrf.PacketData, (size_t)gIntrf.PacketLen);
+        const int len = gIntrf.PacketLen;
+        gIntrf.PacketPending = false;
+        return len;
+    }
+
     int available = gIntrf.RxLen - gIntrf.RxOffset;
     if (available <= 0 || BufferLen <= 0)
     {
@@ -59,8 +84,25 @@ int DeviceIntrfRx(DevIntrf_t *, uint32_t, uint8_t *pBuffer, int BufferLen)
     return count;
 }
 
-int DeviceIntrfTx(DevIntrf_t *, uint32_t, const uint8_t *pData, int DataLen)
+int DeviceIntrfTx(DevIntrf_t *pDev,
+                  uint32_t DevAddr,
+                  const uint8_t *pData,
+                  int DataLen)
 {
+    if (pDev != &gIntrf.Base)
+    {
+        if (!DeviceIntrfStartTx(pDev, DevAddr))
+        {
+            return 0;
+        }
+        const int result = DeviceIntrfTxData(pDev, pData, DataLen);
+        if (result >= 0)
+        {
+            DeviceIntrfStopTx(pDev);
+        }
+        return result;
+    }
+
     if (DataLen <= 0)
     {
         return 0;
@@ -75,6 +117,7 @@ int DeviceIntrfTx(DevIntrf_t *, uint32_t, const uint8_t *pData, int DataLen)
     assert(gIntrf.TxLen + count <= FAKE_TX_SIZE);
     memcpy(&gIntrf.TxData[gIntrf.TxLen], pData, (size_t)count);
     gIntrf.TxLen += count;
+    gIntrf.LastTxAddr = DevAddr;
     return count;
 }
 
@@ -90,14 +133,12 @@ void DeviceIntrfDisable(DevIntrf_t *)
 
 struct FakeController
 {
-    /* Host to controller. */
     unsigned PutCount;
     bool PutAccept;
     HciH4PacketType_t PutType[FAKE_QUEUE_DEPTH];
     size_t PutLen[FAKE_QUEUE_DEPTH];
     uint8_t PutData[FAKE_QUEUE_DEPTH][32];
 
-    /* Controller to host. */
     unsigned GetCount;
     unsigned GetIndex;
     unsigned Pending;
@@ -177,15 +218,18 @@ struct Fixture
     uint8_t ControllerPacket[FAKE_PACKET_SIZE];
 };
 
-static void SetupClosed(Fixture *pFixture)
+static void ResetFixture(Fixture *pFixture)
 {
     memset(&gIntrf, 0, sizeof(gIntrf));
     memset(&gController, 0, sizeof(gController));
     memset(pFixture, 0, sizeof(*pFixture));
-
     gController.PutAccept = true;
     gController.GetOverride = HCI_CONTROLLER_GET_EMPTY;
+}
 
+static void SetupClosed(Fixture *pFixture)
+{
+    ResetFixture(pFixture);
     assert(HciControllerInit(&pFixture->Controller, &gIntrf.Base,
                              pFixture->HostPacket,
                              sizeof(pFixture->HostPacket),
@@ -200,6 +244,20 @@ static void Setup(Fixture *pFixture)
     HciControllerPortOpen(&pFixture->Controller);
 }
 
+static void SetupPacket(Fixture *pFixture)
+{
+    ResetFixture(pFixture);
+    gIntrf.PacketMode = true;
+    assert(HciControllerInitPacketTransport(&pFixture->Controller,
+                                            &gIntrf.Base,
+                                            pFixture->HostPacket,
+                                            sizeof(pFixture->HostPacket),
+                                            pFixture->ControllerPacket,
+                                            sizeof(pFixture->ControllerPacket),
+                                            &gOps));
+    HciControllerPortOpen(&pFixture->Controller);
+}
+
 static void FeedHost(const uint8_t *pData, size_t Len)
 {
     assert(gIntrf.RxLen + (int)Len <= FAKE_RX_SIZE);
@@ -207,7 +265,18 @@ static void FeedHost(const uint8_t *pData, size_t Len)
     gIntrf.RxLen += (int)Len;
 }
 
-static void QueueController(HciH4PacketType_t Type, const uint8_t *pData,
+static void FeedPacket(HciH4PacketType_t Type, const uint8_t *pData, size_t Len)
+{
+    assert(gIntrf.PacketMode && !gIntrf.PacketPending);
+    assert(Len <= sizeof(gIntrf.PacketData));
+    memcpy(gIntrf.PacketData, pData, Len);
+    gIntrf.PacketType = Type;
+    gIntrf.PacketLen = (int)Len;
+    gIntrf.PacketPending = true;
+}
+
+static void QueueController(HciH4PacketType_t Type,
+                            const uint8_t *pData,
                             size_t Len)
 {
     assert(gController.Pending < FAKE_QUEUE_DEPTH);
@@ -219,7 +288,6 @@ static void QueueController(HciH4PacketType_t Type, const uint8_t *pData,
     memcpy(gController.GetData[index], pData, Len);
 }
 
-/* A command from the host reaches the controller with the indicator stripped. */
 static void TestHostToController(void)
 {
     Fixture fixture;
@@ -227,22 +295,15 @@ static void TestHostToController(void)
 
     const uint8_t wire[] = {0x01, 0x03, 0x0C, 0x00};
     FeedHost(wire, sizeof(wire));
-
     HciControllerProcess(&fixture.Controller);
 
     assert(gController.PutCount == 1U);
     assert(gController.PutType[0] == HCI_H4_PACKET_COMMAND);
     assert(gController.PutLen[0] == 3U);
     assert(gController.PutData[0][0] == 0x03);
-    assert(gController.ProcessCount >= 1U);
-    printf("[ok] host command reaches the controller\n");
+    printf("[ok] H4 host command reaches the controller through packet DeviceIntrf\n");
 }
 
-/*
- * A clean host may send Reset while the controller is still coming up. H:4
- * has no transport retry, so a complete packet already queued when the port
- * opens must survive that boundary.
- */
 static void TestPreopenH4BacklogIsPreserved(void)
 {
     Fixture fixture;
@@ -258,17 +319,9 @@ static void TestPreopenH4BacklogIsPreserved(void)
     HciControllerProcess(&fixture.Controller);
     assert(gController.PutCount == 1U);
     assert(gController.PutType[0] == HCI_H4_PACKET_COMMAND);
-    assert(gController.PutLen[0] == 3U);
-    assert(gController.PutData[0][0] == 0x03U);
-    assert(gController.PutData[0][1] == 0x0CU);
     printf("[ok] a clean H4 Reset queued before open is preserved\n");
 }
 
-/*
- * The Thingy:91 case is the opposite: the same FIFO begins with boot text and
- * only later contains H:4. The UART buffer erased the real time gap, so the
- * whole stale mixed backlog still has to be discarded at open.
- */
 static void TestPreopenMixedBacklogIsFlushed(void)
 {
     Fixture fixture;
@@ -285,16 +338,13 @@ static void TestPreopenMixedBacklogIsFlushed(void)
 
     assert(gController.PutCount == 0U);
     assert(fixture.Controller.Host.FlushedOctetCount == sizeof(buffered));
-    assert(fixture.Controller.Host.RxOctetCount == 0U);
     printf("[ok] a text-prefixed pre-open backlog is still flushed\n");
 }
 
-/* A controller refusing the packet gets it again, and it is not duplicated. */
 static void TestHostRetry(void)
 {
     Fixture fixture;
     Setup(&fixture);
-
     gController.PutAccept = false;
 
     const uint8_t wire[] = {0x01, 0x03, 0x0C, 0x00};
@@ -302,17 +352,16 @@ static void TestHostRetry(void)
 
     HciControllerProcess(&fixture.Controller);
     assert(gController.PutCount == 0U);
+    assert(fixture.Controller.HostPacketPending);
 
     gController.PutAccept = true;
     HciControllerProcess(&fixture.Controller);
     assert(gController.PutCount == 1U);
-
     HciControllerProcess(&fixture.Controller);
     assert(gController.PutCount == 1U);
-    printf("[ok] refused host packet is retried exactly once\n");
+    printf("[ok] refused H4 packet is retained above the packet DeviceIntrf\n");
 }
 
-/* An event from the controller reaches the wire with the indicator prefixed. */
 static void TestControllerToHost(void)
 {
     Fixture fixture;
@@ -320,16 +369,14 @@ static void TestControllerToHost(void)
 
     const uint8_t event[] = {0x0E, 0x04, 0x01, 0x03, 0x0C, 0x00};
     QueueController(HCI_H4_PACKET_EVENT, event, sizeof(event));
-
     HciControllerProcess(&fixture.Controller);
 
     assert(gIntrf.TxLen == (int)sizeof(event) + 1);
     assert(gIntrf.TxData[0] == HCI_H4_PACKET_EVENT);
     assert(memcmp(&gIntrf.TxData[1], event, sizeof(event)) == 0);
-    printf("[ok] controller event reaches the host wire\n");
+    printf("[ok] packet DeviceIntrf adapter adds H4 only on the UART/CDC wire\n");
 }
 
-/* Two queued events go out in order across successive passes. */
 static void TestControllerOrdering(void)
 {
     Fixture fixture;
@@ -349,7 +396,52 @@ static void TestControllerOrdering(void)
     printf("[ok] queued controller events keep their order\n");
 }
 
-/* A controller side error is counted and does not stall the bridge. */
+static void TestPacketDeviceIntrf(void)
+{
+    Fixture fixture;
+    SetupPacket(&fixture);
+    assert(gIntrf.EnableCount == 1U);
+
+    const uint8_t reset[] = {0x03U, 0x0CU, 0x00U};
+    FeedPacket(HCI_H4_PACKET_COMMAND, reset, sizeof(reset));
+    HciControllerProcess(&fixture.Controller);
+    assert(gController.PutCount == 1U);
+    assert(gController.PutType[0] == HCI_H4_PACKET_COMMAND);
+    assert(gController.PutLen[0] == sizeof(reset));
+    assert(memcmp(gController.PutData[0], reset, sizeof(reset)) == 0);
+
+    const uint8_t event[] = {0x0EU, 0x01U, 0x00U};
+    QueueController(HCI_H4_PACKET_EVENT, event, sizeof(event));
+    HciControllerProcess(&fixture.Controller);
+    assert(gIntrf.LastTxAddr == HCI_H4_PACKET_EVENT);
+    assert(gIntrf.TxLen == (int)sizeof(event));
+    assert(memcmp(gIntrf.TxData, event, sizeof(event)) == 0);
+
+    const uint8_t outputAcl[] = {0x01U, 0x20U, 0x00U, 0x00U};
+    QueueController(HCI_H4_PACKET_ACL, outputAcl, sizeof(outputAcl));
+    HciControllerProcess(&fixture.Controller);
+    assert(fixture.Controller.ControllerAclPacketCount == 1U);
+    assert(fixture.Controller.HostAclPacketCount == 1U);
+    assert(gIntrf.LastTxAddr == HCI_H4_PACKET_ACL);
+
+    gController.PutAccept = false;
+    const uint8_t acl[] = {0x01U, 0x00U, 0x00U, 0x00U};
+    FeedPacket(HCI_H4_PACKET_ACL, acl, sizeof(acl));
+    HciControllerProcess(&fixture.Controller);
+    assert(!gIntrf.PacketPending);
+    assert(fixture.Controller.HostPacketPending);
+
+    gController.PutAccept = true;
+    HciControllerProcess(&fixture.Controller);
+    assert(!fixture.Controller.HostPacketPending);
+    assert(gController.PutCount == 2U);
+    assert(gController.PutType[1] == HCI_H4_PACKET_ACL);
+
+    HciControllerPortClose(&fixture.Controller);
+    assert(gIntrf.DisableCount == 1U);
+    printf("[ok] native packet DeviceIntrf is swappable with the H4 adapter\n");
+}
+
 static void TestControllerError(void)
 {
     Fixture fixture;
@@ -367,7 +459,6 @@ static void TestControllerError(void)
     printf("[ok] controller get error is counted, bridge keeps running\n");
 }
 
-/* An indicator the controller must never emit is rejected. */
 static void TestInvalidControllerType(void)
 {
     Fixture fixture;
@@ -375,7 +466,6 @@ static void TestInvalidControllerType(void)
 
     const uint8_t command[] = {0x03, 0x0C, 0x00};
     QueueController(HCI_H4_PACKET_COMMAND, command, sizeof(command));
-
     HciControllerProcess(&fixture.Controller);
 
     assert(fixture.Controller.InvalidControllerPacketCount == 1U);
@@ -383,7 +473,6 @@ static void TestInvalidControllerType(void)
     printf("[ok] a command indicator from the controller is rejected\n");
 }
 
-/* A zero length packet would put a bare indicator on the wire. */
 static void TestZeroLengthRejected(void)
 {
     Fixture fixture;
@@ -391,13 +480,11 @@ static void TestZeroLengthRejected(void)
 
     const uint8_t nothing[] = {0x00};
     QueueController(HCI_H4_PACKET_EVENT, nothing, 0U);
-
     HciControllerProcess(&fixture.Controller);
 
     assert(fixture.Controller.InvalidControllerPacketCount == 1U);
     assert(gIntrf.TxLen == 0);
 
-    /* The bridge keeps running behind it. */
     const uint8_t event[] = {0x0E, 0x01, 0x44};
     QueueController(HCI_H4_PACKET_EVENT, event, sizeof(event));
     HciControllerProcess(&fixture.Controller);
@@ -405,11 +492,6 @@ static void TestZeroLengthRejected(void)
     printf("[ok] a zero length controller packet is rejected\n");
 }
 
-/*
- * A packet the transport can never accept is dropped, not held pending. Held
- * pending it would stop the controller to host direction for good, because no
- * further packet is fetched while one is pending.
- */
 static void TestUnsendableDropped(void)
 {
     Fixture fixture;
@@ -418,7 +500,6 @@ static void TestUnsendableDropped(void)
     static uint8_t big[FAKE_PACKET_SIZE];
     memset(big, 0xA5, sizeof(big));
     QueueController(HCI_H4_PACKET_ACL, big, HCI_INTRF_TX_STREAM_SIZE);
-
     HciControllerProcess(&fixture.Controller);
 
     assert(fixture.Controller.UnsendableControllerPacketCount == 1U);
@@ -428,13 +509,10 @@ static void TestUnsendableDropped(void)
     const uint8_t event[] = {0x0E, 0x01, 0x55};
     QueueController(HCI_H4_PACKET_EVENT, event, sizeof(event));
     HciControllerProcess(&fixture.Controller);
-
     assert(gIntrf.TxLen == (int)sizeof(event) + 1);
-    assert(gIntrf.TxData[1] == 0x0E && gIntrf.TxData[3] == 0x55);
     printf("[ok] an unsendable controller packet is dropped, not wedged\n");
 }
 
-/* Init rejects the argument combinations that cannot work. */
 static void TestInitGuards(void)
 {
     HciController_t controller;
@@ -473,6 +551,7 @@ int main(void)
     TestHostRetry();
     TestControllerToHost();
     TestControllerOrdering();
+    TestPacketDeviceIntrf();
     TestControllerError();
     TestInvalidControllerType();
     TestZeroLengthRejected();

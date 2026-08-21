@@ -56,6 +56,11 @@ ISO_PB_COMPLETE = 0x02
 ISO_DIRECTION_INPUT = 0x00
 ISO_DIRECTION_OUTPUT = 0x01
 ISO_DATA_PATH_HCI = 0x00
+ISO_PACKET_STATUS_NAMES = {
+    1: "possibly invalid",
+    2: "lost",
+    3: "reserved-status",
+}
 
 # CIS Established v1/v2 are LE subevents 0x19 and 0x2A; CIS Request is 0x1A.
 # Their event mask bits are therefore 24, 41 and 25. The existing probe mask
@@ -439,7 +444,7 @@ def parse_iso(packet):
 
 def wait_iso(hci, label, expected_cis, expected_sdu, timeout=5.0):
     deadline = time.time() + timeout
-    lost = 0
+    nonvalid = {}
 
     while time.time() < deadline:
         packet = hci.read_packet(0.1)
@@ -454,7 +459,8 @@ def wait_iso(hci, label, expected_cis, expected_sdu, timeout=5.0):
                 continue
 
             if iso["status"] not in (None, 0):
-                lost += 1
+                packet_status = iso["status"]
+                nonvalid[packet_status] = nonvalid.get(packet_status, 0) + 1
                 continue
 
             if iso["pb"] != ISO_PB_COMPLETE:
@@ -481,9 +487,14 @@ def wait_iso(hci, label, expected_cis, expected_sdu, timeout=5.0):
                     iso["sdu_len"],
                 )
             )
-            if lost:
-                print("   %s reported %d lost SDU(s) before the marker"
-                      % (label.capitalize(), lost))
+            if nonvalid:
+                details = []
+                for packet_status in sorted(nonvalid):
+                    name = ISO_PACKET_STATUS_NAMES.get(
+                        packet_status, "status-%u" % packet_status)
+                    details.append("%d %s" % (nonvalid[packet_status], name))
+                print("   %s reported %s HCI ISO packet(s) before the marker"
+                      % (label.capitalize(), ", ".join(details)))
             return
 
         if kind == H4_EVENT and code == EVT_DISCONNECTION_COMPLETE:

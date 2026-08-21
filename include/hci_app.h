@@ -23,6 +23,7 @@
 #include "hci_syslog.h"
 #include "hci_taktos.h"
 #include "hci_tinyusb.h"
+#include "hci_usb.h"
 #include "usb/usbd_cdc_intrf.h"
 
 #ifdef __cplusplus
@@ -32,22 +33,17 @@ extern "C" {
 #define HCI_APP_PACKET_SIZE         1024U
 #define HCI_APP_COMMAND_EVENT_SIZE  260U
 #define HCI_APP_CDC_INTERFACE       0U
-
-/*
- * The second CDC function, where the log goes. Present whichever port the HCI
- * stream is on: with HCI over UART the first function is simply unused and
- * this one still reaches a terminal.
- */
-#define HCI_APP_LOG_INTERFACE       1U
 #define HCI_APP_FIFO_DATA_SIZE      4096U
 #define HCI_APP_FIFO_MEM_SIZE       CFIFO_MEMSIZE(HCI_APP_FIFO_DATA_SIZE)
 
-typedef enum {
+typedef enum
+{
     HCI_APP_HOST_UART = 0,
-    HCI_APP_HOST_USB  = 1,
+    HCI_APP_HOST_USB = 1,
 } HciAppHost_t;
 
-typedef struct {
+typedef struct
+{
     HciController_t Controller;
     HciSdc_t Sdc;
 
@@ -58,16 +54,20 @@ typedef struct {
      * The log is not here. It is HciSyslogDefault, outside this structure, so
      * that the memset below does not clear what was written before this layer
      * existed and so that a start up that never reaches this layer still has
-     * somewhere to have said why. This layer only drains it, on the second CDC
-     * function, whenever the device stack is running. Not the HCI stream and
-     * never mixed with it.
+     * somewhere to have said why. This layer only drains it on the CDC log
+     * function whenever the device stack is running. It is never mixed with
+     * the HCI stream.
      */
 
     UARTDev_t Uart;
     UsbdCdcDevIntrf_t UsbIntrf;
     HciTinyUsb_t Usb;
+    HciUsb_t NativeUsb;
     DevIntrf_t *pHostIntrf;
     HciAppHost_t HostType;
+    HciUsbDescriptorMode_t UsbDescriptorMode;
+    uint8_t LogCdcInterface;
+    bool UsbHciNative;
     bool HostOpen;
 
     /*
@@ -88,11 +88,9 @@ typedef struct {
     bool LogPortOpen;
 
     /*
-     * The octet count as it stood when the link last moved, and how many pump
-     * passes it has stood still since. This is parser recovery state, not
-     * reporting state: the Thingy UART can contain a boot banner before H:4,
-     * and an idle gap is what lets a half-built text packet be discarded before
-     * the first real HCI command arrives.
+     * The octet count as it stood when the H:4 link last moved, and how many
+     * pump passes it has stood still since. Native USB is packet-oriented and
+     * does not use this parser recovery state.
      */
     uint32_t LinkIdleOctets;
     uint32_t LinkIdlePasses;

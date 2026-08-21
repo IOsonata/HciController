@@ -38,14 +38,12 @@
 #define CFG_TUD_ENDPOINT0_SIZE 64
 
 /*
- * Two. One is the HCI byte stream and one is a log, and the second exists
- * because a controller that can only be watched with a debugger cannot be
- * watched at all on a sealed board or on somebody else's product. The nRF52840
- * has seven bulk or interrupt endpoints each way and two CDC take four in and
- * two out, so this is not close to a limit.
- *
- * The log one is there whichever port the HCI stream is on. With HCI over
- * UART the first is simply unused and the log still arrives.
+ * Keep two CDC instances compiled into TinyUSB because the compatibility
+ * CDC/H:4 descriptor uses CDC0 for HCI and CDC1 for the log. Native Bluetooth
+ * USB does not consume a CDC instance for HCI; in that descriptor CDC0 is the
+ * log and the custom Bluetooth class owns the HCI endpoints. Log-only mode
+ * likewise uses CDC0 only. Compiling two instances is therefore the superset
+ * needed by all three runtime descriptor modes.
  */
 #define CFG_TUD_CDC    2
 #define CFG_TUD_MSC    0

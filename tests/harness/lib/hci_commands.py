@@ -25,6 +25,14 @@ EXTENDED_PHASE_OPCODES = frozenset((
 for _opcode in EXTENDED_PHASE_OPCODES:
     _catalog.BY_OPCODE[_opcode].phase = PHASE_EXTENDED
 
+# Scan-enable rows create an unbounded stream of asynchronous reports. Leaving
+# scanning active until the phase-wide teardown can bury a later Command Status
+# behind report traffic on a real controller, especially on the USB interrupt
+# endpoint. Exercise the enable, then disable it immediately before the probe
+# advances to the next command.
+for _opcode in (0x200C, 0x2042):
+    _catalog.BY_OPCODE[_opcode].undo_now = True
+
 # These two commands enable persistent per-connection power-control reporting.
 # Leaving either one enabled contaminates later connection-scoped rows: Nordic's
 # VS Write Remote TX Power can then correctly answer Controller Busy while that

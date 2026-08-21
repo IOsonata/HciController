@@ -67,7 +67,17 @@ bool HciH4ParserInit(HciH4Parser_t *pParser,
                      HciH4PacketHandler_t Handler,
                      void *pContext);
 
+/*
+ * Packet-interface mode. The parser stops in DELIVER with the completed packet
+ * in pPacket instead of invoking a callback. The owner reads Type/PacketLen and
+ * calls HciH4ParserReleasePending() after the packet has been copied out.
+ */
+bool HciH4ParserInitPassive(HciH4Parser_t *pParser,
+                            uint8_t *pPacket,
+                            size_t PacketCapacity);
+
 void HciH4ParserReset(HciH4Parser_t *pParser);
+void HciH4ParserReleasePending(HciH4Parser_t *pParser);
 
 /*
  * Feed bytes into the parser and return the number consumed. DataLen may be
@@ -79,19 +89,6 @@ size_t HciH4ParserFeed(HciH4Parser_t *pParser,
 
 bool HciH4ParserDeliveryPending(const HciH4Parser_t *pParser);
 
-/*
- * True when the parser is part way through a packet: it has taken an indicator
- * and is still collecting the header or the payload behind it.
- *
- * H:4 has no framing. There is no delimiter, no length that can be checked
- * against anything, and no way to tell a packet from the middle of one by
- * looking at the octets. So a stream that once held something other than H:4
- * can leave this parser waiting for a payload that will never come, and every
- * real packet after it gets eaten as that payload. Only the caller knows
- * anything that could break the deadlock, because the one thing that separates
- * packets on a real link is not in the octets at all: it is the gap between
- * them.
- */
 bool HciH4ParserIsMidPacket(const HciH4Parser_t *pParser);
 
 #ifdef __cplusplus

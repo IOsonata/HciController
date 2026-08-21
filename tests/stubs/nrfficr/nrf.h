@@ -18,9 +18,17 @@
 #include <stdint.h>
 
 typedef struct {
-	uint32_t DEVICEID[2];
+    uint32_t DEVICEID[2];
 } NRF_FICR_Type;
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 extern NRF_FICR_Type *NRF_FICR;
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

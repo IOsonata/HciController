@@ -12,6 +12,8 @@
 
 #include <string.h>
 
+#define HCI_CMD_STATUS_UNSPECIFIED_ERROR 0x1FU
+
 static uint16_t HciCmdReadLe16(const uint8_t *pData)
 {
     return (uint16_t)pData[0] | ((uint16_t)pData[1] << 8);
@@ -283,6 +285,26 @@ bool HciCmdDispatchPut(HciCmdDispatch_t *pDispatch,
                                             paramLen,
                                             pReturn,
                                             returnCapacity);
+
+    /*
+     * Response kind is a property of the opcode, not a handler choice. The
+     * table is what malformed-command and guard failures already use to shape
+     * their event. If a handler disagrees with that row, contain the local
+     * implementation error instead of emitting a different HCI event type.
+     *
+     * ReturnLen is not checked against pEntry->ReturnLen here: some commands
+     * have a fixed return prefix followed by a count-sized array (for example
+     * CIG parameters), and a few vendor/Core commands likewise return a
+     * variable tail. Capacity and HCI's one-octet event length remain the hard
+     * bounds below.
+     */
+    if (result.Response != pEntry->Response)
+    {
+        pDispatch->HandlerErrorCount++;
+        HciCmdBuildError(pDispatch, pEntry, opcode,
+                         HCI_CMD_STATUS_UNSPECIFIED_ERROR);
+        return true;
+    }
 
     if (result.ReturnLen > returnCapacity ||
         result.ReturnLen > HCI_CMD_MAX_RETURN_LEN)

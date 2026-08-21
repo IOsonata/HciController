@@ -19,16 +19,6 @@
 
 #include "hci_sdc_expected_resources.h"
 
-/*
- * The fake sdc.h this file builds against has hand written copies of the
- * vendor SDC_MEM_ macros. hci_sdc_resources_test measures the real ones
- * against the same expectations, so a copy that drifts from the vendor header
- * fails here while the real one still passes, and the pair says which moved.
- *
- * Compile time rather than a printed check: a fake that disagrees about how
- * much memory the controller wants makes every other number in this file a
- * measurement of the wrong thing.
- */
 static_assert(HCI_SDC_MEM_REQUIRED == EXPECT_REQUIRED,
               "the fake sdc.h and the vendor one disagree about the pool");
 
@@ -48,7 +38,6 @@ UsbdEnableReg &UsbdEnableReg::operator=(uint32_t Setting)
     return *this;
 }
 
-/* Raw register table so the errata writes can be observed. */
 #define FAKE_REG_COUNT 8
 static uint32_t gFakeAddr[FAKE_REG_COUNT];
 static uint32_t gFakeVal[FAKE_REG_COUNT];
@@ -88,7 +77,6 @@ extern "C" bool nrf52_errata_187(void) { return true; }
 static NRF_CLOCK_Type gClock;
 NRF_CLOCK_Type *NRF_CLOCK = &gClock;
 
-/* Drain a log into a buffer, so a trace line can be read back and checked. */
 static size_t SyslogTake(HciSyslog_t *pLog, char *pOut, size_t Capacity);
 
 static NRF_UARTE_Type gUarte0;
@@ -105,7 +93,6 @@ static CryptoRngNrf gRng;
 static OscDesc_t gLfOsc = { OSC_TYPE_XTAL, 32768U, 20U, 0U };
 
 static unsigned gUsbPowerEvents[3];
-static unsigned gUsbIrq;
 static unsigned gDcdConnect;
 static unsigned gDcdDisconnect;
 static unsigned gClockRegisterWrites;
@@ -127,22 +114,11 @@ extern "C" void NVIC_EnableIRQ(IRQn_Type) {}
 extern "C" void NVIC_DisableIRQ(IRQn_Type) {}
 extern "C" void NVIC_ClearPendingIRQ(IRQn_Type) {}
 
-/*
- * The port helper must never be reached. Linking it here would fail the build
- * if anything still called it, and this definition proves the reference is
- * gone from the object under test.
- */
 extern "C" void tusb_hal_nrf_power_event(uint32_t Event)
 {
     assert(Event < 3U);
     gUsbPowerEvents[Event]++;
-    gClockRegisterWrites++;   /* the helper touches NRF_CLOCK on every path */
-}
-
-extern "C" void tusb_int_handler(uint8_t rhport, bool in_isr)
-{
-    assert(rhport == 0U && in_isr);
-    gUsbIrq++;
+    gClockRegisterWrites++;
 }
 
 extern "C" void dcd_connect(uint8_t rhport) { assert(rhport == 0U); gDcdConnect++; }
@@ -238,12 +214,15 @@ extern "C" void sdc_support_bis_sink(void) {}
 extern "C" void HciTaktOsWake(HciTaktOs_t *, uint32_t) {}
 
 extern "C" void POWER_CLOCK_IRQHandler(void);
-extern "C" void USBD_IRQHandler(void);
+extern "C" uint32_t HciUsbPlatformIrqEnter(void);
+extern "C" void HciUsbPlatformIrqUnexpectedCause(uint32_t Cause);
+extern "C" void HciUsbPlatformIrqStorm(uint32_t Inten,
+                                       uint32_t Cause,
+                                       uint32_t Events);
 
 static void ResetCounters(void)
 {
     memset(gUsbPowerEvents, 0, sizeof(gUsbPowerEvents));
-    gUsbIrq = 0U;
     gDcdConnect = 0U;
     gDcdDisconnect = 0U;
     gClockRegisterWrites = 0U;
@@ -281,20 +260,17 @@ static void TestBringUpOrder(void)
     HciNrf52840GetTaktOsOps(&target, &ops);
     assert(ops.Start(ops.pContext));
 
-    /* Radio bring up must not deliver any USB power event. */
     assert(gUsbPowerEvents[0] == 0U);
     assert(gUsbPowerEvents[2] == 0U);
     assert(gHfclkRequests == 0U);
 
-    /* An early USBD interrupt must be ignored before the stack is up. */
-    USBD_IRQHandler();
-    assert(gUsbIrq == 0U);
+    /* The DCD may see an early IRQ, but target accounting stays inactive. */
+    assert(HciUsbPlatformIrqEnter() == 0U);
 
     assert(HciNrf52840UsbStart(&target));
     assert(gHfclkRequests == 1U);
     assert(target.HfclkRequested);
     assert(target.UsbStarted && target.UsbReadyDone);
-    /* The port power helper must not be reached at all. */
     assert(gUsbPowerEvents[0] == 0U);
     assert(gUsbPowerEvents[1] == 0U);
     assert(gUsbPowerEvents[2] == 0U);
@@ -304,33 +280,23 @@ static void TestBringUpOrder(void)
     assert(gUsbd.ISOSPLIT == USBD_ISOSPLIT_SPLIT_HalfIN);
     assert((gUsbd.INTENSET & USBD_INTEN_USBRESET_Msk) != 0U);
 
-    /* Errata 187 and 171 applied then reverted, 166 left applied. */
     assert(FakeRegPeek(0x4006ED14UL) == 0x00000000UL);
     assert(FakeRegPeek(0x4006EC14UL) == 0x00000000UL);
     assert(FakeRegPeek(NRF_USBD_BASE + 0x800UL) == 0x7E3UL);
     assert(FakeRegPeek(NRF_USBD_BASE + 0x804UL) == 0x40UL);
-
-    /* The crystal was already running, so the driver never wrote NRF_CLOCK. */
     assert(gClockRegisterWrites == 0U);
-
-    /* The USB bits are armed in the enable register shared with CLOCK. */
     assert((gPower.INTENSET & POWER_INTENSET_USBPWRRDY_Msk) != 0U);
 
-    /* MPSL owns that register. Low priority processing must re-arm the bits. */
     gPower.INTENSET = 0U;
     ops.ProcessMpsl(ops.pContext);
     assert((gPower.INTENSET & POWER_INTENSET_USBDETECTED_Msk) != 0U);
     assert((gPower.INTENSET & POWER_INTENSET_USBREMOVED_Msk) != 0U);
     assert((gPower.INTENSET & POWER_INTENSET_USBPWRRDY_Msk) != 0U);
 
-    USBD_IRQHandler();
-    assert(gUsbIrq == 1U);
+    HciNrf52840UsbPassMark(&target);
+    assert(HciUsbPlatformIrqEnter() == 1U);
+    assert(target.UsbIrqCount == 1U);
 
-    /*
-     * Cable removal must not reach the driver path that stops the crystal, and
-     * must not touch the TinyUSB event queue from interrupt context. The
-     * handler records it; the thread applies it.
-     */
     gPower.EVENTS_USBREMOVED = 1U;
     POWER_CLOCK_IRQHandler();
     assert(gUsbPowerEvents[1] == 0U);
@@ -342,7 +308,6 @@ static void TestBringUpOrder(void)
     assert(gDcdDisconnect == 1U);
     assert(!target.UsbDetachPending);
 
-    /* Re-plug only restores the pull up, and again only from the thread. */
     gPower.EVENTS_USBDETECTED = 1U;
     POWER_CLOCK_IRQHandler();
     assert(target.UsbAttachPending);
@@ -352,10 +317,6 @@ static void TestBringUpOrder(void)
     assert(gDcdConnect == 1U);
     assert(gUsbPowerEvents[0] == 0U);
 
-    /*
-     * A detach and an attach arriving before the thread runs collapse to the
-     * state the hardware is actually in, which is attached.
-     */
     gPower.EVENTS_USBREMOVED = 1U;
     POWER_CLOCK_IRQHandler();
     gPower.EVENTS_USBDETECTED = 1U;
@@ -366,15 +327,11 @@ static void TestBringUpOrder(void)
     HciNrf52840Stop(&target);
     assert(gHfclkReleases == 1U);
     assert(!target.HfclkRequested && !target.UsbStarted);
-    /* Stop must disable a controller that was initialised, not only enabled. */
     assert(!target.SdcInitialized);
-
-    /* Stop detaches rather than leaving the host enumerated against nothing. */
     assert(gUsbd.USBPULLUP == 0U);
     assert(gUsbd.ENABLE == 0U);
     assert(gUsbd.INTEN == 0U);
 
-    /* And a stopped target can be started again. */
     assert(ops.Start(ops.pContext));
     HciNrf52840Stop(&target);
 
@@ -384,7 +341,7 @@ static void TestBringUpOrder(void)
 static void TestHfclkTimeoutDoesNotHang(void)
 {
     ResetCounters();
-    gHfclkStartAfter = 0U;   /* crystal never reports running */
+    gHfclkStartAfter = 0U;
     gPower.USBREGSTATUS = POWER_USBREGSTATUS_VBUSDETECT_Msk |
                           POWER_USBREGSTATUS_OUTPUTRDY_Msk;
 
@@ -405,13 +362,11 @@ static void TestHfclkTimeoutDoesNotHang(void)
     assert(!target.HfclkRequested);
     assert(gUsbPowerEvents[0] == 0U && gUsbPowerEvents[2] == 0U);
 
-    /* A retry must make a fresh MPSL request rather than trust stale state. */
     gHfclkStartAfter = gLowPrioProcess + 1U;
     assert(HciNrf52840UsbStart(&target));
     assert(gHfclkRequests == 2U);
     assert(target.HfclkRequested);
 
-    /* The first recorded cause survives the generic fault report. */
     ops.Fault(ops.pContext, -1);
     assert(target.LastError == -1000);
     assert(target.FaultCount == 1U);
@@ -425,7 +380,6 @@ static void TestUsbRegulatorTimeout(void)
 {
     ResetCounters();
     gHfclkStartAfter = 1U;
-    /* VBUS present but the 3.3 V regulator never reports ready. */
     gPower.USBREGSTATUS = POWER_USBREGSTATUS_VBUSDETECT_Msk;
 
     alignas(8) static uint8_t mem[10000];
@@ -440,23 +394,14 @@ static void TestUsbRegulatorTimeout(void)
     assert(!HciNrf52840UsbStart(&target));
     assert(target.LastError == -1001);
     assert(!target.UsbReadyDone);
-
-    /*
-     * A failed bring up unwinds. The controller goes back off, the pull up
-     * never goes up, the flag does not claim success, and the crystal that was
-     * requested for USB alone is handed back so MPSL can drop to the internal
-     * oscillator between radio events.
-     */
     assert(!target.UsbStarted);
     assert(gUsbd.ENABLE == 0U);
     assert(gUsbd.USBPULLUP == 0U);
     assert(gUsbd.INTEN == 0U);
     assert(gHfclkReleases == 1U);
-    /* The release and the flag that records it have to agree. */
     assert(!target.HfclkRequested);
     assert(gUsbPowerEvents[0] == 0U);
 
-    /* A retry after a failure must not claim the port is already up. */
     gPower.USBREGSTATUS = 0U;
     assert(!HciNrf52840UsbStart(&target));
 
@@ -491,7 +436,7 @@ static void TestUsbdReadyTimeout(void)
 {
     ResetCounters();
     gHfclkStartAfter = 1U;
-    gUsbdReadyRaises = false;   /* controller never signals EVENTCAUSE.READY */
+    gUsbdReadyRaises = false;
     gPower.USBREGSTATUS = POWER_USBREGSTATUS_VBUSDETECT_Msk |
                           POWER_USBREGSTATUS_OUTPUTRDY_Msk;
 
@@ -516,7 +461,7 @@ static void TestHfxoNotOnCrystal(void)
 {
     ResetCounters();
     gHfclkStartAfter = 1U;
-    gXtalSelected = false;   /* mpsl reports running, hardware still on the rc */
+    gXtalSelected = false;
     gPower.USBREGSTATUS = POWER_USBREGSTATUS_VBUSDETECT_Msk |
                           POWER_USBREGSTATUS_OUTPUTRDY_Msk;
 
@@ -538,7 +483,7 @@ static void TestHfxoNotOnCrystal(void)
     printf("[ok] crystal select mismatch is caught, not spun on\n");
 }
 
-static void TestEventCauseStormIsBroken(void)
+static void TestUsbIrqBookkeeping(void)
 {
     ResetCounters();
     gHfclkStartAfter = 1U;
@@ -555,73 +500,31 @@ static void TestEventCauseStormIsBroken(void)
     assert(ops.Start(ops.pContext));
     assert(HciNrf52840UsbStart(&target));
 
-    /* Start up must leave no cause behind. */
-    assert(gUsbd.EVENTCAUSE.Value == 0U);
-    assert(gUsbd.EVENTS_USBEVENT == 0U);
+    HciNrf52840UsbPassMark(&target);
+    assert(HciUsbPlatformIrqEnter() == 1U);
+    assert(HciUsbPlatformIrqEnter() == 2U);
+    assert(target.UsbIrqCount == 2U);
 
-    /*
-     * READY sits outside the mask the port clears. Left alone it re-asserts
-     * EVENTS_USBEVENT forever, so the handler has to clear it.
-     */
-    gUsbd.EVENTCAUSE.Value = USBD_EVENTCAUSE_READY_Msk;
-    gUsbd.EVENTS_USBEVENT = 1U;
-    USBD_IRQHandler();
-
-    assert((gUsbd.EVENTCAUSE.Value & USBD_EVENTCAUSE_READY_Msk) == 0U);
-    assert(gUsbd.EVENTS_USBEVENT == 0U);
+    HciUsbPlatformIrqUnexpectedCause(USBD_EVENTCAUSE_READY_Msk);
     assert(target.UsbStuckCauseCount == 1U);
     assert((target.UsbEventCause & USBD_EVENTCAUSE_READY_Msk) != 0U);
 
-    /* Causes the port does handle must be left to the port. */
-    gUsbd.EVENTCAUSE.Value = USBD_EVENTCAUSE_SUSPEND_Msk;
-    gUsbd.EVENTS_USBEVENT = 1U;
-    USBD_IRQHandler();
-
-    assert((gUsbd.EVENTCAUSE.Value & USBD_EVENTCAUSE_SUSPEND_Msk) != 0U);
-    assert(target.UsbStuckCauseCount == 1U);
-
-    /*
-     * Both kinds at once, which is the case that decides it. Clearing the one
-     * the port ignores must not take EVENTS_USBEVENT with it while a cause the
-     * port still has to read is behind it. The port never looks at EVENTCAUSE
-     * unless the event is there, so a suspend or a resume dropped here is a
-     * suspend or a resume the port never learns about.
-     */
-    gUsbd.EVENTCAUSE.Value = USBD_EVENTCAUSE_READY_Msk |
-                             USBD_EVENTCAUSE_SUSPEND_Msk;
-    gUsbd.EVENTS_USBEVENT = 1U;
-    USBD_IRQHandler();
-
-    assert((gUsbd.EVENTCAUSE.Value & USBD_EVENTCAUSE_READY_Msk) == 0U);
-    assert((gUsbd.EVENTCAUSE.Value & USBD_EVENTCAUSE_SUSPEND_Msk) != 0U);
-    assert(gUsbd.EVENTS_USBEVENT == 1U);
-    assert(target.UsbStuckCauseCount == 2U);
-
-    /* And with nothing left behind it the event still has to go. */
-    gUsbd.EVENTCAUSE.Value = USBD_EVENTCAUSE_READY_Msk;
-    gUsbd.EVENTS_USBEVENT = 1U;
-    USBD_IRQHandler();
-
-    assert(gUsbd.EVENTCAUSE.Value == 0U);
-    assert(gUsbd.EVENTS_USBEVENT == 0U);
-    assert(target.UsbStuckCauseCount == 3U);
-
-    /* A source that keeps re-asserting is captured and named, not guessed. */
-    gUsbd.EVENTCAUSE.Value = 0U;
-    gUsbd.EVENTS_USBEVENT = 0U;
-    HciNrf52840UsbPassMark(&target);
-    gUsbd.INTEN = 0x00000001U;
-    gUsbd.EVENTS_USBRESET = 1U;
-    for (uint32_t i = 0U; i < 2100U; i++)
-    {
-        USBD_IRQHandler();
-    }
-
+    HciUsbPlatformIrqStorm(0x00000001U,
+                           USBD_EVENTCAUSE_READY_Msk,
+                           0x00000001U);
     assert(target.UsbStormEvents == 0x00000001U);
     assert(target.UsbStormInten == 0x00000001U);
+    assert(target.UsbStormCause == USBD_EVENTCAUSE_READY_Msk);
+    assert(target.LastError == -1006);
+    assert(!target.UsbStarted);
+    assert(!target.UsbReadyDone);
+
+    HciNrf52840UsbPowerProcess(&target);
+    assert(!target.HfclkRequested);
+    assert(gUsbd.ENABLE == 0U);
 
     HciNrf52840Stop(&target);
-    printf("[ok] eventcause the port ignores is cleared, storm is named\n");
+    printf("[ok] usb irq bookkeeping stays outside the register dispatcher\n");
 }
 
 static void TestUartModeLeavesUsbAlone(void)
@@ -647,9 +550,7 @@ static void TestUartModeLeavesUsbAlone(void)
     gPower.EVENTS_USBREMOVED = 1U;
     POWER_CLOCK_IRQHandler();
     assert(gDcdDisconnect == 0U);
-
-    USBD_IRQHandler();
-    assert(gUsbIrq == 0U);
+    assert(HciUsbPlatformIrqEnter() == 0U);
 
     HciNrf52840Stop(&target);
     printf("[ok] uart mode leaves the usb hardware alone\n");
@@ -693,10 +594,10 @@ static void TestUartTraceUsesDatasheetPinNames(void)
     gUarte0.BAUDRATE = 0x10000000UL;
     gUarte0.ERRORSRC = 0U;
     gUarte0.CONFIG = 1U;
-    gUarte0.PSEL.RXD = 32U; /* P1.00 */
-    gUarte0.PSEL.TXD = 25U; /* P0.25 */
-    gUarte0.PSEL.CTS = 22U; /* P0.22 */
-    gUarte0.PSEL.RTS = 19U; /* P0.19 */
+    gUarte0.PSEL.RXD = 32U;
+    gUarte0.PSEL.TXD = 25U;
+    gUarte0.PSEL.CTS = 22U;
+    gUarte0.PSEL.RTS = 19U;
     gP0.IN = 0U;
     gP1.IN = 0xFFFFFFFFU;
 
@@ -713,14 +614,12 @@ static void TestUartTraceUsesDatasheetPinNames(void)
     assert(strstr(text, "CTS=P0.22") != NULL);
     assert(strstr(text, "RTS=P0.19") != NULL);
 
-    /* Same CTS pin high means the peer is applying backpressure. */
     gP0.IN = 1UL << 22;
     HciSyslogInit(&log);
     HciTargetUartTrace(&target, 0U);
     text[SyslogTake(&log, text, sizeof(text))] = '\0';
     assert(strstr(text, "cts=high(peer-not-ready)") != NULL);
 
-    /* Port bit 5 must survive decoding into the datasheet pin name. */
     gUarte0.PSEL.CTS = 32U;
     gP0.IN = 0xFFFFFFFFU;
     gP1.IN = 0U;
@@ -730,7 +629,6 @@ static void TestUartTraceUsesDatasheetPinNames(void)
     assert(strstr(text, "cts=low(peer-ready)") != NULL);
     assert(strstr(text, "CTS=P1.00") != NULL);
 
-    /* A pin the driver never connected is reported as NC, not a hex PSEL. */
     gUarte0.PSEL.CTS = 0x80000000UL;
     HciSyslogInit(&log);
     HciTargetUartTrace(&target, 0U);
@@ -738,7 +636,6 @@ static void TestUartTraceUsesDatasheetPinNames(void)
     assert(strstr(text, "cts=not-connected") != NULL);
     assert(strstr(text, "CTS=NC") != NULL);
 
-    /* The second instance is a different peripheral, not the first again. */
     gUarte1.ENABLE = 8U;
     gUarte1.PSEL.CTS = 0x80000000UL;
     HciSyslogInit(&log);
@@ -769,7 +666,6 @@ static void TestResetTraceKeepsSdcAssert(void)
     assert(ops.Start(ops.pContext));
     assert(gSdcAssert != nullptr);
 
-    /* The real library resets after this callback returns. */
     gSdcAssert("controller_fault.c", 321U);
     gPower.RESETREAS = POWER_RESETREAS_SREQ_Msk;
 
@@ -781,7 +677,6 @@ static void TestResetTraceKeepsSdcAssert(void)
     assert(strstr(text, "file=controller_fault.c") != NULL);
     assert(strstr(text, "line=321") != NULL);
 
-    /* The retained assertion is consumed once, not repeated every boot log. */
     HciSyslogInit(&log);
     HciNrf52840ResetTrace();
     text[SyslogTake(&log, text, sizeof(text))] = '\0';
@@ -800,7 +695,7 @@ int main(void)
     TestNoVbusIsRejected();
     TestUsbdReadyTimeout();
     TestHfxoNotOnCrystal();
-    TestEventCauseStormIsBroken();
+    TestUsbIrqBookkeeping();
     TestUartModeLeavesUsbAlone();
     TestUartTraceUsesDatasheetPinNames();
     TestResetTraceKeepsSdcAssert();

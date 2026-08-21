@@ -42,6 +42,8 @@ EVT_NUM_COMPLETED_PACKETS = 0x13
 STRESS_CID = 0x0040
 DEFAULT_STRESS_COUNT = 10000
 ISO_EVERY = 10
+ESTABLISHMENT_ATTEMPTS = 3
+ESTABLISHMENT_REASON = 0x3E
 
 # Any increment in these counters means the stress run crossed a boundary the
 # release transport is supposed to preserve. Retries are deliberately not in
@@ -105,23 +107,94 @@ def _check_counter_deltas(before, after, label):
                            % (label, name, delta))
 
 
+def _link_establishment_failed(hci):
+    down = getattr(hci, "link_down", None)
+    return (
+        down is not None
+        and len(down) >= 3
+        and down[2] == ESTABLISHMENT_REASON
+    )
+
+
+def _retryable_acl_establishment(err, central, peripheral):
+    detail = str(err)
+    if (
+        "ACL connection failed: 0x3E" in detail
+        or "Connection Failed To Be Established" in detail
+    ):
+        return True
+    return (
+        "timed out waiting for both ACL connection events" in detail
+        and (
+            _link_establishment_failed(central)
+            or _link_establishment_failed(peripheral)
+        )
+    )
+
+
+def _cleanup_setup_attempt(central, peripheral):
+    cleanup(central, peripheral, None, None, None, None, None)
+    central.close()
+    peripheral.close()
+
+
+def _establish_acl_with_retry(central_port, peripheral_port, raw, label,
+                              attempts=ESTABLISHMENT_ATTEMPTS):
+    for attempt in range(1, attempts + 1):
+        central = IsoHci(central_port, raw=raw)
+        peripheral = IsoHci(peripheral_port, raw=raw)
+        try:
+            peripheral_id, peripheral_type, _ = prepare(peripheral)
+            _, central_type, _ = prepare(central)
+            start_advertising(peripheral, peripheral_id, peripheral_type)
+            start_connection(
+                central, central_type, peripheral_id, peripheral_type
+            )
+            central_acl, peripheral_acl = wait_acl_pair(central, peripheral)
+        except (HciError, HciGone) as err:
+            retryable = _retryable_acl_establishment(
+                err, central, peripheral
+            )
+            _cleanup_setup_attempt(central, peripheral)
+            if retryable and attempt < attempts:
+                print(
+                    "HOST-RETRY: Stress %s ACL setup attempt %u/%u ended "
+                    "in LE 0x3E; retrying fresh setup"
+                    % (label, attempt, attempts)
+                )
+                continue
+            if retryable:
+                print(
+                    "HOST-RETRY: Stress %s ACL setup still failed with "
+                    "LE 0x3E after %u attempts"
+                    % (label, attempts)
+                )
+            raise
+
+        if attempt > 1:
+            print(
+                "HOST-RETRY: Stress %s ACL setup recovered on attempt %u/%u"
+                % (label, attempt, attempts)
+            )
+        return central, peripheral, central_acl, peripheral_acl
+
+    raise HciError("unreachable stress ACL establishment retry state")
+
+
 def run_stress_phase(book, label, central_port, peripheral_port,
                      raw=False, count=DEFAULT_STRESS_COUNT):
-    central = IsoHci(central_port, raw=raw)
-    peripheral = IsoHci(peripheral_port, raw=raw)
+    central = None
+    peripheral = None
     cig_id = None
     central_cis = None
     peripheral_cis = None
     central_acl = None
     peripheral_acl = None
     try:
-        peripheral_id, peripheral_type, _ = prepare(peripheral)
-        _, central_type, _ = prepare(central)
-        start_advertising(peripheral, peripheral_id, peripheral_type)
-        start_connection(
-            central, central_type, peripheral_id, peripheral_type
-        )
-        central_acl, peripheral_acl = wait_acl_pair(central, peripheral)
+        central, peripheral, central_acl, peripheral_acl = \
+            _establish_acl_with_retry(
+                central_port, peripheral_port, raw, label
+            )
 
         cig_id, central_cis, cis_id = create_cig(central)
         status, _ = central.command(
@@ -211,14 +284,15 @@ def run_stress_phase(book, label, central_port, peripheral_port,
     except (HciError, HciGone) as err:
         book.failed("Stress", "concurrent ACL/ISO/event traffic", str(err))
     finally:
-        cleanup(
-            central,
-            peripheral,
-            cig_id,
-            central_cis,
-            peripheral_cis,
-            central_acl,
-            peripheral_acl,
-        )
-        central.close()
-        peripheral.close()
+        if central is not None and peripheral is not None:
+            cleanup(
+                central,
+                peripheral,
+                cig_id,
+                central_cis,
+                peripheral_cis,
+                central_acl,
+                peripheral_acl,
+            )
+            central.close()
+            peripheral.close()

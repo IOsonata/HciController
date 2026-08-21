@@ -18,8 +18,8 @@
 #ifndef HCI_SDC_EXPECTED_RESOURCES_H
 #define HCI_SDC_EXPECTED_RESOURCES_H
 
-#define EXPECT_PERIPHERAL_LINK 2951
-#define EXPECT_CENTRAL_LINK    2855
+#define EXPECT_PERIPHERAL_LINK 2935
+#define EXPECT_CENTRAL_LINK    2839
 #define EXPECT_ADV_SET          961
 #define EXPECT_SCAN_BUFFERS    1688
 #define EXPECT_ACCEPT_LIST       68
@@ -53,9 +53,9 @@
 #define EXPECT_ISO_TX_SDU       1196
 #define EXPECT_ISO_TOTAL       17084
 
-/* Core 6.0 is 91584. FSU + SCI add 1236 + 948 for the Core 6.2 profile. */
-#define EXPECT_REQUIRED_6_0   91584
-#define EXPECT_REQUIRED_6_2   93768
+/* Core 6.0 is 91296. FSU + SCI add 1236 + 948 for the Core 6.2 profile. */
+#define EXPECT_REQUIRED_6_0   91296
+#define EXPECT_REQUIRED_6_2   93480
 #define EXPECT_REQUIRED       EXPECT_REQUIRED_6_2
 
 #endif

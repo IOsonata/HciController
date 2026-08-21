@@ -1,15 +1,8 @@
 #!/usr/bin/env python3
-"""Reusable H:4 ISO helpers for BLE harnesses."""
+"""Reusable HCI ISO helpers for BLE harnesses."""
 
-from pathlib import Path
 import struct
-import sys
 import time
-
-_TESTS_DIR = Path(__file__).resolve().parents[2]
-_HARDWARE_DIR = _TESTS_DIR / "hardware"
-if str(_HARDWARE_DIR) not in sys.path:
-    sys.path.insert(0, str(_HARDWARE_DIR))
 
 import serial
 
@@ -33,6 +26,11 @@ ISO_DIRECTION_INPUT = 0x00
 ISO_DIRECTION_OUTPUT = 0x01
 ISO_DATA_PATH_HCI = 0x00
 CODING_FORMAT_TRANSPARENT = 0x03
+ISO_PACKET_STATUS_NAMES = {
+    1: "possibly invalid",
+    2: "lost",
+    3: "reserved-status",
+}
 
 
 def status_text(status):
@@ -182,7 +180,7 @@ def parse_iso(packet):
 
 def wait_iso(hci, label, expected_handle, expected_sdu, timeout=5.0):
     deadline = time.time() + timeout
-    lost = 0
+    nonvalid = {}
 
     while time.time() < deadline:
         packet = hci.read_packet(0.1)
@@ -195,7 +193,8 @@ def wait_iso(hci, label, expected_handle, expected_sdu, timeout=5.0):
             if iso["handle"] != expected_handle:
                 continue
             if iso["status"] not in (None, 0):
-                lost += 1
+                packet_status = iso["status"]
+                nonvalid[packet_status] = nonvalid.get(packet_status, 0) + 1
                 continue
             if iso["pb"] != ISO_PB_COMPLETE:
                 raise HciError("%s received fragmented small ISO SDU" % label)
@@ -218,11 +217,14 @@ def wait_iso(hci, label, expected_handle, expected_sdu, timeout=5.0):
                     iso["sdu_len"],
                 )
             )
-            if lost:
-                print(
-                    "   %s reported %d lost SDU(s) before the marker"
-                    % (label.capitalize(), lost)
-                )
+            if nonvalid:
+                details = []
+                for packet_status in sorted(nonvalid):
+                    name = ISO_PACKET_STATUS_NAMES.get(
+                        packet_status, "status-%u" % packet_status)
+                    details.append("%d %s" % (nonvalid[packet_status], name))
+                print("   %s reported %s HCI ISO packet(s) before the marker"
+                      % (label.capitalize(), ", ".join(details)))
             return
 
         if kind == H4_EVENT and code == EVT_DISCONNECTION_COMPLETE:

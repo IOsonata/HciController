@@ -2380,7 +2380,7 @@ def cmd_probe(hci, args):
         print("A refusal is not by itself a defect. What it does mean is that")
         print("the row did not describe what this controller was going to")
         print("say, so one of the two is wrong. Check the parameter block in")
-        print("tests/hardware/hci_commands.py against the vendor header")
+        print("tests/harness/lib/hci_commands.py against the vendor header")
         print("before concluding it is the firmware.")
 
     if counts["unknown"]:

@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+"""Keep the Python harness counter schema aligned with firmware."""
+
+import ast
+import os
+import re
+import sys
+
+
+def fail(message):
+    raise SystemExit("[!!] " + message)
+
+
+def read(path):
+    with open(path, "r", encoding="utf-8") as handle:
+        return handle.read()
+
+
+def c_define(text, name):
+    match = re.search(r"^#define\s+%s\s+(\d+)U?\s*$" % re.escape(name),
+                      text, re.MULTILINE)
+    if match is None:
+        fail("missing %s" % name)
+    return int(match.group(1))
+
+
+def assignment(tree, name):
+    for node in tree.body:
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        target = node.targets[0]
+        if isinstance(target, ast.Name) and target.id == name:
+            return ast.literal_eval(node.value)
+    fail("missing Python assignment %s" % name)
+
+
+def main(argv):
+    if len(argv) != 2:
+        print("usage: counter_schema.py REPO_ROOT")
+        return 2
+
+    root = os.path.abspath(argv[1])
+    header = read(os.path.join(root, "include", "hci_counters.h"))
+    harness_lib = os.path.join(root, "tests", "harness", "lib")
+    wrapper = read(os.path.join(harness_lib, "hci_ble_test.py"))
+    implementation = read(os.path.join(harness_lib, "hci_ble_test_impl.py"))
+
+    firmware_version = c_define(header, "HCI_COUNTERS_VERSION")
+    firmware_count = c_define(header, "HCI_COUNTERS_COUNT")
+
+    wrapper_tree = ast.parse(wrapper)
+    impl_tree = ast.parse(implementation)
+    host_version = assignment(wrapper_tree, "COUNTER_VERSION")
+    extra_names = assignment(wrapper_tree, "_COUNTER_EXTRA_NAMES")
+    base_names = assignment(impl_tree, "COUNTER_NAMES")
+    pool_first = assignment(impl_tree, "POOL_FIRST_INDEX")
+    pool_names = assignment(impl_tree, "POOL_NAMES")
+
+    if host_version != firmware_version:
+        fail("harness reads counter version %d but firmware emits version %d"
+             % (host_version, firmware_version))
+
+    if len(base_names) != pool_first:
+        fail("base counter names stop at %d but pool begins at %d"
+             % (len(base_names), pool_first))
+
+    extra_first = pool_first + len(pool_names)
+    expected_indices = list(range(extra_first, firmware_count))
+    actual_indices = [entry[0] for entry in extra_names]
+    if actual_indices != expected_indices:
+        fail("Python extra counter indices %s do not cover firmware indices %s"
+             % (actual_indices, expected_indices))
+
+    if any(not isinstance(entry[1], str) or not entry[1] for entry in extra_names):
+        fail("every appended counter needs a display name")
+
+    print("[ok] counter schema v%d covers all %d firmware fields"
+          % (firmware_version, firmware_count))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

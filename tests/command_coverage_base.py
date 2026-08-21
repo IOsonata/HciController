@@ -6,10 +6,10 @@ The controller has two command dispatch sources:
     src/hci_sdc_nrfxlib.cpp   commands mapped by the nrfxlib table
     src/hci_sdc.cpp           supplemental Core commands
 
-The broad hardware catalog plus hci_nrf52840_profile_test.py must account for
-every externally reachable opcode. Source/resource checks run independently so
-keeping two opcode lists in agreement cannot by itself prove the product
-profile.
+The official harness command catalog plus harness target-profile metadata must
+account for every externally reachable opcode. Source/resource checks run
+independently so keeping two opcode lists in agreement cannot by itself prove
+the product profile.
 """
 
 import ast
@@ -108,9 +108,6 @@ def validate_source_contracts(root):
     if sca and cis:
         print("[ok] SCA+CIS profile has vendor LE Request Peer SCA routing")
 
-    # Release 1 is explicitly Core 6.2 once FSU and SCI are enabled. Require
-    # the version, support calls and memory terms together so one cannot move
-    # without the other two.
     target = re.search(
         r"#define\s+HCI_CONTROLLER_TARGET_CORE_VERSION\s+"
         r"HCI_CORE_VERSION_([0-9_]+)", profile_header
@@ -293,12 +290,11 @@ def main(argv):
         print("no sdk-nrfxlib, opcode-table comparison skipped. Pass one as an argument or set NRFXLIB_DIR.")
         return 0
 
-    sys.path.insert(0, os.path.join(root, "tests", "hardware"))
+    harness_lib = os.path.join(root, "tests", "harness", "lib")
+    sys.path.insert(0, harness_lib)
     import hci_commands
 
-    profile_path = os.path.join(
-        root, "tests", "hardware", "hci_nrf52840_profile_test.py"
-    )
+    profile_path = os.path.join(harness_lib, "target_profile.py")
     covered = literal_set(profile_path, "COVERED_OPCODES")
     excluded = literal_set(profile_path, "EXCLUDED_OPCODES")
 
@@ -325,7 +321,7 @@ def main(argv):
         print("[!!] 0x%04X %-56s driven, not exposed" % (opcode, name))
 
     if undriven or orphaned:
-        print("\n%d opcode(s) disagree between the exposed dispatch profile and hardware tooling."
+        print("\n%d opcode(s) disagree between the exposed dispatch profile and harness tooling."
               % (len(undriven) + len(orphaned)))
         return 1
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check the pairing crypto against the specification's own test vectors.
 
-tests/hardware/hci_ble_test.py implements enough of the Security Manager to
+tests/harness/lib/hci_ble_test.py implements enough of the Security Manager to
 let a phone pair Just Works, so that link layer encryption gets exercised and
 the two Long Term Key Request commands answer a real request instead of being
 checked for their shape. The confirm value c1 and the key derivation s1 are
@@ -127,7 +127,7 @@ def check(label, got, want):
 
 def main():
     here = os.path.dirname(os.path.abspath(__file__))
-    sys.path.insert(0, os.path.join(here, "hardware"))
+    sys.path.insert(0, os.path.join(here, "harness", "lib"))
     try:
         import hci_ble_test
     except SystemExit:

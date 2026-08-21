@@ -168,7 +168,7 @@ def _power_control(hci, handle):
 def _request_phy(hci, handle, phy, expected_phy=None):
     """Request a PHY preference and return the completed TX/RX PHYs."""
     payload = struct.pack("<HBBBH", handle, 0, phy, phy, 0)
-    status, _ = hci.command(_base.OP_LE_SET_PHY, payload, allow_fail=True)
+    status, _ = _command_status_retry(hci, _base.OP_LE_SET_PHY, payload)
     if status != 0:
         raise HciError("LE Set PHY returned %s" % status_text(status))
 

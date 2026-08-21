@@ -394,7 +394,7 @@ size_t HciTinyUsbWrite(uint8_t Interface, const uint8_t *pData, size_t Len)
     return (size_t)written;
 }
 
-extern "C" void tud_cdc_rx_cb(uint8_t itf)
+void tud_cdc_rx_cb(uint8_t itf)
 {
     if (!HciTinyUsbCallbackIsOurs(itf))
     {
@@ -404,7 +404,7 @@ extern "C" void tud_cdc_rx_cb(uint8_t itf)
     HciTinyUsbWake(s_pUsb);
 }
 
-extern "C" void tud_cdc_tx_complete_cb(uint8_t itf)
+void tud_cdc_tx_complete_cb(uint8_t itf)
 {
     if (!HciTinyUsbCallbackIsOurs(itf))
     {
@@ -414,7 +414,7 @@ extern "C" void tud_cdc_tx_complete_cb(uint8_t itf)
     HciTinyUsbWake(s_pUsb);
 }
 
-extern "C" void tud_cdc_line_state_cb(uint8_t itf, bool dtr, bool rts)
+void tud_cdc_line_state_cb(uint8_t itf, bool dtr, bool rts)
 {
     (void)rts;
 
@@ -434,7 +434,7 @@ extern "C" void tud_cdc_line_state_cb(uint8_t itf, bool dtr, bool rts)
     HciTinyUsbWake(s_pUsb);
 }
 
-extern "C" void tud_umount_cb(void)
+void tud_umount_cb(void)
 {
     if (s_pUsb != nullptr)
     {
@@ -444,7 +444,7 @@ extern "C" void tud_umount_cb(void)
     }
 }
 
-extern "C" void tud_event_hook_cb(uint8_t rhport, uint32_t eventid, bool in_isr)
+void tud_event_hook_cb(uint8_t rhport, uint32_t eventid, bool in_isr)
 {
     (void)rhport;
     (void)eventid;

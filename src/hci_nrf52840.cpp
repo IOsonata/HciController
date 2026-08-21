@@ -69,32 +69,6 @@
                                    POWER_INTENSET_USBPWRRDY_Msk)
 
 /*
- * EVENTS_USBEVENT is driven from EVENTCAUSE, so it re-asserts as soon as it is
- * cleared while any cause bit is still set. The TinyUSB nRF5x port clears only
- * these four, so every other cause, READY in particular, produces an interrupt
- * that never stops.
- */
-#define HCI_NRF52840_USBD_PORT_EVENTCAUSE (USBD_EVENTCAUSE_SUSPEND_Msk | \
-                                           USBD_EVENTCAUSE_RESUME_Msk | \
-                                           USBD_EVENTCAUSE_USBWUALLOWED_Msk | \
-                                           USBD_EVENTCAUSE_ISOOUTCRC_Msk)
-
-/*
- * EVENTS_USBRESET through EVENTS_EPDATA are contiguous and match the INTEN bit
- * order, so a pending mask can be built by walking them. Used to name whatever
- * event is re-asserting when the handler will not stop.
- */
-#define HCI_NRF52840_USBD_EVT_COUNT 25U
-
-/* Interrupts within one pump pass before the state is captured. */
-#ifndef HCI_NRF52840_USB_STORM_LIMIT
-#define HCI_NRF52840_USB_STORM_LIMIT 2000U
-#endif
-
-/* A nonzero latch even when the peripheral exposes no individual event bit. */
-#define HCI_NRF52840_USB_STORM_UNKNOWN 0x80000000UL
-
-/*
  * Attempts allowed when proving the entropy source at start up. This bounds a
  * start up check, not the SDC callback, which must block per sdc_soc.h.
  */
@@ -347,9 +321,9 @@ static bool HciNrf52840HfclkStart(HciNrf52840_t *pTarget)
 }
 
 /*
- * Finish shutting down a USB port that the ISR already contained. Clock
- * ownership belongs to MPSL and is therefore unwound from thread context, not
- * from USBD_IRQHandler.
+ * Finish shutting down a USB port after the DCD has contained an IRQ storm.
+ * Clock ownership belongs to MPSL and is therefore unwound from thread
+ * context, not from USBD_IRQHandler.
  */
 static void HciNrf52840UsbAbort(HciNrf52840_t *pTarget, int32_t Error)
 {
@@ -433,11 +407,6 @@ void HciNrf52840UsbPowerProcess(HciNrf52840_t *pTarget)
         return;
     }
 
-    /*
-     * A storm was already made harmless in the ISR by taking the pull-up and
-     * interrupt away. Complete the shutdown here so the MPSL-owned crystal is
-     * released and the failed port cannot be mistaken for a usable one.
-     */
     if (pTarget->UsbStormEvents != 0U)
     {
         HciNrf52840UsbAbort(pTarget, HCI_NRF52840_ERR_USB_STORM);
@@ -548,11 +517,6 @@ void HciNrf52840ResetTrace(void)
     const uint32_t reason = NRF_POWER->RESETREAS;
     char causes[96] = {};
 
-    /*
-     * nRF52840 anomaly 136 can set unrelated RESETREAS bits after a pin reset.
-     * If RESETPIN is present, report that as the cause and leave the raw value
-     * alongside it rather than presenting spurious secondary causes as fact.
-     */
     if ((reason & POWER_RESETREAS_RESETPIN_Msk) != 0U)
     {
         HciNrf52840ResetCauseAppend(causes, sizeof(causes), "pin-reset");
@@ -588,7 +552,6 @@ void HciNrf52840ResetTrace(void)
                  causes, (unsigned long)reason);
     }
 
-    /* RESETREAS is write-one-to-clear. Start the next reset with a clean slate. */
     NRF_POWER->RESETREAS = reason;
 
     const bool retained =
@@ -638,10 +601,6 @@ static void HciNrf52840RandPoll(uint8_t *pBuffer, uint8_t Length)
 
     while (rng == nullptr)
     {
-        /*
-         * Unreachable unless the instance disappeared after start up. There is
-         * no legal way to return, so retry rather than fabricate entropy.
-         */
         if (s_pTarget != nullptr)
         {
             s_pTarget->RandRetryCount++;
@@ -658,10 +617,6 @@ static void HciNrf52840RandPoll(uint8_t *pBuffer, uint8_t Length)
     }
 }
 
-/*
- * Prove the entropy source works before the controller is enabled, so a broken
- * source is a clean start up failure rather than a stall inside SDC later.
- */
 static bool HciNrf52840RandSourceReady(HciNrf52840_t *pTarget)
 {
     CryptoRngNrf *rng = CryptoRngNrfInstance();
@@ -738,10 +693,6 @@ static bool HciNrf52840MpslInit(HciNrf52840_t *pTarget)
     NVIC_EnableIRQ(SWI5_EGU5_IRQn);
 
     pTarget->MpslInitialized = true;
-    /*
-     * USB bring up is deliberately not done here. It has to run after the USB
-     * device stack is initialised, see HciNrf52840UsbStart.
-     */
     return true;
 }
 
@@ -768,11 +719,6 @@ static bool HciNrf52840SdcInit(HciNrf52840_t *pTarget)
         return false;
     }
 
-    /*
-     * What the controller is configured for is not a property of this part,
-     * so it lives in hci_sdc_resources.cpp with the pool that is computed from
-     * it. This layer supplies the clock, the entropy and the host interface.
-     */
     result = HciSdcResourcesApply();
     if (result < 0)
     {
@@ -825,11 +771,6 @@ static bool HciNrf52840Start(void *pContext)
 
     if (!HciNrf52840SdcInit(pTarget))
     {
-        /*
-         * MPSL is up with five interrupts enabled at this point. Returning
-         * without undoing it leaves the radio subsystem live and nothing
-         * servicing it, because the runtime treats a failed start as fatal.
-         */
         HciNrf52840Stop(pTarget);
         return false;
     }
@@ -841,11 +782,6 @@ static void HciNrf52840ProcessMpsl(void *pContext)
 {
     mpsl_low_priority_process();
 
-    /*
-     * POWER and CLOCK are one peripheral and MPSL owns it, so it can drop the
-     * USB bits from the shared enable register. Put them back each pass, unless
-     * a storm deliberately quenched the port.
-     */
     HciNrf52840_t *pTarget = static_cast<HciNrf52840_t *>(pContext);
     if (pTarget != nullptr && pTarget->UsbStarted &&
         pTarget->UsbStormEvents == 0U)
@@ -860,7 +796,6 @@ static void HciNrf52840Fault(void *pContext, int Error)
     if (pTarget != nullptr)
     {
         pTarget->FaultCount++;
-        /* Keep the first recorded cause. The generic layer reports -1 only. */
         if (pTarget->LastError == 0)
         {
             pTarget->LastError = Error;
@@ -868,11 +803,6 @@ static void HciNrf52840Fault(void *pContext, int Error)
     }
 }
 
-/*
- * Undo everything HciNrf52840UsbStart put in place, for a failure between the
- * crystal request and the point where the port is live. Every step is
- * conditional on having been taken, so this is safe from any failure point.
- */
 static bool HciNrf52840UsbStartFailed(HciNrf52840_t *pTarget,
                                       int32_t Error,
                                       bool ErrataApplied)
@@ -891,11 +821,6 @@ static bool HciNrf52840UsbStartFailed(HciNrf52840_t *pTarget,
     NVIC_DisableIRQ(USBD_IRQn);
     NRF_POWER->INTENCLR = HCI_NRF52840_USB_INT_MASK;
 
-    /*
-     * The crystal was requested for USB alone. Holding it after a failed bring
-     * up keeps MPSL from ever dropping to the internal oscillator between
-     * radio events, for the rest of the boot.
-     */
     (void)HciNrf52840HfclkRelease();
     pTarget->HfclkRequested = false;
 
@@ -913,11 +838,6 @@ bool HciNrf52840UsbStart(HciNrf52840_t *pTarget)
         return false;
     }
 
-    /*
-     * A storm is latched until target reinitialization. Re-enabling the same
-     * peripheral immediately would reproduce the interrupt starvation before
-     * the runtime had a chance to report or contain anything.
-     */
     if (pTarget->UsbStormEvents != 0U)
     {
         pTarget->LastError = HCI_NRF52840_ERR_USB_STORM;
@@ -952,10 +872,6 @@ bool HciNrf52840UsbStart(HciNrf52840_t *pTarget)
                                          false);
     }
 
-    /*
-     * Controller enable. The errata 187 and 171 workarounds go on before
-     * ENABLE and come back off once the controller reports ready.
-     */
     NRF_USBD->EVENTCAUSE = USBD_EVENTCAUSE_READY_Msk;
     __ISB();
     __DSB();
@@ -973,12 +889,6 @@ bool HciNrf52840UsbStart(HciNrf52840_t *pTarget)
     while ((NRF_USBD->EVENTCAUSE & USBD_EVENTCAUSE_READY_Msk) == 0U &&
            loop < HCI_NRF52840_USBREG_WAIT_LOOPS)
     {
-        /*
-         * MPSL and the radio are already running by this point, and this wait
-         * can take its full budget on a bad supply. Low priority processing
-         * has a deadline of a few hundred milliseconds, so it is pumped here
-         * exactly as in the crystal wait above.
-         */
         mpsl_low_priority_process();
         loop++;
     }
@@ -1002,10 +912,6 @@ bool HciNrf52840UsbStart(HciNrf52840_t *pTarget)
 
     NRF_USBD->ISOSPLIT = USBD_ISOSPLIT_SPLIT_HalfIN;
 
-    /*
-     * Leave no cause behind. Anything still set here would re-assert
-     * EVENTS_USBEVENT the moment the port enables that interrupt.
-     */
     NRF_USBD->EVENTCAUSE = NRF_USBD->EVENTCAUSE;
     NRF_USBD->EVENTS_USBEVENT = 0U;
     __ISB();
@@ -1016,11 +922,6 @@ bool HciNrf52840UsbStart(HciNrf52840_t *pTarget)
     NVIC_ClearPendingIRQ(USBD_IRQn);
     NVIC_EnableIRQ(USBD_IRQn);
 
-    /*
-     * Poll the 3.3 V regulator rather than wait for USBPWRRDY. That event
-     * shares its enable bit and its interrupt line with CLOCK, which MPSL
-     * owns. The pull up must not go up before the supply is ready.
-     */
     loop = 0U;
     while ((status & POWER_USBREGSTATUS_OUTPUTRDY_Msk) == 0U &&
            loop < HCI_NRF52840_USBREG_WAIT_LOOPS)
@@ -1041,10 +942,6 @@ bool HciNrf52840UsbStart(HciNrf52840_t *pTarget)
 
     HciTrace("usb: outrdy after %lu polls\r\n", (unsigned long)loop);
 
-    /*
-     * The crystal has to be up before the pull up and it comes from MPSL.
-     * Report a mismatch rather than starting it here.
-     */
     if (!HciNrf52840HfxoOnXtal())
     {
         HciTrace("usb: hfxo not on crystal hfclkstat=0x%08lX\r\n",
@@ -1058,15 +955,9 @@ bool HciNrf52840UsbStart(HciNrf52840_t *pTarget)
     __ISB();
     __DSB();
 
-    /*
-     * Set only now that the port is genuinely up. Anything earlier makes a
-     * failed bring up look like a success to the interrupt handler, to
-     * HciNrf52840Stop and to a caller that retries.
-     */
     pTarget->UsbStarted = true;
     pTarget->UsbReadyDone = true;
 
-    /* MPSL shares the enable register, so put the USB bits back. */
     NRF_POWER->INTENSET = HCI_NRF52840_USB_INT_MASK;
 
     HciTrace("usb: started pullup=%lu enable=%lu hfclkstat=0x%08lX inten=0x%08lX\r\n",
@@ -1119,12 +1010,6 @@ void HciNrf52840Stop(HciNrf52840_t *pTarget)
         return;
     }
 
-    /*
-     * Detach cleanly first. Leaving the controller enabled with the pull up
-     * asserted keeps the host enumerated against a device that answers
-     * nothing, and the crystal it needs is released further down. This is the
-     * sequence the vendor port uses on cable removal.
-     */
     if (pTarget->UsbEnabled)
     {
         NVIC_DisableIRQ(USBD_IRQn);
@@ -1144,19 +1029,6 @@ void HciNrf52840Stop(HciNrf52840_t *pTarget)
         pTarget->UsbDetachPending = false;
     }
 
-    /*
-     * The radio has to be stopped before MPSL is torn down, and sdc_disable
-     * unwinds an in flight timeslot, which needs MPSL's RADIO and TIMER0
-     * handlers to run. Masking them first makes it block or trip the MPSL
-     * assert, so the interrupts stay live until both are down.
-     */
-    /*
-     * mpsl.h: "All initialized protocol stacks need to be stopped before
-     * calling this function. Failing to do so will lead to undefined
-     * behavior." Initialized, not enabled. sdc_init can succeed and sdc_enable
-     * fail afterwards, and that path used to reach mpsl_uninit with the
-     * controller still initialised.
-     */
     if (pTarget->SdcInitialized || pTarget->SdcEnabled)
     {
         (void)sdc_disable();
@@ -1181,10 +1053,6 @@ void HciNrf52840Stop(HciNrf52840_t *pTarget)
     NVIC_DisableIRQ(TIMER0_IRQn);
     NVIC_DisableIRQ(POWER_CLOCK_IRQn);
 
-    /*
-     * Clear everything Start checks, so a target that was stopped can be
-     * started again without going back through HciNrf52840Init.
-     */
     pTarget->SdcInitialized = false;
     s_pTarget = nullptr;
 }
@@ -1221,20 +1089,52 @@ extern "C" void POWER_CLOCK_IRQHandler(void)
     }
 }
 
-static uint32_t HciNrf52840UsbdPendingEvents(void)
+/*
+ * USBD register handling lives in nRF52840/src/dcd_nrf5x_hci.c. These hooks
+ * keep only target/runtime bookkeeping here.
+ */
+extern "C" uint32_t HciUsbPlatformIrqEnter(void)
 {
-    volatile uint32_t *pEvt = &NRF_USBD->EVENTS_USBRESET;
-    uint32_t pending = 0U;
-
-    for (uint32_t i = 0U; i < HCI_NRF52840_USBD_EVT_COUNT; i++)
+    if (s_pTarget == nullptr || !s_pTarget->UsbStarted)
     {
-        if (pEvt[i] != 0U)
-        {
-            pending |= 1UL << i;
-        }
+        return 0U;
     }
 
-    return pending;
+    s_pTarget->UsbIrqCount++;
+    return s_pTarget->UsbIrqCount - s_pTarget->UsbIrqMark;
+}
+
+extern "C" void HciUsbPlatformIrqUnexpectedCause(uint32_t Cause)
+{
+    if (s_pTarget == nullptr || Cause == 0U)
+    {
+        return;
+    }
+
+    s_pTarget->UsbEventCause |= Cause;
+    s_pTarget->UsbStuckCauseCount++;
+}
+
+extern "C" void HciUsbPlatformIrqStorm(uint32_t Inten,
+                                       uint32_t Cause,
+                                       uint32_t Events)
+{
+    if (s_pTarget == nullptr || s_pTarget->UsbStormEvents != 0U)
+    {
+        return;
+    }
+
+    s_pTarget->UsbStormInten = Inten;
+    s_pTarget->UsbStormCause = Cause;
+    s_pTarget->UsbStormEvents = Events;
+    s_pTarget->LastError = HCI_NRF52840_ERR_USB_STORM;
+    s_pTarget->UsbStarted = false;
+    s_pTarget->UsbReadyDone = false;
+
+    if (s_pTarget->pRuntime != nullptr)
+    {
+        HciTaktOsWake(s_pTarget->pRuntime, HCI_TAKTOS_EVENT_HOST);
+    }
 }
 
 void HciNrf52840UsbPassMark(HciNrf52840_t *pTarget)
@@ -1242,80 +1142,6 @@ void HciNrf52840UsbPassMark(HciNrf52840_t *pTarget)
     if (pTarget != nullptr)
     {
         pTarget->UsbIrqMark = pTarget->UsbIrqCount;
-    }
-}
-
-extern "C" void USBD_IRQHandler(void)
-{
-    if (s_pTarget != nullptr && s_pTarget->UsbStarted)
-    {
-        s_pTarget->UsbIrqCount++;
-
-        /*
-         * Too many entries inside one pump pass means an event is re-asserting
-         * faster than it is being consumed. Capture what is pending, then
-         * contain the source immediately. Logging a storm while leaving a
-         * level-sensitive source enabled only guarantees this handler keeps
-         * starving the thread that was supposed to report it.
-         */
-        if (s_pTarget->UsbStormEvents == 0U &&
-            (s_pTarget->UsbIrqCount - s_pTarget->UsbIrqMark) >
-                HCI_NRF52840_USB_STORM_LIMIT)
-        {
-            s_pTarget->UsbStormInten = NRF_USBD->INTEN;
-            s_pTarget->UsbStormCause = NRF_USBD->EVENTCAUSE;
-            uint32_t pending = HciNrf52840UsbdPendingEvents();
-            s_pTarget->UsbStormEvents = pending != 0U ? pending :
-                                        HCI_NRF52840_USB_STORM_UNKNOWN;
-            s_pTarget->LastError = HCI_NRF52840_ERR_USB_STORM;
-
-            NRF_USBD->INTEN = 0U;
-            NRF_USBD->USBPULLUP = 0U;
-            NRF_POWER->INTENCLR = HCI_NRF52840_USB_INT_MASK;
-            NVIC_DisableIRQ(USBD_IRQn);
-            s_pTarget->UsbStarted = false;
-            s_pTarget->UsbReadyDone = false;
-            __ISB();
-            __DSB();
-
-            if (s_pTarget->pRuntime != nullptr)
-            {
-                HciTaktOsWake(s_pTarget->pRuntime, HCI_TAKTOS_EVENT_HOST);
-            }
-            return;
-        }
-
-        /*
-         * Clear whatever the port leaves behind in EVENTCAUSE before handing
-         * over, otherwise EVENTS_USBEVENT re-asserts immediately and this
-         * handler is re-entered without end.
-         */
-        uint32_t cause = NRF_USBD->EVENTCAUSE &
-                         ~(uint32_t)HCI_NRF52840_USBD_PORT_EVENTCAUSE;
-        if (cause != 0U)
-        {
-            s_pTarget->UsbEventCause |= cause;
-            s_pTarget->UsbStuckCauseCount++;
-            NRF_USBD->EVENTCAUSE = cause;
-            __ISB();
-            __DSB();
-
-            /*
-             * Take the umbrella event away only when no cause that TinyUSB
-             * consumes remains. Clearing EVENTS_USBEVENT while SUSPEND,
-             * RESUME or USBWUALLOWED is still set prevents the port from ever
-             * seeing that state transition.
-             */
-            if ((NRF_USBD->EVENTCAUSE &
-                 (uint32_t)HCI_NRF52840_USBD_PORT_EVENTCAUSE) == 0U)
-            {
-                NRF_USBD->EVENTS_USBEVENT = 0U;
-                __ISB();
-                __DSB();
-            }
-        }
-
-        tusb_int_handler(0U, true);
     }
 }
 
@@ -1354,11 +1180,6 @@ static void HciNrf52840TargetUsbPowerProcess(void *pContext)
     HciNrf52840UsbPowerProcess(static_cast<HciNrf52840_t *>(pContext));
 }
 
-/*
- * A storm is the USBD peripheral raising events with no interrupt source the
- * driver recognises. Nothing later in the settling loop clears it, so once it
- * is seen there is no point waiting out the remaining passes.
- */
 static bool HciNrf52840TargetUsbStuck(const void *pContext)
 {
     const HciNrf52840_t *pTarget =
@@ -1390,16 +1211,10 @@ static void HciNrf52840TargetUsbTrace(const void *pContext,
              (unsigned long)pTarget->UsbStormEvents,
              (unsigned long)pTarget->UsbStormCause);
 
-    /* HciTrace discards its arguments when tracing is off. */
     (void)pLabel;
     (void)Pass;
 }
 
-/*
- * A PSEL register holds the pin a peripheral function ended up on, or a
- * disconnected marker in the top bit. Bit 5 is the port and the low five bits
- * are the pin.
- */
 #define HCI_NRF52840_PSEL_DISCONNECTED 0x80000000UL
 #define HCI_NRF52840_UARTE_HWFC_MASK   0x00000001UL
 
@@ -1440,7 +1255,6 @@ static void HciNrf52840PselName(uint32_t Psel, char Name[6])
 
 static uint32_t HciNrf52840Baud(uint32_t RegisterValue)
 {
-    /* BAUDRATE = baud * 2^32 / 16 MHz. Round back to the nearest baud. */
     return (uint32_t)((((uint64_t)RegisterValue * 16000000ULL) +
                        0x80000000ULL) >> 32);
 }
@@ -1487,7 +1301,6 @@ static void HciNrf52840TargetUartTrace(const void *, uint8_t DevNo)
                  rxd, txd, cts, rts);
     }
 
-    /* HciTrace discards its arguments when tracing is off. */
     (void)DevNo;
 }
 
@@ -1542,10 +1355,6 @@ static const HciTargetOps_t s_Nrf52840Ops = {
     HciNrf52840TargetLastError,
 };
 
-/*
- * One radio, so one instance, owned here. The application holds the pair and
- * never has to know how large this is.
- */
 static HciNrf52840_t s_Nrf52840;
 
 HciTarget_t HciNrf52840Target(void)

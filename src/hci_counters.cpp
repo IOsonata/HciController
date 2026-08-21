@@ -12,6 +12,29 @@
 
 #include <string.h>
 
+/*
+ * Host-only tests deliberately link hci_counters.cpp without the SDC resource
+ * configurator. Give those builds a zero-valued source. The firmware links the
+ * strong definition in hci_sdc_resources.cpp, so a counter read sees the final
+ * sdc_cfg_set result even though the counter object was wired before SDC start.
+ */
+extern "C" __attribute__((weak)) int32_t HciSdcResourcesRequired(void)
+{
+    return 0;
+}
+
+/*
+ * Platform diagnostics are optional for the same reason. The nRF52840 native
+ * USB DCD supplies the strong definition; portable/unit-test builds retain the
+ * zeroes already present in the counter array.
+ */
+extern "C" __attribute__((weak))
+void HciUsbPlatformReadCounters(uint32_t *pValues, size_t Count)
+{
+    (void)pValues;
+    (void)Count;
+}
+
 static void HciCountersWriteLe32(uint8_t *pData, uint32_t Value)
 {
     pData[0] = (uint8_t)Value;
@@ -122,15 +145,24 @@ HciCmdResult_t HciCountersRead(void *pContext,
         values[27] = pController->ControllerGetErrorCount;
         values[28] = pController->InvalidControllerPacketCount;
         values[29] = pController->UnsendableControllerPacketCount;
+        values[38] = pController->ControllerAclPacketCount;
+        values[39] = pController->HostAclPacketCount;
     }
 
     /*
-     * Not counters, and not read through a layer pointer: the platform fills
-     * these in directly once the controller has answered. Zero where it never
-     * did.
+     * The capacity is fixed when the application allocates the pool. The
+     * required value is different: sdc_cfg_set produces it later, while the
+     * target starts in the runtime thread. Prefer that live value when the
+     * firmware has the resource module linked and retain the stored value as a
+     * fallback for ports and host tests that do not.
      */
-    values[32] = pCounters->SdcMemRequired;
+    const int32_t liveRequired = HciSdcResourcesRequired();
+    values[32] = liveRequired > 0 ?
+                 (uint32_t)liveRequired : pCounters->SdcMemRequired;
     values[33] = pCounters->SdcMemCapacity;
+
+    HciUsbPlatformReadCounters(&values[HCI_COUNTERS_PLATFORM_FIRST],
+                               HCI_COUNTERS_PLATFORM_COUNT);
 
     pReturn[0] = (uint8_t)HCI_COUNTERS_VERSION;
     for (size_t i = 0U; i < HCI_COUNTERS_COUNT; i++)

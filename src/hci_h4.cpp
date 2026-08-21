@@ -78,6 +78,16 @@ static void HciH4ReleasePacket(HciH4Parser_t *pParser)
 
 static bool HciH4DeliverPacket(HciH4Parser_t *pParser)
 {
+    /*
+     * Passive mode is used by a packet DeviceIntrf adapter. Leaving the parser
+     * in DELIVER is not a delivery retry; the packet is simply waiting for the
+     * DeviceIntrf consumer to copy it and explicitly release it.
+     */
+    if (pParser->Handler == NULL)
+    {
+        return false;
+    }
+
     if (!pParser->Handler(pParser->pContext,
                           pParser->Type,
                           pParser->pPacket,
@@ -91,13 +101,15 @@ static bool HciH4DeliverPacket(HciH4Parser_t *pParser)
     return true;
 }
 
-bool HciH4ParserInit(HciH4Parser_t *pParser,
-                     uint8_t *pPacket,
-                     size_t PacketCapacity,
-                     HciH4PacketHandler_t Handler,
-                     void *pContext)
+static bool HciH4ParserInitCommon(HciH4Parser_t *pParser,
+                                  uint8_t *pPacket,
+                                  size_t PacketCapacity,
+                                  HciH4PacketHandler_t Handler,
+                                  void *pContext,
+                                  bool HandlerRequired)
 {
-    if (pParser == NULL || pPacket == NULL || PacketCapacity < 4 || Handler == NULL)
+    if (pParser == NULL || pPacket == NULL || PacketCapacity < 4U ||
+        (HandlerRequired && Handler == NULL))
     {
         return false;
     }
@@ -108,8 +120,33 @@ bool HciH4ParserInit(HciH4Parser_t *pParser,
     pParser->Handler = Handler;
     pParser->pContext = pContext;
     pParser->State = HCI_H4_PARSE_TYPE;
-
     return true;
+}
+
+bool HciH4ParserInit(HciH4Parser_t *pParser,
+                     uint8_t *pPacket,
+                     size_t PacketCapacity,
+                     HciH4PacketHandler_t Handler,
+                     void *pContext)
+{
+    return HciH4ParserInitCommon(pParser,
+                                 pPacket,
+                                 PacketCapacity,
+                                 Handler,
+                                 pContext,
+                                 true);
+}
+
+bool HciH4ParserInitPassive(HciH4Parser_t *pParser,
+                            uint8_t *pPacket,
+                            size_t PacketCapacity)
+{
+    return HciH4ParserInitCommon(pParser,
+                                 pPacket,
+                                 PacketCapacity,
+                                 NULL,
+                                 NULL,
+                                 false);
 }
 
 void HciH4ParserReset(HciH4Parser_t *pParser)
@@ -122,11 +159,19 @@ void HciH4ParserReset(HciH4Parser_t *pParser)
     HciH4ReleasePacket(pParser);
 }
 
+void HciH4ParserReleasePending(HciH4Parser_t *pParser)
+{
+    if (pParser != NULL && pParser->State == HCI_H4_PARSE_DELIVER)
+    {
+        HciH4ReleasePacket(pParser);
+    }
+}
+
 size_t HciH4ParserFeed(HciH4Parser_t *pParser,
                        const uint8_t *pData,
                        size_t DataLen)
 {
-    if (pParser == NULL || (pData == NULL && DataLen > 0))
+    if (pParser == NULL || (pData == NULL && DataLen > 0U))
     {
         return 0;
     }
@@ -154,7 +199,7 @@ size_t HciH4ParserFeed(HciH4Parser_t *pParser,
             case HCI_H4_PARSE_TYPE:
             {
                 HciH4PacketType_t type = (HciH4PacketType_t)pData[offset++];
-                if (HciH4HeaderLen(type) == 0)
+                if (HciH4HeaderLen(type) == 0U)
                 {
                     pParser->InvalidTypeCount++;
                     break;
@@ -184,10 +229,10 @@ size_t HciH4ParserFeed(HciH4Parser_t *pParser,
                         pParser->OversizePacketCount++;
                         pParser->DropRemaining = pParser->PayloadLen;
                         pParser->PacketLen = 0;
-                        pParser->State = pParser->DropRemaining == 0 ?
+                        pParser->State = pParser->DropRemaining == 0U ?
                                          HCI_H4_PARSE_TYPE : HCI_H4_PARSE_DROP;
                     }
-                    else if (pParser->PayloadLen == 0)
+                    else if (pParser->PayloadLen == 0U)
                     {
                         pParser->State = HCI_H4_PARSE_DELIVER;
                     }
@@ -225,7 +270,7 @@ size_t HciH4ParserFeed(HciH4Parser_t *pParser,
                 pParser->DropRemaining -= dropLen;
                 offset += dropLen;
 
-                if (pParser->DropRemaining == 0)
+                if (pParser->DropRemaining == 0U)
                 {
                     HciH4ReleasePacket(pParser);
                 }
@@ -253,12 +298,6 @@ bool HciH4ParserIsMidPacket(const HciH4Parser_t *pParser)
         return false;
     }
 
-    /*
-     * Waiting for the rest of a header or a payload, or throwing away the
-     * remains of one that did not fit. A packet that is built and waiting to
-     * be handed over is not part way through anything, so it is not counted
-     * here: it is complete and the handler is what has not taken it yet.
-     */
     return pParser->State == HCI_H4_PARSE_HEADER ||
            pParser->State == HCI_H4_PARSE_PAYLOAD ||
            pParser->State == HCI_H4_PARSE_DROP;

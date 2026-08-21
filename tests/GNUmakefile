@@ -1,0 +1,58 @@
+# Native USB additions layered over the existing host-test Makefile.
+# GNU make loads GNUmakefile before Makefile, so `make -C tests run` keeps the
+# existing suite and adds the native HCI USB targets without duplicating it.
+include Makefile
+
+USB_DESC_OBJ := $(BUILD_DIR)/usb_descriptors_test.o
+
+TESTS += hci_usb hci_usb_modeswitch hci_controller_invalid_host
+hci_usb_SRC := $(SRC)/hci_usb.cpp \
+               $(SRC)/hci_usb_rx.cpp \
+               $(SRC)/hci_usb_tinyusb.cpp \
+               $(USB_DESC_OBJ) \
+               $(CFIFO_OBJ)
+hci_usb_modeswitch_SRC := $(hci_usb_SRC)
+hci_controller_invalid_host_SRC := $(SRC)/hci_controller.cpp \
+                                   $(SRC)/hci_intrf_transport.cpp \
+                                   $(SRC)/hci_h4.cpp
+TARGETS += $(BUILD_DIR)/hci_usb_test \
+           $(BUILD_DIR)/hci_usb_modeswitch_test \
+           $(BUILD_DIR)/hci_controller_invalid_host_test
+
+$(USB_DESC_OBJ): $(SRC)/usb_descriptors.c $(ROOT)/include/hci_usb.h \
+                 $(STUBS)/tusb.h $(STUBS)/nrfficr/nrf.h | check-root
+	@mkdir -p $(dir $@)
+	$(CC) -I$(STUBS)/nrfficr $(MOCK_INCLUDES) $(MOCK_DEFINES) $(CFLAGS) \
+	  -c $< -o $@
+
+.PHONY: check-hci-transport check-native-usb-review check-counter-schema \
+        check-harness-layout
+
+check-hci-transport:
+	@command -v $(PYTHON) >/dev/null 2>&1 || { \
+	  echo "[TEST] hci_transport_test.py skipped, no $(PYTHON)"; exit 0; }
+	@echo "[TEST] hci_transport_test.py"
+	@PYTHONPATH=$(THIS_DIR)/harness/lib $(PYTHON) \
+	  $(THIS_DIR)/harness/hcicontroller/hci_transport_test.py
+
+check-native-usb-review:
+	@command -v $(PYTHON) >/dev/null 2>&1 || { \
+	  echo "[TEST] native_usb_review_regressions.py skipped, no $(PYTHON)"; exit 0; }
+	@echo "[TEST] native_usb_review_regressions.py"
+	@$(PYTHON) $(THIS_DIR)/native_usb_review_regressions.py $(ROOT)
+
+check-counter-schema:
+	@command -v $(PYTHON) >/dev/null 2>&1 || { \
+	  echo "[TEST] counter_schema.py skipped, no $(PYTHON)"; exit 0; }
+	@echo "[TEST] counter_schema.py"
+	@$(PYTHON) $(THIS_DIR)/counter_schema.py $(ROOT)
+
+check-harness-layout:
+	@command -v $(PYTHON) >/dev/null 2>&1 || { \
+	  echo "[TEST] harness_layout.py skipped, no $(PYTHON)"; exit 0; }
+	@echo "[TEST] harness_layout.py"
+	@$(PYTHON) $(THIS_DIR)/harness_layout.py $(ROOT)
+
+all: $(BUILD_DIR)/hci_usb_test $(BUILD_DIR)/hci_usb_modeswitch_test \
+     $(BUILD_DIR)/hci_controller_invalid_host_test
+run: check-hci-transport check-native-usb-review check-counter-schema check-harness-layout

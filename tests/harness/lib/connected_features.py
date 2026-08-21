@@ -1,15 +1,8 @@
 #!/usr/bin/env python3
 """Stateful two-controller feature procedures used by the release harness."""
 
-from pathlib import Path
 import struct
-import sys
 import time
-
-_TESTS_DIR = Path(__file__).resolve().parents[2]
-_HARDWARE_DIR = _TESTS_DIR / "hardware"
-if str(_HARDWARE_DIR) not in sys.path:
-    sys.path.insert(0, str(_HARDWARE_DIR))
 
 from hci_events import (
     EVT_LE_META,
@@ -133,10 +126,18 @@ def _read_remote_features(hci, handle):
         raise HciError("LE Read Remote Features returned %s" % status_text(status))
     body = wait_le_subevent(
         hci, LE_READ_REMOTE_FEATURES_COMPLETE, handle, 2,
-        predicate=lambda event: len(event) >= 12 and event[1] == 0,
+        predicate=lambda event: len(event) >= 4,
     )
     if body is None:
-        raise HciError("no successful LE Read Remote Features Complete event")
+        raise HciError("no LE Read Remote Features Complete event")
+    if body[1] != 0:
+        raise HciError("LE Read Remote Features Complete returned %s"
+                       % status_text(body[1]))
+    if len(body) < 12:
+        raise HciError(
+            "LE Read Remote Features Complete returned %d bytes, expected at least 12"
+            % len(body)
+        )
     return body[4:12]
 
 

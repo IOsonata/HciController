@@ -20,7 +20,8 @@ static bool gRhportInitResult = true;
 static unsigned gDeinitCalls;
 
 static unsigned gTaskCalls;
-static uint8_t gTaskPort;
+static uint32_t gTaskTimeoutMs;
+static bool gTaskInIsr;
 static bool gMounted;
 static uint8_t gLineState;
 static unsigned gWakeCalls;
@@ -42,7 +43,7 @@ static size_t gUsbOutLen;
 static uint32_t gWriteAvailable;
 static uint32_t gWriteLimit;
 
-extern "C" bool tusb_rhport_init(uint8_t rhport, const tusb_rhport_init_t *pInit)
+bool tusb_rhport_init(uint8_t rhport, const tusb_rhport_init_t *pInit)
 {
     gRhportInitCalls++;
     gRhportInitPort = rhport;
@@ -58,7 +59,7 @@ extern "C" bool tusb_rhport_init(uint8_t rhport, const tusb_rhport_init_t *pInit
     return true;
 }
 
-extern "C" bool tusb_deinit(uint8_t rhport)
+bool tusb_deinit(uint8_t rhport)
 {
     gDeinitCalls++;
     if (rhport >= sizeof(gRhportRole) / sizeof(gRhportRole[0]) ||
@@ -72,14 +73,14 @@ extern "C" bool tusb_deinit(uint8_t rhport)
 }
 
 /* Older TinyUSB fallback, present so the same stub models both public APIs. */
-extern "C" bool tud_deinit(uint8_t rhport)
+bool tud_deinit(uint8_t rhport)
 {
     return tusb_deinit(rhport);
 }
 
-extern "C" bool tusb_inited(void) { return gRhportRole[0] != TUSB_ROLE_INVALID; }
+bool tusb_inited(void) { return gRhportRole[0] != TUSB_ROLE_INVALID; }
 
-extern "C" void tusb_int_handler(uint8_t rhport, bool)
+void tusb_int_handler(uint8_t rhport, bool)
 {
     if (gRhportRole[rhport] == TUSB_ROLE_DEVICE)
     {
@@ -87,24 +88,27 @@ extern "C" void tusb_int_handler(uint8_t rhport, bool)
     }
 }
 
-extern "C" void tud_task_ext(uint8_t rhport, bool)
+void tud_task_ext(uint32_t TimeoutMs, bool bInIsr)
 {
     gTaskCalls++;
-    gTaskPort = rhport;
+    gTaskTimeoutMs = TimeoutMs;
+    gTaskInIsr = bInIsr;
 }
-extern "C" bool tud_mounted(void) { return gMounted; }
-extern "C" uint8_t tud_cdc_n_get_line_state(uint8_t) { return gLineState; }
+
+bool tud_mounted(void) { return gMounted; }
+uint8_t tud_cdc_n_get_line_state(uint8_t) { return gLineState; }
 
 /* What the host has queued for the device to read, and how far it has got. */
 static uint8_t gUsbIn[128];
 static size_t gUsbInLen;
 static size_t gUsbInPos;
 
-extern "C" uint32_t tud_cdc_n_available(uint8_t)
+uint32_t tud_cdc_n_available(uint8_t)
 {
     return (uint32_t)(gUsbInLen - gUsbInPos);
 }
-extern "C" uint32_t tud_cdc_n_read(uint8_t, void *pData, uint32_t Len)
+
+uint32_t tud_cdc_n_read(uint8_t, void *pData, uint32_t Len)
 {
     uint32_t remaining = (uint32_t)(gUsbInLen - gUsbInPos);
     uint32_t actual = Len < remaining ? Len : remaining;
@@ -112,8 +116,10 @@ extern "C" uint32_t tud_cdc_n_read(uint8_t, void *pData, uint32_t Len)
     gUsbInPos += actual;
     return actual;
 }
-extern "C" uint32_t tud_cdc_n_write_available(uint8_t) { return gWriteAvailable; }
-extern "C" uint32_t tud_cdc_n_write(uint8_t, const void *pData, uint32_t Len)
+
+uint32_t tud_cdc_n_write_available(uint8_t) { return gWriteAvailable; }
+
+uint32_t tud_cdc_n_write(uint8_t, const void *pData, uint32_t Len)
 {
     uint32_t actual = Len;
     if (actual > gWriteLimit)
@@ -125,7 +131,8 @@ extern "C" uint32_t tud_cdc_n_write(uint8_t, const void *pData, uint32_t Len)
     gUsbOutLen += actual;
     return actual;
 }
-extern "C" uint32_t tud_cdc_n_write_flush(uint8_t) { return 0U; }
+
+uint32_t tud_cdc_n_write_flush(uint8_t) { return 0U; }
 
 static hCFifo_t gRxFifo;
 static hCFifo_t gTxFifo;
@@ -141,7 +148,8 @@ static void Reset(UsbdCdcDevIntrf_t *pIntrf)
     gRhportInitResult = true;
     gDeinitCalls = 0U;
     gTaskCalls = 0U;
-    gTaskPort = 0xFFU;
+    gTaskTimeoutMs = UINT32_MAX;
+    gTaskInIsr = true;
     gMounted = false;
     gLineState = 0U;
     gWakeCalls = 0U;
@@ -190,13 +198,14 @@ int main(void)
 
     HciTinyUsbProcess(&usb);
     assert(gTaskCalls == 1U);
-    assert(gTaskPort == gRhportInitPort);
+    assert(gTaskTimeoutMs == 0U);
+    assert(!gTaskInIsr);
     assert(usb.TaskCount == 1U);
 
     assert(!HciTinyUsbIsMounted(&usb));
     gMounted = true;
     assert(HciTinyUsbIsMounted(&usb));
-    printf("[ok] pump drives the initialised port and reports mounted\n");
+    printf("[ok] pump runs TinyUSB non-blocking and reports mounted\n");
 
     /*
      * A complete application stop must release both TinyUSB's root-port state

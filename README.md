@@ -1,23 +1,25 @@
 # HciController
 
-Bluetooth LE HCI controller firmware for the I-SYST UDG-NRF52840x dongle. It
-presents a standard Bluetooth HCI H:4 byte stream that any Bluetooth host
-stack can drive.
+Bluetooth LE HCI controller firmware for the I-SYST UDG-NRF52840x dongle.
+The controller boundary is packet-oriented: one `DeviceIntrf` transaction is
+one HCI packet, selected by its HCI packet type.
 
 Built with IOsonata and TaktOS, with TinyUSB for the USB device stack and
 Nordic Semiconductor's nrfxlib SoftDevice Controller and MPSL for the radio.
 
-The H:4 stream is carried over an IOsonata `DeviceIntrf`. One firmware image
-supports two host connections:
+One firmware image supports three host transports:
 
-- USB CDC through IOsonata `UsbdCdcIntrf`;
-- UART to an nRF9151 or another host processor.
+- native Bluetooth USB HCI, the default USB transport;
+- USB CDC carrying H:4 as a compatibility mode;
+- UART carrying H:4 to an nRF9151 or another host processor.
 
-The HCI controller, the H:4 parser, the SDC binding and the TaktOS execution
-path are identical for both.
+UART and CDC are byte streams, so `HciIntrfTransport` adds/removes the H:4
+indicator below the packet `DeviceIntrf`. Native USB is already packet-oriented
+and plugs into the same HCI controller without an H:4 adapter.
 
-A second USB CDC function is a plain text log, present whichever port the HCI
-stream is on. See [The log port](#the-log-port).
+A separate USB CDC function carries the plain text log whenever the board's USB
+socket is available. See [The log port](#the-log-port) and
+[USB-HCI.md](USB-HCI.md).
 
 ## Host interface selection
 
@@ -25,8 +27,8 @@ Which port the controller talks to its host on is a build option,
 `HCI_HOST_SELECT`:
 
 ```text
-HCI_HOST_SELECT_AUTO   read VBUS at reset, powered is USB CDC and otherwise UART
-HCI_HOST_SELECT_USB    always USB CDC
+HCI_HOST_SELECT_AUTO   read VBUS at reset, powered is USB and otherwise UART
+HCI_HOST_SELECT_USB    always USB
 HCI_HOST_SELECT_UART   always UART
 ```
 
@@ -46,9 +48,13 @@ arm-none-eabi-g++ -DBOARD=MY_BOARD -DHCI_HOST_SELECT=HCI_HOST_SELECT_UART ...
 
 AUTO only means something where the USB socket belongs to the nRF52840, which
 is what a dongle is. Where the socket belongs to something else, VBUS reads as
-a host that is not there: a board on a charger would come up talking USB CDC to
+a host that is not there: a board on a charger would come up talking USB to
 nobody while the real host waited for an answer over the UART. A board whose
 host is another part on the same PCB should name UART outright.
+
+When USB is selected, `HCI_USB_HCI_TRANSPORT` chooses native Bluetooth USB HCI
+(the default) or CDC/H:4 compatibility mode. This choice does not change the
+packet interface seen by `HciController`.
 
 Selecting a UART host with no `UART_PINS` in `board.h` is refused at compile
 time rather than left to fail at startup, where nothing would be on the wire to
@@ -76,20 +82,21 @@ BLYST840 P0.23 RXD <- nRF9151 TXD
 
 ## The log port
 
-The device presents two USB CDC functions. The first is the HCI byte stream.
-The second is a plain text log, and it exists because up to now the only way to
-see what the firmware was doing was semihosting, which needs a debugger
-attached and reaches nobody without one. On a sealed dongle, on a customer's
-board, or on somebody else's product, that meant a controller that could not be
-observed at all.
-
-Open the second port with any terminal. Nothing on it is framed and nothing
-parses it.
+The log is always a plain USB CDC function and is never an HCI transport in
+native mode. Which CDC instance carries it depends on the selected descriptor:
 
 ```text
-CDC 0   HCI H:4 byte stream
-CDC 1   text log
+native Bluetooth USB HCI   Bluetooth function + CDC 0 log
+CDC/H:4 compatibility      CDC 0 HCI H:4 + CDC 1 log
+UART host / log-only USB   CDC 0 log
 ```
+
+Open the log CDC port with any terminal. Nothing on it is framed and nothing
+parses it. The separate function exists because up to now the only way to see
+what the firmware was doing was semihosting, which needs a debugger attached
+and reaches nobody without one. On a sealed dongle, on a customer's board, or
+on somebody else's product, that meant a controller that could not be observed
+at all.
 
 The log is a ring in RAM that the firmware writes into and the runtime thread
 drains. It never blocks and it cannot fail a caller, because the first thing
@@ -108,9 +115,9 @@ first instruction that runs. Lines written before the HCI layer exists, or by a
 start up that never reaches it, are still in there to be read when a terminal
 opens the port.
 
-The second function is present whichever port the HCI stream is on. That is the
-point of it: on a board whose host is another part on the same PCB, the UART
-belongs to the host and the socket is free.
+The log function is present whichever port carries HCI. That is the point of
+it: on a board whose host is another part on the same PCB, the UART belongs to
+the host and the socket is free.
 
 `nRF52840/src/board.h` says whether the USB socket is wired to the nRF52840,
 with `HCI_USB_SOCKET`. Where it is, a UART host image still brings the device
@@ -180,7 +187,7 @@ include/            HCI headers
 src/                HCI sources
 nRF52840/ioc/       Eclipse Embedded CDT project
 nRF52840/src/       board.h, the pin and clock configuration
-tests/              host tests and hardware tools
+tests/              host tests plus the official BLE test harness
 ```
 
 ## Boards
@@ -385,35 +392,31 @@ HciController.map
 ## Architecture
 
 ```text
-                         +-------------------+
-USB VBUS present ------> | UsbdCdcIntrf      | -- TinyUSB CDC
-                         +-------------------+
-                                  |
-                                  | DevIntrf_t *
-                                  v
-                         +-------------------+
-USB VBUS absent -------> | UART              | -- P0.24/P0.23
-                         +-------------------+
-                                  |
-                                  v
-                         +-------------------+
-                         | HCI H:4 transport  |
-                         +-------------------+
-                                  |
-                         +-------------------+
-                         | HCI controller     |
-                         +-------------------+
-                                  |
-                         +-------------------+
-                         | nrfxlib SDC / MPSL |
-                         +-------------------+
+native USB HCI ---> HciUsb packet DeviceIntrf -------------------+
+                                                                  |
+USB CDC/H:4 ---> UsbdCdcIntrf ---> H:4 packet adapter -----------+--> HCI controller
+                                                                  |
+UART H:4 ------> UART -----------> H:4 packet adapter -----------+
+                                                                  |
+                                                        nrfxlib SDC / MPSL
 ```
 
-The H:4 transport uses only `DeviceIntrfRx()` and `DeviceIntrfTx()`. It does not include TinyUSB or UART-specific code.
+At the HCI controller boundary, `DevAddr` is the HCI packet type and the data
+buffer contains the complete packet without an H:4 indicator. Native USB
+already has packet boundaries. UART and CDC use `HciIntrfTransport` to recover
+those packets from the H:4 byte stream.
 
-The TinyUSB adapter services the IOsonata `UsbdCdcIntrf` FIFOs. When the RX FIFO has no space, it stops reading the TinyUSB OUT endpoint so USB backpressure is preserved rather than dropping HCI bytes.
+The H:4 adapter uses only `DeviceIntrfRx()` and `DeviceIntrfTx()`. It does not
+include TinyUSB or UART-specific code.
 
-The UART path uses IOsonata's interrupt-driven FIFO/DMA UART implementation. Its 4 KiB RX and TX FIFOs absorb complete HCI packets and host scheduling latency.
+The TinyUSB CDC adapter services the IOsonata `UsbdCdcIntrf` FIFOs used by the
+compatibility HCI path and the diagnostic log. When an RX FIFO has no space, it
+stops reading the TinyUSB OUT endpoint so USB backpressure is preserved rather
+than dropping bytes.
+
+The UART path uses IOsonata's interrupt-driven FIFO/DMA UART implementation.
+Its 4 KiB RX and TX FIFOs absorb complete HCI packets and host scheduling
+latency.
 
 ## Ports
 
@@ -603,7 +606,7 @@ buffer stops the build.
 A high-priority HCI thread owns the low-priority path:
 
 - selected host-interface servicing;
-- H:4 parsing and packet delivery;
+- H:4 parsing for UART/CDC or native USB packet delivery;
 - HCI command dispatch;
 - `mpsl_low_priority_process()`;
 - SoftDevice Controller command, ACL, ISO, and event access.
@@ -612,21 +615,22 @@ USB, UART, MPSL, and SDC callbacks only wake the thread. HCI parsing and typed S
 
 ## USB development identity
 
-The development build uses:
+The open-source repository intentionally defaults to development identities:
 
 ```text
-HCI_USB_VID=0xCAFE
-HCI_USB_PID=0x4070
-HCI_USB_DEVICE_RELEASE=0x0100
+VID       0xCAFE
+CDC/H:4    PID 0x4070
+native     PID 0x4071
+log-only   PID 0x4072
+release        0x0100
 ```
 
-They are defined in the Eclipse project, under C/C++ Build, Settings, Compiler,
-Preprocessor. Change them there for a production USB identity.
-
-`0xCAFE` is the TinyUSB example vendor ID and is allocated to nobody. It is
-fine on a bench and wrong on anything shipped, so an image that leaves this
-board and meets a host that keeps a device database needs a real VID and PID
-before it goes.
+Those defaults keep an unmodified checkout usable for development. Product
+builds can override `HCI_USB_VID`, `HCI_USB_PID_CDC_H4`,
+`HCI_USB_PID_NATIVE_HCI`, `HCI_USB_PID_LOG_ONLY`, and
+`HCI_USB_DEVICE_RELEASE`. A product configuration can also set
+`HCI_USB_REQUIRE_ASSIGNED_IDS=1` so the build fails if any repository
+development identity is still selected.
 
 ## Tests
 
@@ -639,15 +643,25 @@ fakes, so no SDK checkout and no board are required. Pass
 `NRFXLIB_DIR=/path/to/sdk-nrfxlib` to add the dispatch test, which compiles the
 real command table against the real SoftDevice Controller headers.
 
-`tests/hardware` holds the Python tools that drive an attached board over its
-USB CDC port. See `tests/README.md`.
+All attached-controller and over-the-air testing is under the official
+`tests/harness/` tree. Reusable HCI/USB helpers are in `tests/harness/lib/`, and
+the HciController release/focused programs are in
+`tests/harness/hcicontroller/`. See `tests/README.md` and
+`tests/harness/README.md`.
+
+For example, the focused two-dongle native USB CIS/ISO test is:
+
+```sh
+python3 tests/harness/hcicontroller/cis_usb_pair_test.py
+```
 
 ## Design constraints
 
 - one firmware image;
 - runtime USB/UART selection;
-- IOsonata `DeviceIntrf` injection;
-- standard Bluetooth HCI H:4 framing;
+- native Bluetooth USB HCI plus CDC/H:4 compatibility;
+- IOsonata packet `DeviceIntrf` injection;
+- H:4 framing only on UART/CDC byte streams;
 - static allocation;
 - no heap in the HCI data path;
 - no Zephyr dependency;

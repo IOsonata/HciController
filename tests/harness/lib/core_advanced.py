@@ -28,6 +28,7 @@ LE_FRAME_SPACE_UPDATE_COMPLETE = 0x35
 LE_CONNECTION_RATE_CHANGE = 0x37
 
 LE_FEATURE_PAGE_MAX = 10
+LE_REMOTE_FEATURE_PAGES_REQUESTED = 1
 SCI_HOST_SUPPORT_BIT = 73
 
 FRAME_SPACE_1M = 200
@@ -68,9 +69,10 @@ def _valid_feature_bytes(max_page):
 
 
 def _read_all_remote_features(hci, handle, page0_expected):
-    # Ask for the maximum number of extended pages. The Controller stops at
-    # the peer's MaxPage and reports Max_Valid_Page in the completion event.
-    payload = struct.pack("<HB", handle, LE_FEATURE_PAGE_MAX)
+    # Pages_Requested is a count of extended feature pages, not a maximum page
+    # number. One page is sufficient to prove the extended-feature procedure
+    # and matches the positive command probe already validated on this SDC.
+    payload = struct.pack("<HB", handle, LE_REMOTE_FEATURE_PAGES_REQUESTED)
     status, _ = hci.command(
         OP_LE_READ_ALL_REMOTE_FEATURES, payload, allow_fail=True
     )
@@ -83,11 +85,19 @@ def _read_all_remote_features(hci, handle, page0_expected):
         LE_READ_ALL_REMOTE_FEATURES_COMPLETE,
         handle,
         2,
-        predicate=lambda event: len(event) >= 254 and event[1] == 0,
+        predicate=lambda event: len(event) >= 4,
         timeout=8.0,
     )
     if body is None:
-        raise HciError("no successful LE Read All Remote Features Complete event")
+        raise HciError("no LE Read All Remote Features Complete event")
+    if body[1] != 0:
+        raise HciError("LE Read All Remote Features Complete returned %s"
+                       % status_text(body[1]))
+    if len(body) < 254:
+        raise HciError(
+            "LE Read All Remote Features Complete returned %d bytes, expected at least 254"
+            % len(body)
+        )
 
     max_remote_page = body[4]
     max_valid_page = body[5]

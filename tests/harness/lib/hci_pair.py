@@ -1,15 +1,9 @@
 #!/usr/bin/env python3
 """Reusable two-controller BLE coordination helpers."""
 
-from pathlib import Path
 import struct
 import sys
 import time
-
-_TESTS_DIR = Path(__file__).resolve().parents[2]
-_HARDWARE_DIR = _TESTS_DIR / "hardware"
-if str(_HARDWARE_DIR) not in sys.path:
-    sys.path.insert(0, str(_HARDWARE_DIR))
 
 import serial
 from serial.tools import list_ports
