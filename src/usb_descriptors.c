@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include "hci_usb.h"
+#include "hci_version.h"
 #include "nrf.h"
 #include "tusb.h"
 
@@ -52,10 +53,6 @@
      HCI_USB_PID_NATIVE_HCI == HCI_USB_DEVELOPMENT_PID_NATIVE_HCI || \
      HCI_USB_PID_LOG_ONLY == HCI_USB_DEVELOPMENT_PID_LOG_ONLY)
 #error "production USB build requires assigned HCI_USB_VID/PID values"
-#endif
-
-#ifndef HCI_USB_DEVICE_RELEASE
-#define HCI_USB_DEVICE_RELEASE          0x0100U
 #endif
 
 #define HCI_USB_BCD                     0x0200U
@@ -114,7 +111,7 @@ static HciUsbDescriptorMode_t s_DescriptorMode = HCI_USB_DESCRIPTOR_CDC_H4;
         .bMaxPacketSize0 = CFG_TUD_ENDPOINT0_SIZE, \
         .idVendor = HCI_USB_VID, \
         .idProduct = Pid, \
-        .bcdDevice = HCI_USB_DEVICE_RELEASE, \
+        .bcdDevice = HCI_CONTROLLER_VERSION_BCD, \
         .iManufacturer = 1U, \
         .iProduct = 2U, \
         .iSerialNumber = 3U, \
