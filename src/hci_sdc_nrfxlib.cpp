@@ -1451,9 +1451,34 @@ static HciCmdResult_t HciSdcCmdLeTransmitterTestV4(void *,
 HCI_SDC_CMD_NR(HciSdcCmdLeTestEnd, sdc_hci_cmd_le_test_end,
                sdc_hci_cmd_le_test_end_return_t)
 
-HCI_SDC_CMD_P(HciSdcCmdVsTransmitterCarrierTest,
-              sdc_hci_cmd_vs_transmitter_carrier_test,
-              sdc_hci_cmd_vs_transmitter_carrier_test_t, HciSdcComplete)
+/*
+ * The standalone VS transmitter carrier test command was deprecated and dropped
+ * from the SoftDevice Controller library. It now lives under the unified VS DTM
+ * command with the transmitter carrier test sub-opcode. The host still sends the
+ * legacy two byte parameters (tx_channel, tx_power_level); map them onto the new
+ * command so the wire format the host uses is unchanged.
+ */
+static HciCmdResult_t HciSdcCmdVsTransmitterCarrierTest(void *,
+                                                        const uint8_t *pParams,
+                                                        size_t,
+                                                        uint8_t *,
+                                                        size_t)
+{
+    sdc_hci_cmd_vs_transmitter_carrier_test_t params;
+    memcpy(&params, pParams, sizeof(params));
+
+    sdc_hci_cmd_vs_dtm_command_t cmd;
+    cmd.command_parameters.transmitter_carrier_test.header.sub_opcode =
+        SDC_HCI_VS_DTM_COMMAND_OPCODE_TRANSMITTER_CARRIER_TEST;
+    cmd.command_parameters.transmitter_carrier_test.tx_channel = params.tx_channel;
+    cmd.command_parameters.transmitter_carrier_test.tx_power_level =
+        params.tx_power_level;
+
+    uint8_t retBuf[4];
+    uint8_t retLen = 0;
+
+    return HciSdcComplete(sdc_hci_cmd_vs_dtm_command(&cmd, retBuf, &retLen), 0U);
+}
 
 /*
  * Status parameters. Vol 4 Part E 7.5.4, the RSSI of the last packet received
