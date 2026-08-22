@@ -26,7 +26,7 @@ $(USB_DESC_OBJ): $(SRC)/usb_descriptors.c $(ROOT)/include/hci_usb.h \
 	  -c $< -o $@
 
 .PHONY: check-hci-transport check-native-usb-review check-counter-schema \
-        check-harness-layout
+        check-harness-layout check-mode-policy
 
 check-hci-transport:
 	@command -v $(PYTHON) >/dev/null 2>&1 || { \
@@ -53,6 +53,13 @@ check-harness-layout:
 	@echo "[TEST] harness_layout.py"
 	@$(PYTHON) $(THIS_DIR)/harness_layout.py $(ROOT)
 
+check-mode-policy:
+	@command -v $(PYTHON) >/dev/null 2>&1 || { \
+	  echo "[TEST] mode_policy.py skipped, no $(PYTHON)"; exit 0; }
+	@echo "[TEST] mode_policy.py"
+	@$(PYTHON) $(THIS_DIR)/mode_policy.py $(ROOT)
+
 all: $(BUILD_DIR)/hci_usb_test $(BUILD_DIR)/hci_usb_modeswitch_test \
      $(BUILD_DIR)/hci_controller_invalid_host_test
-run: check-hci-transport check-native-usb-review check-counter-schema check-harness-layout
+run: check-hci-transport check-native-usb-review check-counter-schema \
+     check-harness-layout check-mode-policy

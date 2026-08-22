@@ -32,6 +32,10 @@
 #define UART_RTS_PORT 0
 #define UART_RTS_PIN  19
 
+/* No reset-coupled startup behavior in the host compile fixture. */
+#define HCI_UART_EARLY_STARTUP       0
+#define HCI_H4_STARTUP_RESET_SYNC    0
+
 #define UART_PINS                                                             \
     {                                                                         \
         {UART_RX_PORT, UART_RX_PIN, 1, IOPINDIR_INPUT, IOPINRES_NONE,         \

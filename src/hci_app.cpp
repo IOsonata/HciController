@@ -17,43 +17,12 @@
 #include "hci_trace.h"
 #include "sdc_hci.h"
 
-/*
- * The H:4 host transport prefixes one indicator byte. Keep this true even when
- * the image selects native USB, because UART and CDC/H:4 remain supported from
- * the same source tree.
- */
 static_assert(HCI_APP_PACKET_SIZE + 1U <= HCI_INTRF_TX_STREAM_SIZE,
               "controller packet plus indicator must fit the transport stream");
-
-/*
- * sdc_hci_get takes no capacity argument, so the buffer has to be at least as
- * large as the largest message the controller can hand back. sdc_hci.h: "the
- * size of the provided buffer is at least HCI_MSG_BUFFER_MAX_SIZE bytes. For
- * Isochronous Channels the provided buffer should be large enough to contain
- * the maximum supported SDU size."
- *
- * Isochronous channels are enabled, so the second sentence applies. The size
- * that matters is the one configured in sdc_cfg_iso_buffer_cfg_t, not the 4095
- * octet ceiling the specification allows: a controller told its receive SDU
- * buffer is 251 octets never hands back more than that plus the isochronous
- * data header. HCI_SDC_ISO_PACKET_SIZE is that sum, and it moves with the
- * configuration, so raising the configured SDU size without raising
- * HCI_APP_PACKET_SIZE stops the build instead of overflowing HciApp_t, which
- * no downstream length check could catch.
- */
 static_assert(HCI_APP_PACKET_SIZE >= HCI_MSG_BUFFER_MAX_SIZE,
               "controller packet must hold the largest SDC message");
-
 static_assert(HCI_APP_PACKET_SIZE >= HCI_SDC_ISO_PACKET_SIZE,
               "controller packet must hold the largest configured ISO SDU");
-
-/*
- * Every link the controller can hold has to be trackable, or the ACL credit
- * guard stands down for the ones that do not fit and the host can overrun the
- * advertised buffer count on those without being refused. This is the one
- * place both numbers are in scope, the routing layer's table size and the
- * target's link counts.
- */
 static_assert(HCI_SDC_ACL_TRACK_HANDLES >=
                   HCI_SDC_PERIPHERAL_COUNT + HCI_SDC_CENTRAL_COUNT,
               "HCI_SDC_ACL_TRACK_HANDLES is smaller than the link count");
@@ -74,19 +43,15 @@ static_assert(HCI_SDC_ACL_TRACK_HANDLES >=
 #ifndef HCI_SDC_STARTUP_NOP
 #define HCI_SDC_STARTUP_NOP 0
 #endif
-
 #ifndef HCI_APP_USB_SETTLE_PASSES
 #define HCI_APP_USB_SETTLE_PASSES 200000U
 #endif
-
 #ifndef HCI_APP_USB_SETTLE_REPORT
 #define HCI_APP_USB_SETTLE_REPORT 50000U
 #endif
-
 #ifndef HCI_APP_STOP_TIMEOUT_MS
 #define HCI_APP_STOP_TIMEOUT_MS 250U
 #endif
-
 #ifndef HCI_APP_USB_POLL_MS
 #define HCI_APP_USB_POLL_MS 5U
 #endif
@@ -129,18 +94,35 @@ static int HciAppUartEvent(UARTDev_t * const,
 #define HCI_USB_SOCKET 0
 #endif
 
-static HciUsbDescriptorMode_t HciAppUsbDescriptorMode(HciAppHost_t HostType)
+static bool HciAppResolveMode(HciAppMode_t Mode,
+                              HciAppHost_t *pHostType,
+                              HciUsbDescriptorMode_t *pUsbMode)
 {
-    if (HostType != HCI_APP_HOST_USB)
+    if (pHostType == nullptr || pUsbMode == nullptr)
     {
-        return HCI_USB_DESCRIPTOR_LOG_ONLY;
+        return false;
     }
 
-#if HCI_USB_HCI_TRANSPORT == HCI_USB_HCI_TRANSPORT_NATIVE
-    return HCI_USB_DESCRIPTOR_NATIVE_HCI;
-#else
-    return HCI_USB_DESCRIPTOR_CDC_H4;
-#endif
+    switch (Mode)
+    {
+        case HCI_APP_MODE_UART_H4:
+            *pHostType = HCI_APP_HOST_UART;
+            *pUsbMode = HCI_USB_DESCRIPTOR_LOG_ONLY;
+            return true;
+
+        case HCI_APP_MODE_USB_H4:
+            *pHostType = HCI_APP_HOST_USB;
+            *pUsbMode = HCI_USB_DESCRIPTOR_CDC_H4;
+            return true;
+
+        case HCI_APP_MODE_USB_NATIVE:
+            *pHostType = HCI_APP_HOST_USB;
+            *pUsbMode = HCI_USB_DESCRIPTOR_NATIVE_HCI;
+            return true;
+
+        default:
+            return false;
+    }
 }
 
 static const char *HciAppHostName(const HciApp_t *pApp)
@@ -153,13 +135,6 @@ static const char *HciAppHostName(const HciApp_t *pApp)
     return pApp->UsbHciNative ? "usb-native" : "usb-h4";
 }
 
-/*
- * Bring up the TinyUSB/CDC object that pumps the device stack. With CDC/H:4 it
- * also owns the HCI stream; with native HCI or UART HCI it owns only the log.
- * Native Bluetooth USB is a packet-oriented DevIntrf_t. Its DevAddr selector
- * is the HCI packet type, while UART and CDC are byte-stream DevIntrf_t
- * instances wrapped by the H:4-to-packet DeviceIntrf adapter.
- */
 static bool HciAppUsbSetup(HciApp_t *pApp, HciUsbDescriptorMode_t Mode)
 {
     if (!HciUsbDescriptorSetMode(Mode))
@@ -251,6 +226,7 @@ static bool HciAppInitUart(HciApp_t *pApp)
     pApp->pHostIntrf = &pApp->Uart.DevIntrf;
     return true;
 #else
+    (void)pApp;
     return false;
 #endif
 }
@@ -262,16 +238,11 @@ bool HciAppUartEarlyInit(HciApp_t *pApp, HciTarget_t Target)
         return false;
     }
 
-    /*
-     * Thingy:91 calls this at main entry with a static HciApp_t that ResetEntry
-     * has already zeroed. Do not clear that large object a second time before
-     * arming UARTE. Keep the clear for any future non-Thingy caller that uses
-     * this API with the previous initialization semantics.
-     */
-#if BOARD != THINGY91_NRF52840
+#if !HCI_UART_EARLY_STARTUP
     memset(pApp, 0, sizeof(*pApp));
 #endif
     pApp->HostType = HCI_APP_HOST_UART;
+    pApp->Mode = HCI_APP_MODE_UART_H4;
     pApp->Target = Target;
     pApp->UsbHciNative = false;
     s_pApp = pApp;
@@ -327,12 +298,8 @@ static bool HciAppUsbHostIsOpen(const HciApp_t *pApp)
         return false;
     }
 
-    if (pApp->UsbHciNative)
-    {
-        return HciUsbIsOpen(&pApp->NativeUsb);
-    }
-
-    return HciTinyUsbIsOpen(&pApp->Usb);
+    return pApp->UsbHciNative ? HciUsbIsOpen(&pApp->NativeUsb)
+                              : HciTinyUsbIsOpen(&pApp->Usb);
 }
 
 static void HciAppStartLogPort(HciApp_t *pApp)
@@ -433,7 +400,6 @@ static bool HciAppHostStart(void *pContext)
         {
             HciAppStartLogPort(pApp);
         }
-
         HciAppSetHostOpen(pApp, true);
     }
 
@@ -443,12 +409,7 @@ static bool HciAppHostStart(void *pContext)
 static size_t HciAppLogWrite(void *pContext, const uint8_t *pData, size_t Len)
 {
     HciApp_t *pApp = static_cast<HciApp_t *>(pContext);
-    if (pApp == nullptr)
-    {
-        return 0U;
-    }
-
-    return HciTinyUsbWrite(pApp->LogCdcInterface, pData, Len);
+    return pApp != nullptr ? HciTinyUsbWrite(pApp->LogCdcInterface, pData, Len) : 0U;
 }
 
 static void HciAppLogPortOpened(HciApp_t *pApp)
@@ -460,15 +421,13 @@ static void HciAppLogPortOpened(HciApp_t *pApp)
     }
 
     pApp->LogPortOpen = open;
-    if (!open)
+    if (open)
     {
-        return;
+        HciSyslogPrint(HciSyslogDefault(),
+                       "log: port open, %u octet(s) queued, host=%s",
+                       (unsigned)HciSyslogPending(HciSyslogDefault()),
+                       HciAppHostName(pApp));
     }
-
-    HciSyslogPrint(HciSyslogDefault(),
-                   "log: port open, %u octet(s) queued, host=%s",
-                   (unsigned)HciSyslogPending(HciSyslogDefault()),
-                   HciAppHostName(pApp));
 }
 
 #ifndef HCI_APP_LINK_IDLE_PASSES
@@ -483,7 +442,6 @@ static void HciAppResyncOnIdle(HciApp_t *pApp)
     }
 
     HciIntrfTransport_t *pHost = &pApp->Controller.Host;
-
     if (pHost->RxOctetCount != pApp->LinkIdleOctets)
     {
         pApp->LinkIdleOctets = pHost->RxOctetCount;
@@ -541,7 +499,6 @@ static void HciAppHostProcess(void *pContext)
         {
             HciAppSetHostOpen(pApp, HciAppUsbHostIsOpen(pApp));
         }
-
         HciAppDrainLog(pApp);
     }
 
@@ -598,24 +555,25 @@ static bool HciAppControllerInit(HciApp_t *pApp,
                              pControllerOps);
 }
 
-bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType, HciTarget_t Target)
+bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode, HciTarget_t Target)
 {
-    if (!HciTargetValid(&Target) ||
-        (HostType == HCI_APP_HOST_USB && !HciTargetHasUsb(&Target)))
+    HciAppHost_t hostType;
+    HciUsbDescriptorMode_t usbMode;
+    if (!HciAppResolveMode(Mode, &hostType, &usbMode) ||
+        !HciTargetValid(&Target) ||
+        (hostType == HCI_APP_HOST_USB && !HciTargetHasUsb(&Target)))
     {
         return false;
     }
 
     const bool earlyUart =
         pApp != nullptr &&
-        HostType == HCI_APP_HOST_UART &&
+        Mode == HCI_APP_MODE_UART_H4 &&
         s_pApp == pApp &&
         pApp->HostType == HCI_APP_HOST_UART &&
         pApp->pHostIntrf == &pApp->Uart.DevIntrf;
 
-    if (pApp == nullptr ||
-        (HostType != HCI_APP_HOST_UART && HostType != HCI_APP_HOST_USB) ||
-        (s_pApp != nullptr && !earlyUart))
+    if (pApp == nullptr || (s_pApp != nullptr && !earlyUart))
     {
         return false;
     }
@@ -626,11 +584,10 @@ bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType, HciTarget_t Target)
         s_pApp = pApp;
     }
 
-    pApp->HostType = HostType;
+    pApp->HostType = hostType;
+    pApp->Mode = Mode;
     pApp->Target = Target;
-    pApp->UsbHciNative =
-        HostType == HCI_APP_HOST_USB &&
-        HCI_USB_HCI_TRANSPORT == HCI_USB_HCI_TRANSPORT_NATIVE;
+    pApp->UsbHciNative = Mode == HCI_APP_MODE_USB_NATIVE;
 
     HciCountersInit(&pApp->Counters, &pApp->Sdc, &pApp->Controller);
 
@@ -650,10 +607,9 @@ bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType, HciTarget_t Target)
 #endif
 
     bool hostReady;
-    if (HostType == HCI_APP_HOST_USB)
+    if (hostType == HCI_APP_HOST_USB)
     {
-        const HciUsbDescriptorMode_t Mode = HciAppUsbDescriptorMode(HostType);
-        hostReady = HciAppUsbSetup(pApp, Mode);
+        hostReady = HciAppUsbSetup(pApp, usbMode);
         if (hostReady && !pApp->UsbHciNative)
         {
             pApp->pHostIntrf = &pApp->UsbIntrf.DevIntrf;
@@ -673,7 +629,7 @@ bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType, HciTarget_t Target)
 
     if (!hostReady)
     {
-        HciTrace("init: host interface failed type=%u\r\n", (unsigned)HostType);
+        HciTrace("init: host interface failed type=%u\r\n", (unsigned)hostType);
         pApp->LastError = -2;
         HciAppUsbRelease(pApp);
         s_pApp = nullptr;
@@ -693,13 +649,12 @@ bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType, HciTarget_t Target)
 
     if (HciControllerUsesH4(&pApp->Controller))
     {
-#if BOARD == THINGY91_NRF52840
-        if (HostType == HCI_APP_HOST_UART)
+#if HCI_H4_STARTUP_RESET_SYNC
+        if (hostType == HCI_APP_HOST_UART)
         {
             HciControllerSetH4StartupResetSync(&pApp->Controller, true);
         }
 #endif
-
         HciIntrfTransportSetSuspectFilter(&pApp->Controller.Host,
                                           HciAppSuspectFilter,
                                           pApp);
@@ -746,6 +701,24 @@ bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType, HciTarget_t Target)
     return true;
 }
 
+bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType, HciTarget_t Target)
+{
+    if (HostType == HCI_APP_HOST_UART)
+    {
+        return HciAppInitMode(pApp, HCI_APP_MODE_UART_H4, Target);
+    }
+    if (HostType != HCI_APP_HOST_USB)
+    {
+        return false;
+    }
+
+#if HCI_USB_HCI_TRANSPORT == HCI_USB_HCI_TRANSPORT_NATIVE
+    return HciAppInitMode(pApp, HCI_APP_MODE_USB_NATIVE, Target);
+#else
+    return HciAppInitMode(pApp, HCI_APP_MODE_USB_H4, Target);
+#endif
+}
+
 void HciAppStop(HciApp_t *pApp)
 {
     if (pApp == nullptr || !pApp->Initialized)
@@ -762,12 +735,6 @@ void HciAppStop(HciApp_t *pApp)
         return;
     }
 
-    /*
-     * Native USB owns pHostIntrf inside NativeUsb. Release the controller's
-     * DeviceIntrf reference before HciUsbDeinit clears that object. H:4 hosts
-     * still use the physical UART/CDC DevIntrf and keep their existing final
-     * disable below.
-     */
     if (pApp->UsbHciNative && pApp->HostOpen)
     {
         HciAppSetHostOpen(pApp, false);
@@ -792,12 +759,10 @@ void HciAppStop(HciApp_t *pApp)
 void HciAppThread(void *pContext)
 {
     HciApp_t *pApp = static_cast<HciApp_t *>(pContext);
-    if (pApp == nullptr || !pApp->Initialized)
+    if (pApp != nullptr && pApp->Initialized)
     {
-        return;
+        HciTaktOsThread(&pApp->Runtime);
     }
-
-    HciTaktOsThread(&pApp->Runtime);
 }
 
 bool HciAppHostIsOpen(const HciApp_t *pApp)

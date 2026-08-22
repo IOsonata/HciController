@@ -42,6 +42,17 @@ typedef enum
     HCI_APP_HOST_USB = 1,
 } HciAppHost_t;
 
+/*
+ * Complete host transport mode. HostType alone cannot distinguish the two USB
+ * transports, and that distinction is selected at run time by the mode button.
+ */
+typedef enum
+{
+    HCI_APP_MODE_UART_H4 = 0,
+    HCI_APP_MODE_USB_H4 = 1,
+    HCI_APP_MODE_USB_NATIVE = 2,
+} HciAppMode_t;
+
 typedef struct
 {
     HciController_t Controller;
@@ -65,6 +76,7 @@ typedef struct
     HciUsb_t NativeUsb;
     DevIntrf_t *pHostIntrf;
     HciAppHost_t HostType;
+    HciAppMode_t Mode;
     HciUsbDescriptorMode_t UsbDescriptorMode;
     uint8_t LogCdcInterface;
     bool UsbHciNative;
@@ -128,6 +140,13 @@ typedef struct
  */
 bool HciAppUartEarlyInit(HciApp_t *pApp, HciTarget_t Target);
 
+/* Runtime transport selection used by the persistent board mode setting. */
+bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode, HciTarget_t Target);
+
+/*
+ * Compatibility entry point. USB keeps the compile-time
+ * HCI_USB_HCI_TRANSPORT default; UART is H:4.
+ */
 bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType, HciTarget_t Target);
 void HciAppStop(HciApp_t *pApp);
 void HciAppThread(void *pContext);

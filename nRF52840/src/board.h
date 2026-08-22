@@ -47,6 +47,10 @@
  */
 #define THINGY91_NRF52840	100
 
+/* Application-local ids until these products are added to IOsonata. */
+#define WILDTHING51		101
+#define WILDTHING91		102
+
 /* -DBOARD=... on the command line wins, which is how the build is checked
  * against every board without editing this file. */
 #ifndef BOARD
@@ -60,33 +64,15 @@
 //=============================================================================
 
 /*
- * Which port the controller talks to its host on, decided when the image is
- * built.
+ * Which port supplies the default HCI mode when no saved mode exists.
  *
- *   HCI_HOST_SELECT_AUTO   read VBUS at boot, powered is USB and otherwise UART
- *   HCI_HOST_SELECT_USB    always the USB CDC port
- *   HCI_HOST_SELECT_UART   always the UART
+ *   HCI_HOST_SELECT_AUTO   VBUS chooses the initial USB/UART family
+ *   HCI_HOST_SELECT_USB    initial mode is the configured USB transport
+ *   HCI_HOST_SELECT_UART   initial mode is UART/H:4
  *
- * Each board below picks its own, and -DHCI_HOST_SELECT=... on the command
- * line wins over the board, so a dongle can be built as a UART controller
- * without editing this file.
- *
- * AUTO only means something where the USB socket belongs to this part, which
- * is what a dongle is. Where the socket belongs to something else, VBUS reads
- * as a host that is not there: a board on a charger would come up talking USB
- * CDC to nobody while the real host waited for an answer over the UART. A
- * board whose host is another part on the same PCB names UART for that reason,
- * as the BLYST840 does when it answers to an nRF9151.
- *
- * Plain integers rather than an enum because main.cpp tests the selection with
- * #if, which does not see enumerators.
- *
- * None of them is zero, and that is deliberate. The preprocessor reads an
- * identifier it does not know as 0, so with an AUTO of 0 a misspelt
- * -DHCI_HOST_SELECT=HCI_HOST_SELECT_UARTT compiled clean and quietly gave the
- * VBUS reading image, overriding the board that had asked for UART. Starting
- * at 1 leaves 0 meaning nothing, so a misspelling matches no case at all and
- * main.cpp refuses it.
+ * On boards with HCI_MODE_SWITCH, the selected mode is subsequently stored in
+ * NVM and survives reset/power cycle. Board policy still limits which modes are
+ * legal; for example UDG never allows UART-HCI regardless of this default.
  */
 #define HCI_HOST_SELECT_AUTO	1
 #define HCI_HOST_SELECT_USB		2
@@ -97,8 +83,12 @@
 #define BOARD_NAME                      "I-SYST UDG-NRF52840x Dongle"
 #define BOARD_MODULE_NAME               "I-SYST BLYST840"
 
-/* The USB socket is this part's own, so VBUS is worth reading. */
+/* The USB socket is this part's own. HCI itself is USB-only on UDG. */
 #define HCI_USB_SOCKET                  1
+#define HCI_MODE_SWITCH                 1
+#define HCI_MODE_BUTTON_PORT            UDG_NRF52840_BUT1_PORT
+#define HCI_MODE_BUTTON_PIN             UDG_NRF52840_BUT1_PIN
+#define HCI_MODE_BUTTON_PINOP           UDG_NRF52840_BUT1_PINOP
 
 #ifndef HCI_HOST_SELECT
 #define HCI_HOST_SELECT                 HCI_HOST_SELECT_AUTO
@@ -113,7 +103,7 @@
 #define HCI_LED_GREEN_ACTIVE            UDG_NRF52840_LEDG_ACTIVE
 
 #define HCI_LED_BLUE_PORT               UDG_NRF52840_LEDB_PORT
-#define HCI_LED_BLUE_PIN                 UDG_NRF52840_LEDB_PIN
+#define HCI_LED_BLUE_PIN                UDG_NRF52840_LEDB_PIN
 #define HCI_LED_BLUE_ACTIVE              UDG_NRF52840_LEDB_ACTIVE
 
 #define LED_PINS						UDG_NRF52840_LED_PINS_CFG
@@ -145,11 +135,8 @@
  * interconnect, copied here and then left. The Thingy:91 branch below has that
  * board's measured mapping.
  *
- * So these are named after the header the dongle brings out rather than after
- * another board's wiring, and they are still placeholders: this board reaches
- * its host over USB and nothing has put a signal on them. They become real the
- * moment the image is built with -DHCI_HOST_SELECT=HCI_HOST_SELECT_UART, so
- * check them against the schematic before doing that.
+ * These pins remain board/header metadata, but HciController never selects
+ * UART-HCI for UDG. main.cpp rejects a forced UART mode on this board.
  */
 #define UART_TX_PORT            0
 #define UART_TX_PIN             24
@@ -174,8 +161,15 @@
 
 #elif BOARD == IBK_NRF52840
 
-/* The USB socket is this part's own, so VBUS is worth reading. */
+#define BOARD_NAME                      "I-SYST IBK-NRF52840"
+#define BOARD_MODULE_NAME               "I-SYST BLYST840"
+
+/* The USB socket is this part's own, so VBUS is worth reading for first boot. */
 #define HCI_USB_SOCKET                  1
+#define HCI_MODE_SWITCH                 1
+#define HCI_MODE_BUTTON_PORT            IBK_NRF52840_BUT1_PORT
+#define HCI_MODE_BUTTON_PIN             IBK_NRF52840_BUT1_PIN
+#define HCI_MODE_BUTTON_PINOP           IBK_NRF52840_BUT1_PINOP
 
 #ifndef HCI_HOST_SELECT
 #define HCI_HOST_SELECT                 HCI_HOST_SELECT_AUTO
@@ -262,6 +256,9 @@
  * usually sealed.
  */
 #define HCI_USB_SOCKET                  1
+#define HCI_MODE_SWITCH                 0
+#define HCI_UART_EARLY_STARTUP          1
+#define HCI_H4_STARTUP_RESET_SYNC       1
 
 #ifndef HCI_HOST_SELECT
 #define HCI_HOST_SELECT                 HCI_HOST_SELECT_UART
@@ -413,30 +410,120 @@
 #define HCI_SDC_STARTUP_NOP             1
 
 
+#elif BOARD == WILDTHING91
+
+#define BOARD_NAME                      "I-SYST WildThing91"
+#define BOARD_MODULE_NAME               "I-SYST BLYST840"
+
+/*
+ * HCI is always UART. The nRF52840 UART pin map and hardware flow control are
+ * the same as Thingy:91. The nRF91 reset line is NOT connected to nRF52840 on
+ * WildThing91, so the reset-release early RTS gate is deliberately absent.
+ * H:4 startup synchronization remains enabled to discard any nRF91 boot text
+ * before the first HCI Reset.
+ */
+#define HCI_USB_SOCKET                  1
+#define HCI_MODE_SWITCH                 0
+#define HCI_STATUS_LEDS                 0
+#define HCI_H4_STARTUP_RESET_SYNC       1
+
+#ifndef HCI_HOST_SELECT
+#define HCI_HOST_SELECT                 HCI_HOST_SELECT_UART
+#endif
+
+#define UART_TX_PORT            0
+#define UART_TX_PIN             25
+#define UART_TX_PINOP           0
+
+#define UART_RX_PORT            1
+#define UART_RX_PIN             0
+#define UART_RX_PINOP           0
+
+#define UART_RTS_PORT           0
+#define UART_RTS_PIN            19
+#define UART_RTS_PINOP          0
+
+#define UART_CTS_PORT           0
+#define UART_CTS_PIN            22
+#define UART_CTS_PINOP          0
+
+#define UART_HW_FLOWCTRL	1
+#define UART_DEVNO			0
+#define UART_RATE			1000000
+
+
+#elif BOARD == WILDTHING51
+
+#define BOARD_NAME                      "I-SYST WildThing51"
+#define BOARD_MODULE_NAME               "I-SYST BLYST840"
+
+/*
+ * HCI is always the BLYST840 <-> nRF9151 UART. WildThing51 does connect
+ * BT_RST_CTRL to BT_nRESET, so it uses the reset-coupled early receive path.
+ * The schematic gives the four interconnect nets as:
+ *
+ *     BTLTE0  nRF9151 P0.00  -> BLYST840 P0.23  (BLYST RX)
+ *     BTLTE1  nRF9151 P0.01  -> BLYST840 P0.24  (BLYST TX)
+ *     BTLTE2  nRF9151 P0.02  -> BLYST840 P0.21  (BLYST CTS)
+ *     BTLTE3  nRF9151 P0.03  -> BLYST840 P1.04  (BLYST RTS)
+ */
+#define HCI_USB_SOCKET                  1
+#define HCI_MODE_SWITCH                 0
+#define HCI_STATUS_LEDS                 0
+#define HCI_UART_EARLY_STARTUP          1
+#define HCI_H4_STARTUP_RESET_SYNC       1
+
+#ifndef HCI_HOST_SELECT
+#define HCI_HOST_SELECT                 HCI_HOST_SELECT_UART
+#endif
+
+#define UART_TX_PORT            0
+#define UART_TX_PIN             24
+#define UART_TX_PINOP           0
+
+#define UART_RX_PORT            0
+#define UART_RX_PIN             23
+#define UART_RX_PINOP           0
+
+#define UART_RTS_PORT           1
+#define UART_RTS_PIN            4
+#define UART_RTS_PINOP          0
+
+#define UART_CTS_PORT           0
+#define UART_CTS_PIN            21
+#define UART_CTS_PINOP          0
+
+#define UART_HW_FLOWCTRL	1
+#define UART_DEVNO			0
+#define UART_RATE			1000000
+
+
 #else
 #error "No pins defined. Define the pins used by your board."
 #endif
 
 //=============================================================================
-// USB socket
+// USB socket / board HCI policy defaults
 //=============================================================================
 
-/*
- * Whether the USB socket on the board is wired to this part.
- *
- * A separate question from which port the HCI stream is on, and the Thingy:91
- * is why: the socket there is the nRF52840's and the host is the nRF9160 on
- * the other end of the interconnect UART. The socket has no HCI stream on it
- * and is where the log goes instead.
- *
- * A board that says nothing gets 0, and a UART host on it brings no USB up.
- * That is the right way round: where the socket belongs to another part,
- * enabling the peripheral would put a device on a bus that is not this one's
- * to enumerate on, and the cost of the default being wrong the other way is
- * only a log nobody reads.
- */
 #ifndef HCI_USB_SOCKET
 #define HCI_USB_SOCKET		0
+#endif
+
+#ifndef HCI_MODE_SWITCH
+#define HCI_MODE_SWITCH		0
+#endif
+
+#ifndef HCI_STATUS_LEDS
+#define HCI_STATUS_LEDS		1
+#endif
+
+#ifndef HCI_UART_EARLY_STARTUP
+#define HCI_UART_EARLY_STARTUP		0
+#endif
+
+#ifndef HCI_H4_STARTUP_RESET_SYNC
+#define HCI_H4_STARTUP_RESET_SYNC	0
 #endif
 
 //=============================================================================

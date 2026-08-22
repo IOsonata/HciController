@@ -27,18 +27,36 @@
 #include "iopinctrl.h"
 #include "miscdev/led.h"
 
-#define DEVICE_NAME             "HciController"
-#define HCI_THREAD_STACK_SIZE    3072U
-#define STATUS_THREAD_STACK_SIZE 512U
-#define STATUS_UPDATE_MS         100U
+#if HCI_MODE_SWITCH
+#include "storage/nvm.h"
+#include "storage/nvm_intrf.h"
+#include "storage/nvm_region.h"
+#endif
 
+#define DEVICE_NAME               "HciController"
+#define HCI_THREAD_STACK_SIZE      3072U
+/* Mode changes stop HCI/MPSL/SDC before the NVM erase/write/verify path. */
+#define STATUS_THREAD_STACK_SIZE   3072U
+#define STATUS_UPDATE_MS           20U
+#define HCI_MODE_DEBOUNCE_PASSES   2U
+
+#define HCI_THREAD_PRIORITY        TAKTOS_PRIORITY_HIGHEST
+#if HCI_MODE_SWITCH
 /*
- * board.h names this MCU_OSC. Defining it overrides the __WEAK default in
- * IOsonata, which is HFXO 32 MHz and LFXO 32768 at 20 ppm. Leave it undefined
- * and that default is used, which is what the dongle has. It matters because
- * HciNrf52840MpslInit chooses MPSL_CLOCK_LF_SRC_XTAL or _RC from this, and
- * SystemCoreClockGet feeds the TaktOS tick rate below.
+ * TaktOS is strict fixed-priority. Native USB can keep the HCI thread ready
+ * continuously, so a lower-priority polling thread may never execute. Give
+ * the mode-control thread the reserved critical level so its 20 ms poll can
+ * preempt HCI briefly. A confirmed button press stops the HCI runtime, stores
+ * the next mode with MPSL/SDC down, then resets.
  */
+#define STATUS_THREAD_PRIORITY     TAKTOS_PRIORITY_CRITICAL
+#else
+#define STATUS_THREAD_PRIORITY     TAKTOS_PRIORITY_LOW
+#endif
+
+static_assert(!HCI_MODE_SWITCH || STATUS_THREAD_PRIORITY > HCI_THREAD_PRIORITY,
+              "selectable-mode control thread must preempt the HCI thread");
+
 #ifdef MCU_OSC
 McuOsc_t g_McuOsc = MCU_OSC;
 #endif
@@ -50,19 +68,46 @@ const AppInfo_t g_AppInfo = {
     {0},
 };
 
-/*
- * A board without a status LED reachable from this part, which is any board
- * where the LED belongs to something else. Driving the pins another board uses
- * would put a signal on whatever is actually wired there.
- */
-#ifndef HCI_STATUS_LEDS
-#define HCI_STATUS_LEDS 1
+#ifndef HCI_HOST_SELECT
+#define HCI_HOST_SELECT HCI_HOST_SELECT_AUTO
+#endif
+
+#if HCI_HOST_SELECT != HCI_HOST_SELECT_AUTO && \
+    HCI_HOST_SELECT != HCI_HOST_SELECT_USB && \
+    HCI_HOST_SELECT != HCI_HOST_SELECT_UART
+#error "HCI_HOST_SELECT must be HCI_HOST_SELECT_AUTO, _USB or _UART"
+#endif
+
+#if BOARD == UDG_NRF52840 && HCI_HOST_SELECT == HCI_HOST_SELECT_UART
+#error "UDG_NRF52840 supports USB-H4 and USB-HCI only; UART-HCI is not supported"
+#endif
+
+#if (BOARD == THINGY91_NRF52840 || BOARD == WILDTHING51 || BOARD == WILDTHING91) && \
+    HCI_HOST_SELECT != HCI_HOST_SELECT_UART
+#error "This board is HCI UART-only"
 #endif
 
 static HciApp_t s_HciApp;
+static HciAppMode_t s_HciMode;
 
 #if HCI_STATUS_LEDS
 static const IOPinCfg_t s_LedPins[] = LED_PINS;
+#endif
+
+#if HCI_MODE_SWITCH
+static const IOPinCfg_t s_ModeButtonPin = {
+    HCI_MODE_BUTTON_PORT,
+    HCI_MODE_BUTTON_PIN,
+    HCI_MODE_BUTTON_PINOP,
+    IOPINDIR_INPUT,
+    IOPINRES_PULLUP,
+    IOPINTYPE_NORMAL,
+};
+
+static NvmIntrf s_ModeNvmIntrf;
+static Nvm s_ModeNvm;
+static bool s_ModeButtonLatched;
+static uint8_t s_ModeButtonDebounce;
 #endif
 
 alignas(8) static uint8_t s_HciThreadMem[TAKTOS_THREAD_MEM_SIZE(HCI_THREAD_STACK_SIZE)];
@@ -94,6 +139,249 @@ static void HciStatusSet(bool, bool, bool)
 }
 #endif
 
+static void HciFatal(void)
+{
+    HciStatusSet(true, false, false);
+    for (;;)
+    {
+        __WFE();
+    }
+}
+
+static const char *HciModeName(HciAppMode_t Mode)
+{
+    switch (Mode)
+    {
+        case HCI_APP_MODE_UART_H4:
+            return "uart-h4";
+        case HCI_APP_MODE_USB_H4:
+            return "usb-h4";
+        case HCI_APP_MODE_USB_NATIVE:
+            return "usb-native";
+        default:
+            return "invalid";
+    }
+}
+
+static HciAppMode_t HciUsbBuildDefaultMode(void)
+{
+#if HCI_USB_HCI_TRANSPORT == HCI_USB_HCI_TRANSPORT_NATIVE
+    return HCI_APP_MODE_USB_NATIVE;
+#else
+    return HCI_APP_MODE_USB_H4;
+#endif
+}
+
+static HciAppMode_t HciBoardDefaultMode(void)
+{
+#if BOARD == UDG_NRF52840
+    return HciUsbBuildDefaultMode();
+#elif BOARD == IBK_NRF52840
+#if HCI_HOST_SELECT == HCI_HOST_SELECT_UART
+    return HCI_APP_MODE_UART_H4;
+#elif HCI_HOST_SELECT == HCI_HOST_SELECT_USB
+    return HciUsbBuildDefaultMode();
+#else
+    return (NRF_POWER->USBREGSTATUS & POWER_USBREGSTATUS_VBUSDETECT_Msk) != 0U ?
+           HciUsbBuildDefaultMode() : HCI_APP_MODE_UART_H4;
+#endif
+#else
+    return HCI_APP_MODE_UART_H4;
+#endif
+}
+
+static bool HciModeAllowed(HciAppMode_t Mode)
+{
+#if BOARD == UDG_NRF52840
+    return Mode == HCI_APP_MODE_USB_H4 || Mode == HCI_APP_MODE_USB_NATIVE;
+#elif BOARD == IBK_NRF52840
+    return Mode == HCI_APP_MODE_UART_H4 || Mode == HCI_APP_MODE_USB_H4 ||
+           Mode == HCI_APP_MODE_USB_NATIVE;
+#else
+    return Mode == HCI_APP_MODE_UART_H4;
+#endif
+}
+
+#if HCI_MODE_SWITCH
+
+#define HCI_MODE_NVM_MAGIC          0x4843494DU /* HCIM */
+#define HCI_MODE_NVM_VERSION        1U
+#define HCI_MODE_NVM_REGION         0
+
+typedef struct
+{
+    uint32_t Magic;
+    uint32_t Version;
+    uint32_t Board;
+    uint32_t Mode;
+    uint32_t Check;
+} HciModeRecord_t;
+
+static uint32_t HciModeRecordCheck(const HciModeRecord_t *pRecord)
+{
+    return ~(pRecord->Magic ^ pRecord->Version ^ pRecord->Board ^ pRecord->Mode);
+}
+
+static bool HciModeNvmSetup(void)
+{
+    NvmCfg_t cfg = {};
+    NvmMcuCfg(cfg);
+
+    const uintptr_t addr = NvmRegionAddr(HCI_MODE_NVM_REGION);
+    const size_t size = NvmRegionSize(HCI_MODE_NVM_REGION);
+
+    HciTrace("mode: nvm addr=0x%08lX size=%lu\r\n",
+             (unsigned long)addr, (unsigned long)size);
+
+    if (addr == 0U || cfg.EraseSize == 0U || size < cfg.EraseSize ||
+        (addr % cfg.EraseSize) != 0U)
+    {
+        HciTrace("mode: nvm geometry invalid\r\n");
+        return false;
+    }
+
+    if (!s_ModeNvmIntrf.Init(nullptr, false))
+    {
+        HciTrace("mode: nvm interface init failed\r\n");
+        return false;
+    }
+
+    /* Use one erase page only; the rest of NVM0 remains available. */
+    return s_ModeNvm.Init(cfg, &s_ModeNvmIntrf, addr, cfg.EraseSize);
+}
+
+static HciAppMode_t HciModeNvmLoad(HciAppMode_t Default, bool *pStored)
+{
+    HciModeRecord_t record = {};
+    const int rd = s_ModeNvm.Read(0U, &record, sizeof(record));
+
+    const bool valid = rd == (int)sizeof(record) &&
+                       record.Magic == HCI_MODE_NVM_MAGIC &&
+                       record.Version == HCI_MODE_NVM_VERSION &&
+                       record.Board == (uint32_t)BOARD &&
+                       record.Check == HciModeRecordCheck(&record) &&
+                       record.Mode <= (uint32_t)HCI_APP_MODE_USB_NATIVE &&
+                       HciModeAllowed((HciAppMode_t)record.Mode);
+
+    if (pStored != nullptr)
+    {
+        *pStored = valid;
+    }
+
+    return valid ? (HciAppMode_t)record.Mode : Default;
+}
+
+static bool HciModeNvmStore(HciAppMode_t Mode)
+{
+    if (!HciModeAllowed(Mode))
+    {
+        return false;
+    }
+
+    HciModeRecord_t record = {
+        HCI_MODE_NVM_MAGIC,
+        HCI_MODE_NVM_VERSION,
+        (uint32_t)BOARD,
+        (uint32_t)Mode,
+        0U,
+    };
+    record.Check = HciModeRecordCheck(&record);
+
+    const int erase = s_ModeNvm.Erase(0U, s_ModeNvm.EraseSize());
+    if (erase != 0)
+    {
+        return false;
+    }
+
+    const int wr = s_ModeNvm.Write(0U, &record, sizeof(record));
+    if (wr != (int)sizeof(record))
+    {
+        return false;
+    }
+
+    HciModeRecord_t verify = {};
+    const int rd = s_ModeNvm.Read(0U, &verify, sizeof(verify));
+    return rd == (int)sizeof(verify) &&
+           verify.Magic == record.Magic &&
+           verify.Version == record.Version &&
+           verify.Board == record.Board &&
+           verify.Mode == record.Mode &&
+           verify.Check == record.Check;
+}
+
+static HciAppMode_t HciNextMode(HciAppMode_t Mode)
+{
+#if BOARD == UDG_NRF52840
+    return Mode == HCI_APP_MODE_USB_H4 ? HCI_APP_MODE_USB_NATIVE
+                                       : HCI_APP_MODE_USB_H4;
+#else
+    switch (Mode)
+    {
+        case HCI_APP_MODE_UART_H4:
+            return HCI_APP_MODE_USB_H4;
+        case HCI_APP_MODE_USB_H4:
+            return HCI_APP_MODE_USB_NATIVE;
+        default:
+            return HCI_APP_MODE_UART_H4;
+    }
+#endif
+}
+
+static uint32_t HciModeButtonRaw(void)
+{
+    return (uint32_t)IOPinRead(HCI_MODE_BUTTON_PORT, HCI_MODE_BUTTON_PIN);
+}
+
+static bool HciModeButtonDown(void)
+{
+    return HciModeButtonRaw() == 0U;
+}
+
+static void HciModeButtonProcess(void)
+{
+    const bool down = HciModeButtonDown();
+
+    if (!down)
+    {
+        s_ModeButtonLatched = false;
+        s_ModeButtonDebounce = 0U;
+        return;
+    }
+
+    if (s_ModeButtonLatched)
+    {
+        return;
+    }
+
+    s_ModeButtonDebounce++;
+    if (s_ModeButtonDebounce < HCI_MODE_DEBOUNCE_PASSES)
+    {
+        return;
+    }
+
+    s_ModeButtonLatched = true;
+    const HciAppMode_t next = HciNextMode(s_HciMode);
+
+    /*
+     * Internal flash is not touched while MPSL/SDC owns the radio. Stop the
+     * runtime first; HciAppStop waits for the HCI thread to leave, then stops
+     * USB, SDC and MPSL. With the target down the NVM interface uses NVMC
+     * directly, so the new mode can be committed without a retained-register
+     * handoff through the USB DFU bootloader.
+     */
+    HciAppStop(&s_HciApp);
+    if (s_HciApp.Initialized || !HciModeNvmStore(next))
+    {
+        HciFatal();
+    }
+
+    __disable_irq();
+    __DSB();
+    NVIC_SystemReset();
+}
+
+#endif /* HCI_MODE_SWITCH */
+
 static void HciStatusThread(void *)
 {
     for (;;)
@@ -111,107 +399,36 @@ static void HciStatusThread(void *)
             HciStatusSet(false, true, false);
         }
 
+#if HCI_MODE_SWITCH
+        HciModeButtonProcess();
+#endif
+
         (void)TaktOSThreadSleep(TaktOSCurrentThread(), STATUS_UPDATE_MS);
     }
 }
 
-static void HciFatal(void)
-{
-    HciStatusSet(true, false, false);
-    for (;;)
-    {
-        __WFE();
-    }
-}
-
-/*
- * board.h names the host port for the board it describes. A -D on the command
- * line overrides it, which is how the same tree builds a dongle image and a
- * UART controller for a board whose host is another part on the same PCB.
- * hci_app.h documents the three values.
- */
-#ifndef HCI_HOST_SELECT
-#define HCI_HOST_SELECT HCI_HOST_SELECT_AUTO
-#endif
-
-#if HCI_HOST_SELECT != HCI_HOST_SELECT_AUTO && \
-    HCI_HOST_SELECT != HCI_HOST_SELECT_USB && \
-    HCI_HOST_SELECT != HCI_HOST_SELECT_UART
-#error "HCI_HOST_SELECT must be HCI_HOST_SELECT_AUTO, _USB or _UART"
-#endif
-
-/*
- * The UDG dongle's UART pins in board.h are explicitly placeholders. Do not
- * let a command-line override turn an unverified pin map into a build that
- * looks supported. Remove this guard only after the TX/RX mapping has been
- * checked against the schematic or measured on hardware.
- */
-#if BOARD == UDG_NRF52840 && HCI_HOST_SELECT == HCI_HOST_SELECT_UART
-#error "UDG_NRF52840 forced UART is disabled until its UART pin map is validated"
-#endif
-
-/*
- * A UART host with no pins to reach it on would otherwise fail deep inside the
- * UART_PINS expansion on an undeclared identifier, which does not say what is
- * missing. Testing UART_PINS itself proves nothing: board.h defines it for
- * every board, from these two. So test what it is built out of.
- */
-#if HCI_HOST_SELECT != HCI_HOST_SELECT_USB && \
-    (!defined(UART_RX_PORT) || !defined(UART_TX_PORT))
-#error "the selected host needs UART_RX_PORT/PIN and UART_TX_PORT/PIN from board.h"
-#endif
-
-#if BOARD == THINGY91_NRF52840 && HCI_HOST_SELECT == HCI_HOST_SELECT_UART
-#define HCI_THINGY91_EARLY_UART 1
-#else
-#define HCI_THINGY91_EARLY_UART 0
-#endif
-
-#if HCI_THINGY91_EARLY_UART
+#if HCI_UART_EARLY_STARTUP
 #if UART_RTS_PORT != 0 && UART_RTS_PORT != 1
-#error "Thingy91 UART RTS must be on nRF52840 P0 or P1"
+#error "early UART RTS must be on nRF52840 P0 or P1"
 #endif
 
-static void HciThingy91HostNotReady(void)
+static void HciUartHostNotReady(void)
 {
-    /*
-     * Thingy:91 reset-couples the nRF52840 to its nRF9160 host. Hold the
-     * active-low UART ready line high before any other application work so the
-     * host cannot begin HCI while UART RX is still being armed. OUTSET is
-     * written before DIRSET to avoid a transient low/ready pulse.
-     */
     NRF_GPIO_Type *pPort = UART_RTS_PORT == 0 ? NRF_P0 : NRF_P1;
     const uint32_t mask = 1UL << UART_RTS_PIN;
 
+    /* High first, then output: no transient active-low READY pulse. */
     pPort->OUTSET = mask;
     pPort->DIRSET = mask;
     __DSB();
 }
 #endif
 
-static HciAppHost_t HciSelectHost(void)
-{
-#if HCI_HOST_SELECT == HCI_HOST_SELECT_USB
-    return HCI_APP_HOST_USB;
-#elif HCI_HOST_SELECT == HCI_HOST_SELECT_UART
-    return HCI_APP_HOST_UART;
-#elif HCI_HOST_SELECT == HCI_HOST_SELECT_AUTO
-    return (NRF_POWER->USBREGSTATUS & POWER_USBREGSTATUS_VBUSDETECT_Msk) != 0U ?
-           HCI_APP_HOST_USB : HCI_APP_HOST_UART;
-#else
-#error "unreachable, the selection was checked above"
-#endif
-}
-
 int main(void)
 {
-#if HCI_THINGY91_EARLY_UART
-    /*
-     * This must be the first useful application operation on Thingy:91. The
-     * physical UART and its 4K RX FIFO are armed here, but H:4/controller
-     * processing remains deferred until the normal runtime host start.
-     */
-    HciThingy91HostNotReady();
+#if HCI_UART_EARLY_STARTUP
+    /* Fixed UART boards that are reset-coupled must arm receive immediately. */
+    HciUartHostNotReady();
     HciTarget_t target = HciNrf52840Target();
     const bool earlyUartReady = HciAppUartEarlyInit(&s_HciApp, target);
 #else
@@ -223,13 +440,16 @@ int main(void)
 #endif
     HciStatusSet(false, false, false);
 
+#if HCI_MODE_SWITCH
+    IOPinCfg(&s_ModeButtonPin, 1U);
+    s_ModeButtonLatched = HciModeButtonDown();
+    s_ModeButtonDebounce = 0U;
+#endif
+
     HciTraceInit();
     HciNrf52840ResetTrace();
 
-    uint32_t usbReg = NRF_POWER->USBREGSTATUS;
-    HciAppHost_t host = HciSelectHost();
-
-#if HCI_THINGY91_EARLY_UART
+#if HCI_UART_EARLY_STARTUP
     if (!earlyUartReady)
     {
         HciTrace("fatal: early UART init err=%d target=%ld\r\n",
@@ -239,24 +459,35 @@ int main(void)
     }
 #endif
 
-    /*
-     * Naming the build option next to the port it produced separates a board
-     * built for the wrong host from one that read VBUS and got it wrong.
-     */
-#if HCI_HOST_SELECT == HCI_HOST_SELECT_USB
-    static const char *pSelect = "usb";
-#elif HCI_HOST_SELECT == HCI_HOST_SELECT_UART
-    static const char *pSelect = "uart";
+    bool storedMode = false;
+    const HciAppMode_t defaultMode = HciBoardDefaultMode();
+
+#if HCI_MODE_SWITCH
+    if (!HciModeNvmSetup())
+    {
+        HciTrace("fatal: mode NVM region unavailable\r\n");
+        HciFatal();
+    }
+    s_HciMode = HciModeNvmLoad(defaultMode, &storedMode);
 #else
-    static const char *pSelect = "auto";
+    s_HciMode = defaultMode;
 #endif
 
-    HciTrace("boot: usbregstatus=0x%08lX vbus=%u outrdy=%u select=%s host=%s\r\n",
+    if (!HciModeAllowed(s_HciMode))
+    {
+        HciTrace("fatal: mode %u not allowed on BOARD=%u\r\n",
+                 (unsigned)s_HciMode, (unsigned)BOARD);
+        HciFatal();
+    }
+
+    const uint32_t usbReg = NRF_POWER->USBREGSTATUS;
+    HciTrace("boot: board=%s usbregstatus=0x%08lX vbus=%u outrdy=%u mode=%s stored=%u\r\n",
+             BOARD_NAME,
              (unsigned long)usbReg,
              (unsigned)((usbReg & POWER_USBREGSTATUS_VBUSDETECT_Msk) != 0U),
              (unsigned)((usbReg & POWER_USBREGSTATUS_OUTPUTRDY_Msk) != 0U),
-             pSelect,
-             host == HCI_APP_HOST_USB ? "usb" : "uart");
+             HciModeName(s_HciMode),
+             (unsigned)storedMode);
 
     TaktOSCfg_t kernelCfg = {};
     kernelCfg.KernClockHz = SystemCoreClockGet();
@@ -270,25 +501,20 @@ int main(void)
         HciFatal();
     }
 
-    if (!HciAppInit(&s_HciApp, host, target))
+    if (!HciAppInitMode(&s_HciApp, s_HciMode, target))
     {
-        HciTrace("fatal: HciAppInit err=%d target=%ld\r\n",
+        HciTrace("fatal: HciAppInitMode err=%d target=%ld\r\n",
                  s_HciApp.LastError,
                  (long)HciTargetLastError(&s_HciApp.Target));
         HciFatal();
     }
 
-    /*
-     * Mark the runtime as owning a thread before the kernel can schedule it.
-     * A stop in the interval between task creation and the task's first
-     * instruction must wait rather than tear SDC/MPSL down under that task.
-     */
     HciTaktOsThreadArm(&s_HciApp.Runtime);
     if (TaktOSThreadCreate(s_HciThreadMem,
                            sizeof(s_HciThreadMem),
                            HciAppThread,
                            &s_HciApp,
-                           TAKTOS_PRIORITY_HIGHEST) == nullptr)
+                           HCI_THREAD_PRIORITY) == nullptr)
     {
         HciTaktOsThreadDisarm(&s_HciApp.Runtime);
         HciTrace("fatal: hci thread create\r\n");
@@ -299,7 +525,7 @@ int main(void)
                            sizeof(s_StatusThreadMem),
                            HciStatusThread,
                            nullptr,
-                           TAKTOS_PRIORITY_LOW) == nullptr)
+                           STATUS_THREAD_PRIORITY) == nullptr)
     {
         HciTrace("fatal: status thread create\r\n");
         HciFatal();
