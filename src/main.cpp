@@ -161,6 +161,34 @@ static void HciFatal(void)
 #error "the selected host needs UART_RX_PORT/PIN and UART_TX_PORT/PIN from board.h"
 #endif
 
+#if BOARD == THINGY91_NRF52840 && HCI_HOST_SELECT == HCI_HOST_SELECT_UART
+#define HCI_THINGY91_EARLY_UART 1
+#else
+#define HCI_THINGY91_EARLY_UART 0
+#endif
+
+#if HCI_THINGY91_EARLY_UART
+#if UART_RTS_PORT != 0 && UART_RTS_PORT != 1
+#error "Thingy91 UART RTS must be on nRF52840 P0 or P1"
+#endif
+
+static void HciThingy91HostNotReady(void)
+{
+    /*
+     * Thingy:91 reset-couples the nRF52840 to its nRF9160 host. Hold the
+     * active-low UART ready line high before any other application work so the
+     * host cannot begin HCI while UART RX is still being armed. OUTSET is
+     * written before DIRSET to avoid a transient low/ready pulse.
+     */
+    NRF_GPIO_Type *pPort = UART_RTS_PORT == 0 ? NRF_P0 : NRF_P1;
+    const uint32_t mask = 1UL << UART_RTS_PIN;
+
+    pPort->OUTSET = mask;
+    pPort->DIRSET = mask;
+    __DSB();
+}
+#endif
+
 static HciAppHost_t HciSelectHost(void)
 {
 #if HCI_HOST_SELECT == HCI_HOST_SELECT_USB
@@ -177,6 +205,19 @@ static HciAppHost_t HciSelectHost(void)
 
 int main(void)
 {
+#if HCI_THINGY91_EARLY_UART
+    /*
+     * This must be the first useful application operation on Thingy:91. The
+     * physical UART and its 4K RX FIFO are armed here, but H:4/controller
+     * processing remains deferred until the normal runtime host start.
+     */
+    HciThingy91HostNotReady();
+    HciTarget_t target = HciNrf52840Target();
+    const bool earlyUartReady = HciAppUartEarlyInit(&s_HciApp, target);
+#else
+    HciTarget_t target = HciNrf52840Target();
+#endif
+
 #if HCI_STATUS_LEDS
     IOPinCfg(s_LedPins, sizeof(s_LedPins) / sizeof(s_LedPins[0]));
 #endif
@@ -187,6 +228,16 @@ int main(void)
 
     uint32_t usbReg = NRF_POWER->USBREGSTATUS;
     HciAppHost_t host = HciSelectHost();
+
+#if HCI_THINGY91_EARLY_UART
+    if (!earlyUartReady)
+    {
+        HciTrace("fatal: early UART init err=%d target=%ld\r\n",
+                 s_HciApp.LastError,
+                 (long)HciTargetLastError(&s_HciApp.Target));
+        HciFatal();
+    }
+#endif
 
     /*
      * Naming the build option next to the port it produced separates a board
@@ -199,7 +250,6 @@ int main(void)
 #else
     static const char *pSelect = "auto";
 #endif
-
 
     HciTrace("boot: usbregstatus=0x%08lX vbus=%u outrdy=%u select=%s host=%s\r\n",
              (unsigned long)usbReg,
@@ -220,7 +270,7 @@ int main(void)
         HciFatal();
     }
 
-    if (!HciAppInit(&s_HciApp, host, HciNrf52840Target()))
+    if (!HciAppInit(&s_HciApp, host, target))
     {
         HciTrace("fatal: HciAppInit err=%d target=%ld\r\n",
                  s_HciApp.LastError,

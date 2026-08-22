@@ -255,6 +255,37 @@ static bool HciAppInitUart(HciApp_t *pApp)
 #endif
 }
 
+bool HciAppUartEarlyInit(HciApp_t *pApp, HciTarget_t Target)
+{
+    if (pApp == nullptr || !HciTargetValid(&Target) || s_pApp != nullptr)
+    {
+        return false;
+    }
+
+    /*
+     * Thingy:91 calls this at main entry with a static HciApp_t that ResetEntry
+     * has already zeroed. Do not clear that large object a second time before
+     * arming UARTE. Keep the clear for any future non-Thingy caller that uses
+     * this API with the previous initialization semantics.
+     */
+#if BOARD != THINGY91_NRF52840
+    memset(pApp, 0, sizeof(*pApp));
+#endif
+    pApp->HostType = HCI_APP_HOST_UART;
+    pApp->Target = Target;
+    pApp->UsbHciNative = false;
+    s_pApp = pApp;
+
+    if (!HciAppInitUart(pApp))
+    {
+        pApp->LastError = -2;
+        s_pApp = nullptr;
+        return false;
+    }
+
+    return true;
+}
+
 static bool HciAppSuspectFilter(void *pContext,
                                 HciH4PacketType_t Type,
                                 const uint8_t *pPacket,
@@ -575,20 +606,31 @@ bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType, HciTarget_t Target)
         return false;
     }
 
+    const bool earlyUart =
+        pApp != nullptr &&
+        HostType == HCI_APP_HOST_UART &&
+        s_pApp == pApp &&
+        pApp->HostType == HCI_APP_HOST_UART &&
+        pApp->pHostIntrf == &pApp->Uart.DevIntrf;
+
     if (pApp == nullptr ||
         (HostType != HCI_APP_HOST_UART && HostType != HCI_APP_HOST_USB) ||
-        s_pApp != nullptr)
+        (s_pApp != nullptr && !earlyUart))
     {
         return false;
     }
 
-    memset(pApp, 0, sizeof(*pApp));
+    if (!earlyUart)
+    {
+        memset(pApp, 0, sizeof(*pApp));
+        s_pApp = pApp;
+    }
+
     pApp->HostType = HostType;
     pApp->Target = Target;
     pApp->UsbHciNative =
         HostType == HCI_APP_HOST_USB &&
         HCI_USB_HCI_TRANSPORT == HCI_USB_HCI_TRANSPORT_NATIVE;
-    s_pApp = pApp;
 
     HciCountersInit(&pApp->Counters, &pApp->Sdc, &pApp->Controller);
 
@@ -619,7 +661,7 @@ bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType, HciTarget_t Target)
     }
     else
     {
-        hostReady = HciAppInitUart(pApp);
+        hostReady = earlyUart || HciAppInitUart(pApp);
 
         if (hostReady && HCI_USB_SOCKET && HciTargetHasUsb(&pApp->Target) &&
             !HciAppUsbSetup(pApp, HCI_USB_DESCRIPTOR_LOG_ONLY))
@@ -651,6 +693,13 @@ bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType, HciTarget_t Target)
 
     if (HciControllerUsesH4(&pApp->Controller))
     {
+#if BOARD == THINGY91_NRF52840
+        if (HostType == HCI_APP_HOST_UART)
+        {
+            HciControllerSetH4StartupResetSync(&pApp->Controller, true);
+        }
+#endif
+
         HciIntrfTransportSetSuspectFilter(&pApp->Controller.Host,
                                           HciAppSuspectFilter,
                                           pApp);

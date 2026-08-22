@@ -110,6 +110,16 @@ typedef struct {
     HciIntrfTransport_t Host;
     bool HostUsesH4;
 
+    /*
+     * Optional UART startup synchronization. Some embedded hosts print boot
+     * text on the HCI UART before issuing HCI Reset. While active, raw bytes
+     * are discarded until the complete H:4 Reset frame 01 03 0C 00 is found.
+     * The mode is opt-in so CDC/H:4 keeps its ordinary framing behavior.
+     */
+    bool H4StartupResetSync;
+    bool H4StartupResetSyncActive;
+    uint8_t H4StartupResetMatch;
+
     /* Packet retained here while the controller backend applies backpressure. */
     uint8_t *pHostPacket;
     size_t HostPacketCapacity;
@@ -174,6 +184,8 @@ bool HciControllerPutHostPacket(HciController_t *pController,
 bool HciControllerKnowsLocalCommand(uint16_t Opcode, size_t ParamLen);
 
 bool HciControllerUsesH4(const HciController_t *pController);
+void HciControllerSetH4StartupResetSync(HciController_t *pController,
+                                        bool Enable);
 
 void HciControllerPortOpen(HciController_t *pController);
 void HciControllerPortClose(HciController_t *pController);

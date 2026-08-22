@@ -120,6 +120,14 @@ typedef struct
  * The target is passed in rather than chosen here, so this layer names no
  * part. A board decides which port it has and hands over the pair.
  */
+
+/*
+ * Arm only the physical UART receive path before full controller startup.
+ * The caller owns the object storage and must supply its cold-boot initialized
+ * instance. H:4/controller processing remains deferred until HciAppInit().
+ */
+bool HciAppUartEarlyInit(HciApp_t *pApp, HciTarget_t Target);
+
 bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType, HciTarget_t Target);
 void HciAppStop(HciApp_t *pApp);
 void HciAppThread(void *pContext);

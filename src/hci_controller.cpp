@@ -28,10 +28,18 @@
 #define HCI_CONTROLLER_LOOPBACK_EVENT_BASE_SIZE        \
     (HCI_CONTROLLER_UNKNOWN_COMMAND_EVENT_SIZE +       \
      HCI_CONTROLLER_LOOPBACK_RETURN_HEADER_LEN)
+#define HCI_CONTROLLER_H4_STARTUP_RX_PASSES            64U
 
 #define HCI_CONTROLLER_OPCODE_LE_READ_ALL_LOCAL_FEATURES  0x2087U
 #define HCI_CONTROLLER_OPCODE_LE_READ_ALL_REMOTE_FEATURES 0x2088U
 #define HCI_CONTROLLER_OPCODE_LE_SET_HOST_FEATURE_V2      0x2097U
+
+static const uint8_t s_HciControllerH4Reset[] = {
+    (uint8_t)HCI_H4_PACKET_COMMAND,
+    0x03U,
+    0x0CU,
+    0x00U,
+};
 
 static uint16_t HciControllerReadLe16(const uint8_t *pData)
 {
@@ -545,9 +553,114 @@ bool HciControllerUsesH4(const HciController_t *pController)
     return pController != nullptr && pController->HostUsesH4;
 }
 
+void HciControllerSetH4StartupResetSync(HciController_t *pController,
+                                        bool Enable)
+{
+    if (pController == nullptr || !pController->HostUsesH4)
+    {
+        return;
+    }
+
+    pController->H4StartupResetSync = Enable;
+    pController->H4StartupResetSyncActive = false;
+    pController->H4StartupResetMatch = 0U;
+}
+
+static void HciControllerH4StartupSyncProcess(HciController_t *pController)
+{
+    if (pController == nullptr || !pController->H4StartupResetSyncActive)
+    {
+        return;
+    }
+
+    HciIntrfTransport_t *pHost = &pController->Host;
+
+    for (uint32_t pass = 0U; pass < HCI_CONTROLLER_H4_STARTUP_RX_PASSES; pass++)
+    {
+        const int received = DeviceIntrfRx(pHost->pIntrf,
+                                           0U,
+                                           pHost->RxChunk,
+                                           (int)sizeof(pHost->RxChunk));
+        if (received < 0)
+        {
+            pHost->RxErrorCount++;
+            return;
+        }
+
+        if (received == 0)
+        {
+            return;
+        }
+
+        if (pHost->FirstRxLen < sizeof(pHost->FirstRx))
+        {
+            size_t keep = (size_t)received;
+            const size_t room = sizeof(pHost->FirstRx) - pHost->FirstRxLen;
+            if (keep > room)
+            {
+                keep = room;
+            }
+            memcpy(&pHost->FirstRx[pHost->FirstRxLen], pHost->RxChunk, keep);
+            pHost->FirstRxLen += (uint8_t)keep;
+        }
+
+        pHost->RxOctetCount += (uint32_t)received;
+
+        size_t foundEnd = 0U;
+        for (size_t i = 0U; i < (size_t)received; i++)
+        {
+            const uint8_t octet = pHost->RxChunk[i];
+            pHost->FlushedOctetCount++;
+
+            if (octet == s_HciControllerH4Reset[pController->H4StartupResetMatch])
+            {
+                pController->H4StartupResetMatch++;
+            }
+            else
+            {
+                pController->H4StartupResetMatch =
+                    octet == s_HciControllerH4Reset[0] ? 1U : 0U;
+            }
+
+            if (pController->H4StartupResetMatch ==
+                sizeof(s_HciControllerH4Reset))
+            {
+                foundEnd = i + 1U;
+                break;
+            }
+        }
+
+        if (foundEnd == 0U)
+        {
+            continue;
+        }
+
+        pHost->FlushedOctetCount -= (uint32_t)sizeof(s_HciControllerH4Reset);
+        pController->H4StartupResetMatch = 0U;
+        pController->H4StartupResetSyncActive = false;
+
+        pHost->RxChunkLen = (size_t)received;
+        pHost->RxChunkOffset = foundEnd;
+        pHost->Open = true;
+
+        (void)HciH4ParserFeed(&pHost->Parser,
+                              s_HciControllerH4Reset,
+                              sizeof(s_HciControllerH4Reset));
+        return;
+    }
+}
+
 static void HciControllerH4Open(HciController_t *pController)
 {
     HciIntrfTransport_t *pHost = &pController->Host;
+
+    if (pController->H4StartupResetSync)
+    {
+        HciIntrfTransportClose(pHost);
+        pController->H4StartupResetSyncActive = true;
+        pController->H4StartupResetMatch = 0U;
+        return;
+    }
 
     const int received = DeviceIntrfRx(pHost->pIntrf,
                                        0U,
@@ -757,6 +870,9 @@ void HciControllerPortClose(HciController_t *pController)
         return;
     }
 
+    pController->H4StartupResetSyncActive = false;
+    pController->H4StartupResetMatch = 0U;
+
     if (pController->HostUsesH4)
     {
         HciIntrfTransportClose(&pController->Host);
@@ -792,6 +908,7 @@ void HciControllerProcess(HciController_t *pController)
      */
     if (pController->HostUsesH4 && !pController->HostPacketPending)
     {
+        HciControllerH4StartupSyncProcess(pController);
         HciIntrfTransportProcess(&pController->Host);
     }
 

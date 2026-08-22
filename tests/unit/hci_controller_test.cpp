@@ -338,7 +338,62 @@ static void TestPreopenMixedBacklogIsFlushed(void)
 
     assert(gController.PutCount == 0U);
     assert(fixture.Controller.Host.FlushedOctetCount == sizeof(buffered));
-    printf("[ok] a text-prefixed pre-open backlog is still flushed\n");
+    printf("[ok] ordinary H4 still flushes a text-prefixed pre-open backlog\n");
+}
+
+static void TestUartStartupResetBacklogIsRecovered(void)
+{
+    Fixture fixture;
+    SetupClosed(&fixture);
+    HciControllerSetH4StartupResetSync(&fixture.Controller, true);
+
+    const uint8_t buffered[] = {
+        'B', 'o', 'o', 't', 'i', 'n', 'g', ' ', 'T', 'F', '-', 'M', '\r', '\n',
+        0x01, 0x03, 0x0C, 0x00,
+    };
+    FeedHost(buffered, sizeof(buffered));
+
+    HciControllerPortOpen(&fixture.Controller);
+    HciControllerProcess(&fixture.Controller);
+
+    assert(gController.PutCount == 1U);
+    assert(gController.PutType[0] == HCI_H4_PACKET_COMMAND);
+    assert(gController.PutLen[0] == 3U);
+    assert(gController.PutData[0][0] == 0x03U);
+    assert(gController.PutData[0][1] == 0x0CU);
+    assert(gController.PutData[0][2] == 0x00U);
+    assert(fixture.Controller.Host.FlushedOctetCount == sizeof(buffered) - 4U);
+    assert(fixture.Controller.Host.RxOctetCount == sizeof(buffered));
+    printf("[ok] UART startup scan discards boot text and preserves HCI Reset\n");
+}
+
+static void TestUartStartupResetAcrossReadsIsRecovered(void)
+{
+    Fixture fixture;
+    SetupClosed(&fixture);
+    HciControllerSetH4StartupResetSync(&fixture.Controller, true);
+
+    uint8_t buffered[HCI_INTRF_IO_CHUNK_SIZE + 3U];
+    memset(buffered, 'X', sizeof(buffered));
+    buffered[HCI_INTRF_IO_CHUNK_SIZE - 1U] = 0x01U;
+    buffered[HCI_INTRF_IO_CHUNK_SIZE] = 0x03U;
+    buffered[HCI_INTRF_IO_CHUNK_SIZE + 1U] = 0x0CU;
+    buffered[HCI_INTRF_IO_CHUNK_SIZE + 2U] = 0x00U;
+    FeedHost(buffered, sizeof(buffered));
+
+    HciControllerPortOpen(&fixture.Controller);
+    HciControllerProcess(&fixture.Controller);
+
+    assert(gController.PutCount == 1U);
+    assert(gController.PutType[0] == HCI_H4_PACKET_COMMAND);
+    assert(gController.PutLen[0] == 3U);
+    assert(gController.PutData[0][0] == 0x03U);
+    assert(gController.PutData[0][1] == 0x0CU);
+    assert(gController.PutData[0][2] == 0x00U);
+    assert(fixture.Controller.Host.FlushedOctetCount ==
+           HCI_INTRF_IO_CHUNK_SIZE - 1U);
+    assert(fixture.Controller.Host.RxOctetCount == sizeof(buffered));
+    printf("[ok] UART startup Reset scan survives an RX chunk boundary\n");
 }
 
 static void TestHostRetry(void)
@@ -548,6 +603,8 @@ int main(void)
     TestHostToController();
     TestPreopenH4BacklogIsPreserved();
     TestPreopenMixedBacklogIsFlushed();
+    TestUartStartupResetBacklogIsRecovered();
+    TestUartStartupResetAcrossReadsIsRecovered();
     TestHostRetry();
     TestControllerToHost();
     TestControllerOrdering();
