@@ -135,12 +135,17 @@ def validate_source_contracts(root):
                 raise SystemExit("Core 6.2 resource term %s is missing" % macro)
         print("[ok] Core 6.2 profile has Extended Features, FSU and SCI resources")
 
+    init_mode_at = app_source.find("bool HciAppInitMode(")
+    init_compat_at = app_source.find("\nbool HciAppInit(", init_mode_at)
+    if init_mode_at < 0 or init_compat_at < 0:
+        raise SystemExit("HciAppInitMode not found")
+    init_mode_body = app_source[init_mode_at:init_compat_at]
     if not re.search(
-        r"HostType\s*==\s*HCI_APP_HOST_USB\s*&&\s*!HciTargetHasUsb\(&Target\)",
-        app_source,
+        r"hostType\s*==\s*HCI_APP_HOST_USB\s*&&\s*!HciTargetHasUsb\(&Target\)",
+        init_mode_body,
     ):
         raise SystemExit(
-            "HciAppInit does not reject USB host selection on a target without USB operations"
+            "HciAppInitMode does not reject USB host selection on a target without USB operations"
         )
     print("[ok] USB host selection is guarded by HciTargetHasUsb")
 
