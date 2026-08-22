@@ -11,6 +11,13 @@
  * Nordic DCD:
  *   SPDX-FileCopyrightText: Copyright (c) 2019 Ha Thach (tinyusb.org)
  *   SPDX-License-Identifier: MIT
+ *
+ * Re-checked against:
+ *   https://github.com/hathach/tinyusb
+ *   commit fd70160a2f5fd23de1abfbaefb6399746a90b588
+ *   src/portable/nordic/nrf5x/dcd_nrf5x.c
+ * Re-check this local implementation against upstream whenever TinyUSB is
+ * updated.
  */
 
 /*

@@ -16,7 +16,7 @@ FIRMWARE_VERSION = 0x0100
 ```
 
 The native USB `bcdDevice` value is derived from the same definition. Do not
-maintain a second release version in the USB descriptor.
+maintain a second release version in the USB descriptor or Eclipse project.
 
 The controller-facing Bluetooth Core version is defined independently in
 `include/hci_core_profile.h`. Release 1 targets the nRF52840/current nrfxlib
@@ -52,9 +52,27 @@ make -C tests run NRFXLIB_DIR=../external/sdk-nrfxlib
 For a release run, the real-nrfxlib checks must execute; a skip caused by a
 missing `NRFXLIB_DIR` is not release evidence.
 
+The host suite compiles C as GNU C17 and C++ as GNU C++23, matching the
+nRF52840 Eclipse project. Do not weaken the host language standard to make a
+warning disappear; a warning that appears under the target standard is a
+release defect until resolved.
+
 The checks include command-table/catalog agreement, SDC symbol availability,
 resource-profile consistency, USB descriptor/state-machine rules, counter
 schema, harness organization, board policy and persistent mode-switch wiring.
+
+Before the build, run the source hygiene checks from `CODING.md` and the
+IOsonata coding standard on every touched source file. In particular:
+
+- source and documentation must be ASCII;
+- added source text must pass the prohibited-word check;
+- touched source files must have balanced braces;
+- `.project` and `.cproject` must parse as XML;
+- Eclipse linked resources must not contain machine-local absolute paths;
+- all four nRF52840 C++ configurations must remain GNU C++23;
+- obsolete project-level USB PID or USB release defines must not be present;
+  USB PIDs are mode-specific in `usb_descriptors.c` and `bcdDevice` comes from
+  `HCI_CONTROLLER_VERSION_BCD`.
 
 ## nRF52840 build configurations
 

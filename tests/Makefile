@@ -1,9 +1,10 @@
 # Host tests for HciController.
 #
-# Everything here is compiled with the native C++ compiler. The target headers
-# that the firmware needs on device, nrf.h, MPSL, TinyUSB, TaktOS and the
-# SoftDevice Controller, are replaced by the fakes under stubs, so no SDK
-# checkout is needed for the default target.
+# Everything here is compiled with the native C/C++ compiler using the same
+# GNU C17 and GNU C++23 language standards as the nRF52840 target project. The
+# target headers that the firmware needs on device, nrf.h, MPSL, TinyUSB,
+# TaktOS and the SoftDevice Controller, are replaced by the fakes under stubs,
+# so no SDK checkout is needed for the default target.
 #
 # IOsonata is different: cfifo needs no hardware, so the real source is copied
 # into iosonata and built. Faking it made the FIFO paths untestable.
@@ -41,8 +42,8 @@ BUILD_DIR ?= $(THIS_DIR)/build
 # some toolchains.
 CFIFO_OBJ := $(BUILD_DIR)/iosonata/cfifo.o
 
-CXXFLAGS ?= -std=c++14 -O0 -g3 -Wall -Wextra -Werror -Wshadow -Wundef
-CFLAGS ?= -std=gnu11 -O0 -g3 -Wall -Wextra -Werror -Wshadow -Wundef
+CXXFLAGS ?= -std=gnu++23 -O0 -g3 -Wall -Wextra -Werror -Wshadow -Wundef
+CFLAGS ?= -std=gnu17 -O0 -g3 -Wall -Wextra -Werror -Wshadow -Wundef
 
 # stubs/sdc holds the fake sdc.h. It comes first so it wins over a real
 # nrfxlib checkout that may also be on the path, and it is left out of the
@@ -246,7 +247,7 @@ ifneq ($(strip $(TINYUSB_SRC)),)
 	@echo "[TEST] usb_descriptors.c against TinyUSB"
 	@$(CC) -fsyntax-only -I$(STUBS)/nrfficr -I$(ROOT)/include \
 	  -I$(TINYUSB_DIR)/src -I$(STUBS) -DCFG_TUSB_MCU=OPT_MCU_NRF5X \
-	  -std=c11 -Wall -Wextra -Werror $(SRC)/usb_descriptors.c
+	  -std=gnu17 -Wall -Wextra -Werror $(SRC)/usb_descriptors.c
 	@echo "[ok] descriptor length matches what it declares"
 else
 	@echo "[TEST] usb_descriptors.c skipped, set TINYUSB_DIR to a checkout"
