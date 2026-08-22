@@ -1,252 +1,179 @@
 # HCI command coverage
 
-The dispatch table in `src/hci_sdc_nrfxlib.cpp` carries 60 commands. Anything
-not listed there is answered with Unknown HCI Command, so the table is the
-controller's actual capability, and `HCI_Read_Local_Supported_Commands` reports
-exactly the same set. A host test checks the two against each other in both
-directions, so a command cannot be added to one and forgotten in the other.
+HciController does not maintain a hand-copied release command count in this
+file. The command surface is source-defined and checked mechanically because a
+static list becomes wrong as soon as the SDC profile moves.
 
-## Supported
+Two dispatch sources make up the externally reachable command surface:
 
-Controller and baseband
+```text
+src/hci_sdc_nrfxlib.cpp   commands routed directly to nrfxlib SDC
+src/hci_sdc.cpp           supplemental Core/profile/vendor routing
+```
 
-    0x0C01  Set Event Mask
-    0x0C03  Reset
-    0x0C7B  Read Authenticated Payload Timeout
-    0x0C7C  Write Authenticated Payload Timeout
+The hardware tooling accounts for the same surface through:
 
-Informational parameters
+```text
+tests/harness/lib/hci_commands_catalog.py
+tests/harness/lib/hci_commands.py
+tests/harness/lib/target_profile.py
+```
 
-    0x1001  Read Local Version Information
-    0x1002  Read Local Supported Commands
-    0x1003  Read Local Supported Features
-    0x1009  Read BD_ADDR
+`tests/command_coverage.py` resolves the real nrfxlib opcode values, reads both
+firmware dispatch tables, and requires every exposed opcode to be either in the
+broad command catalog or in explicit target-profile coverage. An opcode exposed
+by the firmware but not driven by the release tooling is a test failure. An
+opcode driven by the tooling but not exposed by the firmware is also a failure.
 
-Link control
+Run the release form of the check with the real nrfxlib tree available:
 
-    0x0406  Disconnect                              status
-    0x041D  Read Remote Version Information         status
+```sh
+make -C tests run NRFXLIB_DIR=../external/sdk-nrfxlib
+```
 
-LE basics
+## Release profile
 
-    0x2001  LE Set Event Mask
-    0x2002  LE Read Buffer Size
-    0x2003  LE Read Local Supported Features
-    0x2005  LE Set Random Address
+`include/hci_core_profile.h` sets the nRF52840 release profile to Bluetooth Core
+6.2. The profile is the intersection of what the product exposes and what the
+selected nRF52840 multirole SoftDevice Controller can actually support. It is
+not a Bluetooth SIG qualification claim.
 
-Legacy advertising and scanning
+The exposed command families include:
 
-    0x2006  LE Set Advertising Parameters
-    0x2007  LE Read Adv Physical Channel Tx Power
-    0x2008  LE Set Advertising Data
-    0x2009  LE Set Scan Response Data
-    0x200A  LE Set Advertising Enable
-    0x200B  LE Set Scan Parameters
-    0x200C  LE Set Scan Enable
+- Controller/Baseband, information and status commands used by normal LE hosts;
+- connection management and filter accept list;
+- privacy/resolving-list control;
+- LE encryption and key-request handling;
+- data length and PHY control;
+- legacy advertising/scanning;
+- extended advertising/scanning/initiating;
+- periodic advertising, periodic synchronization and sync transfer;
+- PAwR command paths supported by the configured SDC resources;
+- LE Power Control and path-loss reporting;
+- Sleep Clock Accuracy update/request support;
+- connection subrating;
+- Extended Feature Set support;
+- Direct Test Mode command versions exposed by the SDC profile;
+- connected and broadcast isochronous setup/data-path/test commands;
+- Core 6.2 Frame Space Update and Shorter Connection Intervals command paths;
+- Nordic SDC vendor commands used by the release profile;
+- HciController vendor diagnostics, including VS Read Counters.
 
-Connection management
+The exact opcodes and safe probe payloads are in the harness command catalog.
+That catalog is what release testing executes against hardware.
 
-    0x200D  LE Create Connection                    status
-    0x200E  LE Create Connection Cancel
-    0x2013  LE Connection Update                    status
-    0x2015  LE Read Channel Map
-    0x2016  LE Read Remote Features                 status
+## Supported Commands bitmap
 
-Filter accept list
+`HCI_Read_Local_Supported_Commands` is built from the actual standard command
+surface. A host test checks the bitmap and the dispatch table against one
+another in both directions where the Bluetooth Core specification assigns a
+Supported Commands bit.
 
-    0x200F  LE Read Filter Accept List Size
-    0x2010  LE Clear Filter Accept List
-    0x2011  LE Add Device To Filter Accept List
-    0x2012  LE Remove Device From Filter Accept List
+Supplemental commands that do not map cleanly into that standard bitmap are
+covered separately by the target profile; they are not made invisible just to
+make the bitmap test simpler.
 
-Security
+## Commands deliberately not advertised
 
-    0x2017  LE Encrypt
-    0x2018  LE Rand
-    0x2019  LE Enable Encryption                    status
-    0x201A  LE Long Term Key Request Reply
-    0x201B  LE Long Term Key Request Negative Reply
+Controller-to-host ACL flow control is not advertised. In the current nRF52840
+SDC configuration, Host Buffer Size is refused by the controller with status
+0x11. Advertising the three host-flow-control commands would therefore promise
+a capability the controller does not provide. Their rows and Supported Commands
+bits remain absent together.
 
-Capability
+Direction Finding is outside the nRF52840 target profile.
 
-    0x204B  LE Read Transmit Power
+The nRF52840 also does not provide encrypted isochronous-channel packets in the
+current SoftDevice Controller. That is a link-layer hardware/controller
+limitation, not an HCI transport limitation; the unencrypted CIS/BIS command and
+ISO data paths remain exposed.
 
-Direct test mode
+## LE Read Supported States
 
-    0x201D  LE Receiver Test v1
-    0x201E  LE Transmitter Test v1
-    0x201F  LE Test End
+The multirole SDC archive does not provide the older direct
+`sdc_hci_cmd_le_read_supported_states` entry point used by some SDC variants.
+HciController supplies the product-level LE Supported States result in
+`src/hci_sdc.cpp` instead. The host test verifies that the concurrency claim is
+backed by the configured Central, Peripheral, advertising, scanning and
+parallel scan/initiate resources.
 
-Data length
+This is intentionally different from inventing an unsupported SDC command: the
+returned state bitmap describes the product's configured concurrency profile and
+is checked against that profile.
 
-    0x2022  LE Set Data Length
-    0x2023  LE Read Suggested Default Data Length
-    0x2024  LE Write Suggested Default Data Length
-    0x202F  LE Read Maximum Data Length
+## Public and static random addresses
 
-PHY
+The nRF52840 board does not carry a programmed public Bluetooth device address,
+so `HCI_Read_BD_ADDR` reports all zeroes. A host must not assume public address
+type 0x00 is available just because the command exists.
 
-    0x2030  LE Read PHY
-    0x2031  LE Set Default PHY
-    0x2032  LE Set PHY                              status
+The Nordic static-address vendor command reports the static random identity
+derived from FICR. The hardware harness resolves an identity before running
+advertising, scanning or initiating procedures so a missing public address is
+not misdiagnosed as a failure of the following HCI command.
 
-Extended advertising
+## HciController VS Read Counters
 
-    0x2035  LE Set Advertising Set Random Address
-    0x2036  LE Set Extended Advertising Parameters
-    0x2037  LE Set Extended Advertising Data        variable
-    0x2038  LE Set Extended Scan Response Data      variable
-    0x2039  LE Set Extended Advertising Enable      variable
-    0x203A  LE Read Maximum Advertising Data Length
-    0x203B  LE Read Number Of Supported Adv Sets
-    0x203C  LE Remove Advertising Set
-    0x203D  LE Clear Advertising Sets
+`0xFFF0` is the HciController diagnostic command. It is answered in the routing
+layer without asking the radio and reports counters spanning the H:4 parser,
+transport, bridge and SDC routing paths.
 
-Extended scanning and initiating
+The wire schema is versioned in `hci_counters.h`. Fields are appended and the
+schema version is raised; existing fields are not renumbered. The Python harness
+checks that its decoder and the firmware schema stay in agreement.
 
-    0x2041  LE Set Extended Scan Parameters         variable
-    0x2042  LE Set Extended Scan Enable
-    0x2043  LE Extended Create Connection           variable, status
+One reason the counters exist is the measured nRF52840 SDC ACL behavior: a
+packet beyond the controller-advertised ACL credit can be accepted by the SDC
+API without ever producing a matching Number Of Completed Packets event. The
+routing layer therefore enforces the known host credit after LE Read Buffer Size
+has established it and counts any overrun it refuses.
 
-Vendor specific
+## Handler rules
 
-    0xFC09  VS Read Static Addresses                variable return
-    0xFFF0  VS Read Counters
+Fixed-size handlers take parameter/return sizes from the nrfxlib types and pin
+wire-critical sizes with static assertions where needed.
 
-The board carries no public address, so `HCI_Read_BD_ADDR` answers all zeros
-and a host that asks for Own_Address_Type 0x00 is refused with 0x12. 0xFC09 is
-what BlueZ and Zephyr ask instead: it reports the static random address SDC
-derives from FICR, which is the value IOsonata `nrf_get_mac_address()` also
-produces, so the board keeps one identity across runs and across firmware.
-Its return is a count byte followed by 22 octets per address, so the length
-depends on the answer; the table declares the count byte alone, which is the
-minimum the command always carries and what an error is padded out to.
+Variable-length commands validate the complete HCI Parameter_Total_Length
+against the count fields inside the command before calling SDC. This is exact,
+not merely a minimum-length check. SDC command structures contain trailing
+arrays and a short packet with a larger count must not be allowed to read bytes
+left in a reused receive buffer.
 
-0xFFF0 is this firmware's own, answered without going near the radio. It
-reports thirty counters spanning all four layers, the H:4 parser, the
-transport, the bridge and the SDC routing layer, of what each accepted and what
-each refused. Until it existed those numbers only lived in RAM, so a board
-could be questioned only with a debugger on it, which is no use on a sealed
-dongle.
+Each dispatch entry also declares the response kind. Commands that complete
+asynchronously use Command Status; synchronous commands use Command Complete.
+The distinction is part of the host test coverage because a host waiting for the
+wrong completion form behaves like the controller never answered.
 
-The first version of it reported the SDC layer alone, and every counter there
-records a refusal. That made it misleading rather than merely incomplete: a
-flood of ACL that moved no counter could not be told apart from a flood that
-never reached the SDC layer at all, which is exactly the reading it gave on
-hardware. It now counts what the controller took as well as what it refused,
-and reaches up through the stack, so silence means what it appears to mean.
+## Vendor symbol availability
 
-One version byte then the counters, four octets each little endian, laid out in
-`hci_counters.h`. Counters are appended and the version raised, never
-renumbered, so an older host keeps reading the fields it knows.
+The nrfxlib headers describe a broader API than every library variant exports.
+A declaration in a header is therefore not proof that the selected nRF52 archive
+contains the entry point.
 
-Two of them record a controller behaviour worth knowing about. Measured on an
-nRF52840: send one ACL packet more than the count `LE_Read_Buffer_Size`
-advertised and `sdc_hci_data_put` answers 0 for it, the packet never goes out,
-and no `Number_Of_Completed_Packets` event ever names it. Four buffers, five
-packets, four transmitted, every error code zero. The packet and the host's
-buffer both vanish, so a host that slips once loses that buffer for the life of
-the connection. The routing layer now holds the host to the advertised count
-and refuses anything past it, returning the credit and counting it, which is
-the same treatment an oversize packet already gets. Set
-`HCI_SDC_ENFORCE_ACL_CREDITS` to 0 to keep the counter and let the packets
-through.
+Run:
 
-The guard only refuses what it can prove is over. It stands down entirely
-until the host has asked `LE_Read_Buffer_Size`, so the limit is never a guess,
-and it stands down for a link the tracking table has no room for. Refusing
-traffic a host is entitled to send would be worse than the loss it prevents.
+```sh
+python3 tests/sdc_symbols.py ../external/sdk-nrfxlib/softdevice_controller/lib/nrf52/hard-float/libsoftdevice_controller_multirole.a
+```
 
-The eight marked status answer with a Command Status rather than a Command
-Complete, as Vol 4 Part E 7.7.15 requires. Getting that wrong leaves a host
-stack waiting for an event that never arrives.
+The symbol check reports missing functions named by the release dispatch table.
+A new nrfxlib revision is not release-ready until this check and the real-header
+dispatch/resource tests pass.
 
-## Built out, and how to build them back in
+## Release hardware coverage
 
-A SoftDevice Controller header declares the whole HCI API, but a library
-variant only contains the commands it was built with, so a declaration is not
-a guarantee that the symbol links. Seven commands sit behind a macro
-in `src/hci_sdc_nrfxlib.cpp`, each covering the handler, the table row and the
-supported commands bit together, so the three stay consistent whichever way the
-macro goes.
+The broad command probe drives the catalog against a real controller and handles
+state requirements such as a live connection, an advertising set, a periodic
+sync or explicit operator consent. Commands that require a second radio or a
+specific role are exercised by the two-controller release phases rather than by
+sending them in a meaningless state and treating Command Disallowed as proof of
+support.
 
-    HCI_SDC_HAS_READ_SUPPORTED_STATES     0   0x201C  LE Read Supported States
-    HCI_SDC_HAS_READ_TRANSMIT_POWER       1   0x204B  LE Read Transmit Power
-    HCI_SDC_HAS_READ_REMOTE_VERSION       1   0x041D  Read Remote Version Info
-    HCI_SDC_HAS_AUTH_PAYLOAD_TIMEOUT      1   0x0C7B and 0x0C7C
-    HCI_SDC_HAS_VS_READ_STATIC_ADDRESSES  1   0xFC09  VS Read Static Addresses
-    HCI_SDC_HAS_VS_READ_COUNTERS          1   0xFFF0  VS Read Counters
+The full release runner is:
 
-Do not guess at these. Read the archive:
+```sh
+python3 tests/harness/hcicontroller/release_test.py --help
+```
 
-    python3 tests/sdc_symbols.py [path to libsoftdevice_controller_*.a]
-
-It parses the archive symbol index, which is every symbol the members define,
-and prints what each macro should be set to. No toolchain needed, so the
-question can be settled before the first build as easily as after it. It exits
-non-zero when a default in the source disagrees with the library.
-
-Checked against `libsoftdevice_controller_multirole.a` for nrf52 hard-float:
-`sdc_hci_cmd_le_read_supported_states` is the only entry point the table names
-that the library does not define. Read Supported States reports legacy
-advertising states and is left out of a build that only enables the extended
-advertiser.
-
-A wrong 1 is a link error, which is loud. A wrong 0 is a command answered
-Unknown HCI Command that the controller could have run, which is silent, and is
-worth re-checking whenever nrfxlib moves.
-
-## How the handlers are written
-
-The handlers are all one of seven shapes, so they are generated by macro
-rather than copied fifty times: parameters only, parameters with a return, no
-parameters, no parameters with a return, and three variable length forms that
-differ only in how the trailing array is measured, by byte count, by element
-count, or by the number of PHYs named in a bitmap.
-
-A variable length command carries a trailing array whose size comes from a
-field inside the fixed part, and SDC trusts that field. Each variable length
-macro therefore requires the parameter length the host sent to match what the
-count field declares, exactly rather than at least, since Vol 4 Part E 5.4.1
-fixes Parameter_Total_Length. A mismatch is refused with 0x12. Without that
-check a short packet with a large count makes SDC read past the end of the
-receive buffer, which holds the previous packet.
-
-Parameter lengths come from `sizeof()` on the SDC type rather than hand counted
-numbers, and static assertions pin each of those types to the length Vol 4 Part
-E gives. Without them nothing compares an SDC type against the wire: the host
-test sends the same `sizeof()` the table declares, so the two agree by
-construction whatever either is worth, and a type that did not match would show
-up only as a board refusing a correctly formed command with 0x12.
-
-Every table row also declares the response kind and the return parameter
-length that a successful call produces, so a rejection is shaped the same way
-as a success. A Command Complete that is short of the length the host holds
-for that opcode reads to the host as no answer at all.
-
-## Tests
-
-    make -C tests run NRFXLIB_DIR=/path/to/sdk-nrfxlib
-
-99 checks across nine binaries. `hci_sdc_dispatch_test` compiles the real
-dispatch table against the real nrfxlib headers with only the SDC entry points
-stubbed, then checks that every opcode reaches the intended SDC function, that
-Command Status and Command Complete are used where the specification says,
-that return payload lengths match the SDC return types, that a variable length
-command whose count field disagrees with the packet is rejected with 0x12,
-that a wrong fixed length is rejected before the handler runs, that an
-unassigned opcode is answered with 0x01, and that a controller error is passed
-through rather than masked.
-
-Two of those checks walk the whole table rather than a hand picked list. One
-drives every fixed length entry twice, once accepted and once rejected, and
-compares what comes out against what the row declares. The other reads the
-supported commands bitmap back off the wire and matches it against the table
-in both directions.
-
-The stubs under `tests/stubs/sdclink` follow the nrfxlib signatures, so a
-change in the real headers shows up as a compile error rather than as wrong
-behaviour.
-
-If NRFXLIB_DIR does not resolve, that one test is skipped and the other eight
-still run against the fakes under `tests/stubs`.
+See `tests/README.md`, `tests/harness/README.md` and `RELEASE.md` for the release
+gate.

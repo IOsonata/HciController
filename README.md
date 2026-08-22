@@ -1,386 +1,275 @@
 # HciController
 
-Bluetooth LE HCI controller firmware for the I-SYST UDG-NRF52840x dongle.
+HciController is an open-source Bluetooth LE HCI controller firmware for the
+nRF52840. It is built with IOsonata and TaktOS, TinyUSB for USB device support,
+and Nordic Semiconductor's nrfxlib SoftDevice Controller (SDC) and MPSL for the
+radio.
+
+Release 1 is version **1.0.0** (`FIRMWARE_VERSION 0x0100`) and targets the
+nRF52840/current SDC capability profile reported by the firmware as Bluetooth
+Core 6.2. This is an implementation/capability statement, not Bluetooth SIG
+qualification or RF certification.
+
 The controller boundary is packet-oriented: one `DeviceIntrf` transaction is
-one HCI packet, selected by its HCI packet type.
+one complete HCI packet, selected by HCI packet type. The same controller code
+therefore accepts three host transports:
 
-Built with IOsonata and TaktOS, with TinyUSB for the USB device stack and
-Nordic Semiconductor's nrfxlib SoftDevice Controller and MPSL for the radio.
-
-One firmware image supports three host transports:
-
-- native Bluetooth USB HCI, the default USB transport;
-- USB CDC carrying H:4 as a compatibility mode;
-- UART carrying H:4 to an nRF9151 or another host processor.
+- native Bluetooth USB HCI;
+- USB CDC carrying H:4;
+- UART carrying H:4.
 
 UART and CDC are byte streams, so `HciIntrfTransport` adds/removes the H:4
 indicator below the packet `DeviceIntrf`. Native USB is already packet-oriented
-and plugs into the same HCI controller without an H:4 adapter.
+and plugs into the same controller without an H:4 adapter.
 
-A separate USB CDC function carries the plain text log whenever the board's USB
-socket is available. See [The log port](#the-log-port) and
-[USB-HCI.md](USB-HCI.md).
+See also:
 
-## Host interface selection
+- [USB-HCI.md](USB-HCI.md) for the native USB transport;
+- [README-commands.md](README-commands.md) for command/profile coverage;
+- [RELEASE.md](RELEASE.md) for the release gate and memory-map checks;
+- [CODING.md](CODING.md) for the IOsonata coding/review rules used here;
+- [CHANGELOG.md](CHANGELOG.md) for release changes.
 
-Which port the controller talks to its host on is a build option,
-`HCI_HOST_SELECT`:
+## Host modes and persistent selection
 
-```text
-HCI_HOST_SELECT_AUTO   read VBUS at reset, powered is USB and otherwise UART
-HCI_HOST_SELECT_USB    always USB
-HCI_HOST_SELECT_UART   always UART
-```
+Transport selection is runtime on boards that provide a mode button. Build-time
+settings choose the default used when there is no valid stored mode; after that,
+the selected mode is stored in NVM and survives reset and power cycle.
 
-`nRF52840/src/board.h` picks a default for each board, and `-DHCI_HOST_SELECT=...`
-on the command line wins over it:
+| Board | HCI modes | Mode-button sequence |
+| --- | --- | --- |
+| I-SYST UDG-NRF52840x | USB H:4, native USB HCI | USB H:4 <-> native |
+| I-SYST IBK-NRF52840 | UART H:4, USB H:4, native USB HCI | UART -> USB H:4 -> native -> UART |
+| Nordic Thingy:91 | UART H:4 only | none |
+| I-SYST WildThing51 | UART H:4 only | none |
+| I-SYST WildThing91 | UART H:4 only | none |
 
-```sh
-# a dongle image, VBUS decides
-arm-none-eabi-g++ ...
-
-# force a dongle to come up on its UART
-arm-none-eabi-g++ -DHCI_HOST_SELECT=HCI_HOST_SELECT_UART ...
-
-# a board whose host is another part on the same PCB
-arm-none-eabi-g++ -DBOARD=MY_BOARD -DHCI_HOST_SELECT=HCI_HOST_SELECT_UART ...
-```
-
-AUTO only means something where the USB socket belongs to the nRF52840, which
-is what a dongle is. Where the socket belongs to something else, VBUS reads as
-a host that is not there: a board on a charger would come up talking USB to
-nobody while the real host waited for an answer over the UART. A board whose
-host is another part on the same PCB should name UART outright.
-
-When USB is selected, `HCI_USB_HCI_TRANSPORT` chooses native Bluetooth USB HCI
-(the default) or CDC/H:4 compatibility mode. This choice does not change the
-packet interface seen by `HciController`.
-
-Selecting a UART host with no `UART_PINS` in `board.h` is refused at compile
-time rather than left to fail at startup, where nothing would be on the wire to
-say why.
-
-The selected concrete interface is passed to the HCI controller as a `DevIntrf_t *`, in the same way an IOsonata device driver can receive either an SPI or I2C interface.
-
-The UART configuration for the BLYST840/nRF9151 product is:
+The default policy is controlled by `HCI_HOST_SELECT`:
 
 ```text
-BLYST840 TXD: P0.24
-BLYST840 RXD: P0.23
-Rate:         1,000,000 bit/s
-Format:       8-N-1
-Flow control: none
-Framing:      Bluetooth HCI H:4
+HCI_HOST_SELECT_AUTO   choose the initial USB/UART family from VBUS where legal
+HCI_HOST_SELECT_USB    choose the configured USB transport
+HCI_HOST_SELECT_UART   choose UART H:4
 ```
 
-The UART connection is crossed at the product level:
+For USB, `HCI_USB_HCI_TRANSPORT` chooses the default USB transport:
 
 ```text
-BLYST840 P0.24 TXD -> nRF9151 RXD
-BLYST840 P0.23 RXD <- nRF9151 TXD
+HCI_USB_HCI_TRANSPORT_NATIVE   native Bluetooth USB HCI
+HCI_USB_HCI_TRANSPORT_CDC_H4   USB CDC carrying H:4
 ```
 
-## The log port
+On UDG, UART HCI is not allowed. On Thingy:91 and WildThing boards, USB HCI is
+not allowed. Invalid board/mode combinations are rejected rather than left to
+fail after startup.
 
-The log is always a plain USB CDC function and is never an HCI transport in
-native mode. Which CDC instance carries it depends on the selected descriptor:
+### How a mode change is stored
+
+Internal flash is not written while MPSL/SDC owns the radio. A confirmed button
+press performs this sequence:
+
+```text
+button debounce
+    -> choose next board-legal mode
+    -> stop HCI runtime
+    -> stop USB, SDC and MPSL
+    -> erase/write/verify the NVM mode record
+    -> system reset
+    -> load the persisted mode before USB/radio startup
+```
+
+The mode does not depend on reset reason and is not handed through
+GPREGRET/GPREGRET2 or another bootloader-owned retained register.
+
+The startup log prints the linker-selected NVM address, for example on the UDG
+USB-DFU build:
+
+```text
+mode: nvm addr=0x000DD000 size=12288
+```
+
+## NVM and bootloader memory maps
+
+The linker owns `NVM0`. This is important on nRF52 because different bootloaders
+occupy different high-flash regions. The HCI mode code asks IOsonata for the
+linker-defined NVM region; it does not guess a flash address in C++.
+
+The nRF52840 Eclipse project has these configurations:
+
+| Configuration | Intended layout | Linker script |
+| --- | --- | --- |
+| `Debug` | no bootloader/debug | `nrf52840_xxaa_sdc.ld` |
+| `Release` | no bootloader | `nrf52840_xxaa_sdc.ld` |
+| `Release_MBR` | USB DFU/MBR | `nrf52840_xxaa_sdc_mbr.ld` |
+| `Release_SD` | OTA DFU/S140-compatible | `nrf52840_xxaa_s140_sdc.ld` |
+
+Required release NVM locations are:
+
+```text
+USB DFU:        NVM0 0xDD000 .. 0xDFFFF, bootloader starts at 0xE0000
+OTA DFU:        NVM0 0xF5000 .. 0xF7FFF, bootloader starts at 0xF8000
+no bootloader:  NVM0 0xFD000 .. 0xFFFFF
+```
+
+HciController uses one erase page at the start of `NVM0` for its mode record.
+The rest of the region remains available to the platform/application layout.
+
+A release build must verify the generated `.map`; the configuration name alone
+does not prove that the external IOsonata linker script has the intended
+address. See [RELEASE.md](RELEASE.md).
+
+## Native USB and the log port
+
+Native mode is a composite USB device containing:
+
+- a Bluetooth Controller USB function;
+- an independent CDC diagnostic log.
+
+The log is never an HCI transport in native mode. CDC assignment is:
 
 ```text
 native Bluetooth USB HCI   Bluetooth function + CDC 0 log
-CDC/H:4 compatibility      CDC 0 HCI H:4 + CDC 1 log
-UART host / log-only USB   CDC 0 log
+USB CDC/H:4                CDC 0 HCI H:4 + CDC 1 log
+UART H:4 / log-only USB    CDC 0 log
 ```
 
-Open the log CDC port with any terminal. Nothing on it is framed and nothing
-parses it. The separate function exists because up to now the only way to see
-what the firmware was doing was semihosting, which needs a debugger attached
-and reaches nobody without one. On a sealed dongle, on a customer's board, or
-on somebody else's product, that meant a controller that could not be observed
-at all.
+`HciTrace` writes into a RAM ring that the runtime drains to the log port. The
+log path is non-blocking and is available without semihosting. `HCI_TRACE=1`
+adds the semihosting copy; it is not required for the USB log.
 
-The log is a ring in RAM that the firmware writes into and the runtime thread
-drains. It never blocks and it cannot fail a caller, because the first thing
-anyone logs is a path that is already going wrong and a log that stalls that
-path turns one fault into two. A full ring gives up whole lines from the oldest
-end and says how many octets it lost, so what survives can still be read.
-Everything `HciTrace` writes goes here, in every build. `HCI_TRACE=1` adds the
-semihosting copy on top and nothing else; it is not what turns the log on. The
-two were one switch at first, which meant an ordinary build wrote nothing to
-the log and the build that would have written to it faults on the first line
-without a debugger attached, so the port enumerated and stayed empty either
-way.
+See [USB-HCI.md](USB-HCI.md) for the endpoint layout, Bulk Serialization and USB
+state-machine behavior.
 
-The ring is in BSS and needs no initialising, so it is taking lines from the
-first instruction that runs. Lines written before the HCI layer exists, or by a
-start up that never reaches it, are still in there to be read when a terminal
-opens the port.
+## USB development identity
 
-The log function is present whichever port carries HCI. That is the point of
-it: on a board whose host is another part on the same PCB, the UART belongs to
-the host and the socket is free.
+The source tree intentionally defaults to development USB identities:
 
-`nRF52840/src/board.h` says whether the USB socket is wired to the nRF52840,
-with `HCI_USB_SOCKET`. Where it is, a UART host image still brings the device
-stack up so the log has somewhere to go. Where it is not, the board leaves
-`HCI_USB_SOCKET` at 0 and no USB comes up, because enabling the peripheral
-would put a device on a bus that is not this part's to enumerate on.
+```text
+VID       0xCAFE
+CDC/H4    PID 0x4070
+native    PID 0x4071
+log-only  PID 0x4072
+bcdDevice 0x0100
+```
 
-The Nordic Thingy:91 is the case this was built for. Its nRF52840 answers to
-the nRF9160 over the interconnect UART, no LED on that board reaches this part,
-and the enclosure is sealed, so the USB socket is the only thing about it that
-can be observed.
+Product builds can override `HCI_USB_VID`, `HCI_USB_PID_CDC_H4`,
+`HCI_USB_PID_NATIVE_HCI` and `HCI_USB_PID_LOG_ONLY`.
 
-Bring up for the log runs without the settling loop the USB host path uses. A
-host on the UART can send its first command in the first millisecond, and
-waiting a hundred of them for a terminal that may never be plugged in would
-lose it. With no cable there is no VBUS, the peripheral does not come up at
-all, and a cable plugged in afterwards does not change that until the next
-reset.
+A shipping build should define:
 
-## The dongle
+```text
+HCI_USB_REQUIRE_ASSIGNED_IDS=1
+```
 
-The reference target is the I-SYST UDG-NRF52840x, an nRF52840 USB dongle built
-on the I-SYST BLYST840 module. Two variants, differing only in the USB
-connector:
+so compilation fails if a development VID/PID remains selected. The USB
+`bcdDevice` value comes from `FIRMWARE_VERSION`; there is no second USB version
+to keep synchronized.
+
+## Reference hardware
+
+### UDG-NRF52840x
+
+The primary USB target is the I-SYST UDG-NRF52840x built on the BLYST840
+nRF52840 module.
 
 | Part | Connector |
 | --- | --- |
 | `UDG-NRF52840` | USB Type-A |
 | `UDG-NRF52840C` | USB Type-C |
 
-Both are 31 x 16 x 4 mm with a real connector rather than a bare PCB edge, and
-both carry a user LED, a user RGB LED, a user button, a reset button and 10
-GPIO on edge castellations. The BLYST840 module brings both oscillators the
-radio wants, a 32 MHz and a 32.768 kHz crystal at 20 ppm, so nothing here runs
-the radio off an RC.
+The BLYST840 provides 32 MHz and 32.768 kHz crystals. The dongle has a USB DFU
+bootloader, user RGB LED, user button, reset button, SWD/Tag-Connect access and
+edge I/O.
 
-The module is certified rather than merely compliant: FCC ID `2ALTY-IBTZ840`,
-IC `25671-IBTZ840`, and an EU Declaration of Conformity under RED 2014/53/EU
-that names `UDG-NRF52840` and `UDG-NRF52840C` by part number. That matters if a
-dongle has to travel to a customer site or live in a regulated lab.
+Product page: https://www.i-syst.com/products/usb_dongle
 
-The dongle carries a USB bootloader, so a first image needs no debugger. A
-Tag-Connect debug port is present for SWD when one is wanted, with nothing to
-solder.
+### IBK-NRF52840
 
-### Where to buy
+IBK is the breakout/development board. It allows UART H:4 as well as both USB
+modes. Its user button cycles all three modes and the selection is persistent.
+UART pins in `board.h` are development defaults and must match the actual bench
+wiring.
 
-Both variants are stocked by Mouser and DigiKey. Prices and stock move, so
-these are links rather than quoted numbers.
+### Thingy:91
 
-**UDG-NRF52840**, USB Type-A
-
-- Mouser [392-UDG-NRF52840](https://www.mouser.com/ProductDetail/392-UDG-NRF52840)
-- DigiKey [25675543](https://www.digikey.com/en/products/detail/i-syst/UDG-NRF52840/25675543)
-
-**UDG-NRF52840C**, USB Type-C
-
-- Mouser [392-UDG-NRF52840C](https://www.mouser.com/ProductDetail/392-UDG-NRF52840C)
-- DigiKey [25675547](https://www.digikey.com/en/products/detail/i-syst/UDG-NRF52840C/25675547)
-
-Product page: [i-syst.com/products/usb_dongle](https://www.i-syst.com/products/usb_dongle)
-
-## Repository layout
-
-```text
-include/            HCI headers
-src/                HCI sources
-nRF52840/ioc/       Eclipse Embedded CDT project
-nRF52840/src/       board.h, the pin and clock configuration
-tests/              host tests plus the official BLE test harness
-```
-
-## Boards
-
-`nRF52840/src/board.h` selects the board with `BOARD`. It holds the I-SYST
-boards this firmware is developed and tested on, the UDG-NRF52840x dongle and
-the IBK-NRF52840 breakout, and one board that is not I-SYST hardware: the
-Nordic Thingy:91, whose nRF52840 reaches its host over the interconnect UART
-to the nRF9160.
-
-The Thingy:91 UART uses the measured nRF52840 pin assignment in `board.h`:
+On Nordic Thingy:91, the nRF52840 HCI host is the nRF9160 over the interconnect
+UART. USB is used for diagnostics, not for HCI. The measured nRF52840 mapping is:
 
 ```text
 nRF52840 side   TX P0.25   RX P1.00   RTS P0.19   CTS P0.22
 nRF9160 side    TX P0.22   RX P0.23   RTS P0.24   CTS P0.25
-Rate            1,000,000 bit/s, both board files
-Flow control    hardware, all four wires exist
+rate            1,000,000 bit/s
+flow control    hardware
 ```
 
-The sdk-nrf nRF52840 pinctrl file names P0.22 as RTS and P0.19 as CTS, but that
-assignment does not work on the hardware. The mapping above was measured both
-ways round on the board: driving nRF52840 RTS on P0.19 lets the peer transmit;
-driving it on P0.22 leaves the peer silent. The firmware therefore uses the
-measured assignment rather than the pinctrl labels.
+The measured RTS/CTS assignment on the nRF52840 differs from the sdk-nrf pinctrl
+labels. `board.h` documents the measurement and must not be changed from the
+pinctrl labels without another hardware measurement.
 
-That board defaults to `HCI_HOST_SELECT_UART`, because its USB socket has
-nothing behind it that speaks HCI and AUTO would come up talking to a host
-that is not there. It also sets `HCI_STATUS_LEDS 0`, since the Thingy:91 LEDs
-are driven from the nRF9160.
-
-The nRF9160 side needs one Kconfig setting beyond the pins:
+The host side should use:
 
 ```text
 CONFIG_BT_WAIT_NOP=y
 ```
 
-The nRF9160 holds this part in reset and releases it while bringing the HCI
-transport up. `sdk-nrf`, `boards/nordic/thingy91/nrf52840_reset.c`, drives
-nRF9160 P0.10 low, waits 10 ms, drains the port and lets go, and Zephyr then
-sends HCI Reset at once. Ten milliseconds is not enough for this firmware to
-come out of reset and bring up TaktOS, the radio and the port, so those four
-octets reach a part that is not listening and nothing retries them. The
-symptom is an `hci_core.c` assertion on opcode `0x0c03` timing out after ten
-seconds with the link otherwise correct.
+The nRF52840 emits the startup No Operation Command Complete expected by that
+startup scheme. H:4 startup synchronization also discards boot text that may
+precede the first HCI packet on the shared interconnect UART.
 
-With `CONFIG_BT_WAIT_NOP=y` the host holds its command semaphore at zero
-until a Command Complete for the No Operation opcode arrives. This firmware
-queues exactly that at startup and sends it first, so the host waits for the
-controller rather than racing it. A host that cannot be configured cannot be
-told to do this, and whether the race is real on such a host has not been
-measured.
+### WildThing51 and WildThing91
 
-The rest of the board has been checked against `sdk-nrf` and the Thingy:91
-hardware guide: the pins and rate above, the low frequency crystal on P0.00
-and P0.01 so the default clock configuration is right, and that every command
-a Zephyr host sends during `bt_enable` is dispatched here. Note also that the
-stock nRF52840 image on that board boots through MCUboot, so how a
-replacement image is programmed decides whether it runs at all.
+Both are UART-H4-only controller configurations. Their interconnect pins and
+flow-control policy are in `nRF52840/src/board.h`; they do not enter the runtime
+mode-switch state machine.
 
+## Repository layout
 
-Other hardware is a port, and it is a small one. A board says four things
-beyond its pins:
-
-| | |
-| --- | --- |
-| `HCI_HOST_SELECT` | the host port, described above |
-| `HCI_STATUS_LEDS 0` | where no status LED is reachable from this part, so nothing drives pins that belong to something else |
-| `UART_HW_FLOWCTRL 1` | where the peer drives RTS and CTS |
-| `MCU_OSC` | where the low frequency clock is not the default |
-
-Add an id, add a branch to the `#if` chain, name the pins. Nothing else in the
-tree is board-aware.
-
-Flow control and the pin map are built together at the end of `board.h` rather
-than per board, because the two have to agree. Asking the peripheral for
-hardware flow control without RTS and CTS in the map gets a link that never
-sends; putting them in the map without asking for flow control drives two pins
-the peripheral never uses. A board that sets `UART_HW_FLOWCTRL` without naming
-RTS and CTS is refused at compile time, rather than failing further down on an
-undeclared macro inside the pin map, which would not say what is missing.
-
-RTS is an output and has to meet the peer's CTS, so a port has to agree with
-what the other side names each wire. Reversed, the board comes up, initialises
-cleanly and never transmits, and nothing in the firmware can tell.
-
-Where a board's stock firmware was doing something else over USB, a serial
-bridge or a sniffer, replacing it with this takes that with it.
+```text
+include/            public HCI/controller headers
+src/                generic HCI, transport, USB and nRF52840 target sources
+nRF52840/ioc/       Eclipse Embedded CDT managed project
+nRF52840/src/       board policy and pin mapping
+tests/              native host tests and repository checks
+tests/harness/      official hardware/release test system
+```
 
 ## Prerequisites
 
-The firmware is built with IOcomposer, which supplies the ARM toolchain,
-OpenOCD, the SDK integration and the Eclipse project support the
-`nRF52840/ioc` project depends on.
-
-### 1. Install IOcomposer
-
-[IOcomposer](https://iocomposer.io) installs into `~/IOcomposer`, or
-`%USERPROFILE%\IOcomposer` on Windows. That directory is the workspace root
-everything else sits under.
-
-**macOS**
-
-```bash
-curl -fsSL https://iocomposer.io/install_ioc_macos.sh -o /tmp/install_ioc_macos.sh && bash /tmp/install_ioc_macos.sh
-```
-
-**Linux**
-
-```bash
-curl -fsSL https://iocomposer.io/install_ioc_linux.sh -o /tmp/install_ioc_linux.sh && bash /tmp/install_ioc_linux.sh
-```
-
-**Windows, PowerShell as Administrator**
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://iocomposer.io/install_ioc_windows.ps1 | iex"
-```
-
-### 2. Lay out the workspace
-
-Dependencies stay separate sibling repositories and external SDKs. The Eclipse
-project reaches them by relative path, so the layout matters:
+The normal IOcomposer workspace is:
 
 ```text
 ~/IOcomposer/
     external/
-        tinyusb/
         nrfx/
         sdk-nrfxlib/
+        tinyusb/
     IOsonata/
     HciController/
     TaktOS/
 ```
 
-### 3. Build the libraries
+Install IOcomposer for the host platform, then build the nRF52840 IOsonata and
+TaktOS libraries before building HciController. HciController links those
+libraries; it does not compile their sources into the application project.
 
-HciController does not compile IOsonata or TaktOS sources, it links them. Build
-them first with the IOsonata library builder and select nRF52840. TaktOS is
-built automatically when it is installed.
+The current Eclipse project also links nrfxlib MPSL, MPSL FEM common and the
+nRF52 hard-float multirole SoftDevice Controller.
 
-**macOS**
-
-```bash
-bash ~/IOcomposer/IOsonata/Installer/build_iosonata_lib_macos.sh
-```
-
-**Linux**
-
-```bash
-bash ~/IOcomposer/IOsonata/Installer/build_iosonata_lib_linux.sh
-```
-
-**Windows, PowerShell**
-
-```powershell
-& "$env:USERPROFILE\IOcomposer\IOsonata\Installer\build_iosonata_lib_win.ps1"
-```
-
-That produces what the firmware links against:
-
-```text
-libIOsonata_nRF52840.a  from  IOsonata/ARM/Nordic/nRF52/nRF52840/lib/Eclipse/Debug_SDC
-libTaktOS_M4.a          from  TaktOS/ARM/cm4/Eclipse/DebugFPU
-```
-
-The host tests under `tests/` need none of this. They build with any C++14
-compiler, so the HCI layers can be read and exercised without a toolchain
-install or a board.
+For release reproducibility, record the exact IOsonata, TaktOS, TinyUSB, nrfx
+and sdk-nrfxlib revisions used by the release build. The installer normally
+follows repository HEADs, so the HciController tag by itself does not identify
+all binary inputs.
 
 ## Eclipse Embedded CDT
 
-Import `HciController/nRF52840/ioc` as an existing project. It is a Managed CDT
-Arm Cross GCC project, generated from the IOsonata Eclipse Embedded CDT
-template.
+Import `HciController/nRF52840/ioc` as an existing project.
 
-After updating project metadata, remove the old workspace project without
-deleting its files, delete `nRF52840/ioc/Debug`, and re-import it. Eclipse
-caches linked resources and generated makefiles.
+If `.cproject` changes while the project is already imported, remove the
+workspace project without deleting files, delete the old generated build
+configuration directory, and re-import it. Eclipse caches generated makefiles
+and linked-resource state.
 
-The application project compiles:
-
-- HciController sources;
-- TinyUSB device sources.
-
-It links:
-
-- `libIOsonata_nRF52840.a` from `Debug_SDC`;
-- `libTaktOS_M4.a` from `DebugFPU`;
-- nrfxlib MPSL;
-- nrfxlib MPSL FEM common;
-- nrfxlib multirole SoftDevice Controller.
-
-Build outputs are written under `nRF52840/ioc/Debug`:
+Build outputs for the active configuration are:
 
 ```text
 HciController.elf
@@ -388,6 +277,11 @@ HciController.hex
 HciController.bin
 HciController.map
 ```
+
+The `.map` is part of release evidence because it confirms the actual linker
+memory layout used by the binary.
+
+See [nRF52840/ioc/README.md](nRF52840/ioc/README.md) for configuration details.
 
 ## Architecture
 
@@ -402,273 +296,103 @@ UART H:4 ------> UART -----------> H:4 packet adapter -----------+
 ```
 
 At the HCI controller boundary, `DevAddr` is the HCI packet type and the data
-buffer contains the complete packet without an H:4 indicator. Native USB
-already has packet boundaries. UART and CDC use `HciIntrfTransport` to recover
-those packets from the H:4 byte stream.
+buffer contains the complete packet without an H:4 indicator.
 
-The H:4 adapter uses only `DeviceIntrfRx()` and `DeviceIntrfTx()`. It does not
-include TinyUSB or UART-specific code.
+The HCI runtime is a high-priority TaktOS thread. USB, UART, MPSL and SDC
+interrupt/callback paths wake it and leave command parsing and typed SDC access
+in thread context. On boards with a mode switch, a short critical-priority
+control thread polls/debounces the button so a continuously ready HCI thread
+cannot starve the control path.
 
-The TinyUSB CDC adapter services the IOsonata `UsbdCdcIntrf` FIFOs used by the
-compatibility HCI path and the diagnostic log. When an RX FIFO has no space, it
-stops reading the TinyUSB OUT endpoint so USB backpressure is preserved rather
-than dropping bytes.
+Target-specific clock, USB peripheral, interrupt, SDC and MPSL code is isolated
+behind `HciTarget_t`. The parser, H:4 transport, routing, command dispatch,
+counters and resource profile do not depend on a concrete UART or USB class.
 
-The UART path uses IOsonata's interrupt-driven FIFO/DMA UART implementation.
-Its 4 KiB RX and TX FIFOs absorb complete HCI packets and host scheduling
-latency.
+## Controller capability profile
 
-## Ports
+The release command surface is not documented as a hand-maintained opcode count.
+The dispatch tables, supported-command bitmap, harness catalog and target-profile
+coverage are compared by the host test suite.
 
-The tree is split so that a part supplies hardware and nothing else.
+Major configured feature families include:
 
-```text
-include/hci_target.h          what the application needs from a part
-include/hci_sdc_resources.h   what the controller is configured for
-src/hci_sdc_resources.cpp     every sdc_support_ call, the sdc_cfg_set sequence
-include/hci_nrf52840.h        the nRF52840 port: clock, USB, errata
-src/hci_nrf52840.cpp          its bring up, and the HciTarget_t it publishes
-```
+- Central and Peripheral roles;
+- legacy and extended advertising/scanning/initiating;
+- privacy and resolving list;
+- LE Data Length and PHY control;
+- periodic advertising, synchronization and sync transfer;
+- PAwR resources;
+- LE Power Control, SCA update and connection subrating;
+- Extended Feature Set, Frame Space Update and Shorter Connection Intervals;
+- connected and broadcast isochronous channels;
+- controller/vendor diagnostics.
 
-Nothing above the radio names a part. `hci_app` holds an `HciTarget_t`, which
-is a table of function pointers and an opaque instance the port owns, and
-`main.cpp` decides which port that is in one line.
+See [README-commands.md](README-commands.md) for how the exposed command surface
+is checked.
 
-The resource configuration is deliberately not part of a port. nrfxlib ships
-one `sdc.h` covering nrf52, nrf53, nrf54h, nrf54l, nrf54lm, nrf54ls, nrf54lv
-and nrf71, and every `SDC_MEM_` macro the pool is computed from comes from it.
-A port does not get an opinion about how many links the controller supports.
+## Isochronous limitation on nRF52840
 
-Adding a part means one header and one source:
+The configured nRF52840 controller supports unencrypted connected and broadcast
+isochronous operation and HCI ISO transport. The current nRF52840 SoftDevice
+Controller does not support encrypted isochronous-channel packets.
 
-| | |
-| --- | --- |
-| a state structure | whatever its clock, USB and errata need |
-| `Init` | MPSL, the entropy source, `sdc_init`, then `HciSdcResourcesApply()`, then `sdc_enable` |
-| `GetTaktOsOps` | how the runtime starts it and pumps MPSL |
-| `UsbStart`, `UsbPassMark`, `UsbPowerProcess` | or null on a part with no USB device peripheral, and the application skips them |
-| `Stop` | |
-| `LastError` | |
-| one `HciTarget_t` returned by value | the instance is static in the port, because a board has one radio |
+This is not an HCI USB limitation. nRF52840 lacks the radio-path CCM header-mask
+support used by the nRF52820/nRF52833 controller implementations for encrypted
+ISO packets. Software-side AES cannot replace that link-layer operation.
 
-The dispatch table, the H:4 parser, the transport, the bridge, the counters and
-the resource configuration are then already correct for it.
-
-## Capacity
-
-What one image is configured for, and what it costs in the SoftDevice
-Controller memory pool. Every value is a constant in
-`include/hci_sdc_resources.h`, and the pool is computed from them, so changing
-a count grows the array that holds it rather than needing a second edit. There are no build options here:
-configuring the controller differently means editing the value.
-
-| | | Pool cost |
-| --- | ---: | ---: |
-| Peripheral links | 16 | 2951 each |
-| Central links | 2 | 2855 each |
-| ACL payload, each way | 251 octets | in the per-link cost |
-| ACL buffers, each way | 4 | in the per-link cost |
-| Advertising sets | 3 | 961 each |
-| Advertising data | 255 octets | in the per-set cost |
-| Scan buffers | 4 | 1688 for four |
-| Filter accept list | 8 | 68 for eight |
-| Channel survey | on | 40 |
-| LE Power Control | on | 2227 for eighteen links |
-| Connection subrating | on | 1092 for eighteen links |
-| Extended feature pages | 10 | 4673 for eighteen links |
-| Frame Space Update | on | 1236 for eighteen links |
-| Shorter Connection Intervals | on | 948 for eighteen links |
-| Scan and initiate together | on | 384 |
-| Periodic advertising sets | 1 | 753 each |
-| Periodic syncs | 2 | 1787 each, four buffers, with responses |
-| Periodic advertiser list | 8 | 64 for eight |
-| Periodic sync transfer | on | 2515 for eighteen links |
-| Periodic sets with responses | 1 | 1575 each |
-| Connected isochronous groups | 2 | 339 for two |
-| Connected isochronous streams | 4 | 2201 for four |
-| Broadcast isochronous groups | 2 | 675 for two |
-| Broadcast isochronous streams | 2 source, 2 sink | 1049 for four |
-| Isochronous SDU, transmit | 247 octets, 4 buffers | 1196 |
-| Isochronous SDU, receive | 251 octets, 4 buffers | 1064 |
-| Isochronous PDU, per stream | 3 each way | 5280 transmit, 5280 receive |
-| | | **93768 required** |
-
-The pool is that total plus a 512 octet margin, **94280 octets allocated**,
-because sdk-nrfxlib says the memory macros may move between minor releases and
-the number that decides whether the controller starts is the one `sdc_cfg_set`
-answers at run time.
-
-Isochronous channels remain 17084 octets of the pool. They have their own
-section below, because what this part does and does not do with them takes more
-than a paragraph.
-
-The ACL payload is worth calling out. 251 octets is the data length extension
-maximum, and it is what the controller reports in LE Read Buffer Size, so a
-host is entitled to use it. The common alternative is 27, which caps
-throughput at about a ninth of what the radio can carry.
-
-The buffer count is a total across every link, not an allowance each. Vol 4
-Part E 4.1.1 gives the host one pool to spend, and the controller refuses a
-packet past it rather than letting the SoftDevice Controller take the packet
-and the host's buffer with it. `AclCreditOverrunCount`, counter 30, says how
-often that has happened.
-
-## Isochronous channels
-
-The short version: unencrypted isochronous works on this part, encrypted does
-not, and the reason is one missing register rather than anything about
-isochronous transport or about the part's cryptography.
-
-### What works
-
-Every isochronous entry point is present in the nRF52 SoftDevice Controller
-library and all four roles are enabled here:
-
-| Role | `sdc_support_` call |
-| --- | --- |
-| Connected stream, central | `sdc_support_cis_central` |
-| Connected stream, peripheral | `sdc_support_cis_peripheral` |
-| Broadcast stream, source | `sdc_support_bis_source` |
-| Broadcast stream, sink | `sdc_support_bis_sink` |
-
-That is 24 opcodes, the group and stream setup, the data path, the four
-isochronous test commands, and `sdc_hci_iso_data_put` for the data itself.
-`LE Read Buffer Size v2` is part of the set rather than an extra: version 1
-reports only the ACL packet length and count, so without v2 a host has every
-command it needs to build a stream and no way to flow control it.
-
-### What does not, and why
-
-sdk-nrfxlib `README.rst` states the limit:
-
-> For the Isochronous Channels features, nRF52820 and nRF52833 are the nRF52
-> Series devices that support encrypting and decrypting the Isochronous
-> Channels packets.
-
-nRF52840 is not in that list. The cause is visible in the register maps. CCM
-authenticates the PDU header octet, and which bits of it are authenticated
-differ between an ACL data PDU and an isochronous one:
-
-```text
-nrf52840  CCM: ... MAXPACKETSIZE, RATEOVERRIDE
-nrf52833  CCM: ... MAXPACKETSIZE, RATEOVERRIDE, HEADERMASK
-nrf52820  CCM: ... MAXPACKETSIZE, RATEOVERRIDE, HEADERMASK
-```
-
-`CCM.HEADERMASK` is documented as the header (S0) mask, eight bits wide.
-Without it the CCM applies the fixed ACL mask, which is the wrong additional
-authenticated data for an isochronous PDU and so the wrong MIC.
-
-This is worth stating plainly because it inverts the obvious reading: the
-nRF52840 is the one of the three parts with a CryptoCell. It has more
-cryptographic hardware than the other two, not less. What it lacks is one
-register in the CCM accelerator that sits in the radio datapath, and nothing
-in software reaches around it. IOsonata's crypto engines are host side and
-cannot substitute: the one Bluetooth adjacent engine, `CryptoCtlrSdc`, sends
-HCI `LE Encrypt` to borrow the controller's AES block for pairing, which is a
-different thing entirely from link layer CCM inside the controller.
-
-### What this means in practice
-
-**Broadcast is unaffected.** Encryption is per group and optional: pass
-`Encryption = 0` to LE Create BIG and it is a public broadcast. Nothing about
-an unencrypted broadcast is degraded or non-conformant.
-
-**Connected streams have an open question.** A CIS does not have its own
-encryption switch the way a BIG does. What happens when a CIS is created over
-an already encrypted ACL link has not been measured on this part, and this
-document will not guess at it. The test is cheap now that pairing works:
-bring up an encrypted link, send LE Set CIG Parameters and then LE Create
-CIS, and read the status. Until that is run, treat unencrypted CIS between
-two of these dongles as the supported case.
-
-If encrypted isochronous is a requirement, it is a part change to nRF52820 or
-nRF52833. It is not something this firmware can be made to do.
-
-### Configuration
-
-Two connected groups, four connected streams, two broadcast groups, two
-broadcast source and two broadcast sink streams. Transmit SDU 247 octets,
-receive SDU 251, four buffers each way, three protocol units per stream each
-way. 17084 octets of the pool, the largest single item in it.
-
-The receive SDU size is also what the packet buffer above the controller is
-sized against, rather than the 4095 octet ceiling the specification allows,
-because `sdc_hci.h` ties the `sdc_hci_get` requirement to
-`sdc_cfg_iso_buffer_cfg_t::rx_sdu_buffer_size`. 251 plus the 12 octet
-isochronous header is 263, which the existing 1024 octet packet buffer holds,
-so isochronous costs no extra packet buffer at all. `src/hci_app.cpp` asserts
-this against the configured size, so raising the SDU without raising the
-buffer stops the build.
-
-## TaktOS execution model
-
-A high-priority HCI thread owns the low-priority path:
-
-- selected host-interface servicing;
-- H:4 parsing for UART/CDC or native USB packet delivery;
-- HCI command dispatch;
-- `mpsl_low_priority_process()`;
-- SoftDevice Controller command, ACL, ISO, and event access.
-
-USB, UART, MPSL, and SDC callbacks only wake the thread. HCI parsing and typed SDC command calls remain in thread context.
-
-## USB development identity
-
-The open-source repository intentionally defaults to development identities:
-
-```text
-VID       0xCAFE
-CDC/H:4    PID 0x4070
-native     PID 0x4071
-log-only   PID 0x4072
-release        0x0100
-```
-
-Those defaults keep an unmodified checkout usable for development. Product
-builds can override `HCI_USB_VID`, `HCI_USB_PID_CDC_H4`,
-`HCI_USB_PID_NATIVE_HCI`, `HCI_USB_PID_LOG_ONLY`, and
-`HCI_USB_DEVICE_RELEASE`. A product configuration can also set
-`HCI_USB_REQUIRE_ASSIGNED_IDS=1` so the build fails if any repository
-development identity is still selected.
+Do not claim encrypted ISO support for the nRF52840 release.
 
 ## Tests
 
+Run the host/source suite with the real nrfxlib tree available:
+
 ```sh
-make -C tests run
+make -C tests clean
+make -C tests run NRFXLIB_DIR=../external/sdk-nrfxlib
 ```
 
-The host tests need only a C++14 compiler. The target headers are replaced by
-fakes, so no SDK checkout and no board are required. Pass
-`NRFXLIB_DIR=/path/to/sdk-nrfxlib` to add the dispatch test, which compiles the
-real command table against the real SoftDevice Controller headers.
+The host suite exercises parser/routing behavior, SDC dispatch/resources, USB
+state machines, command/catalog consistency, counter schemas, board policy and
+persistent mode-switch wiring.
 
-All attached-controller and over-the-air testing is under the official
-`tests/harness/` tree. Reusable HCI/USB helpers are in `tests/harness/lib/`, and
-the HciController release/focused programs are in
-`tests/harness/hcicontroller/`. See `tests/README.md` and
-`tests/harness/README.md`.
+Hardware and over-the-air testing lives under `tests/harness/`.
 
-For example, the focused two-dongle native USB CIS/ISO test is:
+For two native USB controllers:
+
+```sh
+python3 tests/harness/hcicontroller/release_test.py \
+    --transport usb --a SERIAL_A --b SERIAL_B
+```
+
+Focused native USB CIS/ISO testing is available through:
 
 ```sh
 python3 tests/harness/hcicontroller/cis_usb_pair_test.py
 ```
 
+A feature advertised by the release must be exercised positively. A test that
+cannot create the state required for an advertised feature is incomplete, not a
+passing skip.
+
+See [RELEASE.md](RELEASE.md) before creating `v1.0.0`.
+
 ## Design constraints
 
-- one firmware image;
-- runtime USB/UART selection;
-- native Bluetooth USB HCI plus CDC/H:4 compatibility;
-- IOsonata packet `DeviceIntrf` injection;
+- IOsonata packet `DeviceIntrf` injection at the controller boundary;
 - H:4 framing only on UART/CDC byte streams;
-- static allocation;
-- no heap in the HCI data path;
-- no Zephyr dependency;
-- IOsonata and TaktOS remain separately built static libraries.
+- runtime host-mode selection where the board permits it;
+- bootloader-specific memory layout selected by the linker;
+- static/caller-owned storage;
+- no heap in controller/real-time paths;
+- no exceptions or RTTI in the embedded build;
+- no Zephyr dependency in the controller firmware;
+- IOsonata and TaktOS remain separately built libraries.
+
+See [CODING.md](CODING.md) for the project coding/review rules.
 
 ## License
 
-HciController source written by I-SYST inc. is licensed under the Mozilla Public License 2.0. External components retain their own licenses.
+HciController source written by I-SYST inc. is licensed under the Mozilla Public
+License 2.0. External components retain their own licenses.
 
 Copyright (c) 2026 I-SYST inc.
