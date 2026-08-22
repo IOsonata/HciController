@@ -54,8 +54,6 @@
 									<listOptionValue builtIn="false" value="NRF52840_XXAA"/>
 									<listOptionValue builtIn="false" value="CFG_TUSB_MCU=OPT_MCU_NRF5X"/>
 									<listOptionValue builtIn="false" value="HCI_USB_VID=0xCAFE"/>
-									<listOptionValue builtIn="false" value="HCI_USB_PID=0x4070"/>
-									<listOptionValue builtIn="false" value="HCI_USB_DEVICE_RELEASE=0x0100"/>
 									<listOptionValue builtIn="false" value="BUILDN=$$(date +&quot;%y%m%d&quot;)"/>
 								</option>
 								<option IS_BUILTIN_EMPTY="false" IS_VALUE_EMPTY="false" id="ilg.gnuarmeclipse.managedbuild.cross.option.c.compiler.include.paths.420603972" name="Include paths (-I)" superClass="ilg.gnuarmeclipse.managedbuild.cross.option.c.compiler.include.paths" useByScannerDiscovery="true" valueType="includePath">
@@ -98,8 +96,6 @@
 									<listOptionValue builtIn="false" value="NRF52840_XXAA"/>
 									<listOptionValue builtIn="false" value="CFG_TUSB_MCU=OPT_MCU_NRF5X"/>
 									<listOptionValue builtIn="false" value="HCI_USB_VID=0xCAFE"/>
-									<listOptionValue builtIn="false" value="HCI_USB_PID=0x4070"/>
-									<listOptionValue builtIn="false" value="HCI_USB_DEVICE_RELEASE=0x0100"/>
 									<listOptionValue builtIn="false" value="BUILDN=$$(date +&quot;%y%m%d&quot;)"/>
 								</option>
 								<option IS_BUILTIN_EMPTY="false" IS_VALUE_EMPTY="false" id="ilg.gnuarmeclipse.managedbuild.cross.option.cpp.compiler.include.paths.2001546930" name="Include paths (-I)" superClass="ilg.gnuarmeclipse.managedbuild.cross.option.cpp.compiler.include.paths" useByScannerDiscovery="true" valueType="includePath">
@@ -264,8 +260,6 @@
 									<listOptionValue builtIn="false" value="NRF52840_XXAA"/>
 									<listOptionValue builtIn="false" value="CFG_TUSB_MCU=OPT_MCU_NRF5X"/>
 									<listOptionValue builtIn="false" value="HCI_USB_VID=0xCAFE"/>
-									<listOptionValue builtIn="false" value="HCI_USB_PID=0x4070"/>
-									<listOptionValue builtIn="false" value="HCI_USB_DEVICE_RELEASE=0x0100"/>
 									<listOptionValue builtIn="false" value="BUILDN=$$(date +&quot;%y%m%d&quot;)"/>
 								</option>
 								<option IS_BUILTIN_EMPTY="false" IS_VALUE_EMPTY="false" id="ilg.gnuarmeclipse.managedbuild.cross.option.c.compiler.include.paths.101323161" name="Include paths (-I)" superClass="ilg.gnuarmeclipse.managedbuild.cross.option.c.compiler.include.paths" useByScannerDiscovery="true" valueType="includePath">
@@ -309,8 +303,6 @@
 									<listOptionValue builtIn="false" value="NRF52840_XXAA"/>
 									<listOptionValue builtIn="false" value="CFG_TUSB_MCU=OPT_MCU_NRF5X"/>
 									<listOptionValue builtIn="false" value="HCI_USB_VID=0xCAFE"/>
-									<listOptionValue builtIn="false" value="HCI_USB_PID=0x4070"/>
-									<listOptionValue builtIn="false" value="HCI_USB_DEVICE_RELEASE=0x0100"/>
 									<listOptionValue builtIn="false" value="BUILDN=$$(date +&quot;%y%m%d&quot;)"/>
 								</option>
 								<option IS_BUILTIN_EMPTY="false" IS_VALUE_EMPTY="false" id="ilg.gnuarmeclipse.managedbuild.cross.option.cpp.compiler.include.paths.2132642681" name="Include paths (-I)" superClass="ilg.gnuarmeclipse.managedbuild.cross.option.cpp.compiler.include.paths" useByScannerDiscovery="true" valueType="includePath">
@@ -475,8 +467,6 @@
 									<listOptionValue builtIn="false" value="NRF52840_XXAA"/>
 									<listOptionValue builtIn="false" value="CFG_TUSB_MCU=OPT_MCU_NRF5X"/>
 									<listOptionValue builtIn="false" value="HCI_USB_VID=0xCAFE"/>
-									<listOptionValue builtIn="false" value="HCI_USB_PID=0x4070"/>
-									<listOptionValue builtIn="false" value="HCI_USB_DEVICE_RELEASE=0x0100"/>
 									<listOptionValue builtIn="false" value="BUILDN=$$(date +&quot;%y%m%d&quot;)"/>
 								</option>
 								<option IS_BUILTIN_EMPTY="false" IS_VALUE_EMPTY="false" id="ilg.gnuarmeclipse.managedbuild.cross.option.c.compiler.include.paths.1044081917" name="Include paths (-I)" superClass="ilg.gnuarmeclipse.managedbuild.cross.option.c.compiler.include.paths" useByScannerDiscovery="true" valueType="includePath">
@@ -520,8 +510,6 @@
 									<listOptionValue builtIn="false" value="NRF52840_XXAA"/>
 									<listOptionValue builtIn="false" value="CFG_TUSB_MCU=OPT_MCU_NRF5X"/>
 									<listOptionValue builtIn="false" value="HCI_USB_VID=0xCAFE"/>
-									<listOptionValue builtIn="false" value="HCI_USB_PID=0x4070"/>
-									<listOptionValue builtIn="false" value="HCI_USB_DEVICE_RELEASE=0x0100"/>
 									<listOptionValue builtIn="false" value="BUILDN=$$(date +&quot;%y%m%d&quot;)"/>
 								</option>
 								<option IS_BUILTIN_EMPTY="false" IS_VALUE_EMPTY="false" id="ilg.gnuarmeclipse.managedbuild.cross.option.cpp.compiler.include.paths.645601900" name="Include paths (-I)" superClass="ilg.gnuarmeclipse.managedbuild.cross.option.cpp.compiler.include.paths" useByScannerDiscovery="true" valueType="includePath">
@@ -686,8 +674,6 @@
 									<listOptionValue builtIn="false" value="NRF52840_XXAA"/>
 									<listOptionValue builtIn="false" value="CFG_TUSB_MCU=OPT_MCU_NRF5X"/>
 									<listOptionValue builtIn="false" value="HCI_USB_VID=0xCAFE"/>
-									<listOptionValue builtIn="false" value="HCI_USB_PID=0x4070"/>
-									<listOptionValue builtIn="false" value="HCI_USB_DEVICE_RELEASE=0x0100"/>
 									<listOptionValue builtIn="false" value="BUILDN=$$(date +&quot;%y%m%d&quot;)"/>
 								</option>
 								<option IS_BUILTIN_EMPTY="false" IS_VALUE_EMPTY="false" id="ilg.gnuarmeclipse.managedbuild.cross.option.c.compiler.include.paths.390830038" name="Include paths (-I)" superClass="ilg.gnuarmeclipse.managedbuild.cross.option.c.compiler.include.paths" useByScannerDiscovery="true" valueType="includePath">
@@ -731,8 +717,6 @@
 									<listOptionValue builtIn="false" value="NRF52840_XXAA"/>
 									<listOptionValue builtIn="false" value="CFG_TUSB_MCU=OPT_MCU_NRF5X"/>
 									<listOptionValue builtIn="false" value="HCI_USB_VID=0xCAFE"/>
-									<listOptionValue builtIn="false" value="HCI_USB_PID=0x4070"/>
-									<listOptionValue builtIn="false" value="HCI_USB_DEVICE_RELEASE=0x0100"/>
 									<listOptionValue builtIn="false" value="BUILDN=$$(date +&quot;%y%m%d&quot;)"/>
 								</option>
 								<option IS_BUILTIN_EMPTY="false" IS_VALUE_EMPTY="false" id="ilg.gnuarmeclipse.managedbuild.cross.option.cpp.compiler.include.paths.1118281231" name="Include paths (-I)" superClass="ilg.gnuarmeclipse.managedbuild.cross.option.cpp.compiler.include.paths" useByScannerDiscovery="true" valueType="includePath">
