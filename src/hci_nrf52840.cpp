@@ -371,7 +371,7 @@ static void HciNrf52840UsbPowerIrq(void)
     {
         NRF_POWER->EVENTS_USBDETECTED = 0U;
         s_pTarget->UsbAttachPending = true;
-        s_pTarget->UsbAttachCount++;
+        s_pTarget->UsbAttachCount = s_pTarget->UsbAttachCount + 1U;
         wake = true;
     }
 
@@ -379,7 +379,7 @@ static void HciNrf52840UsbPowerIrq(void)
     {
         NRF_POWER->EVENTS_USBREMOVED = 0U;
         s_pTarget->UsbDetachPending = true;
-        s_pTarget->UsbDetachCount++;
+        s_pTarget->UsbDetachCount = s_pTarget->UsbDetachCount + 1U;
         wake = true;
     }
 
@@ -1100,7 +1100,7 @@ extern "C" uint32_t HciUsbPlatformIrqEnter(void)
         return 0U;
     }
 
-    s_pTarget->UsbIrqCount++;
+    s_pTarget->UsbIrqCount = s_pTarget->UsbIrqCount + 1U;
     return s_pTarget->UsbIrqCount - s_pTarget->UsbIrqMark;
 }
 
@@ -1111,8 +1111,8 @@ extern "C" void HciUsbPlatformIrqUnexpectedCause(uint32_t Cause)
         return;
     }
 
-    s_pTarget->UsbEventCause |= Cause;
-    s_pTarget->UsbStuckCauseCount++;
+    s_pTarget->UsbEventCause = s_pTarget->UsbEventCause | Cause;
+    s_pTarget->UsbStuckCauseCount = s_pTarget->UsbStuckCauseCount + 1U;
 }
 
 extern "C" void HciUsbPlatformIrqStorm(uint32_t Inten,

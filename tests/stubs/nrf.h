@@ -29,7 +29,7 @@ extern NRF_POWER_Type *NRF_POWER;
  * host test exercises the same waits the target does.
  */
 struct UsbdEventCauseReg {
-    volatile uint32_t Value;
+    uint32_t Value;
     UsbdEventCauseReg &operator=(uint32_t Mask) { Value &= ~Mask; return *this; }
     operator uint32_t() const { return Value; }
 };
