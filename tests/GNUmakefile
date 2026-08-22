@@ -1,6 +1,25 @@
 # Native USB additions layered over the existing host-test Makefile.
 # GNU make loads GNUmakefile before Makefile, so `make -C tests run` keeps the
 # existing suite and adds the native HCI USB targets without duplicating it.
+#
+# GCC/Clang versions released before the final C++23 option spelling use
+# `gnu++2b` for the same language generation. Require C++23, but accept either
+# compiler spelling so the host release gate does not require a compiler update
+# only for the renamed -std option.
+CXX ?= c++
+HCI_CXX23_STD := $(shell \
+	if printf '' | $(CXX) -x c++ -std=gnu++23 -fsyntax-only - >/dev/null 2>&1; then \
+		printf '%s' 'gnu++23'; \
+	elif printf '' | $(CXX) -x c++ -std=gnu++2b -fsyntax-only - >/dev/null 2>&1; then \
+		printf '%s' 'gnu++2b'; \
+	fi)
+
+ifeq ($(strip $(HCI_CXX23_STD)),)
+$(error $(CXX) does not support GNU C++23 (-std=gnu++23 or -std=gnu++2b))
+endif
+
+CXXFLAGS ?= -std=$(HCI_CXX23_STD) -O0 -g3 -Wall -Wextra -Werror -Wshadow -Wundef
+
 include Makefile
 
 USB_DESC_OBJ := $(BUILD_DIR)/usb_descriptors_test.o
