@@ -20,7 +20,6 @@
 #include "hci_sdc_resources.h"
 #include "hci_target.h"
 #include "hci_sdc_nrfxlib.h"
-#include "hci_syslog.h"
 #include "hci_taktos.h"
 #include "hci_tinyusb.h"
 #include "hci_usb.h"
@@ -62,12 +61,9 @@ typedef struct
     HciCounters_t Counters;
 
     /*
-     * The log is not here. It is HciSyslogDefault, outside this structure, so
-     * that the memset below does not clear what was written before this layer
-     * existed and so that a start up that never reaches this layer still has
-     * somewhere to have said why. This layer only drains it on the CDC log
-     * function whenever the device stack is running. It is never mixed with
-     * the HCI stream.
+     * Developer trace storage is owned by the standard IOsonata SysLog and its
+     * CFifo, outside this structure. This layer only supplies the diagnostic
+     * CDC DeviceIntrf when USB is running. It is never mixed with the HCI stream.
      */
 
     UARTDev_t Uart;
@@ -93,10 +89,7 @@ typedef struct
      */
     bool UsbRunning;
 
-    /*
-     * Whether a terminal has the log port open. Kept so the moment it is
-     * opened can be noticed, which is when the log says it is there.
-     */
+    /* Whether a terminal has the diagnostic CDC function open. */
     bool LogPortOpen;
 
     /*

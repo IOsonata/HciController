@@ -31,13 +31,16 @@ def main(argv):
 
     root = os.path.abspath(argv[1])
 
-    trace = read(os.path.join(root, "include", "hci_trace.h"))
-    va_end = trace.find("va_end(args);")
-    negative = trace.find("if (len < 0)", va_end)
-    outputs = trace.find("HciTraceWrite0(line);", va_end)
-    if va_end < 0 or negative < 0 or outputs < 0 or not va_end < negative < outputs:
-        fail("HciTrace must reject negative vsnprintf before using the buffer")
-    print("[ok] HciTrace rejects a formatting failure before using its buffer")
+    trace = read(os.path.join(root, "src", "hci_trace.cpp"))
+    trace_body = function_body(trace, "void HciTrace(", "void HciTraceInit(")
+    format_at = trace_body.find("const int len = vsnprintf(")
+    guard_at = trace_body.find("if (len >= 0)", format_at)
+    output_at = trace_body.find("HciTraceWrite0(line);", guard_at)
+    syslog_at = trace_body.find("(void)SysLogVPrintf(&s_Log, pFormat, args);", output_at)
+    if (format_at < 0 or guard_at < 0 or output_at < 0 or syslog_at < 0 or
+            not format_at < guard_at < output_at < syslog_at):
+        fail("HciTrace must guard semihosting output before delegating to SysLog")
+    print("[ok] HciTrace guards formatting failure before semihosting output")
 
     usb = read(os.path.join(root, "src", "hci_usb_tinyusb.cpp"))
     open_body = function_body(usb,

@@ -34,10 +34,11 @@ workspace path into the script option.
 | `Debug` | debugger/no bootloader development | `nrf52840_xxaa_sdc.ld` |
 | `Release` | optimized no-bootloader build | `nrf52840_xxaa_sdc.ld` |
 | `Release_MBR` | USB DFU/MBR layout | `nrf52840_xxaa_sdc_mbr.ld` |
-| `Release_SD` | OTA DFU/S140-compatible layout | `nrf52840_xxaa_s140_sdc.ld` |
+| `Release_SD` | S140-compatible application-origin layout | `nrf52840_xxaa_s140_sdc.ld` |
 
 All HciController configurations use the nrfxlib multirole SDC. The `SD`/`MBR`
-names describe the flash/bootloader memory map, not a second HCI implementation.
+names describe the flash/linker memory map, not a second HCI implementation and
+not a board selection.
 
 ## Persistent HCI mode storage
 
@@ -45,7 +46,7 @@ UDG and IBK persist the selected HCI transport in IOsonata `NVM0`. The linker
 owns that address. A different bootloader therefore requires the matching
 linker layout even though the HciController source is unchanged.
 
-Required release layouts are:
+The current IOsonata linker layouts used by this project are:
 
 ### USB DFU/MBR (`Release_MBR`)
 
@@ -55,42 +56,48 @@ NVM0             0x0DD000 .. 0x0DFFFF
 USB DFU loader   0x0E0000 ..
 ```
 
-This is the UDG-NRF52840x layout. At startup the release log should include:
+This is the UDG-NRF52840x USB-DFU layout. At startup the release log should
+include:
 
 ```text
 mode: nvm addr=0x000DD000 size=12288
 ```
 
-### OTA DFU/S140-compatible (`Release_SD`)
+### S140-compatible application origin (`Release_SD`)
+
+The current `nrf52840_xxaa_s140_sdc.ld` starts application flash at `0x27000`
+and reserves the same 12 KiB `NVM0` region used by the MBR layout:
 
 ```text
-application      0x027000 .. 0x0F4FFF
-NVM0             0x0F5000 .. 0x0F7FFF
-OTA bootloader   0x0F8000 .. 0x0FDFFF
-MBR parameters   0x0FE000 .. 0x0FEFFF
+application      0x027000 .. 0x0DCFFF
+NVM0             0x0DD000 .. 0x0DFFFF
+BT_PDS           0x0FD000 .. 0x0FEFFF
 settings         0x0FF000 .. 0x0FFFFF
 ```
 
-This is the layout required when the installed Nordic OTA DFU bootloader starts
-at `0xF8000` and reserves the standard 12 KiB application-data area immediately
-below it.
-
-Before publishing a `Release_SD` binary, inspect both the IOsonata linker script
-and the generated map. The application must stop at `0xF5000` and `NVM0` must
-start at `0xF5000`; do not infer this from the configuration name alone.
+The linker script does not define an OTA bootloader region between those
+reservations. Do not infer an `NVM0` address such as `0xF5000` from the
+`Release_SD` configuration name or from a particular board. If a bootloader is
+installed, its occupied flash must be checked separately against the generated
+map and the exact IOsonata linker-script revision used for the build.
 
 ### No bootloader (`Debug` / `Release`)
 
-The no-bootloader SDC linker currently reserves `NVM0` at
-`0xFD000..0xFFFFF`. These configurations are for debugger/development use and
-must not be substituted for a DFU-specific release image.
+The no-bootloader SDC linker reserves:
+
+```text
+application      0x000000 .. 0x0FCFFF
+NVM0             0x0FD000 .. 0x0FFFFF
+```
 
 HciController uses only the first erase page of `NVM0` for the mode record.
 
 ## Board selection
 
 `nRF52840/src/board.h` owns the board policy and pin map. `BOARD` may be set by
-the build; otherwise UDG-NRF52840 is the default.
+the build; otherwise UDG-NRF52840 is the default. The Eclipse configuration
+name selects a linker layout only. It does not select UDG, IBK, Thingy:91 or a
+WildThing board.
 
 Current policies are:
 
@@ -138,7 +145,7 @@ HciController.map
 ```
 
 Keep the `.map` as release evidence. It is the easiest way to confirm that the
-build used the intended bootloader/NVM layout.
+build used the intended linker-owned memory layout.
 
 ## Language/runtime settings
 

@@ -4,7 +4,6 @@
 
 #include "hci_nrf52840.h"
 #include "hci_sdc_resources.h"
-#include "hci_syslog.h"
 #include "hci_target.h"
 
 #include <assert.h>
@@ -18,6 +17,9 @@
 #include "crypto_rng_nrf.h"
 
 #include "hci_sdc_expected_resources.h"
+
+extern "C" void HciTraceTestReset(void);
+extern "C" size_t HciTraceTestTake(char *pOut, size_t Capacity);
 
 static_assert(HCI_SDC_MEM_REQUIRED == EXPECT_REQUIRED,
               "the fake sdc.h and the vendor one disagree about the pool");
@@ -76,8 +78,6 @@ extern "C" bool nrf52_errata_171(void) { return true; }
 extern "C" bool nrf52_errata_187(void) { return true; }
 static NRF_CLOCK_Type gClock;
 NRF_CLOCK_Type *NRF_CLOCK = &gClock;
-
-static size_t SyslogTake(HciSyslog_t *pLog, char *pOut, size_t Capacity);
 
 static NRF_UARTE_Type gUarte0;
 static NRF_UARTE_Type gUarte1;
@@ -556,38 +556,9 @@ static void TestUartModeLeavesUsbAlone(void)
     printf("[ok] uart mode leaves the usb hardware alone\n");
 }
 
-static char *s_pTakeOut;
-static size_t s_TakeCapacity;
-static size_t s_TakeLen;
-
-static size_t SyslogTakeWrite(void *, const uint8_t *pData, size_t Len)
-{
-    if (s_TakeLen + Len >= s_TakeCapacity)
-    {
-        Len = s_TakeCapacity - s_TakeLen - 1U;
-    }
-    memcpy(&s_pTakeOut[s_TakeLen], pData, Len);
-    s_TakeLen += Len;
-    return Len;
-}
-
-static size_t SyslogTake(HciSyslog_t *pLog, char *pOut, size_t Capacity)
-{
-    s_pTakeOut = pOut;
-    s_TakeCapacity = Capacity;
-    s_TakeLen = 0U;
-    HciSyslogDrain(pLog, SyslogTakeWrite, NULL);
-    return s_TakeLen;
-}
-
 static void TestUartTraceUsesDatasheetPinNames(void)
 {
-    HciSyslog_t log;
     char text[512];
-
-    HciSyslogInit(&log);
-    HciSyslogAttachTrace(&log);
-
     const HciTarget_t target = HciNrf52840Target();
 
     gUarte0.ENABLE = 8U;
@@ -601,9 +572,9 @@ static void TestUartTraceUsesDatasheetPinNames(void)
     gP0.IN = 0U;
     gP1.IN = 0xFFFFFFFFU;
 
-    HciSyslogInit(&log);
+    HciTraceTestReset();
     HciTargetUartTrace(&target, 0U);
-    text[SyslogTake(&log, text, sizeof(text))] = '\0';
+    (void)HciTraceTestTake(text, sizeof(text));
     assert(strstr(text, "uart0: enabled=yes") != NULL);
     assert(strstr(text, "hwfc=on") != NULL);
     assert(strstr(text, "baud=1000000") != NULL);
@@ -615,35 +586,34 @@ static void TestUartTraceUsesDatasheetPinNames(void)
     assert(strstr(text, "RTS=P0.19") != NULL);
 
     gP0.IN = 1UL << 22;
-    HciSyslogInit(&log);
+    HciTraceTestReset();
     HciTargetUartTrace(&target, 0U);
-    text[SyslogTake(&log, text, sizeof(text))] = '\0';
+    (void)HciTraceTestTake(text, sizeof(text));
     assert(strstr(text, "cts=high(peer-not-ready)") != NULL);
 
     gUarte0.PSEL.CTS = 32U;
     gP0.IN = 0xFFFFFFFFU;
     gP1.IN = 0U;
-    HciSyslogInit(&log);
+    HciTraceTestReset();
     HciTargetUartTrace(&target, 0U);
-    text[SyslogTake(&log, text, sizeof(text))] = '\0';
+    (void)HciTraceTestTake(text, sizeof(text));
     assert(strstr(text, "cts=low(peer-ready)") != NULL);
     assert(strstr(text, "CTS=P1.00") != NULL);
 
     gUarte0.PSEL.CTS = 0x80000000UL;
-    HciSyslogInit(&log);
+    HciTraceTestReset();
     HciTargetUartTrace(&target, 0U);
-    text[SyslogTake(&log, text, sizeof(text))] = '\0';
+    (void)HciTraceTestTake(text, sizeof(text));
     assert(strstr(text, "cts=not-connected") != NULL);
     assert(strstr(text, "CTS=NC") != NULL);
 
     gUarte1.ENABLE = 8U;
     gUarte1.PSEL.CTS = 0x80000000UL;
-    HciSyslogInit(&log);
+    HciTraceTestReset();
     HciTargetUartTrace(&target, 1U);
-    text[SyslogTake(&log, text, sizeof(text))] = '\0';
+    (void)HciTraceTestTake(text, sizeof(text));
     assert(strstr(text, "uart1: enabled=yes") != NULL);
 
-    HciSyslogAttachTrace(HciSyslogDefault());
     printf("[ok] uart trace uses datasheet pin names and decoded settings\n");
 }
 
@@ -651,11 +621,7 @@ static void TestResetTraceKeepsSdcAssert(void)
 {
     ResetCounters();
 
-    HciSyslog_t log;
     char text[512];
-    HciSyslogInit(&log);
-    HciSyslogAttachTrace(&log);
-
     alignas(8) static uint8_t mem[10000];
     HciTaktOs_t runtime = {};
     HciNrf52840_t target;
@@ -669,21 +635,20 @@ static void TestResetTraceKeepsSdcAssert(void)
     gSdcAssert("controller_fault.c", 321U);
     gPower.RESETREAS = POWER_RESETREAS_SREQ_Msk;
 
-    HciSyslogInit(&log);
+    HciTraceTestReset();
     HciNrf52840ResetTrace();
-    text[SyslogTake(&log, text, sizeof(text))] = '\0';
+    (void)HciTraceTestTake(text, sizeof(text));
     assert(strstr(text, "cause=software-reset") != NULL);
     assert(strstr(text, "previous=SDC-assert") != NULL);
     assert(strstr(text, "file=controller_fault.c") != NULL);
     assert(strstr(text, "line=321") != NULL);
 
-    HciSyslogInit(&log);
+    HciTraceTestReset();
     HciNrf52840ResetTrace();
-    text[SyslogTake(&log, text, sizeof(text))] = '\0';
+    (void)HciTraceTestTake(text, sizeof(text));
     assert(strstr(text, "previous=SDC-assert") == NULL);
 
     HciNrf52840Stop(&target);
-    HciSyslogAttachTrace(HciSyslogDefault());
     printf("[ok] reset trace keeps the SDC assertion across reset state\n");
 }
 

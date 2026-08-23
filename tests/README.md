@@ -22,26 +22,32 @@ make -C tests clean
 make -C tests run
 ```
 
-The C++ tests compile natively with C++14. Target dependencies such as nRF,
-MPSL, TinyUSB, TaktOS and the SoftDevice Controller are replaced by the fakes
-under `stubs/`, except where a test deliberately compiles against the real
-nrfxlib headers.
+The host suite compiles C as GNU C17 and C++ as GNU C++23, matching the
+nRF52840 target project. Target dependencies such as nRF, MPSL, TinyUSB, TaktOS
+and the SoftDevice Controller are replaced by the fakes under `stubs/`, except
+where a test deliberately compiles against the real nrfxlib headers.
 
-When `../external/sdk-nrfxlib` is present, the suite also builds the real-header
-SDC dispatch/resource tests. Override the location with:
+The Makefile looks for the real nrfxlib tree at the sibling path
+`$(ROOT)/../external/sdk-nrfxlib`. If nrfxlib is elsewhere, override it with an
+absolute path:
 
 ```sh
-make -C tests run NRFXLIB_DIR=/path/to/sdk-nrfxlib
+make -C tests run NRFXLIB_DIR=/absolute/path/to/sdk-nrfxlib
 ```
+
+A release run must not report that the real-header SDC dispatch, critical or
+resource tests were skipped.
 
 The Python host checks validate repository/project consistency, board pin maps,
 USB descriptor/runtime invariants, command coverage, SDC symbol availability,
 SMP vectors, connection-event parsing, CIS cleanup ordering, native USB
 transport behavior and the firmware/Python counter schema.
 
-`command_coverage.py` compares the exposed SDC dispatch profile with the command
-catalog in `tests/harness/lib/hci_commands.py`. Dedicated target-profile
-coverage metadata lives in `tests/harness/lib/target_profile.py`.
+`command_coverage.py` compares the complete externally reachable command
+profile, including the SDC dispatch tables and bridge-local HciController
+commands, with the release command profile in
+`tests/harness/lib/hci_commands.py`. Dedicated target-profile coverage metadata
+lives in `tests/harness/lib/target_profile.py`.
 
 ## Official hardware/release harness
 

@@ -3,7 +3,8 @@
 
 The complete nrfxlib-backed command catalog is kept in
 hci_commands_catalog.py. This module applies the nRF52840 release profile and
-adds commands implemented by the supplemental SDC dispatcher.
+adds commands implemented by the supplemental SDC dispatcher and the generic
+HciController bridge.
 """
 
 import struct
@@ -157,9 +158,23 @@ _SDC_VS = (
             COMPLETE, b"\x00", note="disabled state; no asynchronous report flood"),
 )
 
-COMMANDS = tuple(_catalog.COMMANDS) + _CORE_62 + _SDC_VS
+# HciController commands consumed by the bridge before an SDC dispatch. Both
+# are read-only with respect to radio/controller state and are safe in the broad
+# release probe. The loopback uses a non-zero PRBS seed with no data, which
+# exercises the local command path without adding a large event to the probe.
+_LOCAL = (
+    Command(0xFFF1, "VS HciController Transport Integrity Loopback", COMPLETE,
+            b"\x00\x00\x01",
+            note="sequence 0, PRBS8 seed 1 and zero payload octets"),
+    Command(0xFFF2, "VS HciController USB TX Validation Snapshot", COMPLETE,
+            b"",
+            note="read-only snapshot of the native Event-IN validation history; "
+                 "a fresh history legitimately reports count zero"),
+)
+
+COMMANDS = tuple(_catalog.COMMANDS) + _CORE_62 + _SDC_VS + _LOCAL
 BY_OPCODE = dict(_catalog.BY_OPCODE)
-for _command in _CORE_62 + _SDC_VS:
+for _command in _CORE_62 + _SDC_VS + _LOCAL:
     if _command.opcode in BY_OPCODE:
         raise AssertionError("opcode 0x%04X listed twice" % _command.opcode)
     BY_OPCODE[_command.opcode] = _command

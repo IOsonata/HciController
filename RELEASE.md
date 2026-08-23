@@ -16,7 +16,7 @@ FIRMWARE_VERSION = 0x0100
 ```
 
 The native USB `bcdDevice` value is derived from the same definition. Do not
-maintain a second release version in the USB descriptor.
+maintain a second release version in the USB descriptor or Eclipse project.
 
 The controller-facing Bluetooth Core version is defined independently in
 `include/hci_core_profile.h`. Release 1 targets the nRF52840/current nrfxlib
@@ -46,15 +46,46 @@ Run from a clean checkout of the exact release candidate:
 
 ```sh
 make -C tests clean
-make -C tests run NRFXLIB_DIR=../external/sdk-nrfxlib
+make -C tests run
 ```
+
+The test Makefile resolves the default real nrfxlib tree as
+`$(ROOT)/../external/sdk-nrfxlib`. If the release checkout uses a different
+location, override it with an absolute path:
+
+```sh
+make -C tests run NRFXLIB_DIR=/absolute/path/to/sdk-nrfxlib
+```
+
+Do not pass `NRFXLIB_DIR=../external/sdk-nrfxlib` with `make -C tests`; GNU make
+changes into `tests/` before resolving that command-line relative path, which
+points at `HciController/external/sdk-nrfxlib` instead of the sibling external
+tree.
 
 For a release run, the real-nrfxlib checks must execute; a skip caused by a
 missing `NRFXLIB_DIR` is not release evidence.
 
+The host suite compiles C as GNU C17 and C++ as GNU C++23, matching the
+nRF52840 Eclipse project. Do not weaken the host language standard to make a
+warning disappear; a warning that appears under the target standard is a
+release defect until resolved.
+
 The checks include command-table/catalog agreement, SDC symbol availability,
 resource-profile consistency, USB descriptor/state-machine rules, counter
 schema, harness organization, board policy and persistent mode-switch wiring.
+
+Before the build, run the source hygiene checks from `CODING.md` and the
+IOsonata coding standard on every touched source file. In particular:
+
+- source and documentation must be ASCII;
+- added source text must pass the prohibited-word check;
+- touched source files must have balanced braces;
+- `.project` and `.cproject` must parse as XML;
+- Eclipse linked resources must not contain machine-local absolute paths;
+- all four nRF52840 C++ configurations must remain GNU C++23;
+- obsolete project-level USB PID or USB release defines must not be present;
+  USB PIDs are mode-specific in `usb_descriptors.c` and `bcdDevice` comes from
+  `HCI_CONTROLLER_VERSION_BCD`.
 
 ## nRF52840 build configurations
 
@@ -65,15 +96,17 @@ The Eclipse project is `nRF52840/ioc`.
 | `Debug` | debugger/no bootloader development | `nrf52840_xxaa_sdc.ld` |
 | `Release` | no-bootloader release-style build | `nrf52840_xxaa_sdc.ld` |
 | `Release_MBR` | USB DFU/MBR layout | `nrf52840_xxaa_sdc_mbr.ld` |
-| `Release_SD` | OTA DFU/S140-compatible layout | `nrf52840_xxaa_s140_sdc.ld` |
+| `Release_SD` | S140-compatible application-origin layout | `nrf52840_xxaa_s140_sdc.ld` |
 
 The project selects the script by filename and supplies the IOsonata linker
 search directory. This is intentional: the linker owns the NVM location, and a
 map from a different script is not equivalent even if the source is identical.
+The configuration name selects the linker layout only; it does not select a
+board.
 
-### Required NVM/bootloader maps
+### Required linker-owned NVM maps
 
-For the USB DFU layout used by UDG:
+For the USB DFU/MBR layout:
 
 ```text
 application      0x001000 .. 0x0DCFFF
@@ -81,26 +114,33 @@ NVM0             0x0DD000 .. 0x0DFFFF
 USB DFU loader   0x0E0000 ..
 ```
 
-For the OTA DFU layout:
+For the current S140-compatible linker layout:
 
 ```text
-application      0x027000 .. 0x0F4FFF
-NVM0             0x0F5000 .. 0x0F7FFF
-OTA bootloader   0x0F8000 .. 0x0FDFFF
-MBR parameters   0x0FE000 .. 0x0FEFFF
+application      0x027000 .. 0x0DCFFF
+NVM0             0x0DD000 .. 0x0DFFFF
+BT_PDS           0x0FD000 .. 0x0FEFFF
 settings         0x0FF000 .. 0x0FFFFF
 ```
+
+The current `nrf52840_xxaa_s140_sdc.ld` does not define an `NVM0` region at
+`0xF5000` and does not define the OTA bootloader region itself. Do not infer
+flash geometry from the `Release_SD` name or from the board being built. If a
+bootloader is installed, verify its occupied flash separately against the exact
+IOsonata linker-script revision and the generated map.
 
 For a no-bootloader/debug layout, the current IOsonata SDC linker reserves:
 
 ```text
+application      0x000000 .. 0x0FCFFF
 NVM0             0x0FD000 .. 0x0FFFFF
 ```
 
 Before tagging, inspect the generated `.map` for every release configuration
-that will be published. The NVM address must match the bootloader layout above.
-A successful link is not sufficient; a linker script can successfully place
-persistent storage inside a bootloader region.
+that will be published. The NVM address must match the selected linker script
+and must not overlap any installed bootloader or other persistent storage. A
+successful link by itself is not sufficient evidence of the external bootloader
+layout.
 
 HciController uses only the first erase page of `NVM0` for the mode record. The
 remaining reserved pages stay available to the application/platform layout.
@@ -119,16 +159,19 @@ Use `Release_MBR` and verify at least:
 - startup log reports `mode: nvm addr=0x000DD000 size=12288`;
 - no bootloader/reset loop during the NVM write/reset sequence.
 
-### IBK-NRF52840, OTA DFU build
+### IBK-NRF52840
 
-Use the OTA-compatible release configuration and verify:
+Build with `BOARD=IBK_NRF52840` and select the linker configuration that matches
+the flash layout installed on the test board. The Eclipse configuration name is
+not the board selector. Verify:
 
 - UART H:4 -> USB H:4;
 - USB H:4 -> native USB HCI;
 - native USB HCI -> UART H:4;
 - selected mode survives a power cycle in each mode;
-- startup log reports the OTA NVM location (`0x000F5000`) before the radio is
-  started.
+- startup log reports the `NVM0` address from the selected linker script before
+  the radio is started (`0x000DD000` for the current `Release_SD` script and
+  `0x000FD000` for the no-bootloader `Release` script).
 
 ### UART-only boards
 

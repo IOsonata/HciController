@@ -4,11 +4,12 @@ HciController does not maintain a hand-copied release command count in this
 file. The command surface is source-defined and checked mechanically because a
 static list becomes wrong as soon as the SDC profile moves.
 
-Two dispatch sources make up the externally reachable command surface:
+Three command sources make up the externally reachable command surface:
 
 ```text
 src/hci_sdc_nrfxlib.cpp   commands routed directly to nrfxlib SDC
 src/hci_sdc.cpp           supplemental Core/profile/vendor routing
+src/hci_controller.cpp    bridge-local HciController vendor diagnostics
 ```
 
 The hardware tooling accounts for the same surface through:
@@ -20,16 +21,27 @@ tests/harness/lib/target_profile.py
 ```
 
 `tests/command_coverage.py` resolves the real nrfxlib opcode values, reads both
-firmware dispatch tables, and requires every exposed opcode to be either in the
-broad command catalog or in explicit target-profile coverage. An opcode exposed
-by the firmware but not driven by the release tooling is a test failure. An
-opcode driven by the tooling but not exposed by the firmware is also a failure.
+SDC dispatch tables and the bridge-local command routes, and requires every
+exposed opcode to be either in the broad command profile or in explicit
+target-profile coverage. An opcode exposed by the firmware but not driven by
+the release tooling is a test failure. An opcode driven by the tooling but not
+exposed by the firmware is also a failure.
 
 Run the release form of the check with the real nrfxlib tree available:
 
 ```sh
-make -C tests run NRFXLIB_DIR=../external/sdk-nrfxlib
+make -C tests run
 ```
+
+The test Makefile defaults to the sibling
+`$(ROOT)/../external/sdk-nrfxlib`. If nrfxlib is elsewhere, pass an absolute
+path:
+
+```sh
+make -C tests run NRFXLIB_DIR=/absolute/path/to/sdk-nrfxlib
+```
+
+A release run is incomplete if the real-header SDC tests are skipped.
 
 ## Release profile
 
@@ -57,10 +69,11 @@ The exposed command families include:
 - connected and broadcast isochronous setup/data-path/test commands;
 - Core 6.2 Frame Space Update and Shorter Connection Intervals command paths;
 - Nordic SDC vendor commands used by the release profile;
-- HciController vendor diagnostics, including VS Read Counters.
+- HciController vendor diagnostics and transport-integrity commands.
 
-The exact opcodes and safe probe payloads are in the harness command catalog.
-That catalog is what release testing executes against hardware.
+`tests/harness/lib/hci_commands.py` assembles the exact release command profile
+and safe probe payloads from the base catalog plus supplemental and local rows.
+That assembled profile is what release testing executes against hardware.
 
 ## Supported Commands bitmap
 
@@ -69,8 +82,8 @@ surface. A host test checks the bitmap and the dispatch table against one
 another in both directions where the Bluetooth Core specification assigns a
 Supported Commands bit.
 
-Supplemental commands that do not map cleanly into that standard bitmap are
-covered separately by the target profile; they are not made invisible just to
+Supplemental and vendor commands that do not map into that standard bitmap are
+covered separately by the release tooling; they are not made invisible just to
 make the bitmap test simpler.
 
 ## Commands deliberately not advertised
@@ -112,11 +125,16 @@ derived from FICR. The hardware harness resolves an identity before running
 advertising, scanning or initiating procedures so a missing public address is
 not misdiagnosed as a failure of the following HCI command.
 
-## HciController VS Read Counters
+## HciController vendor diagnostics
 
-`0xFFF0` is the HciController diagnostic command. It is answered in the routing
-layer without asking the radio and reports counters spanning the H:4 parser,
-transport, bridge and SDC routing paths.
+HciController exposes three project-specific vendor commands. `0xFFF0` is
+routed by the SDC command layer, while `0xFFF1` and `0xFFF2` are consumed by the
+generic bridge before SDC dispatch. All three are part of the externally
+reachable HCI surface and are included in the command-coverage check and broad
+hardware probe.
+
+`0xFFF0` is VS Read Counters. It reports counters spanning the H:4 parser,
+transport, bridge and SDC routing paths without issuing a radio command.
 
 The wire schema is versioned in `hci_counters.h`. Fields are appended and the
 schema version is raised; existing fields are not renumbered. The Python harness
@@ -127,6 +145,20 @@ packet beyond the controller-advertised ACL credit can be accepted by the SDC
 API without ever producing a matching Number Of Completed Packets event. The
 routing layer therefore enforces the known host credit after LE Read Buffer Size
 has established it and counts any overrun it refuses.
+
+`0xFFF1` is the HciController transport-integrity loopback. The host supplies a
+sequence number, non-zero PRBS8 seed and up to 240 PRBS octets. The Command
+Complete reports controller-side validation, CRC32 and the exact payload
+received. A payload-length sweep exercises Event-IN sizes 16 through 256 bytes
+and is transport-independent: it works through UART H:4, CDC H:4 and native USB.
+
+`0xFFF2` returns the native USB pre-transmit Event-IN validation history. The
+snapshot contains a version/count followed by the last eight legacy Event-IN
+records with sequence, length/structural flags, event code, CRC32, first eight
+bytes and last eight bytes. It is read-only and the snapshot is taken before
+its own Command Complete enters USB, so the reply does not overwrite the event
+history it is reporting. A build without the strong USB platform hook answers
+Unknown HCI Command.
 
 ## Handler rules
 
@@ -162,12 +194,12 @@ dispatch/resource tests pass.
 
 ## Release hardware coverage
 
-The broad command probe drives the catalog against a real controller and handles
-state requirements such as a live connection, an advertising set, a periodic
-sync or explicit operator consent. Commands that require a second radio or a
-specific role are exercised by the two-controller release phases rather than by
-sending them in a meaningless state and treating Command Disallowed as proof of
-support.
+The broad command probe drives the assembled profile against a real controller
+and handles state requirements such as a live connection, an advertising set, a
+periodic sync or explicit operator consent. Commands that require a second radio
+or a specific role are exercised by the two-controller release phases rather
+than by sending them in a meaningless state and treating Command Disallowed as
+proof of support.
 
 The full release runner is:
 

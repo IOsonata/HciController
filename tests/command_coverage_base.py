@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """Check that the nRF52840 + SDC HEAD profile drives every exposed opcode.
 
-The controller has two command dispatch sources:
+The controller has three command sources:
 
     src/hci_sdc_nrfxlib.cpp   commands mapped by the nrfxlib table
     src/hci_sdc.cpp           supplemental Core commands
+    src/hci_controller.cpp    bridge-local vendor diagnostics
 
 The official harness command catalog plus harness target-profile metadata must
 account for every externally reachable opcode. Source/resource checks run
-independently so keeping two opcode lists in agreement cannot by itself prove
-the product profile.
+independently so keeping opcode lists in agreement cannot by itself prove the
+product profile.
 """
 
 import ast
@@ -135,12 +136,17 @@ def validate_source_contracts(root):
                 raise SystemExit("Core 6.2 resource term %s is missing" % macro)
         print("[ok] Core 6.2 profile has Extended Features, FSU and SCI resources")
 
+    init_mode_at = app_source.find("bool HciAppInitMode(")
+    init_compat_at = app_source.find("\nbool HciAppInit(", init_mode_at)
+    if init_mode_at < 0 or init_compat_at < 0:
+        raise SystemExit("HciAppInitMode not found")
+    init_mode_body = app_source[init_mode_at:init_compat_at]
     if not re.search(
-        r"HostType\s*==\s*HCI_APP_HOST_USB\s*&&\s*!HciTargetHasUsb\(&Target\)",
-        app_source,
+        r"hostType\s*==\s*HCI_APP_HOST_USB\s*&&\s*!HciTargetHasUsb\(&Target\)",
+        init_mode_body,
     ):
         raise SystemExit(
-            "HciAppInit does not reject USB host selection on a target without USB operations"
+            "HciAppInitMode does not reject USB host selection on a target without USB operations"
         )
     print("[ok] USB host selection is guarded by HciTargetHasUsb")
 
@@ -172,6 +178,15 @@ def opcode_values(nrfxlib, root):
                       read_text(counters))
     if match:
         values["HCI_COUNTERS_OPCODE"] = int(match.group(1), 16)
+
+    controller_header = read_text(
+        os.path.join(root, "include", "hci_controller.h")
+    )
+    for name in (
+        "HCI_CONTROLLER_LOOPBACK_OPCODE",
+        "HCI_CONTROLLER_USB_TX_VALIDATION_OPCODE",
+    ):
+        values[name] = macro_int(controller_header, name)
 
     local_paths = (
         os.path.join(root, "include", "hci_sdc.h"),
@@ -224,11 +239,24 @@ def firmware_tables(root, values):
         r"\{\s*(HCI_SDC_(?:COMPAT|SUPP)_OPCODE_[A-Z0-9_]+)",
     )
 
-    names = vendor_names + supplemental_names
+    controller_path = os.path.join(root, "src", "hci_controller.cpp")
+    controller_source = read_text(controller_path)
+    local_names = []
+    for name in (
+        "HCI_CONTROLLER_LOOPBACK_OPCODE",
+        "HCI_CONTROLLER_USB_TX_VALIDATION_OPCODE",
+    ):
+        if not re.search(
+                r"if\s*\(\s*opcode\s*==\s*%s\s*\)" % re.escape(name),
+                controller_source):
+            raise SystemExit("local command %s is not routed by hci_controller.cpp" % name)
+        local_names.append(name)
+
+    names = vendor_names + supplemental_names + local_names
     unresolved = sorted(set(n for n in names if n not in values))
     if unresolved:
         raise SystemExit(
-            "these dispatch table entries have no resolved opcode value:\n  "
+            "these command entries have no resolved opcode value:\n  "
             + "\n  ".join(unresolved)
         )
 
@@ -237,7 +265,7 @@ def firmware_tables(root, values):
         opcode = values[name]
         if opcode in firmware:
             raise SystemExit(
-                "opcode 0x%04X appears in both dispatch sources (%s, %s)"
+                "opcode 0x%04X appears in multiple command sources (%s, %s)"
                 % (opcode, firmware[opcode], name)
             )
         firmware[opcode] = name
@@ -321,7 +349,7 @@ def main(argv):
         print("[!!] 0x%04X %-56s driven, not exposed" % (opcode, name))
 
     if undriven or orphaned:
-        print("\n%d opcode(s) disagree between the exposed dispatch profile and harness tooling."
+        print("\n%d opcode(s) disagree between the exposed command profile and harness tooling."
               % (len(undriven) + len(orphaned)))
         return 1
 
@@ -339,7 +367,7 @@ def main(argv):
             buckets[need] = buckets.get(need, 0) + 1
 
     print("[ok] %d exposed opcodes, all driven." % len(firmware))
-    print("     %d dispatcher opcodes hidden by the target profile."
+    print("     %d command opcodes hidden by the target profile."
           % len(set(firmware_all) & excluded))
     print("     %d supplemental opcodes have dedicated profile coverage."
           % len(covered))

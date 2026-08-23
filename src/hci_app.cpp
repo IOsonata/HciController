@@ -58,6 +58,159 @@ static_assert(HCI_SDC_ACL_TRACK_HANDLES >=
 
 static HciApp_t *s_pApp;
 
+/*
+ * Output transport for the diagnostic CDC function. SysLog owns the queued
+ * log records in its CFifo. This object only owns one record that DeviceIntrf
+ * has accepted and TinyUSB has not completely consumed yet.
+ */
+typedef struct
+{
+    HciApp_t *pApp;
+    uint8_t Pending[HCI_TRACE_RECORD_SIZE];
+    size_t PendingOffset;
+    size_t PendingLen;
+} HciAppLogIntrf_t;
+
+static HciAppLogIntrf_t s_LogIntrfState;
+static DevIntrf_t s_LogIntrf;
+
+static void HciAppLogPump(void)
+{
+    if (s_LogIntrfState.pApp == nullptr ||
+        s_LogIntrfState.PendingOffset >= s_LogIntrfState.PendingLen)
+    {
+        s_LogIntrfState.PendingOffset = 0U;
+        s_LogIntrfState.PendingLen = 0U;
+        return;
+    }
+
+    const size_t remaining =
+        s_LogIntrfState.PendingLen - s_LogIntrfState.PendingOffset;
+    const size_t count = HciTinyUsbWrite(
+        s_LogIntrfState.pApp->LogCdcInterface,
+        &s_LogIntrfState.Pending[s_LogIntrfState.PendingOffset],
+        remaining);
+
+    if (count > remaining)
+    {
+        return;
+    }
+
+    s_LogIntrfState.PendingOffset += count;
+    if (s_LogIntrfState.PendingOffset == s_LogIntrfState.PendingLen)
+    {
+        s_LogIntrfState.PendingOffset = 0U;
+        s_LogIntrfState.PendingLen = 0U;
+    }
+}
+
+static void HciAppLogDisable(DevIntrf_t *)
+{
+}
+
+static void HciAppLogEnable(DevIntrf_t *)
+{
+}
+
+static uint32_t HciAppLogGetRate(DevIntrf_t *)
+{
+    return 0U;
+}
+
+static uint32_t HciAppLogSetRate(DevIntrf_t *, uint32_t)
+{
+    return 0U;
+}
+
+static bool HciAppLogStartRx(DevIntrf_t *, uint32_t)
+{
+    return false;
+}
+
+static int HciAppLogRxData(DevIntrf_t *, uint8_t *, int)
+{
+    return 0;
+}
+
+static void HciAppLogStopRx(DevIntrf_t *)
+{
+}
+
+static bool HciAppLogStartTx(DevIntrf_t *, uint32_t)
+{
+    return s_LogIntrfState.pApp != nullptr &&
+           s_LogIntrfState.PendingLen == 0U;
+}
+
+static int HciAppLogTxData(DevIntrf_t *, const uint8_t *pData, int DataLen)
+{
+    if (s_LogIntrfState.pApp == nullptr || pData == nullptr || DataLen <= 0 ||
+        DataLen > (int)sizeof(s_LogIntrfState.Pending) ||
+        s_LogIntrfState.PendingLen != 0U)
+    {
+        return 0;
+    }
+
+    memcpy(s_LogIntrfState.Pending, pData, (size_t)DataLen);
+    s_LogIntrfState.PendingOffset = 0U;
+    s_LogIntrfState.PendingLen = (size_t)DataLen;
+    HciAppLogPump();
+    return DataLen;
+}
+
+static void HciAppLogStopTx(DevIntrf_t *)
+{
+}
+
+static void HciAppLogReset(DevIntrf_t *)
+{
+    s_LogIntrfState.PendingOffset = 0U;
+    s_LogIntrfState.PendingLen = 0U;
+}
+
+static void HciAppLogPowerOff(DevIntrf_t *)
+{
+}
+
+static void *HciAppLogGetHandle(DevIntrf_t *)
+{
+    return nullptr;
+}
+
+static void HciAppLogIntrfInit(HciApp_t *pApp)
+{
+    memset(&s_LogIntrfState, 0, sizeof(s_LogIntrfState));
+
+    s_LogIntrfState.pApp = pApp;
+    s_LogIntrf.pDevData = &s_LogIntrfState;
+    s_LogIntrf.IntPrio = 0;
+    s_LogIntrf.EvtCB = nullptr;
+    s_LogIntrf.MaxRetry = 0;
+    s_LogIntrf.Type = DEVINTRF_TYPE_USB;
+    s_LogIntrf.bDma = false;
+    s_LogIntrf.bIntEn = false;
+    s_LogIntrf.Disable = HciAppLogDisable;
+    s_LogIntrf.Enable = HciAppLogEnable;
+    s_LogIntrf.GetRate = HciAppLogGetRate;
+    s_LogIntrf.SetRate = HciAppLogSetRate;
+    s_LogIntrf.StartRx = HciAppLogStartRx;
+    s_LogIntrf.RxData = HciAppLogRxData;
+    s_LogIntrf.StopRx = HciAppLogStopRx;
+    s_LogIntrf.StartTx = HciAppLogStartTx;
+    s_LogIntrf.TxData = HciAppLogTxData;
+    s_LogIntrf.TxSrData = HciAppLogTxData;
+    s_LogIntrf.StopTx = HciAppLogStopTx;
+    s_LogIntrf.Reset = HciAppLogReset;
+    s_LogIntrf.PowerOff = HciAppLogPowerOff;
+    s_LogIntrf.GetHandle = HciAppLogGetHandle;
+    atomic_flag_clear(&s_LogIntrf.bBusy);
+    atomic_store(&s_LogIntrf.bTxReady, true);
+    atomic_store(&s_LogIntrf.bNoStop, false);
+    atomic_store(&s_LogIntrf.EnCnt, 1);
+
+    HciTraceSetSink(&s_LogIntrf, 0U);
+}
+
 #ifdef UART_PINS
 static const IOPinCfg_t s_HciUartPins[] = UART_PINS;
 #endif
@@ -167,6 +320,7 @@ static bool HciAppUsbSetup(HciApp_t *pApp, HciUsbDescriptorMode_t Mode)
         return false;
     }
 
+    HciAppLogIntrfInit(pApp);
     pApp->UsbRunning = true;
     return true;
 }
@@ -177,6 +331,11 @@ static void HciAppUsbRelease(HciApp_t *pApp)
     {
         return;
     }
+
+    HciTraceSetSink(nullptr, 0U);
+    s_LogIntrfState.pApp = nullptr;
+    s_LogIntrfState.PendingOffset = 0U;
+    s_LogIntrfState.PendingLen = 0U;
 
     if (pApp->UsbHciNative)
     {
@@ -406,12 +565,6 @@ static bool HciAppHostStart(void *pContext)
     return true;
 }
 
-static size_t HciAppLogWrite(void *pContext, const uint8_t *pData, size_t Len)
-{
-    HciApp_t *pApp = static_cast<HciApp_t *>(pContext);
-    return pApp != nullptr ? HciTinyUsbWrite(pApp->LogCdcInterface, pData, Len) : 0U;
-}
-
 static void HciAppLogPortOpened(HciApp_t *pApp)
 {
     const bool open = HciTinyUsbPortIsOpen(pApp->LogCdcInterface);
@@ -423,10 +576,10 @@ static void HciAppLogPortOpened(HciApp_t *pApp)
     pApp->LogPortOpen = open;
     if (open)
     {
-        HciSyslogPrint(HciSyslogDefault(),
-                       "log: port open, %u octet(s) queued, host=%s",
-                       (unsigned)HciSyslogPending(HciSyslogDefault()),
-                       HciAppHostName(pApp));
+        HciTrace("log: port open, %lu record(s) queued, %lu dropped, host=%s\r\n",
+                 (unsigned long)HciTracePending(),
+                 (unsigned long)HciTraceDropped(),
+                 HciAppHostName(pApp));
     }
 }
 
@@ -462,7 +615,13 @@ static void HciAppResyncOnIdle(HciApp_t *pApp)
 static void HciAppDrainLog(HciApp_t *pApp)
 {
     HciAppLogPortOpened(pApp);
-    HciSyslogDrain(HciSyslogDefault(), HciAppLogWrite, pApp);
+    HciAppLogPump();
+
+    if (pApp->LogPortOpen && s_LogIntrfState.PendingLen == 0U)
+    {
+        (void)HciTraceFlush();
+        HciAppLogPump();
+    }
 }
 
 static void HciAppHostProcess(void *pContext)

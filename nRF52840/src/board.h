@@ -103,7 +103,7 @@
 #define HCI_LED_GREEN_ACTIVE            UDG_NRF52840_LEDG_ACTIVE
 
 #define HCI_LED_BLUE_PORT               UDG_NRF52840_LEDB_PORT
-#define HCI_LED_BLUE_PIN                UDG_NRF52840_LEDB_PIN
+#define HCI_LED_BLUE_PIN                 UDG_NRF52840_LEDB_PIN
 #define HCI_LED_BLUE_ACTIVE              UDG_NRF52840_LEDB_ACTIVE
 
 #define LED_PINS						UDG_NRF52840_LED_PINS_CFG
@@ -177,7 +177,7 @@
 
 #define BUTTON1_PINS					IBK_NRF52840_BUT_PINS_CFG
 
-/* Product status LED channels, all active low. */
+/* Product status LED channels. Polarity comes from the IOsonata board definitions. */
 
 #define HCI_LED_RED_PORT                IBK_NRF52840_LED3_PORT
 #define HCI_LED_RED_PIN                 IBK_NRF52840_LED3_PIN

@@ -101,15 +101,23 @@ The nRF52840 Eclipse project has these configurations:
 | `Debug` | no bootloader/debug | `nrf52840_xxaa_sdc.ld` |
 | `Release` | no bootloader | `nrf52840_xxaa_sdc.ld` |
 | `Release_MBR` | USB DFU/MBR | `nrf52840_xxaa_sdc_mbr.ld` |
-| `Release_SD` | OTA DFU/S140-compatible | `nrf52840_xxaa_s140_sdc.ld` |
+| `Release_SD` | S140-compatible application origin | `nrf52840_xxaa_s140_sdc.ld` |
 
-Required release NVM locations are:
+The configuration name selects a linker layout; it does not select a board.
+The current IOsonata linker-owned NVM regions are:
 
 ```text
-USB DFU:        NVM0 0xDD000 .. 0xDFFFF, bootloader starts at 0xE0000
-OTA DFU:        NVM0 0xF5000 .. 0xF7FFF, bootloader starts at 0xF8000
-no bootloader:  NVM0 0xFD000 .. 0xFFFFF
+USB DFU/MBR:     NVM0 0xDD000 .. 0xDFFFF
+S140-compatible: NVM0 0xDD000 .. 0xDFFFF
+no bootloader:   NVM0 0xFD000 .. 0xFFFFF
 ```
+
+The current S140-compatible script starts application flash at `0x27000` and
+ends it at `0xDCFFF`; it also reserves `BT_PDS` at `0xFD000..0xFEFFF` and the
+bootloader-settings page at `0xFF000..0xFFFFF`. It does not define an `NVM0`
+region at `0xF5000`, and it does not define an OTA bootloader region itself.
+Any installed bootloader must therefore be checked separately against the exact
+linker-script revision and generated map used for the build.
 
 HciController uses one erase page at the start of `NVM0` for its mode record.
 The rest of the region remains available to the platform/application layout.
@@ -188,7 +196,8 @@ Product page: https://www.i-syst.com/products/usb_dongle
 IBK is the breakout/development board. It allows UART H:4 as well as both USB
 modes. Its user button cycles all three modes and the selection is persistent.
 UART pins in `board.h` are development defaults and must match the actual bench
-wiring.
+wiring. The board selection is independent of the Eclipse linker configuration;
+set `BOARD=IBK_NRF52840` when building IBK firmware.
 
 ### Thingy:91
 
