@@ -55,6 +55,9 @@ class FakeHci:
             self.pending.append(self.unrelated)
         return 0, b""
 
+    def has_pending_input(self):
+        return bool(self.fresh)
+
     def read_packet(self, timeout=1.0):
         if self.pending:
             return self.pending.pop(0)
