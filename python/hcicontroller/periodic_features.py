@@ -846,7 +846,7 @@ def _wait_pawr_periodic_report(
         timeout=12.0,
         advertiser=None,
         advertiser_deferred=None):
-    """Wait for response-critical 0x25 while servicing advertiser 0x27."""
+    """Wait for response-critical 0x25 with scanner-first arbitration."""
     scanner_deferred = []
     reports = []
     deadline = time.time() + timeout
@@ -855,21 +855,24 @@ def _wait_pawr_periodic_report(
         raise HciError("PAwR advertiser deferred queue is missing")
 
     while time.time() < deadline:
-        # Keep future PAwR subevent data supplied while waiting for the scanner
-        # report. Once a marker-bearing 0x25 is received below, return
-        # immediately: no advertiser access is allowed between it and 0x2083.
-        if advertiser is not None:
-            while (
-                    advertiser.pending
-                    or advertiser.has_pending_input()):
-                if not _service_pawr_advertiser_once(
-                        advertiser,
-                        advertiser_deferred,
-                        timeout=0.0):
-                    break
-
-        remaining = max(0.0, deadline - time.time())
-        packet = scanner.read_packet(min(0.002, remaining))
+        # A queued scanner report may already contain the event counter for the
+        # response slot. It always wins over advertiser maintenance. If the
+        # scanner is idle, service at most one advertiser 0x27 request, then
+        # immediately recheck the scanner before touching any further work.
+        scanner_ready = scanner.pending or scanner.has_pending_input()
+        if scanner_ready:
+            packet = scanner.read_packet(0.0)
+        elif advertiser is not None and (
+                advertiser.pending or advertiser.has_pending_input()):
+            _service_pawr_advertiser_once(
+                advertiser,
+                advertiser_deferred,
+                timeout=0.0,
+            )
+            continue
+        else:
+            remaining = max(0.0, deadline - time.time())
+            packet = scanner.read_packet(min(0.002, remaining))
 
         if packet is not None:
             kind, code, body = packet
@@ -905,8 +908,8 @@ def _wait_pawr_periodic_report(
 
                     if not data and advertiser is not None:
                         # The empty report is obsolete once consumed. The next
-                        # loop iteration services any newly pending 0x27 before
-                        # reading another scanner report.
+                        # iteration arbitrates again, giving any ready scanner
+                        # report priority over advertiser maintenance.
                         continue
 
             scanner_deferred.append(packet)
@@ -1079,9 +1082,9 @@ def run_pawr_phase(book, label, advertiser, scanner):
             subevent,
         )
 
-        # Service advertiser 0x27 requests while waiting for the scanner's
-        # usable 0x25. Once the marker-bearing report is received, the helper
-        # returns immediately so 0x2083 remains the next Host operation.
+        # Keep advertiser subevent data supplied, but the scanner wins whenever
+        # both controllers have pending work. A marker-bearing 0x25 therefore
+        # cannot sit behind a backlog of 0x2082 maintenance commands.
         report = _wait_pawr_periodic_report(
             scanner,
             sync_handle,

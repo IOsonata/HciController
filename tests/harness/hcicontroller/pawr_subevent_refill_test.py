@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regression for PAwR advertiser subevent-data servicing order."""
+"""Regression for PAwR advertiser/scanner servicing priority."""
 
 import struct
 
@@ -34,9 +34,10 @@ def data_request(start=SUBEVENT, count=1):
 
 
 class FakeAdvertiser:
-    def __init__(self, order):
+    def __init__(self, state, order):
         self.pending = [data_request()]
         self.commands = []
+        self.state = state
         self.order = order
 
     def has_pending_input(self):
@@ -50,13 +51,15 @@ class FakeAdvertiser:
     def command(self, opcode, payload=b"", allow_fail=False):
         self.order.append("refill")
         self.commands.append((opcode, payload, allow_fail))
+        self.state["scanner_ready"] = True
         return 0, b""
 
 
 class FakeScanner:
-    def __init__(self, advertiser, order):
+    def __init__(self, advertiser, state, order):
         self.pending = []
         self.advertiser = advertiser
+        self.state = state
         self.order = order
         self.fresh = [periodic_v2(
             SYNC_HANDLE,
@@ -65,10 +68,13 @@ class FakeScanner:
         )]
         self.late_request = data_request(start=0, count=1)
 
+    def has_pending_input(self):
+        return self.state["scanner_ready"] and bool(self.fresh)
+
     def read_packet(self, timeout=1.0):
         if self.pending:
             return self.pending.pop(0)
-        if not self.fresh:
+        if not self.state["scanner_ready"] or not self.fresh:
             return None
 
         # This request becomes pending at the same instant the usable scanner
@@ -78,10 +84,11 @@ class FakeScanner:
         return self.fresh.pop(0)
 
 
-def main():
+def run_case(scanner_ready):
     order = []
-    advertiser = FakeAdvertiser(order)
-    scanner = FakeScanner(advertiser, order)
+    state = {"scanner_ready": scanner_ready}
+    advertiser = FakeAdvertiser(state, order)
+    scanner = FakeScanner(advertiser, state, order)
     advertiser_deferred = []
 
     report = pf._wait_pawr_periodic_report(
@@ -97,25 +104,33 @@ def main():
     assert report[1] == DATA_COUNTER
     assert report[2] == SUBEVENT
     assert report[3] == pf.PAWR_SUBEVENT_MARKER
-
-    # The first 0x27 was serviced before reading the marker-bearing 0x25.
-    assert order == ["refill", "marker-report"]
-    assert len(advertiser.commands) == 1
-    opcode, payload, allow_fail = advertiser.commands[0]
-    assert opcode == pf.OP_LE_SET_PERIODIC_ADV_SUBEVENT_DATA
-    assert allow_fail is True
-    assert payload[0] == pf.ADV_HANDLE_PERIODIC
-    assert payload[1] == 1
-    assert payload[2] == SUBEVENT
-    assert pf.PAWR_SUBEVENT_MARKER in payload
-
-    # The second 0x27 arrived with the usable 0x25 and remains pending. Once
-    # the marker report is returned, no advertiser access is allowed before
-    # the caller sends 0x2083.
-    assert advertiser.pending == [scanner.late_request]
     assert advertiser_deferred == []
     assert scanner.pending == []
 
+    if scanner_ready:
+        # If both controllers already have work, the scanner's response-
+        # critical report wins. No advertiser command may run first.
+        assert order == ["marker-report"]
+        assert advertiser.commands == []
+        assert advertiser.pending == [data_request(), scanner.late_request]
+    else:
+        # If the scanner is idle, service one advertiser request, then recheck
+        # the scanner before touching any further advertiser work.
+        assert order == ["refill", "marker-report"]
+        assert len(advertiser.commands) == 1
+        opcode, payload, allow_fail = advertiser.commands[0]
+        assert opcode == pf.OP_LE_SET_PERIODIC_ADV_SUBEVENT_DATA
+        assert allow_fail is True
+        assert payload[0] == pf.ADV_HANDLE_PERIODIC
+        assert payload[1] == 1
+        assert payload[2] == SUBEVENT
+        assert pf.PAWR_SUBEVENT_MARKER in payload
+        assert advertiser.pending == [scanner.late_request]
+
+
+def main():
+    run_case(scanner_ready=True)
+    run_case(scanner_ready=False)
     print("pawr_subevent_refill_test: PASS")
     return 0
 
