@@ -908,6 +908,30 @@ def _wait_pawr_periodic_report(
     )
 
 
+def _discard_stale_pawr_periodic_reports(hci, sync_handle):
+    """Discard periodic reports that predate the completed 0x2084 command."""
+    kept = []
+    discarded = 0
+
+    for packet in hci.pending:
+        kind, code, body = packet
+        if kind == H4_EVENT and code == EVT_LE_META:
+            parsed = _periodic_report_data(body)
+            if (
+                    parsed is not None
+                    and parsed[0] == sync_handle
+                    and body[0] in (
+                        LE_PERIODIC_ADV_REPORT,
+                        LE_PERIODIC_ADV_REPORT_V2,
+                    )):
+                discarded += 1
+                continue
+        kept.append(packet)
+
+    hci.pending = kept
+    return discarded
+
+
 def _set_pawr_sync_subevent(hci, sync_handle, subevent):
     payload = struct.pack("<HHB", sync_handle, 0, 1) + bytes([subevent])
     _command_ok(
@@ -916,6 +940,12 @@ def _set_pawr_sync_subevent(hci, sync_handle, subevent):
         payload,
         "LE Set Periodic Sync Subevent",
     )
+
+    # Hci.command() restores asynchronous packets that arrived before the
+    # matching Command Complete to hci.pending. A periodic report from that
+    # queue predates the completed 0x2084 configuration and its event counter
+    # can already be too old for the following 0x2083 response command.
+    _discard_stale_pawr_periodic_reports(hci, sync_handle)
 
 
 def _set_pawr_response(hci, sync_handle, event_counter, request_subevent,
