@@ -312,6 +312,7 @@ class SerialH4Transport:
             raise SelectionError("pyserial is missing; install pyserial")
         self._serial_module = serial
         self.ser = serial.Serial(port, 1000000, timeout=0.05)
+        self._rx = bytearray()
         try:
             self.ser.dtr = True
             self.ser.rts = True
@@ -330,48 +331,74 @@ class SerialH4Transport:
         except (self._serial_module.SerialException, OSError) as err:
             raise TransportGone(str(err))
 
-    def read_exact(self, count, deadline):
-        data = b""
-        while len(data) < count:
-            if time.time() > deadline:
-                raise TransportError("timed out after %d of %d bytes"
-                                     % (len(data), count))
-            try:
-                chunk = self.ser.read(count - len(data))
-            except (self._serial_module.SerialException, OSError) as err:
-                raise TransportGone(str(err))
-            if chunk:
-                data += chunk
-        return data
-
-    def read_packet(self, timeout=1.0):
-        deadline = time.time() + timeout
-        try:
-            chunk = self.ser.read(1)
-        except (self._serial_module.SerialException, OSError) as err:
-            raise TransportGone(str(err))
-        if not chunk:
+    @staticmethod
+    def _expected_length(data):
+        if not data:
             return None
 
-        kind = chunk[0]
+        kind = data[0]
         if kind == H4_EVENT:
-            header = self.read_exact(2, deadline)
-            body = self.read_exact(header[1], deadline)
-            return kind, header[0], body
+            if len(data) < 3:
+                return None
+            return 3 + data[2]
         if kind == H4_ACL:
-            header = self.read_exact(4, deadline)
-            length = int.from_bytes(header[2:4], "little")
-            body = self.read_exact(length, deadline)
-            return kind, None, header + body
+            if len(data) < 5:
+                return None
+            return 5 + int.from_bytes(data[3:5], "little")
         if kind == H4_ISO:
-            header = self.read_exact(4, deadline)
-            length = int.from_bytes(header[2:4], "little") & 0x3FFF
-            body = self.read_exact(length, deadline)
-            return kind, None, header + body
+            if len(data) < 5:
+                return None
+            return 5 + (int.from_bytes(data[3:5], "little") & 0x3FFF)
         raise TransportError("bad H:4 packet indicator 0x%02X, stream out of sync"
                              % kind)
 
+    def _take_packet(self):
+        expected = self._expected_length(self._rx)
+        if expected is None or len(self._rx) < expected:
+            return None
+
+        packet = bytes(self._rx[:expected])
+        del self._rx[:expected]
+        kind = packet[0]
+        if kind == H4_EVENT:
+            return kind, packet[1], packet[3:]
+        return kind, None, packet[1:]
+
+    def _read_pending(self):
+        try:
+            waiting = int(self.ser.in_waiting)
+            if waiting <= 0:
+                return False
+            chunk = self.ser.read(waiting)
+        except (self._serial_module.SerialException, OSError) as err:
+            raise TransportGone(str(err))
+        if not chunk:
+            return False
+        self._rx.extend(chunk)
+        return True
+
+    def read_packet(self, timeout=1.0):
+        timeout = max(0.0, timeout)
+        deadline = time.monotonic() + timeout
+
+        while True:
+            packet = self._take_packet()
+            if packet is not None:
+                return packet
+
+            if self._read_pending():
+                continue
+
+            if timeout <= 0:
+                return None
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return None
+            time.sleep(min(0.001, remaining))
+
     def has_pending_input(self):
+        if self._rx:
+            return True
         try:
             return bool(self.ser.in_waiting)
         except (AttributeError, OSError):
