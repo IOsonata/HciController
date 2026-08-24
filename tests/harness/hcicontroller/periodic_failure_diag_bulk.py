@@ -2,16 +2,12 @@
 """Run the periodic failure diagnostic over Bluetooth USB Bulk Serialization."""
 
 import sys
-from pathlib import Path
 
-_HERE = Path(__file__).resolve().parent
-if str(_HERE) not in sys.path:
-    sys.path.insert(0, str(_HERE))
-
+import _bootstrap  # noqa: F401
 # Importing the safe wrapper installs its pre-on_event semantic validation.
 import periodic_failure_diag_safe  # noqa: F401
 import periodic_failure_diag as diag
-from lib.pair_transport import resolve_pair as _resolve_pair
+from hcicontroller.pair_transport import resolve_pair as _resolve_pair
 
 
 def _resolve_bulk_pair(first=None, second=None, kind="auto", **kwargs):

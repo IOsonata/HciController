@@ -12,16 +12,12 @@ host transfers can remain outstanding at once.
 """
 
 import argparse
-from pathlib import Path
 import statistics
 import sys
 import time
 
-_LIB_DIR = Path(__file__).resolve().parents[1] / "lib"
-if str(_LIB_DIR) not in sys.path:
-    sys.path.insert(0, str(_LIB_DIR))
-
-import hci_transport
+import _bootstrap  # noqa: F401
+from hcicontroller import hci_transport
 
 
 MAX_HCI_PACKET = 1024

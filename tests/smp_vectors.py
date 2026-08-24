@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check the pairing crypto against the specification's own test vectors.
 
-tests/harness/lib/hci_ble_test.py implements enough of the Security Manager to
+python/hcicontroller/hci_ble_test.py implements enough of the Security Manager to
 let a phone pair Just Works, so that link layer encryption gets exercised and
 the two Long Term Key Request commands answer a real request instead of being
 checked for their shape. The confirm value c1 and the key derivation s1 are
@@ -127,13 +127,14 @@ def check(label, got, want):
 
 def main():
     here = os.path.dirname(os.path.abspath(__file__))
-    sys.path.insert(0, os.path.join(here, "harness", "lib"))
+    repo_root = os.path.dirname(here)
+    sys.path.insert(0, os.path.join(repo_root, "python"))
     try:
-        import hci_ble_test
+        import hcicontroller.hci_ble_test as hci_ble_test
     except SystemExit:
         # The tool exits when pyserial is absent, which has nothing to do
         # with the crypto in it.
-        print("pyserial is missing, so hci_ble_test.py cannot be imported.")
+        print("pyserial is missing, so hcicontroller.hci_ble_test cannot be imported.")
         print("Run: pip3 install pyserial")
         return 0
 

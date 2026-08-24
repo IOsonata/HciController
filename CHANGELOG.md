@@ -25,6 +25,19 @@ Initial HciController source release.
 - UART H:4 for an on-board or external host processor.
 - Independent USB CDC diagnostic log.
 
+### Python validation library
+
+- Reusable `hcicontroller` Python package under `python/hcicontroller/`.
+- Direct access to serial H:4 and native Bluetooth USB HCI transports.
+- Reusable command/event, pair, periodic advertising, PAwR, CIS/BIS, ISO,
+  capability, DUT-control and result helpers.
+- Editable installation from the repository with `pip install -e ./python`.
+- Example program for controller discovery and identity access.
+- HciController hardware/release harness imports the same public Python
+  implementation directly and runs from the source tree without `PYTHONPATH`.
+- Bumble remains supported when a complete Bluetooth host stack is preferable
+  to direct HCI control.
+
 ### Runtime mode selection
 
 - Persistent HCI mode selection on UDG-NRF52840x and IBK-NRF52840.
@@ -49,6 +62,8 @@ Initial HciController source release.
 - Repository policy checks for board modes, command coverage and schemas.
 - Official hardware/release harness under `tests/harness/` for two-controller
   and BLE-device testing.
+- Counter-schema and hardware tooling consume the canonical public Python
+  library sources.
 
 ### Known limitation
 

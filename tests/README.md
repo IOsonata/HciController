@@ -1,16 +1,19 @@
 # HciController tests
 
-The repository has two test layers.
+The repository has two test layers plus a reusable host-side Python library.
 
 ```text
+python/
+    hcicontroller/           public HCI/BLE validation library
+    examples/                user-facing library examples
+
 tests/
-    unit/                   native C++ host tests
-    stubs/                  target/vendor fakes used by host tests
-    iosonata/               real host-buildable IOsonata support
-    harness/                official hardware/release test system
-        lib/                reusable HCI/USB/BLE helpers
-        hcicontroller/      two-HciController release/focused tests
-        ble_device/         arbitrary BLE-device DUT harness
+    unit/                    native C++ host tests
+    stubs/                   target/vendor fakes used by host tests
+    iosonata/                real host-buildable IOsonata support
+    harness/                 official hardware/release test system
+        hcicontroller/       two-HciController release/focused tests
+        ble_device/          arbitrary BLE-device DUT harness
 ```
 
 ## Host tests
@@ -46,8 +49,35 @@ transport behavior and the firmware/Python counter schema.
 `command_coverage.py` compares the complete externally reachable command
 profile, including the SDC dispatch tables and bridge-local HciController
 commands, with the release command profile in
-`tests/harness/lib/hci_commands.py`. Dedicated target-profile coverage metadata
-lives in `tests/harness/lib/target_profile.py`.
+`python/hcicontroller/hci_commands.py`. Dedicated target-profile coverage
+metadata lives in `python/hcicontroller/target_profile.py`.
+
+The counter-schema check reads the canonical decoder sources from
+`python/hcicontroller/` so moving the library cannot leave the release check
+validating a stale private copy.
+
+## Public Python validation library
+
+Reusable HCI packet parsing, command catalog data, serial/native-USB transports,
+controller coordination and BLE feature helpers live only in:
+
+```text
+python/hcicontroller/
+```
+
+Install the package from the repository with:
+
+```sh
+python3 -m pip install -e ./python
+```
+
+The official hardware harness consumes the same implementation directly. Its
+entry points locate the in-tree package automatically, so running repository
+tests does not require an external `PYTHONPATH` setting or an editable install.
+
+See `python/README.md` for direct-HCI use and examples. Bumble remains an
+alternative when a validation program needs a complete Bluetooth host stack
+rather than direct controller procedures.
 
 ## Official hardware/release harness
 
@@ -94,13 +124,14 @@ Bulk Serialization because HCI ISO is carried there.
 
 ## Harness organization
 
-`tests/harness/lib/` owns reusable HCI packet parsing, command catalog data,
-serial/native-USB transports, controller coordination and feature helpers.
-Focused HciController programs in `tests/harness/hcicontroller/` use those
-helpers rather than carrying independent transport implementations.
+Focused HciController programs in `tests/harness/hcicontroller/` use the public
+`python/hcicontroller/` helpers rather than carrying independent transport or
+protocol implementations.
 
 `tests/harness/ble_device/` uses an HciController dongle as a BLE test
 instrument for another product or board. The DUT does not need to use IOsonata.
+A product-specific DUT adapter may implement `hcicontroller.DutControl` over any
+available control channel.
 
 A feature advertised by the DUT must be exercised positively. If the harness
 cannot create the required state, the release result is incomplete/failing;

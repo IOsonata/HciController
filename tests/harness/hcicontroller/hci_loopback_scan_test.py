@@ -2,21 +2,13 @@
 """Stress the HCI PRBS loopback while unsolicited scan events share Event-IN."""
 
 import argparse
-from pathlib import Path
 import struct
 import sys
 import time
 
-_HERE = Path(__file__).resolve().parent
-_HARNESS_DIR = _HERE.parent
-_LIB_DIR = _HARNESS_DIR / "lib"
-if str(_HERE) not in sys.path:
-    sys.path.insert(0, str(_HERE))
-if str(_LIB_DIR) not in sys.path:
-    sys.path.insert(0, str(_LIB_DIR))
-
+import _bootstrap  # noqa: F401
 import hci_loopback_test as loopback
-from hci_pair import prepare_controller
+from hcicontroller.hci_pair import prepare_controller
 
 
 H4_COMMAND = 0x01

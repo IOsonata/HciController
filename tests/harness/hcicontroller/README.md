@@ -1,41 +1,39 @@
 # HciController release harness
 
-This harness validates HciController as the DUT by using two HciController
-dongles over the air. It is the official board/release test surface for this
-repository.
+This directory contains the official HciController hardware and release tests.
+The reusable controller, transport, and BLE procedure implementation lives in
+`python/hcicontroller/` and is imported directly by these programs.
 
-The two radios are intentionally symmetric. A phase may assign dongle A as
-Central and B as Peripheral, reset both, then reverse the roles. Periodic and
-isochronous phases likewise assign advertiser/scanner, sender/receiver and
-broadcaster/sink roles explicitly.
+The runners are executable directly from a repository checkout. `_bootstrap.py`
+adds the repository `python/` directory to the Python import path, so repository
+testing does not require an external `PYTHONPATH` setting or an editable package
+installation.
 
 Main programs:
 
 ```text
-pair_smoke_test.py      basic profile + both ACL role assignments
+pair_smoke_test.py      basic profile and both ACL role assignments
 release_test.py         full release-strict feature/compliance run
 probe_test.py           broad HCI command/radio probe
 cis_pair_test.py        focused two-controller CIS/ISO over H:4
 cis_usb_pair_test.py    focused CIS/ISO over native USB Bulk Serialization
 ```
 
-Reusable protocol, transport and feature logic belongs in `../lib/`. Focused
-programs here should call those helpers instead of carrying separate connection,
-event, command or ISO implementations.
+The two radios are symmetric. Tests explicitly assign Central/Peripheral,
+advertiser/scanner, sender/receiver, and broadcaster/sink roles as required by
+each phase.
 
-The release runner is capability-driven:
+The release runner reads the capability profile from both controllers, verifies
+the expected release profile, exercises every applicable capability in a valid
+radio state, and fails when an advertised feature cannot be exercised
+positively. Hardware or controller exclusions are reported as `N/A` with the
+reason.
 
-1. Read the capability profile from both Controllers.
-2. Verify that both report the expected release profile.
-3. Build the applicable feature plan from the advertised capability set.
-4. Exercise every applicable feature in a real valid radio state.
-5. Mark hardware/SDC exclusions as `N/A`, never as a passing `SKIP`.
-6. Fail the release when an advertised feature cannot be exercised positively.
+For user-written BLE product validation, install the same public package with:
 
-The nRF52840 release matrix covers Central/Peripheral ACL roles, DLE, PHY,
-power control/path loss, SCA, subrating, Extended Feature Set, newer connection
-timing procedures, periodic advertising/sync, PAST, PAwR, CIS, BIS,
-reset/recovery and long-running ACL/ISO/event stress.
+```sh
+python3 -m pip install -e ./python
+```
 
-Direction Finding, Channel Sounding and encrypted ISO are profile exclusions on
-nRF52840 and must be reported as `N/A` with the reason.
+See `python/README.md` for direct HCI use and
+`tests/harness/ble_device/README.md` for product-DUT integration.

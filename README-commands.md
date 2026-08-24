@@ -12,19 +12,20 @@ src/hci_sdc.cpp           supplemental Core/profile/vendor routing
 src/hci_controller.cpp    bridge-local HciController vendor diagnostics
 ```
 
-The hardware tooling accounts for the same surface through:
+The reusable hardware tooling accounts for the same surface through the public
+Python package:
 
 ```text
-tests/harness/lib/hci_commands_catalog.py
-tests/harness/lib/hci_commands.py
-tests/harness/lib/target_profile.py
+python/hcicontroller/hci_commands_catalog.py
+python/hcicontroller/hci_commands.py
+python/hcicontroller/target_profile.py
 ```
 
 `tests/command_coverage.py` resolves the real nrfxlib opcode values, reads both
 SDC dispatch tables and the bridge-local command routes, and requires every
 exposed opcode to be either in the broad command profile or in explicit
-target-profile coverage. An opcode exposed by the firmware but not driven by
-the release tooling is a test failure. An opcode driven by the tooling but not
+target-profile coverage. An opcode exposed by the firmware but not driven by the
+release tooling is a test failure. An opcode driven by the tooling but not
 exposed by the firmware is also a failure.
 
 Run the release form of the check with the real nrfxlib tree available:
@@ -71,9 +72,11 @@ The exposed command families include:
 - Nordic SDC vendor commands used by the release profile;
 - HciController vendor diagnostics and transport-integrity commands.
 
-`tests/harness/lib/hci_commands.py` assembles the exact release command profile
-and safe probe payloads from the base catalog plus supplemental and local rows.
-That assembled profile is what release testing executes against hardware.
+`python/hcicontroller/hci_commands.py` assembles the exact release command
+profile and safe probe payloads from the base catalog plus supplemental and
+local rows. That assembled profile is what release testing executes against
+hardware. There is no second command-profile implementation under the test
+tree.
 
 ## Supported Commands bitmap
 
@@ -137,8 +140,8 @@ hardware probe.
 transport, bridge and SDC routing paths without issuing a radio command.
 
 The wire schema is versioned in `hci_counters.h`. Fields are appended and the
-schema version is raised; existing fields are not renumbered. The Python harness
-checks that its decoder and the firmware schema stay in agreement.
+schema version is raised; existing fields are not renumbered. The public Python
+library checks that its decoder and the firmware schema stay in agreement.
 
 One reason the counters exist is the measured nRF52840 SDC ACL behavior: a
 packet beyond the controller-advertised ACL credit can be accepted by the SDC
@@ -207,5 +210,9 @@ The full release runner is:
 python3 tests/harness/hcicontroller/release_test.py --help
 ```
 
-See `tests/README.md`, `tests/harness/README.md` and `RELEASE.md` for the release
-gate.
+The same command/event and transport modules are available to user validation
+programs through `python/hcicontroller/`; see [python/README.md](python/README.md).
+
+See [tests/README.md](tests/README.md) and
+[tests/harness/README.md](tests/harness/README.md) for the source checks,
+hardware harness, and validation entry points.

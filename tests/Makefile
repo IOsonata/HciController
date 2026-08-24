@@ -325,8 +325,7 @@ check-events:
 	@command -v $(PYTHON) >/dev/null 2>&1 || { \
 	  echo "[TEST] hci_connection_event_test.py skipped, no $(PYTHON)"; exit 0; }
 	@echo "[TEST] hci_connection_event_test.py"
-	@PYTHONPATH=$(THIS_DIR)/harness/lib $(PYTHON) \
-	  $(THIS_DIR)/harness/hcicontroller/hci_connection_event_test.py
+	@$(PYTHON) $(THIS_DIR)/harness/hcicontroller/hci_connection_event_test.py
 
 # A two controller run ended with LE Set Host Feature refused on both dongles
 # and the test printing PASS regardless, because teardown swallowed the status.
@@ -335,8 +334,7 @@ check-cis-cleanup:
 	@command -v $(PYTHON) >/dev/null 2>&1 || { \
 	  echo "[TEST] hci_cis_cleanup_test.py skipped, no $(PYTHON)"; exit 0; }
 	@echo "[TEST] hci_cis_cleanup_test.py"
-	@PYTHONPATH=$(THIS_DIR)/harness/lib $(PYTHON) \
-	  $(THIS_DIR)/harness/hcicontroller/hci_cis_cleanup_test.py
+	@$(PYTHON) $(THIS_DIR)/harness/hcicontroller/hci_cis_cleanup_test.py
 
 run: all check-project check-boards check-usb-desc check-usb-runtime \
      check-commands check-sdc-symbols check-smp check-events check-cis-cleanup

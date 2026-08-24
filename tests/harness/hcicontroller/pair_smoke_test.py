@@ -2,32 +2,28 @@
 """Two-dongle base validation for the HciController harness."""
 
 import argparse
-from pathlib import Path
 import struct
 import sys
 
-_HARNESS_DIR = Path(__file__).resolve().parents[1]
-if str(_HARNESS_DIR) not in sys.path:
-    sys.path.insert(0, str(_HARNESS_DIR))
-
-from lib.hci_core_conditions import (
+import _bootstrap  # noqa: F401
+from hcicontroller.hci_core_conditions import (
     EXPECTED_LE_SUPPORTED_STATES,
     FEAT_CIS_PERIPHERAL,
     feature,
     require_command_bit,
     validate_conditional_commands,
 )
-from lib.hci_pair import (
+from hcicontroller.hci_pair import (
     Hci,
     HciError,
     HciGone,
     disconnect_acl_pair,
     establish_legacy_acl_pair,
 )
-from lib.hci_transport import SelectionError
-from lib.pair_transport import resolve_pair
-from lib.profile import read_controller_capabilities
-from lib.results import ResultBook
+from hcicontroller.hci_transport import SelectionError
+from hcicontroller.pair_transport import resolve_pair
+from hcicontroller.profile import read_controller_capabilities
+from hcicontroller.results import ResultBook
 
 EXPECTED_CORE_VERSION = 0x10
 

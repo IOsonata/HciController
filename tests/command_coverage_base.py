@@ -318,11 +318,13 @@ def main(argv):
         print("no sdk-nrfxlib, opcode-table comparison skipped. Pass one as an argument or set NRFXLIB_DIR.")
         return 0
 
-    harness_lib = os.path.join(root, "tests", "harness", "lib")
-    sys.path.insert(0, harness_lib)
-    import hci_commands
+    python_root = os.path.join(root, "python")
+    sys.path.insert(0, python_root)
+    from hcicontroller import hci_commands
 
-    profile_path = os.path.join(harness_lib, "target_profile.py")
+    profile_path = os.path.join(
+        python_root, "hcicontroller", "target_profile.py"
+    )
     covered = literal_set(profile_path, "COVERED_OPCODES")
     excluded = literal_set(profile_path, "EXCLUDED_OPCODES")
 

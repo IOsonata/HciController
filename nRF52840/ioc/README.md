@@ -1,11 +1,19 @@
-# HciController nRF52840 Eclipse project
+# HciController nRF52840 IOcomposer Project
 
-This directory contains the Eclipse Embedded CDT managed project used to build
-HciController for nRF52840.
+This directory contains the IOcomposer project used to build HciController for
+nRF52840.
 
-It is not a generic generated IOsonata application. The project links the
-HciController sources with separately built IOsonata/TaktOS libraries, TinyUSB,
-Nordic nrfxlib MPSL and the multirole SoftDevice Controller.
+The project links HciController with IOsonata, TaktOS, TinyUSB, Nordic nrfxlib
+MPSL, and the multirole SoftDevice Controller.
+
+## Development environment
+
+Install IOcomposer before opening this project. The IOcomposer installer sets up
+the required compiler toolchains, SDK/external repositories, IOsonata, TaktOS,
+HciController, and the expected workspace layout. No manual SDK setup is
+required for the normal build path.
+
+See [../../BUILDING.md](../../BUILDING.md) for installation and build steps.
 
 ## Workspace layout
 
@@ -22,23 +30,24 @@ The project expects the normal IOcomposer sibling layout:
     TaktOS/
 ```
 
-The linker script itself is named in `.cproject` by basename. The project adds
-both the common IOsonata linker directory and the nRF52840 linker directory to
-the linker search path. This avoids embedding one machine-specific absolute
-workspace path into the script option.
+The linker script is named in the project configuration by basename. The project
+adds the common IOsonata linker directory and the nRF52840 linker directory to
+the linker search path instead of embedding one machine-specific absolute path.
 
-## Configurations
+## Build configurations
 
 | Configuration | Use | C++ linker script |
 | --- | --- | --- |
-| `Debug` | debugger/no bootloader development | `nrf52840_xxaa_sdc.ld` |
+| `Debug` | debugger/no-bootloader development | `nrf52840_xxaa_sdc.ld` |
 | `Release` | optimized no-bootloader build | `nrf52840_xxaa_sdc.ld` |
 | `Release_MBR` | USB DFU/MBR layout | `nrf52840_xxaa_sdc_mbr.ld` |
-| `Release_SD` | S140-compatible application-origin layout | `nrf52840_xxaa_s140_sdc.ld` |
+| `Release_SD` | S140-compatible application origin | `nrf52840_xxaa_s140_sdc.ld` |
 
-All HciController configurations use the nrfxlib multirole SDC. The `SD`/`MBR`
-names describe the flash/linker memory map, not a second HCI implementation and
-not a board selection.
+All configurations use the nrfxlib multirole SDC. The `SD` and `MBR` names
+describe the flash/linker memory map, not a second HCI implementation and not a
+board selection.
+
+For the standard UDG-NRF52840 with its USB DFU bootloader, use `Release_MBR`.
 
 ## Persistent HCI mode storage
 
@@ -78,8 +87,8 @@ settings         0x0FF000 .. 0x0FFFFF
 The linker script does not define an OTA bootloader region between those
 reservations. Do not infer an `NVM0` address such as `0xF5000` from the
 `Release_SD` configuration name or from a particular board. If a bootloader is
-installed, its occupied flash must be checked separately against the generated
-map and the exact IOsonata linker-script revision used for the build.
+installed, check its occupied flash against the generated map and the exact
+IOsonata linker-script revision used for the build.
 
 ### No bootloader (`Debug` / `Release`)
 
@@ -95,9 +104,9 @@ HciController uses only the first erase page of `NVM0` for the mode record.
 ## Board selection
 
 `nRF52840/src/board.h` owns the board policy and pin map. `BOARD` may be set by
-the build; otherwise UDG-NRF52840 is the default. The Eclipse configuration
-name selects a linker layout only. It does not select UDG, IBK, Thingy:91 or a
-WildThing board.
+the build; otherwise UDG-NRF52840 is the default. The IOcomposer build
+configuration selects a linker layout only. It does not select UDG, IBK,
+Thingy:91, or a WildThing board.
 
 Current policies are:
 
@@ -113,29 +122,21 @@ Do not add a board-specific transport decision elsewhere in the HCI stack.
 
 ## Build dependencies
 
-Build the nRF52840 IOsonata and TaktOS libraries first. The managed project
-links, rather than compiles, those repositories.
+IOcomposer installs the required build dependencies and places them in the
+expected workspace. There is no separate manual nrfx, nrfxlib, TinyUSB,
+IOsonata, or TaktOS setup step for a normal HciController build.
 
-The SDC build also needs the nRF52 hard-float libraries from:
-
-```text
-external/sdk-nrfxlib/softdevice_controller/lib/nrf52/hard-float
-external/sdk-nrfxlib/mpsl/lib/nrf52/hard-float
-external/sdk-nrfxlib/mpsl/fem/common/lib/nrf52/hard-float
-```
-
+The project links the separately built IOsonata and TaktOS libraries and uses
+the nRF52 hard-float SDC/MPSL libraries under the IOcomposer `external` tree.
 TinyUSB sources are compiled by the application project.
 
-## Import/build notes
+## Open and build
 
-Import this directory as an existing Eclipse project.
+Open this project in IOcomposer, select the board and required build
+configuration, then build.
 
-If `.cproject` changes while the project is already imported, Eclipse may keep
-old generated makefiles and linked-resource state. Remove the workspace project
-without deleting files, remove the old configuration output directory, then
-re-import before judging a new project setting.
-
-Build products are written under the active configuration directory and include:
+Build products are written under the active configuration directory and
+include:
 
 ```text
 HciController.elf
@@ -144,8 +145,12 @@ HciController.bin
 HciController.map
 ```
 
-Keep the `.map` as release evidence. It is the easiest way to confirm that the
-build used the intended linker-owned memory layout.
+Keep the `.map` for release builds. It confirms the memory layout actually used
+by the linker.
+
+If project configuration files change while the project is already open in
+IOcomposer, remove the old generated configuration output before rebuilding so
+stale generated build files are not used.
 
 ## Language/runtime settings
 
@@ -156,12 +161,27 @@ The embedded project uses GNU C/C++ with:
 -fno-rtti
 ```
 
-Controller and real-time paths use static/caller-owned storage. Follow
-`../../CODING.md` for the IOsonata coding and review rules used by this project.
+Controller and real-time paths use static/caller-owned storage.
 
-## Release
+## Flashing UDG-NRF52840
 
-Do not tag a build based only on a successful compile. Run the host suite with
-the real nrfxlib headers, verify the release map, then run the appropriate
-hardware mode/persistence tests and official release harness described in
-`../../RELEASE.md`.
+For a standard UDG-NRF52840 USB DFU build:
+
+1. Build `Release_MBR`.
+2. Connect the dongle over USB.
+3. Press **SW2 (RESET)** to enter DFU mode.
+4. Use Nordic nRF Connect Programmer to load `HciController.hex`.
+5. Program the dongle and allow it to reset.
+
+See [../../GETTING_STARTED.md](../../GETTING_STARTED.md) for first-use and HCI
+mode instructions.
+
+## Validation
+
+Do not treat a successful compile as complete validation. Run the host/source
+suite, verify the generated map for the intended memory layout, and run the
+hardware harness appropriate to the board and transport.
+
+For the test entry points and two-controller hardware harness, see
+[../../tests/README.md](../../tests/README.md) and
+[../../tests/harness/README.md](../../tests/harness/README.md).

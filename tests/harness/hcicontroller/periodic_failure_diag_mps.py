@@ -9,18 +9,9 @@ already-received prefix when the request times out.
 """
 
 import sys
-from pathlib import Path
 
-_HERE = Path(__file__).resolve().parent
-_HARNESS_DIR = _HERE.parent
-_LIB_DIR = _HARNESS_DIR / "lib"
-
-for path in (_HERE, _HARNESS_DIR, _LIB_DIR):
-    text = str(path)
-    if text not in sys.path:
-        sys.path.insert(0, text)
-
-import hci_transport as transport
+import _bootstrap  # noqa: F401
+from hcicontroller import hci_transport as transport
 
 
 _native_usb_read_endpoint = transport.NativeUsbTransport._read_endpoint

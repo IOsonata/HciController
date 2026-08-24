@@ -2,19 +2,12 @@
 """Validate periodic advertising/ACL ordering with mandatory OTA proof."""
 
 import argparse
-from pathlib import Path
 import struct
 import sys
 import time
 
-_HARNESS_DIR = Path(__file__).resolve().parents[1]
-_LIB_DIR = _HARNESS_DIR / "lib"
-if str(_HARNESS_DIR) not in sys.path:
-    sys.path.insert(0, str(_HARNESS_DIR))
-if str(_LIB_DIR) not in sys.path:
-    sys.path.insert(0, str(_LIB_DIR))
-
-from lib.hci_pair import (
+import _bootstrap  # noqa: F401
+from hcicontroller.hci_pair import (
     EVT_DISCONNECTION_COMPLETE,
     H4_EVENT,
     Hci,
@@ -24,10 +17,10 @@ from lib.hci_pair import (
     prepare_controller,
     wait_acl_pair,
 )
-from lib.hci_transport import SelectionError
-from lib.pair_transport import resolve_pair
-from lib import periodic_features as periodic
-from lib.results import ResultBook
+from hcicontroller.hci_transport import SelectionError
+from hcicontroller.pair_transport import resolve_pair
+from hcicontroller import periodic_features as periodic
+from hcicontroller.results import ResultBook
 
 LE_PERIODIC_SYNC_LOST = 0x10
 SECOND_EXT_ADV_DATA = b"\x02\x01\x06"

@@ -2,16 +2,12 @@
 """Run legacy native USB periodic diagnostics one Event-IN packet per host read."""
 
 import sys
-from pathlib import Path
 
-_HERE = Path(__file__).resolve().parent
-if str(_HERE) not in sys.path:
-    sys.path.insert(0, str(_HERE))
-
+import _bootstrap  # noqa: F401
 # Install the semantic event validation used by the existing focused capture.
 import periodic_failure_diag_safe  # noqa: F401
 import periodic_failure_diag as diag
-from lib import hci_transport as transport
+from hcicontroller import hci_transport as transport
 
 
 _original_read_endpoint = transport.NativeUsbTransport._read_endpoint

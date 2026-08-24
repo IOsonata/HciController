@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 import errno
-import os
-import sys
 from types import SimpleNamespace
 
-sys.path.insert(0, os.path.dirname(__file__))
-import hci_transport as ht
+import _bootstrap  # noqa: F401
+from hcicontroller import hci_transport as ht
 
 
 def port(device, vid=None, pid=None, manufacturer=None, product=None,

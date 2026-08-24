@@ -6,17 +6,13 @@ import sys
 import time
 import zlib
 from collections import deque
-from pathlib import Path
 
-_HERE = Path(__file__).resolve().parent
-if str(_HERE) not in sys.path:
-    sys.path.insert(0, str(_HERE))
-
+import _bootstrap  # noqa: F401
 import periodic_failure_diag as diag
-import hci_ble_test as hci_test
-import hci_transport as transport
-from lib.hci_events import EVT_NUM_COMPLETED_PACKETS, H4_EVENT
-from lib.hci_pair import HciError, HciGone
+from hcicontroller import hci_ble_test as hci_test
+from hcicontroller import hci_transport as transport
+from hcicontroller.hci_events import EVT_NUM_COMPLETED_PACKETS, H4_EVENT
+from hcicontroller.hci_pair import HciError, HciGone
 
 
 # Counter block v8 appends thirteen packed EP1 acknowledgement records. Keep

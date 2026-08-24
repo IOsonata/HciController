@@ -22,6 +22,11 @@ CXXFLAGS ?= -std=$(HCI_CXX23_STD) -O0 -g3 -Wall -Wextra -Werror -Wshadow -Wundef
 
 include Makefile
 
+# The focused trace integration test compiles IOsonata device_intrf.cpp, which
+# contains a GNU C++ variable-length array. Keep that dependency diagnostic
+# visible, but do not promote it to an HciController host-test failure.
+$(HCI_TRACE_TARGET): CXXFLAGS += -Wno-error=vla
+
 USB_DESC_OBJ := $(BUILD_DIR)/usb_descriptors_test.o
 
 TESTS += hci_usb hci_usb_modeswitch hci_controller_invalid_host \
@@ -56,8 +61,7 @@ check-hci-transport:
 	@command -v $(PYTHON) >/dev/null 2>&1 || { \
 	  echo "[TEST] hci_transport_test.py skipped, no $(PYTHON)"; exit 0; }
 	@echo "[TEST] hci_transport_test.py"
-	@PYTHONPATH=$(THIS_DIR)/harness/lib $(PYTHON) \
-	  $(THIS_DIR)/harness/hcicontroller/hci_transport_test.py
+	@$(PYTHON) $(THIS_DIR)/harness/hcicontroller/hci_transport_test.py
 
 check-native-usb-review:
 	@command -v $(PYTHON) >/dev/null 2>&1 || { \

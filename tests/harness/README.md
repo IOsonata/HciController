@@ -1,81 +1,102 @@
-# BLE test harnesses
+# Hardware and release test harness
 
-`tests/harness/` is the official hardware/release test system for HciController.
-It is self-contained: harness code must not import or execute test code from any
-parallel legacy directory.
+`tests/harness/` contains the programs that talk to real BLE hardware. The
+reusable HCI, transport and BLE procedure implementation is public under
+`python/hcicontroller/`; the harness consumes that implementation directly
+rather than maintaining a private copy.
 
 ```text
+python/hcicontroller/            reusable HCI/BLE validation library
+
 tests/harness/
-    lib/             reusable HCI, USB, pair, capability and result helpers
-    hcicontroller/   HciController DUT validation and focused two-dongle tests
-    ble_device/      arbitrary BLE-device DUT validation using a dongle
+    hcicontroller/               HciController release/focused hardware tests
+    ble_device/                  arbitrary BLE-product DUT documentation
 ```
 
-## HciController DUT
-
-The HciController harness uses two dongles. Each controller is both DUT and peer
-for the other, allowing Central, Peripheral, periodic and isochronous roles to
-be exercised over the air.
-
-Main entry points:
+Install the Python package from the repository root before writing user-facing
+validation programs:
 
 ```sh
-python3 tests/harness/hcicontroller/pair_smoke_test.py
+python3 -m pip install -e ./python
+```
+
+The repository harness entry points also work directly from the source tree.
+They locate `python/hcicontroller/` themselves, so no `PYTHONPATH` setting or
+editable installation is required to run the HciController release tests.
+
+## HciController release harness
+
+The official two-controller release runner is:
+
+```sh
 python3 tests/harness/hcicontroller/release_test.py
-python3 tests/harness/hcicontroller/cis_pair_test.py
-python3 tests/harness/hcicontroller/cis_usb_pair_test.py
-python3 tests/harness/hcicontroller/probe_test.py --help
 ```
 
-`pair_smoke_test.py` and `release_test.py` accept
-`--transport {auto,serial,usb}`. `auto` prefers native Bluetooth USB HCI when
-native controllers are present, then falls back to serial H:4. With native USB,
-`--a` and `--b` select controllers by USB serial number; with serial H:4 they
-name device paths.
-
-A complete native USB release run with two explicitly selected dongles is:
+Transport selection is explicit when required:
 
 ```sh
+# Native Bluetooth USB HCI
 python3 tests/harness/hcicontroller/release_test.py \
-    --transport usb \
-    --a SERIAL_A \
-    --b SERIAL_B
+    --transport usb --a SERIAL_A --b SERIAL_B
+
+# Serial/CDC H:4
+python3 tests/harness/hcicontroller/release_test.py \
+    --transport serial --a /dev/cu.usbmodemA --b /dev/cu.usbmodemB
 ```
 
-The ordinary release phases use legacy Bluetooth USB HCI alternate setting 0.
-CIS, BIS and the combined ACL/ISO stress phase switch the same controllers to
-Bulk Serialization alternate setting 1 because HCI ISO is carried on the bulk
-endpoint pair there. The sequence then returns to legacy mode for later
-non-ISO phases, so the release runner also exercises alternate-setting changes
-between independent sessions.
+`--transport auto` prefers native USB when compatible native controllers are
+present and otherwise selects serial H:4.
 
-`cis_usb_pair_test.py` remains the focused native USB CIS/ISO diagnostic. It
-opens two native Bluetooth USB HCI controllers directly in Bulk Serialization
-mode. With exactly two attached it auto-selects both; otherwise use
-`--central USB-SERIAL --peripheral USB-SERIAL`.
+The release harness treats inability to exercise an advertised release feature
+as a failure/incomplete result rather than a passing skip. `N/A` is reserved for
+features outside the nRF52840 target profile.
 
-The reusable transport layer in `lib/hci_transport.py` supports serial H:4 and
-native Bluetooth USB HCI. Native USB legacy mode uses EP0/interrupt/bulk as
-specified by the Bluetooth USB transport; Bulk Serialization uses the bulk pair
-and HCI packet indicators, including ISO. `lib/pair_transport.py` resolves a
-stable two-controller pair for the release harness and derives Bulk
-Serialization specs only for ISO phases.
+Focused entry points include:
 
-## BLE-device DUT
+```text
+pair_smoke_test.py      profile + ACL role validation
+probe_test.py           broad command/radio probe
+cis_pair_test.py        CIS/ISO over H:4
+cis_usb_pair_test.py    CIS/ISO over native USB Bulk Serialization
+release_test.py         complete release acceptance run
+```
 
-`ble_device/` uses one HciController as the test instrument and treats another
-board or product as the DUT. A DUT adapter can control the product through its
-own UART, USB, RPC, GPIO or test firmware interface.
+## Native USB
 
-## Result rules
+Legacy Bluetooth USB HCI uses EP0 for commands, interrupt IN for events and bulk
+IN/OUT for ACL. Bulk Serialization uses alternate setting 1 of the Bluetooth
+interface and carries an HCI packet indicator on the bulk endpoint pair. The
+focused native USB CIS/ISO path uses Bulk Serialization so HCI ISO traffic can
+share the packetized bulk transport.
 
-A feature advertised by the DUT must be exercised positively. If the harness
-cannot create the state required to test an advertised feature, the release
-result is incomplete/failing rather than a passing `SKIP`.
+For more than two native controllers, select the required devices by USB serial
+number. Do not rely on enumeration order in an automated fixture.
 
-`N/A` is reserved for capability genuinely outside the DUT profile, for example
-Direction Finding on an nRF52840.
+## Reusable Python library
 
-The harness validates HCI/Link Layer behavior and BLE feature interaction. It
-does not replace Bluetooth SIG qualification, PTS certification evidence or RF
-laboratory measurements.
+The public library exposes the same controller access used by these release
+tests:
+
+- serial H:4 and native Bluetooth USB HCI discovery/transports;
+- HCI command/event and ACL handling;
+- two-controller coordination;
+- connected-role feature helpers;
+- periodic advertising, PAST and PAwR procedures;
+- CIS/BIS and HCI ISO helpers;
+- controller capability reads;
+- `DutControl` for product-specific automation;
+- result accounting.
+
+See [`../../python/README.md`](../../python/README.md) for direct use. A product
+validation program can use this library for exact HCI procedure control or use
+Bumble when it needs a complete Bluetooth host stack.
+
+## BLE product DUT use
+
+`tests/harness/ble_device/` describes using an HciController dongle as the radio
+test instrument while another board or product is the DUT. The DUT does not
+need to use IOsonata or HciController firmware.
+
+A product-specific adapter can implement `hcicontroller.DutControl` over UART,
+USB, RPC, GPIO or a dedicated test-firmware interface. BLE observations and
+peer-side protocol actions remain on the HciController side.

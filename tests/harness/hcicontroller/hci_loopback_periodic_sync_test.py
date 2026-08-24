@@ -2,26 +2,16 @@
 """Stress HCI PRBS loopback while an established periodic sync shares Event-IN."""
 
 import argparse
-from pathlib import Path
 import struct
 import sys
 import time
 
-_HERE = Path(__file__).resolve().parent
-_HARNESS_DIR = _HERE.parent
-_LIB_DIR = _HARNESS_DIR / "lib"
-if str(_HERE) not in sys.path:
-    sys.path.insert(0, str(_HERE))
-if str(_HARNESS_DIR) not in sys.path:
-    sys.path.insert(0, str(_HARNESS_DIR))
-if str(_LIB_DIR) not in sys.path:
-    sys.path.insert(0, str(_LIB_DIR))
-
+import _bootstrap  # noqa: F401
 import hci_loopback_test as loopback
-from lib.hci_pair import HciError, HciGone, prepare_controller
-from lib.hci_transport import SelectionError
-from lib.pair_transport import resolve_pair
-from lib import periodic_features as periodic
+from hcicontroller.hci_pair import HciError, HciGone, prepare_controller
+from hcicontroller.hci_transport import SelectionError
+from hcicontroller.pair_transport import resolve_pair
+from hcicontroller import periodic_features as periodic
 
 
 H4_COMMAND = 0x01

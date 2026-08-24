@@ -52,9 +52,9 @@ def main(argv):
     root = os.path.abspath(argv[1])
     header = read(os.path.join(root, "include", "hci_counters.h"))
     dcd = read(os.path.join(root, "nRF52840", "src", "dcd_nrf5x_hci.c"))
-    harness_lib = os.path.join(root, "tests", "harness", "lib")
-    wrapper = read(os.path.join(harness_lib, "hci_ble_test.py"))
-    implementation = read(os.path.join(harness_lib, "hci_ble_test_impl.py"))
+    python_lib = os.path.join(root, "python", "hcicontroller")
+    wrapper = read(os.path.join(python_lib, "hci_ble_test.py"))
+    implementation = read(os.path.join(python_lib, "hci_ble_test_impl.py"))
 
     firmware_version = c_define(header, "HCI_COUNTERS_VERSION")
     firmware_count = c_define(header, "HCI_COUNTERS_COUNT")

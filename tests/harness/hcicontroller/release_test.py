@@ -10,37 +10,28 @@ from pathlib import Path
 import subprocess
 import sys
 
-_HARNESS_DIR = Path(__file__).resolve().parents[1]
-_LIB_DIR = _HARNESS_DIR / "lib"
-_TESTS_DIR = _HARNESS_DIR.parent
-_REPO_ROOT = _TESTS_DIR.parent
-if str(_HARNESS_DIR) not in sys.path:
-    sys.path.insert(0, str(_HARNESS_DIR))
-if str(_LIB_DIR) not in sys.path:
-    sys.path.insert(0, str(_LIB_DIR))
-if str(Path(__file__).resolve().parent) not in sys.path:
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
-
-from lib import bis_features
-from lib import stress_features
-from lib.connected_features_pair import run_connected_feature_phase, run_subrate_phase
-from lib.core_advanced import run_core_advanced_phase
-from lib.hci_cis_usb_pair_test import NativeIsoHci
-from lib.hci_pair import Hci, HciError
-from lib.hci_transport import SelectionError
-from lib.pair_transport import (
+import _bootstrap  # noqa: F401
+from hcicontroller import bis_features
+from hcicontroller import stress_features
+from hcicontroller.connected_features_pair import run_connected_feature_phase, run_subrate_phase
+from hcicontroller.core_advanced import run_core_advanced_phase
+from hcicontroller.hci_cis_usb_pair_test import NativeIsoHci
+from hcicontroller.hci_pair import Hci, HciError
+from hcicontroller.hci_transport import SelectionError
+from hcicontroller.pair_transport import (
     bulk_spec,
     resolve_pair,
     spec_selector,
     transport_cli_args,
 )
-from lib.periodic_features import run_past_phase, run_pawr_phase, run_periodic_sync_phase
-from lib.profile import read_controller_capabilities
-from lib.recovery_features import run_recovery_phase
-from lib.results import FAIL, ResultBook
-from lib.stress_features import DEFAULT_STRESS_COUNT
+from hcicontroller.periodic_features import run_past_phase, run_pawr_phase, run_periodic_sync_phase
+from hcicontroller.profile import read_controller_capabilities
+from hcicontroller.recovery_features import run_recovery_phase
+from hcicontroller.results import FAIL, ResultBook
+from hcicontroller.stress_features import DEFAULT_STRESS_COUNT
 from pair_smoke_test import check_profile
 
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 _ESTABLISHMENT_ATTEMPTS = 3
 _ESTABLISHMENT_REASON = 0x3E
 

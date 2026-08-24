@@ -125,7 +125,9 @@ is not handed through GPREGRET/GPREGRET2 or another bootloader-owned retained
 register.
 
 The physical NVM address is linker-owned and must match the installed DFU
-layout. See `RELEASE.md` and `nRF52840/ioc/README.md`.
+layout. See [BUILDING.md](BUILDING.md) and
+[nRF52840/ioc/README.md](nRF52840/ioc/README.md) for the build configurations
+and memory maps.
 
 ## Diagnostic CDC log
 
@@ -170,10 +172,10 @@ maintain.
 
 The official hardware/release test system is under `tests/harness/`. Reusable
 HCI event, command, transport and CIS/ISO support lives in
-`tests/harness/lib/`; HciController entry points live in
+`python/hcicontroller/`; HciController entry points live in
 `tests/harness/hcicontroller/`.
 
-`tests/harness/lib/hci_transport.py` discovers native USB controllers through
+`python/hcicontroller/hci_transport.py` discovers native USB controllers through
 PyUSB/libusb. In legacy native mode it routes commands/events/ACL according to
 the Bluetooth USB endpoints. Bulk Serialization selects alternate setting 1 and
 carries the HCI packet indicator, including HCI ISO packets.
@@ -225,5 +227,6 @@ The native USB host tests exercise the real configuration descriptor and pin:
 - truncated bulk packets are rejected and the OUT endpoint is rearmed;
 - Bulk Serialization removes/adds the packet indicator below `DeviceIntrf`.
 
-See `tests/README.md`, `tests/harness/README.md` and `RELEASE.md` for the full
-release gate.
+See [tests/README.md](tests/README.md) and
+[tests/harness/README.md](tests/harness/README.md) for the source checks and
+hardware validation entry points.

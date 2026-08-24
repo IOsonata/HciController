@@ -22,12 +22,18 @@ UART and CDC are byte streams, so `HciIntrfTransport` adds/removes the H:4
 indicator below the packet `DeviceIntrf`. Native USB is already packet-oriented
 and plugs into the same controller without an H:4 adapter.
 
+The repository also includes the reusable Python HCI/validation library used by
+the hardware release tests. User validation programs can drive HciController
+directly through that library or use Bumble when a complete Bluetooth host stack
+is required.
+
 See also:
 
+- [GETTING_STARTED.md](GETTING_STARTED.md) to flash the released firmware, select an HCI mode, and start using HciController;
+- [python/README.md](python/README.md) for the direct Python HCI and BLE validation library;
+- [BUILDING.md](BUILDING.md) to install IOcomposer and build HciController from source;
 - [USB-HCI.md](USB-HCI.md) for the native USB transport;
 - [README-commands.md](README-commands.md) for command/profile coverage;
-- [RELEASE.md](RELEASE.md) for the release gate and memory-map checks;
-- [CODING.md](CODING.md) for the IOsonata coding/review rules used here;
 - [CHANGELOG.md](CHANGELOG.md) for release changes.
 
 ## Host modes and persistent selection
@@ -94,7 +100,7 @@ The linker owns `NVM0`. This is important on nRF52 because different bootloaders
 occupy different high-flash regions. The HCI mode code asks IOsonata for the
 linker-defined NVM region; it does not guess a flash address in C++.
 
-The nRF52840 Eclipse project has these configurations:
+The nRF52840 IOcomposer project has these configurations:
 
 | Configuration | Intended layout | Linker script |
 | --- | --- | --- |
@@ -122,9 +128,9 @@ linker-script revision and generated map used for the build.
 HciController uses one erase page at the start of `NVM0` for its mode record.
 The rest of the region remains available to the platform/application layout.
 
-A release build must verify the generated `.map`; the configuration name alone
-does not prove that the external IOsonata linker script has the intended
-address. See [RELEASE.md](RELEASE.md).
+For local builds, verify the generated `.map`; the configuration name alone does
+not prove that the external IOsonata linker script has the intended address.
+See [BUILDING.md](BUILDING.md).
 
 ## Native USB and the log port
 
@@ -147,6 +153,65 @@ adds the semihosting copy; it is not required for the USB log.
 
 See [USB-HCI.md](USB-HCI.md) for the endpoint layout, Bulk Serialization and USB
 state-machine behavior.
+
+## Python HCI and BLE validation library
+
+The host-side Python implementation used by the HciController release harness is
+available as an installable package under `python/hcicontroller/`.
+
+From the repository root:
+
+```sh
+python3 -m pip install -e ./python
+```
+
+The package supports both native Bluetooth USB HCI and serial H:4 and includes
+reusable command/event, pair, periodic advertising, PAwR, CIS/BIS, HCI ISO,
+capability, DUT-control and result helpers.
+
+Use the included package when the validation software needs direct HCI control,
+including exact controller procedures or timing required by a custom BLE
+product. Use Bumble when the validation program needs a complete Bluetooth host
+stack with higher-level GAP, GATT, L2CAP or related host protocols.
+
+A minimal direct-HCI program is:
+
+```python
+from hcicontroller import Hci, addr_str, discover
+
+spec = discover(kind="usb")
+if spec is None:
+    raise RuntimeError("no HciController found")
+
+hci = Hci(spec)
+try:
+    hci.setup()
+    identity, _, source = hci.identity()
+    print(addr_str(identity), source)
+finally:
+    hci.close()
+```
+
+For BLE product validation, HciController can supply the programmable peer/radio
+side while product-specific automation controls the DUT independently:
+
+```text
+Python validation program
+        |
+        | direct HCI library or Bumble
+        v
+UDG-NRF52840 + HciController
+        |
+        | Bluetooth LE over the air
+        v
+product under test
+```
+
+`hcicontroller.DutControl` defines optional DUT hooks for UART, USB, RPC, GPIO or
+a dedicated product test interface. The DUT does not need to use IOsonata.
+
+See [python/README.md](python/README.md) and
+[tests/harness/ble_device/README.md](tests/harness/ble_device/README.md).
 
 ## USB development identity
 
@@ -196,8 +261,8 @@ Product page: https://www.i-syst.com/products/usb_dongle
 IBK is the breakout/development board. It allows UART H:4 as well as both USB
 modes. Its user button cycles all three modes and the selection is persistent.
 UART pins in `board.h` are development defaults and must match the actual bench
-wiring. The board selection is independent of the Eclipse linker configuration;
-set `BOARD=IBK_NRF52840` when building IBK firmware.
+wiring. The board selection is independent of the IOcomposer build
+configuration; set `BOARD=IBK_NRF52840` when building IBK firmware.
 
 ### Thingy:91
 
@@ -234,17 +299,24 @@ mode-switch state machine.
 ## Repository layout
 
 ```text
-include/            public HCI/controller headers
-src/                generic HCI, transport, USB and nRF52840 target sources
-nRF52840/ioc/       Eclipse Embedded CDT managed project
-nRF52840/src/       board policy and pin mapping
-tests/              native host tests and repository checks
-tests/harness/      official hardware/release test system
+include/                public HCI/controller headers
+src/                    generic HCI, transport, USB and nRF52840 target sources
+nRF52840/ioc/           IOcomposer nRF52840 project
+nRF52840/src/           board policy and pin mapping
+python/hcicontroller/   reusable Python HCI/BLE validation library
+python/examples/        user-facing Python examples
+tests/                  native host tests and repository checks
+tests/harness/          official hardware/release test system
 ```
 
-## Prerequisites
+## IOcomposer development environment
 
-The normal IOcomposer workspace is:
+Install IOcomposer for the host platform before building HciController. The
+IOcomposer installer prepares the required compiler toolchains, SDK/external
+repositories, IOsonata, TaktOS, HciController, and the expected workspace. No
+manual SDK or dependency setup is required for the normal build path.
+
+The normal workspace is:
 
 ```text
 ~/IOcomposer/
@@ -257,28 +329,8 @@ The normal IOcomposer workspace is:
     TaktOS/
 ```
 
-Install IOcomposer for the host platform, then build the nRF52840 IOsonata and
-TaktOS libraries before building HciController. HciController links those
-libraries; it does not compile their sources into the application project.
-
-The current Eclipse project also links nrfxlib MPSL, MPSL FEM common and the
-nRF52 hard-float multirole SoftDevice Controller.
-
-For release reproducibility, record the exact IOsonata, TaktOS, TinyUSB, nrfx
-and sdk-nrfxlib revisions used by the release build. The installer normally
-follows repository HEADs, so the HciController tag by itself does not identify
-all binary inputs.
-
-## Eclipse Embedded CDT
-
-Import `HciController/nRF52840/ioc` as an existing project.
-
-If `.cproject` changes while the project is already imported, remove the
-workspace project without deleting files, delete the old generated build
-configuration directory, and re-import it. Eclipse caches generated makefiles
-and linked-resource state.
-
-Build outputs for the active configuration are:
+Open `HciController/nRF52840/ioc` in IOcomposer and select the required board and
+build configuration. Build outputs for the active configuration are:
 
 ```text
 HciController.elf
@@ -287,10 +339,13 @@ HciController.bin
 HciController.map
 ```
 
-The `.map` is part of release evidence because it confirms the actual linker
-memory layout used by the binary.
+See [BUILDING.md](BUILDING.md) for installation and build steps and
+[nRF52840/ioc/README.md](nRF52840/ioc/README.md) for configuration details.
 
-See [nRF52840/ioc/README.md](nRF52840/ioc/README.md) for configuration details.
+For reproducibility, record the exact IOsonata, TaktOS, TinyUSB, nrfx and
+sdk-nrfxlib revisions used by the build. The installer normally follows
+repository HEADs, so the HciController tag by itself does not identify all
+binary inputs.
 
 ## Architecture
 
@@ -320,8 +375,8 @@ counters and resource profile do not depend on a concrete UART or USB class.
 ## Controller capability profile
 
 The release command surface is not documented as a hand-maintained opcode count.
-The dispatch tables, supported-command bitmap, harness catalog and target-profile
-coverage are compared by the host test suite.
+The dispatch tables, supported-command bitmap, Python command catalog and
+target-profile coverage are compared by the host test suite.
 
 Major configured feature families include:
 
@@ -353,18 +408,20 @@ Do not claim encrypted ISO support for the nRF52840 release.
 
 ## Tests
 
-Run the host/source suite with the real nrfxlib tree available:
+Run the host/source suite with the IOcomposer workspace installed:
 
 ```sh
 make -C tests clean
-make -C tests run NRFXLIB_DIR=../external/sdk-nrfxlib
+make -C tests run
 ```
 
 The host suite exercises parser/routing behavior, SDC dispatch/resources, USB
 state machines, command/catalog consistency, counter schemas, board policy and
-persistent mode-switch wiring.
+persistent mode-switch wiring. The Python-side source/schema checks consume the
+canonical implementation under `python/hcicontroller/`.
 
-Hardware and over-the-air testing lives under `tests/harness/`.
+Hardware and over-the-air testing lives under `tests/harness/` and uses the same
+public Python implementation.
 
 For two native USB controllers:
 
@@ -383,7 +440,9 @@ A feature advertised by the release must be exercised positively. A test that
 cannot create the state required for an advertised feature is incomplete, not a
 passing skip.
 
-See [RELEASE.md](RELEASE.md) before creating `v1.0.0`.
+See [tests/README.md](tests/README.md) and
+[tests/harness/README.md](tests/harness/README.md) for test organization and
+hardware harness usage.
 
 ## Design constraints
 
@@ -396,8 +455,6 @@ See [RELEASE.md](RELEASE.md) before creating `v1.0.0`.
 - no exceptions or RTTI in the embedded build;
 - no Zephyr dependency in the controller firmware;
 - IOsonata and TaktOS remain separately built libraries.
-
-See [CODING.md](CODING.md) for the project coding/review rules.
 
 ## License
 

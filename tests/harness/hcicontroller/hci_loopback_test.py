@@ -2,19 +2,14 @@
 """Transport-neutral HCI PRBS loopback integrity and timing test."""
 
 import argparse
-from pathlib import Path
 import struct
 import sys
 import time
 import zlib
 
-_HARNESS_DIR = Path(__file__).resolve().parents[1]
-_LIB_DIR = _HARNESS_DIR / "lib"
-if str(_LIB_DIR) not in sys.path:
-    sys.path.insert(0, str(_LIB_DIR))
-
-import hci_ble_test
-import hci_transport
+import _bootstrap  # noqa: F401
+from hcicontroller import hci_ble_test
+from hcicontroller import hci_transport
 
 
 OP_VS_TRANSPORT_LOOPBACK = 0xFFF1

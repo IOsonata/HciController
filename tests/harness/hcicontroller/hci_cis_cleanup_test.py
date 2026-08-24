@@ -15,9 +15,9 @@ ordering is checked wherever python runs.
 import struct
 import sys
 
-from hci_events import EVT_DISCONNECTION_COMPLETE, H4_EVENT
-
-import hci_cis_cleanup as teardown
+import _bootstrap  # noqa: F401
+from hcicontroller.hci_events import EVT_DISCONNECTION_COMPLETE, H4_EVENT
+from hcicontroller import hci_cis_cleanup as teardown
 
 
 OP_DISCONNECT = teardown.OP_DISCONNECT
