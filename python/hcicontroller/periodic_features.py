@@ -325,7 +325,7 @@ def _observe_periodic_advertiser(
             continue
         for report in _extended_reports(body):
             if _periodic_source_matches(report, addr, addr_type, sid):
-                return report
+                return report[:4]
 
     _set_sync_scan(scanner, False, allow_fail=True)
     raise HciError(
@@ -719,7 +719,7 @@ def _observe_periodic_advertiser_pawr(
 
         for report in _extended_reports(body):
             if _periodic_source_matches(report, addr, addr_type, sid):
-                return report
+                return report[:4]
 
     _set_sync_scan(scanner, False, allow_fail=True)
 
