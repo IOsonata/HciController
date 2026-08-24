@@ -22,8 +22,9 @@ STATUS_CONTROLLER_BUSY = 0x3A
 ACL_PB_CONTINUING = 0x01
 ACL_PB_FIRST_AUTO_FLUSHABLE = 0x02
 ACL_PB_COMPLETE = 0x03
-PHY_CODED = 0x04
-PHY_ALL = _base.PHY_1M | _base.PHY_2M | PHY_CODED
+PHY_CODED_MASK = 0x04
+PHY_CODED = 0x03
+PHY_ALL = _base.PHY_1M | _base.PHY_2M | PHY_CODED_MASK
 PHY_OPTION_NO_PREFERENCE = 0x0000
 PHY_OPTION_CODED_S2 = 0x0001
 PHY_OPTION_CODED_S8 = 0x0002
@@ -259,7 +260,7 @@ def _run_coded_phy(book, label, central, peripheral,
     _request_phy(
         central,
         central_handle,
-        PHY_CODED,
+        PHY_CODED_MASK,
         expected_phy=PHY_CODED,
         phy_options=phy_options,
     )
