@@ -614,19 +614,31 @@ def _wait_pawr_data_request(hci, timeout=8.0):
 
 
 def _set_requested_pawr_subevent_data(hci, start, count):
-    # Supply one requested subevent. The Controller will request more later if
-    # necessary; one complete request/response cycle is the release criterion.
-    subevent = start
+    # Fill every subevent the Controller asked the Host to prepare. Leaving
+    # requested entries empty forces another 0x27/0x2082 round trip and makes
+    # the later response-slot deadline depend on unrelated Host event timing.
+    if count <= 0:
+        raise HciError("PAwR data request asked for zero subevents")
+
     marker = PAWR_SUBEVENT_MARKER
-    element = bytes([subevent, 0, 1, len(marker)]) + marker
-    payload = bytes([ADV_HANDLE_PERIODIC, 1]) + element
+    elements = []
+    for offset in range(count):
+        subevent = start + offset
+        if subevent > 0xFF:
+            raise HciError("PAwR data request exceeds the subevent field")
+        elements.append(bytes([subevent, 0, 1, len(marker)]) + marker)
+
+    payload = bytes([ADV_HANDLE_PERIODIC, count]) + b"".join(elements)
+    if len(payload) > 0xFF:
+        raise HciError("PAwR subevent data does not fit one HCI command")
+
     _command_ok(
         hci,
         OP_LE_SET_PERIODIC_ADV_SUBEVENT_DATA,
         payload,
         "LE Set Periodic Advertising Subevent Data",
     )
-    return subevent
+    return start
 
 
 def _service_pawr_advertiser_once(hci, deferred, timeout=0.01):
@@ -830,19 +842,20 @@ def _wait_sync_established_pawr(
 
 def _wait_pawr_periodic_report(
         scanner,
-        advertiser,
-        advertiser_deferred,
         sync_handle,
         marker,
         timeout=12.0):
-    """Wait for 0x25 with scanner priority while servicing advertiser 0x27."""
+    """Wait for response-critical 0x25 without polling the advertiser."""
     scanner_deferred = []
     reports = []
     deadline = time.time() + timeout
 
     while time.time() < deadline:
-        # The scanner is response-time critical. Check it first and keep this
-        # poll short so a received 0x25 reaches 0x2083 immediately.
+        # Once synchronized, the next Host action is the deadline-sensitive
+        # 0x2083 response command. Do not poll the other controller here: on
+        # native USB even a nominal zero-time read has a finite libusb timeout,
+        # and successful response timing must not depend on advertiser failure
+        # reports making that unrelated read return early.
         remaining = max(0.0, deadline - time.time())
         packet = scanner.read_packet(min(0.002, remaining))
 
@@ -879,15 +892,6 @@ def _wait_pawr_periodic_report(
                         return parsed
 
             scanner_deferred.append(packet)
-
-        # Only after checking the response-critical scanner do we service the
-        # advertiser. Use a non-blocking poll so an absent 0x27 cannot consume
-        # response-slot turnaround time.
-        _service_pawr_advertiser_once(
-            advertiser,
-            advertiser_deferred,
-            timeout=0.0,
-        )
 
     _base._restore(scanner, scanner_deferred)
 
@@ -992,8 +996,8 @@ def run_pawr_phase(book, label, advertiser, scanner):
             "LE Set Periodic Advertising Enable",
         )
 
-        # First PAwR data request establishes the single subevent exercised by
-        # this release test.
+        # Fill every subevent named by the first PAwR data request. The first
+        # one remains the deterministic scanner subevent exercised below.
         start_subevent, count = _wait_pawr_data_request(
             advertiser
         )
@@ -1003,8 +1007,8 @@ def run_pawr_phase(book, label, advertiser, scanner):
             count,
         )
 
-        # From this point forward one thread alternates between the two
-        # controllers. There is no background PyUSB reader.
+        # From this point through sync establishment one thread alternates
+        # between the two controllers. There is no background PyUSB reader.
         _create_periodic_sync_pawr(
             scanner,
             advertiser,
@@ -1027,10 +1031,11 @@ def run_pawr_phase(book, label, advertiser, scanner):
             subevent,
         )
 
+        # From the v2 periodic report to 0x2083, service only the scanner. The
+        # response slot has a real Too Late deadline; unrelated advertiser
+        # event polling is deliberately outside this interval.
         report = _wait_pawr_periodic_report(
             scanner,
-            advertiser,
-            advertiser_deferred,
             sync_handle,
             PAWR_SUBEVENT_MARKER,
             timeout=12.0,
@@ -1111,4 +1116,3 @@ def run_pawr_phase(book, label, advertiser, scanner):
             )
 
         _stop_periodic(advertiser)
-
