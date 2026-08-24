@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regression for independent PAwR advertiser subevent servicing."""
+"""Regression for independent PAwR advertiser subevent/response servicing."""
 
 import threading
 import time
@@ -22,10 +22,26 @@ def data_request(start=START_SUBEVENT, count=REQUEST_COUNT):
     return pf.H4_EVENT, pf.EVT_LE_META, body
 
 
+def response_report(marker=pf.PAWR_RESPONSE_MARKER):
+    # LE Periodic Advertising Response Report:
+    # subevent, advertising handle, subevent, tx status, num responses,
+    # then one response entry. The parser only needs data_len at entry + 5.
+    body = bytearray(5 + 6 + len(marker))
+    body[0] = pf.LE_PERIODIC_ADV_RESPONSE_REPORT
+    body[1] = pf.ADV_HANDLE_PERIODIC
+    body[2] = START_SUBEVENT
+    body[3] = 0
+    body[4] = 1
+    body[5 + 5] = len(marker)
+    body[5 + 6:] = marker
+    return pf.H4_EVENT, pf.EVT_LE_META, bytes(body)
+
+
 class FakeAdvertiser:
     def __init__(self):
         self.pending = [
             data_request(),
+            response_report(),
             (pf.H4_EVENT, 0xFF, b"unrelated"),
         ]
         self.commands = []
@@ -48,6 +64,7 @@ def main():
     service = pf._start_pawr_data_service(hci)
 
     assert hci.command_seen.wait(1.0)
+    assert service["response"].wait(1.0)
     pf._finish_pawr_data_service(hci, service)
 
     assert len(hci.commands) == 1
@@ -74,7 +91,12 @@ def main():
     assert second[3] == len(marker)
     assert second[4:] == marker
 
-    # Non-0x27 advertiser events are restored after the worker is stopped.
+    # The same advertiser-side reader remains armed for the response report;
+    # the marker-bearing 0x28 is consumed and signaled, not handed off to a
+    # second reader after 0x2083.
+    assert service["response"].is_set()
+
+    # Other advertiser events are restored only after the worker is stopped.
     assert hci.pending == [(pf.H4_EVENT, 0xFF, b"unrelated")]
     assert service["finished"] is True
     assert service["errors"] == []

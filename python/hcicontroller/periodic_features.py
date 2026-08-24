@@ -64,6 +64,8 @@ EXT_ADV_DISCOVERY_DATA = (
 PAWR_NUM_SUBEVENTS = 2
 PAWR_SUBEVENT_MARKER = b"HCI PAwR subevent"
 PAWR_RESPONSE_MARKER = b"HCI PAwR response"
+PAWR_RESPONSE_ATTEMPTS = 3
+PAWR_RESPONSE_WAIT = 0.5
 PAST_SERVICE_DATA = 0x4843
 
 
@@ -102,7 +104,8 @@ def _is_command_complete_for(packet, opcode):
     )
 
 
-def _verify_pawr_response_completion(hci, before, after):
+def _verify_pawr_response_completion(
+        hci, before, after, expected_count=1):
     """Reject duplicate 0x2083 completions and verify the firmware checkpoints."""
     duplicates = []
     kept = []
@@ -129,10 +132,12 @@ def _verify_pawr_response_completion(hci, before, after):
             % (len(duplicates), detail)
         )
 
-    if delta is not None and delta != (1, 1, 1, 1):
+    expected = (expected_count,) * 4
+    if delta is not None and delta != expected:
         raise HciError(
-            "PAwR delayed completion path mismatch: candidate=%u handler=%u "
-            "suppressed=%u sdc_complete=%u" % delta
+            "PAwR delayed completion path mismatch after %u response command(s): "
+            "candidate=%u handler=%u suppressed=%u sdc_complete=%u"
+            % ((expected_count,) + delta)
         )
 
 
@@ -297,12 +302,8 @@ def _periodic_source_matches(report, addr, addr_type, sid):
     )
 
 
-def _observe_periodic_advertiser(
-        scanner, addr, addr_type, sid=ADV_SID_PERIODIC, timeout=5.0):
-    # Multiple release benches can advertise the same discovery marker and SID
-    # at the same time. The advertising set is explicitly programmed with the
-    # local controller identity, so only that exact AdvA tuple belongs to this
-    # test pair. A marker match from another controller must be ignored.
+def _start_periodic_source_scan(scanner):
+    """Configure and start the scanner before the periodic advertiser runs."""
     _, own_addr_type, _ = scanner.identity()
     params = bytes([own_addr_type, 0x00, 0x01, 0x00])
     params += struct.pack("<HH", 0x0060, 0x0030)
@@ -313,6 +314,17 @@ def _observe_periodic_advertiser(
         "LE Set Extended Scan Parameters",
     )
     _set_sync_scan(scanner, True)
+
+
+def _observe_periodic_advertiser(
+        scanner, addr, addr_type, sid=ADV_SID_PERIODIC, timeout=5.0,
+        scan_started=False):
+    # Multiple release benches can advertise the same discovery marker and SID
+    # at the same time. The advertising set is explicitly programmed with the
+    # local controller identity, so only that exact AdvA tuple belongs to this
+    # test pair. A marker match from another controller must be ignored.
+    if not scan_started:
+        _start_periodic_source_scan(scanner)
 
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -367,9 +379,16 @@ def _sync_established_source(body):
     return body[5], body[6:12], body[4]
 
 
-def _create_periodic_sync(scanner, addr, addr_type, sid=ADV_SID_PERIODIC):
+def _create_periodic_sync(
+        scanner, addr, addr_type, sid=ADV_SID_PERIODIC, scan_started=False):
     observed_type, observed_addr, observed_sid, _ = (
-        _observe_periodic_advertiser(scanner, addr, addr_type, sid)
+        _observe_periodic_advertiser(
+            scanner,
+            addr,
+            addr_type,
+            sid,
+            scan_started=scan_started,
+        )
     )
 
     payload = bytes([0, observed_sid, observed_type]) + observed_addr
@@ -702,10 +721,31 @@ def _set_requested_pawr_subevent_data(hci, start, count):
     return start
 
 
+def _pawr_response_has_marker(body, marker):
+    if (
+            len(body) < 5
+            or body[0] != LE_PERIODIC_ADV_RESPONSE_REPORT
+            or body[1] != ADV_HANDLE_PERIODIC):
+        return False
+
+    at = 5
+    for _ in range(body[4]):
+        if len(body) < at + 6:
+            return False
+        data_len = body[at + 5]
+        if len(body) < at + 6 + data_len:
+            return False
+        if marker in body[at + 6:at + 6 + data_len]:
+            return True
+        at += 6 + data_len
+    return False
+
+
 def _start_pawr_data_service(hci):
-    """Service advertiser 0x27 requests independently of scanner timing."""
+    """Keep the advertiser reader armed for both 0x27 requests and 0x28."""
     service = {
         "stop": threading.Event(),
+        "response": threading.Event(),
         "deferred": [],
         "errors": [],
         "finished": False,
@@ -726,6 +766,11 @@ def _start_pawr_data_service(hci):
                     _set_requested_pawr_subevent_data(
                         hci, body[2], body[3]
                     )
+                    continue
+                if (kind == H4_EVENT and code == EVT_LE_META
+                        and _pawr_response_has_marker(
+                            body, PAWR_RESPONSE_MARKER)):
+                    service["response"].set()
                     continue
                 service["deferred"].append(packet)
         except (HciError, HciGone) as err:
@@ -845,8 +890,11 @@ def _wait_pawr_response_report(hci, marker, timeout=10.0):
         if packet is None:
             continue
         kind, code, body = packet
-        if kind == H4_EVENT and code == EVT_LE_META and len(body) >= 5 \
-                and body[0] == LE_PERIODIC_ADV_RESPONSE_REPORT:
+        if (
+                kind == H4_EVENT
+                and code == EVT_LE_META
+                and len(body) >= 5
+                and body[0] == LE_PERIODIC_ADV_RESPONSE_REPORT):
             if body[1] != ADV_HANDLE_PERIODIC:
                 deferred.append(packet)
                 continue
@@ -872,14 +920,19 @@ def run_pawr_phase(book, label, advertiser, scanner):
     sync_handle = None
     data_service = None
     pawr_diag_before = None
+    attempts_sent = 0
+    response_seen = False
     try:
         adv_id, adv_type, _ = prepare_controller(advertiser)
         prepare_controller(scanner)
         pawr_diag_before = _pawr_diag_counters(scanner)
         _configure_pawr(advertiser, adv_type)
 
-        # Keep the same start order as ordinary periodic advertising: the
-        # associated extended advertiser must be running before the PAwR train.
+        # Arm the scanner before the first PAwR transmission. The advertiser
+        # can then start into an already-running receive path instead of
+        # transmitting several events before the scanner begins listening.
+        _start_periodic_source_scan(scanner)
+
         _ext_adv_enable(advertiser, ADV_HANDLE_PERIODIC, True)
         _command_ok(
             advertiser,
@@ -891,12 +944,17 @@ def run_pawr_phase(book, label, advertiser, scanner):
         start, count = _wait_pawr_data_request(advertiser)
         subevent = _set_requested_pawr_subevent_data(advertiser, start, count)
 
-        # The advertiser and scanner are separate HCI controllers. Keep one
-        # reader per controller so 0x27 maintenance cannot delay scanner 0x25
-        # delivery or the following response-critical 0x2083 command.
+        # The advertiser-side reader is also the response receiver. Start it
+        # before synchronization and keep it running across every 0x2083
+        # attempt so an early 0x28 cannot be missed during a Host-reader handoff.
         data_service = _start_pawr_data_service(advertiser)
 
-        sync_source = _create_periodic_sync(scanner, adv_id, adv_type)
+        sync_source = _create_periodic_sync(
+            scanner,
+            adv_id,
+            adv_type,
+            scan_started=True,
+        )
         sync_handle, _ = _wait_sync_established(
             scanner,
             expected_source=sync_source,
@@ -905,28 +963,51 @@ def run_pawr_phase(book, label, advertiser, scanner):
             keep_scan=True,
         )
 
-        # The completed 0x2084 forms the Host/Controller boundary. Reports
-        # queued before that completion are discarded by the helper, and only
-        # a later v2 report for the selected subevent may drive 0x2083.
-        _set_pawr_sync_subevent(scanner, sync_handle, subevent)
+        for attempt in range(1, PAWR_RESPONSE_ATTEMPTS + 1):
+            if data_service["response"].is_set():
+                response_seen = True
+                break
+            if data_service["errors"]:
+                raise data_service["errors"][0]
 
-        report = _wait_pawr_periodic_report(
-            scanner,
-            sync_handle,
-            subevent,
-            PAWR_SUBEVENT_MARKER,
-            timeout=12.0,
-        )
+            # Reissue 0x2084 before every attempt. Its Command Complete is a
+            # fresh synchronization boundary that removes queued periodic
+            # reports from earlier response opportunities. Only the selected
+            # subevent observed after this boundary may supply Request_Event.
+            _set_pawr_sync_subevent(scanner, sync_handle, subevent)
 
-        # Queue the response before scan shutdown or advertiser-service cleanup
-        # can consume any part of the response-slot Host turnaround budget.
-        _set_pawr_response(
-            scanner,
-            sync_handle,
-            report[1],
-            report[2],
-            subevent,
-        )
+            report = _wait_pawr_periodic_report(
+                scanner,
+                sync_handle,
+                subevent,
+                PAWR_SUBEVENT_MARKER,
+                timeout=12.0,
+            )
+
+            _set_pawr_response(
+                scanner,
+                sync_handle,
+                report[1],
+                report[2],
+                subevent,
+            )
+            attempts_sent = attempt
+
+            # The advertiser reader was armed before 0x2083. Give this response
+            # opportunity one full scheduling window plus margin, then retry
+            # from a new 0x2084 boundary instead of waiting ten seconds on a
+            # single lost exchange.
+            deadline = time.monotonic() + PAWR_RESPONSE_WAIT
+            while time.monotonic() < deadline:
+                if data_service["response"].wait(
+                        min(0.05, max(0.0, deadline - time.monotonic()))):
+                    response_seen = True
+                    break
+                if data_service["errors"]:
+                    raise data_service["errors"][0]
+
+            if response_seen:
+                break
 
         _finish_pawr_data_service(advertiser, data_service)
         data_service = None
@@ -934,14 +1015,25 @@ def run_pawr_phase(book, label, advertiser, scanner):
 
         pawr_diag_after = _pawr_diag_counters(scanner)
         _verify_pawr_response_completion(
-            scanner, pawr_diag_before, pawr_diag_after
+            scanner,
+            pawr_diag_before,
+            pawr_diag_after,
+            expected_count=attempts_sent,
         )
 
-        _wait_pawr_response_report(advertiser, PAWR_RESPONSE_MARKER)
+        if not response_seen:
+            raise HciError(
+                "no PAwR response marker after %u fresh response attempts"
+                % attempts_sent
+            )
+
+        detail = "%s subevent %u + OTA response slot" % (label, subevent)
+        if attempts_sent > 1:
+            detail += " after %u attempts" % attempts_sent
         book.passed(
             "PAwR",
             "advertiser and scanner",
-            "%s subevent %u + OTA response slot" % (label, subevent),
+            detail,
         )
     except (HciError, HciGone) as err:
         book.failed("PAwR", "advertiser and scanner", str(err))
