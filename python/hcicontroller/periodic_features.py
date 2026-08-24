@@ -334,6 +334,39 @@ def _observe_periodic_advertiser(
     )
 
 
+def _is_sync_established_packet(packet):
+    kind, code, body = packet
+    return (
+        kind == H4_EVENT
+        and code == EVT_LE_META
+        and body
+        and body[0] in (
+            LE_PERIODIC_SYNC_ESTABLISHED,
+            LE_PERIODIC_SYNC_ESTABLISHED_V2,
+        )
+    )
+
+
+def _discard_pre_create_sync_events(hci):
+    """Drop Sync Established events older than the new Create Sync status."""
+    hci.pending = [
+        packet for packet in hci.pending
+        if not _is_sync_established_packet(packet)
+    ]
+
+
+def _sync_established_source(body):
+    """Return (address type, address, SID) from a Sync Established event."""
+    if (
+            len(body) < 12
+            or body[0] not in (
+                LE_PERIODIC_SYNC_ESTABLISHED,
+                LE_PERIODIC_SYNC_ESTABLISHED_V2,
+            )):
+        return None
+    return body[5], body[6:12], body[4]
+
+
 def _create_periodic_sync(scanner, addr, addr_type, sid=ADV_SID_PERIODIC):
     observed_type, observed_addr, observed_sid, _ = (
         _observe_periodic_advertiser(scanner, addr, addr_type, sid)
@@ -344,14 +377,24 @@ def _create_periodic_sync(scanner, addr, addr_type, sid=ADV_SID_PERIODIC):
     status, _ = scanner.command(
         OP_LE_PERIODIC_CREATE_SYNC, payload, allow_fail=True
     )
+
+    # Hci.command() restores asynchronous events consumed before the matching
+    # Command Status. A Sync Established event on that side of the boundary
+    # cannot belong to this Create Sync procedure and must not satisfy its
+    # terminal-event waiter.
+    _discard_pre_create_sync_events(scanner)
+
     if status != 0:
         _set_sync_scan(scanner, False, allow_fail=True)
         raise HciError("LE Periodic Advertising Create Sync returned %s"
                        % status_text(status))
 
+    return observed_type, observed_addr, observed_sid
 
-def _wait_sync_established(hci, timeout=10.0, require_v2=False,
-                           keep_scan=False):
+
+def _wait_sync_established(
+        hci, expected_source=None, timeout=10.0, require_v2=False,
+        keep_scan=False):
     deferred = []
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -359,11 +402,21 @@ def _wait_sync_established(hci, timeout=10.0, require_v2=False,
         if packet is None:
             continue
         kind, code, body = packet
-        if kind == H4_EVENT and code == EVT_LE_META and len(body) >= 4:
+        if kind == H4_EVENT and code == EVT_LE_META and len(body) >= 1:
             if body[0] in (LE_PERIODIC_SYNC_ESTABLISHED,
                            LE_PERIODIC_SYNC_ESTABLISHED_V2):
+                source = _sync_established_source(body)
+                if source is None:
+                    _base._restore(hci, deferred)
+                    raise HciError("malformed Periodic Sync Established event")
+
+                # There is only one outstanding Create Sync procedure in this
+                # harness. A terminal event for another advertiser is stale or
+                # unrelated and must not be restored to poison a later sync.
+                if expected_source is not None and source != expected_source:
+                    continue
+
                 if require_v2 and body[0] != LE_PERIODIC_SYNC_ESTABLISHED_V2:
-                    deferred.append(packet)
                     continue
                 if body[1] != 0:
                     _set_sync_scan(hci, False, allow_fail=True)
@@ -447,8 +500,10 @@ def run_periodic_sync_phase(book, label, advertiser, scanner):
         prepare_controller(scanner)
         _configure_periodic(advertiser, adv_type)
         _start_periodic(advertiser)
-        _create_periodic_sync(scanner, adv_id, adv_type)
-        sync_handle, _ = _wait_sync_established(scanner)
+        sync_source = _create_periodic_sync(scanner, adv_id, adv_type)
+        sync_handle, _ = _wait_sync_established(
+            scanner, expected_source=sync_source
+        )
         _wait_periodic_report(scanner, sync_handle, PERIODIC_MARKER)
         book.passed(
             "Periodic advertising",
@@ -841,9 +896,13 @@ def run_pawr_phase(book, label, advertiser, scanner):
         # delivery or the following response-critical 0x2083 command.
         data_service = _start_pawr_data_service(advertiser)
 
-        _create_periodic_sync(scanner, adv_id, adv_type)
+        sync_source = _create_periodic_sync(scanner, adv_id, adv_type)
         sync_handle, _ = _wait_sync_established(
-            scanner, timeout=12.0, require_v2=True, keep_scan=True
+            scanner,
+            expected_source=sync_source,
+            timeout=12.0,
+            require_v2=True,
+            keep_scan=True,
         )
 
         # The completed 0x2084 forms the Host/Controller boundary. Reports
