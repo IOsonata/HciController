@@ -843,18 +843,20 @@ def _wait_pawr_periodic_report(
         scanner,
         sync_handle,
         marker,
-        timeout=12.0):
-    """Wait for response-critical 0x25 without polling the advertiser."""
+        timeout=12.0,
+        advertiser=None,
+        advertiser_deferred=None):
+    """Wait for response-critical 0x25 and refill empty subevent data."""
     scanner_deferred = []
     reports = []
     deadline = time.time() + timeout
 
     while time.time() < deadline:
-        # Once synchronized, the next Host action is the deadline-sensitive
-        # 0x2083 response command. Do not poll the other controller here: on
-        # native USB even a nominal zero-time read has a finite libusb timeout,
-        # and successful response timing must not depend on advertiser failure
-        # reports making that unrelated read return early.
+        # Once a data-bearing report is received, the next Host action is the
+        # deadline-sensitive 0x2083 response command. Do not touch the
+        # advertiser after that report. An empty report has no usable response
+        # target, so it is safe to service pending 0x27 data requests before
+        # waiting for the next periodic event.
         remaining = max(0.0, deadline - time.time())
         packet = scanner.read_packet(min(0.002, remaining))
 
@@ -889,6 +891,24 @@ def _wait_pawr_periodic_report(
                     if marker in data:
                         _base._restore(scanner, scanner_deferred)
                         return parsed
+
+                    if not data and advertiser is not None:
+                        if advertiser_deferred is None:
+                            raise HciError(
+                                "PAwR advertiser deferred queue is missing"
+                            )
+                        while (
+                                advertiser.pending
+                                or advertiser.has_pending_input()):
+                            if not _service_pawr_advertiser_once(
+                                    advertiser,
+                                    advertiser_deferred,
+                                    timeout=0.0):
+                                break
+                        # This empty report is consumed as the refill trigger.
+                        # Restoring it would put an obsolete no-data event back
+                        # ahead of the fresh report required for 0x2083.
+                        continue
 
             scanner_deferred.append(packet)
 
@@ -1060,14 +1080,17 @@ def run_pawr_phase(book, label, advertiser, scanner):
             subevent,
         )
 
-        # From the v2 periodic report to 0x2083, service only the scanner. The
-        # response slot has a real Too Late deadline; unrelated advertiser
-        # event polling is deliberately outside this interval.
+        # Empty 0x25 reports mean the advertiser Host has not replenished the
+        # requested PAwR subevent data. Service those pending 0x27 requests only
+        # after an empty report. Once a marker-bearing 0x25 is received, return
+        # immediately so no advertiser access occurs before 0x2083.
         report = _wait_pawr_periodic_report(
             scanner,
             sync_handle,
             PAWR_SUBEVENT_MARKER,
             timeout=12.0,
+            advertiser=advertiser,
+            advertiser_deferred=advertiser_deferred,
         )
 
         if report[1] is None or report[2] is None:
