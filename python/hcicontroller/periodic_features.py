@@ -60,6 +60,7 @@ EXT_ADV_DISCOVERY_DATA = (
     + bytes([len(EXT_ADV_DISCOVERY_MARKER) + 1, 0x09])
     + EXT_ADV_DISCOVERY_MARKER
 )
+PAWR_NUM_SUBEVENTS = 2
 PAWR_SUBEVENT_MARKER = b"HCI PAwR subevent"
 PAWR_RESPONSE_MARKER = b"HCI PAwR response"
 PAST_SERVICE_DATA = 0x4843
@@ -584,7 +585,7 @@ def _configure_pawr(hci, own_addr_type):
         0x00FF,
         0x00FF,
         0,
-        2,      # avoid the Nordic DRGN-28994 Num_Subevents=1 corner
+        PAWR_NUM_SUBEVENTS,
         0x60,   # 120 ms; two subevents still fit in the 318.75 ms period
         0x40,   # 80 ms response delay gives the HCI Host time to reply
         0x50,
@@ -614,18 +615,18 @@ def _wait_pawr_data_request(hci, timeout=8.0):
 
 
 def _set_requested_pawr_subevent_data(hci, start, count):
-    # Fill every subevent the Controller asked the Host to prepare. Leaving
-    # requested entries empty forces another 0x27/0x2082 round trip and makes
-    # the later response-slot deadline depend on unrelated Host event timing.
-    if count <= 0:
-        raise HciError("PAwR data request asked for zero subevents")
+    # Fill every subevent the Controller asked the Host to prepare. The request
+    # sequence wraps from Num_Subevents - 1 back to zero; treating it as a
+    # monotonically increasing byte produces an invalid subevent number.
+    if start >= PAWR_NUM_SUBEVENTS:
+        raise HciError("PAwR data request start exceeds configured subevents")
+    if count <= 0 or count > PAWR_NUM_SUBEVENTS:
+        raise HciError("PAwR data request count exceeds configured subevents")
 
     marker = PAWR_SUBEVENT_MARKER
     elements = []
     for offset in range(count):
-        subevent = start + offset
-        if subevent > 0xFF:
-            raise HciError("PAwR data request exceeds the subevent field")
+        subevent = (start + offset) % PAWR_NUM_SUBEVENTS
         elements.append(bytes([subevent, 0, 1, len(marker)]) + marker)
 
     payload = bytes([ADV_HANDLE_PERIODIC, count]) + b"".join(elements)
