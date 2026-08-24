@@ -285,11 +285,23 @@ def _extended_reports(body):
     return reports
 
 
-def _observe_periodic_advertiser(scanner, timeout=5.0):
-    # Do not guess which AdvA the Controller put on air. Scan the actual
-    # extended advertisement and use the exact address type/address/SID that
-    # carried SyncInfo. A non-zero Periodic_Advertising_Interval proves this
-    # is the synchronizable extended advertisement, not just our marker.
+def _periodic_source_matches(report, addr, addr_type, sid):
+    report_type, report_addr, report_sid, periodic_interval, data = report
+    return (
+        report_type == addr_type
+        and report_addr == addr
+        and report_sid == sid
+        and periodic_interval != 0
+        and EXT_ADV_DISCOVERY_MARKER in data
+    )
+
+
+def _observe_periodic_advertiser(
+        scanner, addr, addr_type, sid=ADV_SID_PERIODIC, timeout=5.0):
+    # Multiple release benches can advertise the same discovery marker and SID
+    # at the same time. The advertising set is explicitly programmed with the
+    # local controller identity, so only that exact AdvA tuple belongs to this
+    # test pair. A marker match from another controller must be ignored.
     _, own_addr_type, _ = scanner.identity()
     params = bytes([own_addr_type, 0x00, 0x01, 0x00])
     params += struct.pack("<HH", 0x0060, 0x0030)
@@ -312,27 +324,19 @@ def _observe_periodic_advertiser(scanner, timeout=5.0):
         if kind != H4_EVENT or code != EVT_LE_META:
             continue
         for report in _extended_reports(body):
-            addr_type, addr, sid, periodic_interval, data = report
-            if (EXT_ADV_DISCOVERY_MARKER in data
-                    and periodic_interval != 0):
-                return addr_type, addr, sid, periodic_interval
+            if _periodic_source_matches(report, addr, addr_type, sid):
+                return report
 
     _set_sync_scan(scanner, False, allow_fail=True)
     raise HciError(
-        "periodic source extended advertisement with SyncInfo was not observed"
+        "expected periodic source extended advertisement with SyncInfo was not observed"
     )
 
 
 def _create_periodic_sync(scanner, addr, addr_type, sid=ADV_SID_PERIODIC):
     observed_type, observed_addr, observed_sid, _ = (
-        _observe_periodic_advertiser(scanner)
+        _observe_periodic_advertiser(scanner, addr, addr_type, sid)
     )
-
-    if (observed_type, observed_addr, observed_sid) != (addr_type, addr, sid):
-        print(
-            "   periodic source on-air tuple differs from identity/SID; "
-            "using observed values"
-        )
 
     payload = bytes([0, observed_sid, observed_type]) + observed_addr
     payload += struct.pack("<HHB", 0, 0x0200, 0)
@@ -672,8 +676,9 @@ def _service_pawr_advertiser_once(hci, deferred, timeout=0.01):
 
 
 def _observe_periodic_advertiser_pawr(
-        scanner, advertiser, advertiser_deferred, timeout=5.0):
-    """Find the PAwR advertiser while continuing to service its 0x27 events."""
+        scanner, advertiser, advertiser_deferred,
+        addr, addr_type, sid=ADV_SID_PERIODIC, timeout=5.0):
+    """Find this test pair's PAwR advertiser while servicing its 0x27 events."""
     _service_pawr_advertiser_once(
         advertiser, advertiser_deferred, timeout=0.01
     )
@@ -713,16 +718,13 @@ def _observe_periodic_advertiser_pawr(
             continue
 
         for report in _extended_reports(body):
-            addr_type, addr, sid, periodic_interval, data = report
-
-            if (EXT_ADV_DISCOVERY_MARKER in data
-                    and periodic_interval != 0):
-                return addr_type, addr, sid, periodic_interval
+            if _periodic_source_matches(report, addr, addr_type, sid):
+                return report
 
     _set_sync_scan(scanner, False, allow_fail=True)
 
     raise HciError(
-        "periodic source extended advertisement with SyncInfo was not observed"
+        "expected PAwR source extended advertisement with SyncInfo was not observed"
     )
 
 
@@ -734,15 +736,11 @@ def _create_periodic_sync_pawr(
             scanner,
             advertiser,
             advertiser_deferred,
+            addr,
+            addr_type,
+            sid,
         )
     )
-
-    if (observed_type, observed_addr, observed_sid) != (
-            addr_type, addr, sid):
-        print(
-            "   periodic source on-air tuple differs from identity/SID; "
-            "using observed values"
-        )
 
     _service_pawr_advertiser_once(
         advertiser, advertiser_deferred, timeout=0.01
