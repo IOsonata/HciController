@@ -701,6 +701,25 @@ def _finish_pawr_data_service(hci, service):
         raise service["errors"][0]
 
 
+def _discard_pre_pawr_sync_reports(hci, sync_handle):
+    """Remove same-sync periodic reports queued before 0x2084 completed."""
+    kept = []
+    for packet in hci.pending:
+        kind, code, body = packet
+        if kind == H4_EVENT and code == EVT_LE_META:
+            parsed = _periodic_report_data(body)
+            if (
+                    parsed is not None
+                    and parsed[0] == sync_handle
+                    and body[0] in (
+                        LE_PERIODIC_ADV_REPORT,
+                        LE_PERIODIC_ADV_REPORT_V2,
+                    )):
+                continue
+        kept.append(packet)
+    hci.pending = kept
+
+
 def _set_pawr_sync_subevent(hci, sync_handle, subevent):
     payload = struct.pack("<HHB", sync_handle, 0, 1) + bytes([subevent])
     _command_ok(
@@ -709,6 +728,38 @@ def _set_pawr_sync_subevent(hci, sync_handle, subevent):
         payload,
         "LE Set Periodic Sync Subevent",
     )
+
+    # Hci.command() restores asynchronous events observed before the matching
+    # Command Complete to pending. The completed 0x2084 is the synchronization
+    # boundary: those older periodic reports must not supply Request_Event for
+    # the following response command.
+    _discard_pre_pawr_sync_reports(hci, sync_handle)
+
+
+def _wait_pawr_periodic_report(
+        hci, sync_handle, subevent, marker, timeout=8.0):
+    """Wait for a post-0x2084 v2 report for the selected PAwR subevent."""
+    deferred = []
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        packet = hci.read_packet(min(0.2, max(0.0, deadline - time.time())))
+        if packet is None:
+            continue
+        kind, code, body = packet
+        if kind == H4_EVENT and code == EVT_LE_META:
+            parsed = _periodic_report_data(body)
+            if parsed is not None and parsed[0] == sync_handle:
+                if body[0] != LE_PERIODIC_ADV_REPORT_V2:
+                    continue
+                if parsed[2] != subevent:
+                    continue
+                if marker in parsed[3]:
+                    _base._restore(hci, deferred)
+                    return parsed
+                continue
+        deferred.append(packet)
+    _base._restore(hci, deferred)
+    raise HciError("timed out waiting for selected PAwR periodic advertising marker")
 
 
 def _set_pawr_response(hci, sync_handle, event_counter, request_subevent,
@@ -795,20 +846,18 @@ def run_pawr_phase(book, label, advertiser, scanner):
             scanner, timeout=12.0, require_v2=True, keep_scan=True
         )
 
-        # Hci.command() preserves asynchronous events that arrive while 0x2084
-        # waits for Command Complete. A selected marker-bearing 0x25 from that
-        # queue is valid and must remain available to the periodic-report wait.
+        # The completed 0x2084 forms the Host/Controller boundary. Reports
+        # queued before that completion are discarded by the helper, and only
+        # a later v2 report for the selected subevent may drive 0x2083.
         _set_pawr_sync_subevent(scanner, sync_handle, subevent)
 
-        report = _wait_periodic_report(
+        report = _wait_pawr_periodic_report(
             scanner,
             sync_handle,
+            subevent,
             PAWR_SUBEVENT_MARKER,
             timeout=12.0,
-            require_v2=True,
         )
-        if report[1] is None or report[2] is None:
-            raise HciError("PAwR periodic report had no event counter/subevent")
 
         # Queue the response before scan shutdown or advertiser-service cleanup
         # can consume any part of the response-slot Host turnaround budget.
