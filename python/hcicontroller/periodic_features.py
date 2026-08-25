@@ -62,10 +62,17 @@ EXT_ADV_DISCOVERY_DATA = (
     + EXT_ADV_DISCOVERY_MARKER
 )
 PAWR_NUM_SUBEVENTS = 2
+PAWR_INTERVAL_UNITS = 0x00FF
+PAWR_INTERVAL_SECONDS = PAWR_INTERVAL_UNITS * 0.00125
 PAWR_SUBEVENT_MARKER = b"HCI PAwR subevent"
 PAWR_RESPONSE_MARKER = b"HCI PAwR response"
 PAWR_RESPONSE_ATTEMPTS = 3
-PAWR_RESPONSE_WAIT = 0.5
+PAWR_RESPONSE_WAIT_CYCLES = 2
+PAWR_RESPONSE_WAIT_MARGIN = 0.100
+PAWR_RESPONSE_WAIT = (
+    PAWR_RESPONSE_WAIT_CYCLES * PAWR_INTERVAL_SECONDS
+    + PAWR_RESPONSE_WAIT_MARGIN
+)
 PAST_SERVICE_DATA = 0x4843
 
 
@@ -661,8 +668,8 @@ def _configure_pawr(hci, own_addr_type):
     payload = struct.pack(
         "<BHHHBBBBB",
         ADV_HANDLE_PERIODIC,
-        0x00FF,
-        0x00FF,
+        PAWR_INTERVAL_UNITS,
+        PAWR_INTERVAL_UNITS,
         0,
         PAWR_NUM_SUBEVENTS,
         0x60,   # 120 ms; two subevents still fit in the 318.75 ms period
@@ -993,10 +1000,9 @@ def run_pawr_phase(book, label, advertiser, scanner):
             )
             attempts_sent = attempt
 
-            # The advertiser reader was armed before 0x2083. Give this response
-            # opportunity one full scheduling window plus margin, then retry
-            # from a new 0x2084 boundary instead of waiting ten seconds on a
-            # single lost exchange.
+            # The advertiser reader was armed before 0x2083. Wait through two
+            # complete periodic cycles plus Host margin before declaring this
+            # response opportunity missed and starting a fresh 0x2084 boundary.
             deadline = time.monotonic() + PAWR_RESPONSE_WAIT
             while time.monotonic() < deadline:
                 if data_service["response"].wait(

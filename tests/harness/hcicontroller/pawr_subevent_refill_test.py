@@ -60,6 +60,12 @@ class FakeAdvertiser:
 
 
 def main():
+    # A response may be reported on a later PAwR event. Do not retry until the
+    # already-armed advertiser receiver has observed at least two full periodic
+    # cycles of the configured train.
+    assert pf.PAWR_RESPONSE_WAIT_CYCLES >= 2
+    assert pf.PAWR_RESPONSE_WAIT >= 2 * pf.PAWR_INTERVAL_SECONDS
+
     hci = FakeAdvertiser()
     service = pf._start_pawr_data_service(hci)
 
