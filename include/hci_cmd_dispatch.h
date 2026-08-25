@@ -1,12 +1,17 @@
-/*
- * Copyright (c) 2026 I-SYST inc.
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at https://mozilla.org/MPL/2.0/.
- *
- * SPDX-License-Identifier: MPL-2.0
- */
+/**-------------------------------------------------------------------------
+@file	hci_cmd_dispatch.h
+
+@brief	HCI command dispatch table and response formatting.
+
+		Defines command entries, handlers, guards, response types, status
+		codes, dispatcher state, and helpers for producing HCI Command
+		Complete and Command Status responses.
+
+@author	Nguyen Hoan Hoang
+@date	August 2026
+
+@license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
+----------------------------------------------------------------------------*/
 
 #ifndef HCI_CMD_DISPATCH_H
 #define HCI_CMD_DISPATCH_H

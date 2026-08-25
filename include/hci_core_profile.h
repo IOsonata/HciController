@@ -1,12 +1,17 @@
-/*
- * Copyright (c) 2026 I-SYST inc.
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at https://mozilla.org/MPL/2.0/.
- *
- * SPDX-License-Identifier: MPL-2.0
- */
+/**-------------------------------------------------------------------------
+@file	hci_core_profile.h
+
+@brief	Bluetooth Core version constants and product profile selection.
+
+		Defines the Bluetooth Core versions recognized by HciController and
+		the product-facing Core version exported by the current controller
+		profile.
+
+@author	Nguyen Hoan Hoang
+@date	August 2026
+
+@license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
+----------------------------------------------------------------------------*/
 
 #ifndef HCI_CORE_PROFILE_H
 #define HCI_CORE_PROFILE_H

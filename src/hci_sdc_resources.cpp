@@ -1,12 +1,16 @@
-/*
- * Copyright (c) 2026 I-SYST inc.
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at https://mozilla.org/MPL/2.0/.
- *
- * SPDX-License-Identifier: MPL-2.0
- */
+/**-------------------------------------------------------------------------
+@file	hci_sdc_resources.cpp
+
+@brief	SoftDevice Controller feature and memory configuration implementation.
+
+		Enables the release-profile SDC features, applies resource counts and
+		buffer sizing, and records the final memory requirement from sdc_cfg_set.
+
+@author	Nguyen Hoan Hoang
+@date	August 2026
+
+@license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
+----------------------------------------------------------------------------*/
 
 #include "hci_sdc_resources.h"
 #include "hci_core_profile.h"

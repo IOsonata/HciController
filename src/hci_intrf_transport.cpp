@@ -1,12 +1,16 @@
-/*
- * Copyright (c) 2026 I-SYST inc.
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at https://mozilla.org/MPL/2.0/.
- *
- * SPDX-License-Identifier: MPL-2.0
- */
+/**-------------------------------------------------------------------------
+@file	hci_intrf_transport.cpp
+
+@brief	H:4 byte-stream DeviceIntrf transport implementation.
+
+		Converts UART or CDC byte streams to HCI packets, handles framing and
+		resynchronization, and exposes the packet-oriented DeviceIntrf adapter.
+
+@author	Nguyen Hoan Hoang
+@date	August 2026
+
+@license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
+----------------------------------------------------------------------------*/
 
 #include "hci_intrf_transport.h"
 

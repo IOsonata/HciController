@@ -1,12 +1,17 @@
-/*
- * Copyright (c) 2026 I-SYST inc.
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at https://mozilla.org/MPL/2.0/.
- *
- * SPDX-License-Identifier: MPL-2.0
- */
+/**-------------------------------------------------------------------------
+@file	hci_usb_rx.cpp
+
+@brief	Native Bluetooth USB HCI receive path and Bulk OUT queue.
+
+		Implements native USB receive buffering, packet-length validation,
+		Bulk Serialization parsing, ISR-side Bulk OUT rearming, task-side
+		packet assembly, and synchronous SCO receive rearming.
+
+@author	Nguyen Hoan Hoang
+@date	August 2026
+
+@license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
+----------------------------------------------------------------------------*/
 
 #include "hci_usb_priv.h"
 

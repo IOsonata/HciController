@@ -1,12 +1,17 @@
-/*
- * Copyright (c) 2026 I-SYST inc.
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at https://mozilla.org/MPL/2.0/.
- *
- * SPDX-License-Identifier: MPL-2.0
- */
+/**-------------------------------------------------------------------------
+@file	hci_usb_priv.h
+
+@brief	Private native Bluetooth USB transport helpers.
+
+		Defines internal USB class constants, endpoint transfer compatibility
+		wrappers, shared transport state, and private receive/transmit helpers
+		used by the native HCI USB modules.
+
+@author	Nguyen Hoan Hoang
+@date	August 2026
+
+@license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
+----------------------------------------------------------------------------*/
 
 #ifndef HCI_USB_PRIV_H
 #define HCI_USB_PRIV_H

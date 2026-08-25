@@ -1,14 +1,18 @@
-/*
- * board.h
- *
- * IOsonata board pin assignments.
- *
- * This header intentionally contains ONLY pin assignments for devices used on the board.
- * Naming convention:
- *   <DEV_PIN_NAME>_PORT
- *   <DEV_PIN_NAME>_PIN
- *   <DEV_PIN_NAME>_PINOP   (MCU dependent; use 0 for GPIO; Nordic uses 0)
- */
+/**-------------------------------------------------------------------------
+@file	board.h
+
+@brief	nRF52840 board pin assignments and HciController board policy.
+
+		Defines board-specific LEDs, buttons, UART pins, host transport policy,
+		mode-switch support, startup behavior, and UART flow-control mapping
+		for the supported nRF52840-based products and development boards.
+
+@author	Nguyen Hoan Hoang
+@date	August 2026
+
+@license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
+----------------------------------------------------------------------------*/
+
 #ifndef __BOARD_H__
 #define __BOARD_H__
 

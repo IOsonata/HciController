@@ -1,12 +1,16 @@
-/*
- * Copyright (c) 2026 I-SYST inc.
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at https://mozilla.org/MPL/2.0/.
- *
- * SPDX-License-Identifier: MPL-2.0
- */
+/**-------------------------------------------------------------------------
+@file	hci_nrf52840.h
+
+@brief	nRF52840 HciController target interface and runtime state.
+
+		Declares the nRF52840 target state, USB lifecycle hooks, retained reset
+		diagnostics, TaktOS integration, and the target instance factory.
+
+@author	Nguyen Hoan Hoang
+@date	August 2026
+
+@license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
+----------------------------------------------------------------------------*/
 
 #ifndef HCI_NRF52840_H
 #define HCI_NRF52840_H

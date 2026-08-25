@@ -1,12 +1,17 @@
-/*
- * Copyright (c) 2026 I-SYST inc.
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at https://mozilla.org/MPL/2.0/.
- *
- * SPDX-License-Identifier: MPL-2.0
- */
+/**-------------------------------------------------------------------------
+@file	hci_sdc.h
+
+@brief	Generic SoftDevice Controller HCI routing and flow-control interface.
+
+		Defines the SDC operation hooks, command dispatch state, supplemental
+		Core command support, ACL accounting, delayed-command tracking, and
+		controller-facing interface used by the nrfxlib adapter.
+
+@author	Nguyen Hoan Hoang
+@date	August 2026
+
+@license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
+----------------------------------------------------------------------------*/
 
 #ifndef HCI_SDC_H
 #define HCI_SDC_H

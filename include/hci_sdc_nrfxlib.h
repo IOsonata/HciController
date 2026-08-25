@@ -1,12 +1,16 @@
-/*
- * Copyright (c) 2026 I-SYST inc.
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at https://mozilla.org/MPL/2.0/.
- *
- * SPDX-License-Identifier: MPL-2.0
- */
+/**-------------------------------------------------------------------------
+@file	hci_sdc_nrfxlib.h
+
+@brief	nrfxlib SoftDevice Controller HCI command adapter declarations.
+
+		Declares initialization of the nrfxlib command table, startup No
+		Operation event support, and advertising-command-set reset handling.
+
+@author	Nguyen Hoan Hoang
+@date	August 2026
+
+@license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
+----------------------------------------------------------------------------*/
 
 #ifndef HCI_SDC_NRFXLIB_H
 #define HCI_SDC_NRFXLIB_H
