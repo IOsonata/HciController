@@ -4,8 +4,6 @@
 import struct
 import time
 
-import serial
-
 from hci_ble_test import (
     ERROR_NAMES,
     EVT_DISCONNECTION_COMPLETE,
@@ -38,46 +36,7 @@ def status_text(status):
 
 
 class IsoHci(Hci):
-    """HCI serial helper extended with H:4 ISO packets."""
-
-    def read_wire(self, timeout=1.0):
-        deadline = time.time() + timeout
-        try:
-            first = self.ser.read(1)
-        except (serial.SerialException, OSError) as err:
-            raise HciGone(str(err))
-
-        if not first:
-            return None
-
-        kind = first[0]
-        if kind == H4_EVENT:
-            header = self.read_exact(2, deadline)
-            body = self.read_exact(header[1], deadline)
-            if self.raw:
-                print("   rx evt %02x" % header[0], body.hex(" "))
-            self.on_event(header[0], body)
-            return kind, header[0], body
-
-        if kind == H4_ACL:
-            header = self.read_exact(4, deadline)
-            length = struct.unpack("<H", header[2:4])[0]
-            body = self.read_exact(length, deadline)
-            if self.raw:
-                print("   rx acl", header.hex(" "), body.hex(" "))
-            return kind, None, header + body
-
-        if kind == H4_ISO:
-            header = self.read_exact(4, deadline)
-            length = struct.unpack("<H", header[2:4])[0] & 0x3FFF
-            body = self.read_exact(length, deadline)
-            if self.raw:
-                print("   rx iso", header.hex(" "), body.hex(" "))
-            return kind, None, header + body
-
-        raise HciError(
-            "bad H:4 packet indicator 0x%02X, stream out of sync" % kind
-        )
+    """HCI helper extended with H:4 ISO transmit support."""
 
     def send_iso(self, handle, sequence, sdu):
         if len(sdu) > 0x0FFF:
