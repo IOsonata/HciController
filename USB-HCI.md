@@ -109,7 +109,7 @@ The release board policy is:
 
 | Board | Runtime modes | Button sequence |
 | --- | --- | --- |
-| UDG-NRF52840x | USB H:4, native USB HCI | USB H:4 <-> native |
+| UDG-NRF52840 family | USB H:4, native USB HCI | USB H:4 <-> native |
 | IBK-NRF52840 | UART H:4, USB H:4, native USB HCI | UART -> USB H:4 -> native -> UART |
 | Thingy:91 | UART H:4 only | none |
 | WildThing51 | UART H:4 only | none |

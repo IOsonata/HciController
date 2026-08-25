@@ -65,7 +65,7 @@ NVM0             0x0DD000 .. 0x0DFFFF
 USB DFU loader   0x0E0000 ..
 ```
 
-This is the UDG-NRF52840x USB-DFU layout. At startup the release log should
+This is the UDG-NRF52840 family USB-DFU layout. At startup the release log should
 include:
 
 ```text
