@@ -173,9 +173,10 @@ _impl.AttServer = AttServer
 # Counter block v5 appended four PAwR checkpoints after the two SDC pool
 # figures. Version 6 appends the Controller-to-Host ACL fetch/accept checkpoints
 # at 38 and 39. Version 7 appends the nRF52840 legacy USB Event-IN checkpoints
-# at 40 through 48. The implementation module intentionally keeps the older
-# table stable, so extend its presentation here without shifting prior indices.
-COUNTER_VERSION = 7
+# at 40 through 48. Version 8 appends the packed EP1 acknowledgement trace at
+# 49 through 61. Those words are snapshots, not monotonic counters, so they are
+# decoded separately and never included in delta calculations.
+COUNTER_VERSION = 8
 _impl.COUNTER_VERSION = COUNTER_VERSION
 _COUNTER_EXTRA_NAMES = (
     (34, "PAwR delayed candidates"),
@@ -194,6 +195,25 @@ _COUNTER_EXTRA_NAMES = (
     (47, "USB Event-IN late status"),
     (48, "USB Event-IN/EPOUT2 END overlap"),
 )
+_COUNTER_TRACE_FIRST = 49
+_COUNTER_TRACE_COUNT = 13
+
+
+def _print_event_ack_trace(values):
+    """Decode the version-8 packed EP1 ACK trace without treating it as counters."""
+    trace = values[_COUNTER_TRACE_FIRST:
+                   _COUNTER_TRACE_FIRST + _COUNTER_TRACE_COUNT]
+    if not trace or not any(trace):
+        return
+
+    print("   USB Event-IN ACK trace (oldest to newest):")
+    for slot, word in enumerate(trace):
+        chunk = (word >> 24) & 0xFF
+        prefix = bytes((word & 0xFF,
+                        (word >> 8) & 0xFF,
+                        (word >> 16) & 0xFF))
+        print("      %2d: chunk %3d  data %s"
+              % (slot, chunk, prefix.hex(" ")))
 
 
 def print_counters(values, baseline=None):
@@ -236,6 +256,8 @@ def print_counters(values, baseline=None):
         print("   all zero")
 
     _impl.print_pool(values)
+    if baseline is None:
+        _print_event_ack_trace(values)
 
 
 _impl.print_counters = print_counters

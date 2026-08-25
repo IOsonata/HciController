@@ -63,6 +63,8 @@ def main(argv):
     impl_tree = ast.parse(implementation)
     host_version = assignment(wrapper_tree, "COUNTER_VERSION")
     extra_names = assignment(wrapper_tree, "_COUNTER_EXTRA_NAMES")
+    trace_first = assignment(wrapper_tree, "_COUNTER_TRACE_FIRST")
+    trace_count = assignment(wrapper_tree, "_COUNTER_TRACE_COUNT")
     base_names = assignment(impl_tree, "COUNTER_NAMES")
     pool_first = assignment(impl_tree, "POOL_FIRST_INDEX")
     pool_names = assignment(impl_tree, "POOL_NAMES")
@@ -77,8 +79,8 @@ def main(argv):
 
     extra_first = pool_first + len(pool_names)
     actual_indices = [entry[0] for entry in extra_names]
-    host_count = actual_indices[-1] + 1 if actual_indices else extra_first
-    expected_indices = list(range(extra_first, host_count))
+    named_count = actual_indices[-1] + 1 if actual_indices else extra_first
+    expected_indices = list(range(extra_first, named_count))
     if actual_indices != expected_indices:
         fail("Python extra counter indices %s are not contiguous from %d"
              % (actual_indices, extra_first))
@@ -86,12 +88,19 @@ def main(argv):
     if any(not isinstance(entry[1], str) or not entry[1] for entry in extra_names):
         fail("every appended counter needs a display name")
 
+    if trace_first != named_count:
+        fail("counter trace begins at %d but named fields end at %d"
+             % (trace_first, named_count))
+    if trace_count <= 0:
+        fail("counter trace length must be positive")
+    host_count = trace_first + trace_count
+
     if host_version == firmware_version:
         if host_count != firmware_count:
-            fail("counter schema v%d names %d fields but firmware emits %d"
+            fail("counter schema v%d covers %d fields but firmware emits %d"
                  % (host_version, host_count, firmware_count))
-        print("[ok] counter schema v%d covers all %d firmware fields"
-              % (firmware_version, firmware_count))
+        print("[ok] counter schema v%d covers %d named fields and %d trace words"
+              % (firmware_version, named_count, trace_count))
         return 0
 
     trace = diagnostic_trace_tail(header)
