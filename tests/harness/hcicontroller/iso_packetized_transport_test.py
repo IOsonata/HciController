@@ -4,8 +4,8 @@
 import struct
 
 import _bootstrap  # noqa: F401
-import hci_cis_pair_test as cis
 from hcicontroller import hci_iso as iso
+from hcicontroller import hci_cis_pair_test as cis
 
 
 class FakePacketTransport:
