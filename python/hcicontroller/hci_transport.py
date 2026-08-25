@@ -9,7 +9,9 @@ Bluetooth USB transfers and keeps it when Bulk Serialization is selected.
 
 import errno
 import sys
+import threading
 import time
+from collections import deque
 
 H4_COMMAND = 0x01
 H4_ACL = 0x02
@@ -331,6 +333,20 @@ class SerialH4Transport:
         except (self._serial_module.SerialException, OSError) as err:
             raise TransportGone(str(err))
 
+    def read_exact(self, count, deadline):
+        data = b""
+        while len(data) < count:
+            if time.time() > deadline:
+                raise TransportError("timed out after %d of %d bytes"
+                                     % (len(data), count))
+            try:
+                chunk = self.ser.read(count - len(data))
+            except (self._serial_module.SerialException, OSError) as err:
+                raise TransportGone(str(err))
+            if chunk:
+                data += chunk
+        return data
+
     @staticmethod
     def _expected_length(data):
         if not data:
@@ -407,6 +423,11 @@ class SerialH4Transport:
 
 class NativeUsbTransport:
     name = "usb-native"
+    # libusb timeout 0 keeps a synchronous transfer submitted until it either
+    # completes or the endpoint session changes. Repeated short interrupt-IN
+    # timeouts can surface EIO on macOS while the controller is completely idle.
+    # close() reselects the current alternate setting to terminate these reads.
+    _READER_TIMEOUT_MS = 0
 
     def __init__(self, device, bulk_serialization=False):
         try:
@@ -424,6 +445,9 @@ class NativeUsbTransport:
         self._prefetched = []
         self._event_rx = bytearray()
         self._bulk_rx = bytearray()
+        self.event_read_size = 0
+        self.bulk_read_size = 0
+        self._init_reader_state()
         self.interface_number = self._find_interface_number()
 
         try:
@@ -452,9 +476,17 @@ class NativeUsbTransport:
                 raise TransportError("Bluetooth USB interface alternate %d missing"
                                      % alt)
             self._open_endpoints(interface)
+            self._start_readers()
         except Exception:
             self.close()
             raise
+
+    def _init_reader_state(self):
+        self._reader_stop = threading.Event()
+        self._reader_condition = threading.Condition()
+        self._reader_packets = deque()
+        self._reader_error = None
+        self._reader_threads = []
 
     def _find_interface_number(self):
         for config in self.device:
@@ -465,6 +497,13 @@ class NativeUsbTransport:
                         getattr(interface, "bAlternateSetting", 0) == 0):
                     return interface.bInterfaceNumber
         raise TransportError("device has no Bluetooth HCI USB interface")
+
+    @staticmethod
+    def _endpoint_mps(endpoint, label):
+        size = int(getattr(endpoint, "wMaxPacketSize", 0)) & 0x07FF
+        if size <= 0:
+            raise TransportError("%s has invalid max packet size" % label)
+        return size
 
     def _open_endpoints(self, interface):
         self.event_ep = None
@@ -487,8 +526,112 @@ class NativeUsbTransport:
             raise TransportError("Bluetooth USB bulk endpoints are missing")
         if not self.bulk_serialization and self.event_ep is None:
             raise TransportError("Bluetooth USB event endpoint is missing")
+        self.bulk_read_size = self._endpoint_mps(
+            self.bulk_in_ep, "Bluetooth USB bulk IN endpoint")
+        if self.event_ep is not None:
+            self.event_read_size = self._endpoint_mps(
+                self.event_ep, "Bluetooth USB event endpoint")
+
+    def _start_reader(self, name, endpoint, buffer, size,
+                      expected_fn, maximum, label, parser):
+        thread = threading.Thread(
+            target=self._reader_loop,
+            name=name,
+            args=(endpoint, buffer, size, expected_fn, maximum, label, parser),
+            daemon=True)
+        self._reader_threads.append(thread)
+        thread.start()
+
+    def _start_readers(self):
+        if self.bulk_serialization:
+            self._start_reader(
+                "hci-usb-bulk-serialized", self.bulk_in_ep, self._bulk_rx,
+                self.bulk_read_size, self._serialized_expected, 1025,
+                "USB Bulk Serialization packet", self._parse_serialized)
+            return
+
+        self._start_reader(
+            "hci-usb-event", self.event_ep, self._event_rx,
+            self.event_read_size, self._event_expected, 257,
+            "native USB event", self._parse_event)
+        self._start_reader(
+            "hci-usb-acl", self.bulk_in_ep, self._bulk_rx,
+            self.bulk_read_size, self._acl_expected, 1024,
+            "native USB ACL packet", self._parse_acl)
+
+    def _queue_reader_packet(self, packet):
+        with self._reader_condition:
+            self._reader_packets.append(packet)
+            self._reader_condition.notify()
+
+    def _fail_reader(self, error):
+        with self._reader_condition:
+            if self._reader_error is None:
+                self._reader_error = error
+            self._reader_stop.set()
+            self._reader_condition.notify_all()
+
+    def _reader_loop(self, endpoint, buffer, size,
+                     expected_fn, maximum, label, parser):
+        while not self._reader_stop.is_set():
+            try:
+                data = self._read_complete(
+                    endpoint, buffer, size, self._READER_TIMEOUT_MS,
+                    expected_fn, maximum, label)
+                if data is None:
+                    continue
+                if self._reader_stop.is_set():
+                    return
+                self._queue_reader_packet(parser(data))
+            except TransportError as err:
+                if self._reader_stop.is_set():
+                    return
+                self._fail_reader(err)
+                return
+            except Exception as err:
+                if self._reader_stop.is_set():
+                    return
+                self._fail_reader(
+                    TransportError("%s reader failed: %s" % (label, err)))
+                return
+
+    def _stop_readers(self):
+        stop = getattr(self, "_reader_stop", None)
+        if stop is None:
+            return
+        stop.set()
+        condition = getattr(self, "_reader_condition", None)
+        if condition is not None:
+            with condition:
+                condition.notify_all()
+
+        threads = list(getattr(self, "_reader_threads", ()))
+        if not threads:
+            return
+
+        # The readers use unlimited synchronous libusb transfers. HciController
+        # intentionally treats reselecting the current HCI alternate setting as
+        # an endpoint recovery point; rebuilding the endpoints terminates those
+        # outstanding IN transfers before the host releases the interface.
+        device = getattr(self, "device", None)
+        interface_number = getattr(self, "interface_number", None)
+        if device is not None and interface_number is not None:
+            alt = 1 if self.bulk_serialization else 0
+            try:
+                device.set_interface_altsetting(
+                    interface=interface_number,
+                    alternate_setting=alt)
+            except Exception:
+                pass
+
+        current = threading.current_thread()
+        for thread in threads:
+            if thread is not current:
+                thread.join()
+        self._reader_threads = []
 
     def close(self):
+        self._stop_readers()
         device = getattr(self, "device", None)
         if device is None:
             return
@@ -661,86 +804,44 @@ class NativeUsbTransport:
         return self._take_complete(buffer, expected_fn, maximum, label)
 
     def _read_endpoint(self, endpoint, size, timeout_ms):
-        if endpoint is getattr(self, "event_ep", None):
-            mps = int(getattr(endpoint, "wMaxPacketSize", 0)) & 0x07FF
-            if mps > 0:
-                size = min(int(size), mps)
         try:
-            data = endpoint.read(size, timeout=max(1, int(timeout_ms)))
+            data = endpoint.read(size, timeout=max(0, int(timeout_ms)))
             return bytes(data)
         except self._core.USBError as err:
             if self._timeout(err):
                 return None
-            raise self._classify_usb_error("native USB read", err)
+            address = getattr(endpoint, "bEndpointAddress", None)
+            operation = "native USB read"
+            if address is not None:
+                operation += " ep 0x%02X" % address
+            raise self._classify_usb_error(operation, err)
 
     def read_packet(self, timeout=1.0):
         if self._prefetched:
             return self._prefetched.pop(0)
 
-        deadline = time.monotonic() + max(0.0, timeout)
-        while True:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0 and timeout > 0:
-                return None
-            slice_ms = 1 if timeout <= 0 else max(1, min(20, int(remaining * 1000)))
-
-            if self.bulk_serialization:
-                data = self._read_complete(
-                    self.bulk_in_ep, self._bulk_rx, 1025, slice_ms,
-                    self._serialized_expected, 1025,
-                    "USB Bulk Serialization packet")
-                if data is not None:
-                    return self._parse_serialized(data)
-                if timeout <= 0 or time.monotonic() >= deadline:
+        timeout = max(0.0, timeout)
+        deadline = time.monotonic() + timeout
+        with self._reader_condition:
+            while True:
+                if self._reader_packets:
+                    return self._reader_packets.popleft()
+                if self._reader_error is not None:
+                    raise self._reader_error
+                if timeout <= 0:
                     return None
-                continue
-
-            if self._event_rx:
-                data = self._read_complete(
-                    self.event_ep, self._event_rx, 260, slice_ms,
-                    self._event_expected, 257, "native USB event")
-                if data is not None:
-                    return self._parse_event(data)
-                if timeout <= 0 or time.monotonic() >= deadline:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
                     return None
-                continue
-
-            if self._bulk_rx:
-                data = self._read_complete(
-                    self.bulk_in_ep, self._bulk_rx, 1024, slice_ms,
-                    self._acl_expected, 1024, "native USB ACL packet")
-                if data is not None:
-                    return self._parse_acl(data)
-                if timeout <= 0 or time.monotonic() >= deadline:
-                    return None
-                continue
-
-            data = self._read_complete(
-                self.event_ep, self._event_rx, 260, slice_ms,
-                self._event_expected, 257, "native USB event")
-            if data is not None:
-                return self._parse_event(data)
-            if self._event_rx:
-                if timeout <= 0 or time.monotonic() >= deadline:
-                    return None
-                continue
-
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                return None
-            slice_ms = max(1, min(20, int(remaining * 1000)))
-            data = self._read_complete(
-                self.bulk_in_ep, self._bulk_rx, 1024, slice_ms,
-                self._acl_expected, 1024, "native USB ACL packet")
-            if data is not None:
-                return self._parse_acl(data)
-            if timeout <= 0:
-                return None
+                self._reader_condition.wait(remaining)
 
     def has_pending_input(self):
         if self._prefetched:
             return True
-        packet = self.read_packet(0.0)
+        # The old synchronous nonblocking probe still spent at least one
+        # millisecond in endpoint.read(). Give the background readers the same
+        # opportunity to publish a transfer already pending in libusb.
+        packet = self.read_packet(0.001)
         if packet is None:
             return False
         self._prefetched.append(packet)

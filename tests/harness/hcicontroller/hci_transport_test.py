@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import errno
+import threading
+import time
 from types import SimpleNamespace
 
 import _bootstrap  # noqa: F401
@@ -58,27 +60,58 @@ class FakeUsbCore:
 
 
 class FakeEndpoint:
-    def __init__(self, chunks=()):
+    def __init__(self, chunks=(), max_packet_size=16):
         self.chunks = list(chunks)
+        self.wMaxPacketSize = max_packet_size
+        self.read_sizes = []
+        self._condition = threading.Condition()
 
     def read(self, size, timeout=1):
-        del timeout
-        if not self.chunks:
-            raise FakeUsbTimeoutError('timed out')
-        chunk = self.chunks.pop(0)
+        deadline = time.monotonic() + max(0, timeout) / 1000.0
+        with self._condition:
+            self.read_sizes.append(size)
+            while not self.chunks:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise FakeUsbTimeoutError('timed out')
+                self._condition.wait(remaining)
+            chunk = self.chunks.pop(0)
+        if isinstance(chunk, Exception):
+            raise chunk
         assert len(chunk) <= size
         return chunk
 
+    def feed(self, chunk):
+        with self._condition:
+            self.chunks.append(chunk)
+            self._condition.notify()
 
-def fake_native(event_chunks=(), bulk_chunks=(), bulk_serialization=False):
+
+def wait_for(predicate, timeout=0.5):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.001)
+    return predicate()
+
+
+def fake_native(event_chunks=(), bulk_chunks=(), bulk_serialization=False,
+                event_read_size=16, bulk_read_size=64):
     transport = ht.NativeUsbTransport.__new__(ht.NativeUsbTransport)
     transport._core = FakeUsbCore
     transport.bulk_serialization = bulk_serialization
+    transport._detached = False
     transport._prefetched = []
     transport._event_rx = bytearray()
     transport._bulk_rx = bytearray()
-    transport.event_ep = FakeEndpoint(event_chunks)
-    transport.bulk_in_ep = FakeEndpoint(bulk_chunks)
+    transport.event_read_size = event_read_size
+    transport.bulk_read_size = bulk_read_size
+    transport.event_ep = FakeEndpoint(event_chunks, event_read_size)
+    transport.bulk_in_ep = FakeEndpoint(bulk_chunks, bulk_read_size)
+    transport.device = None
+    transport._init_reader_state()
+    transport._start_readers()
     return transport
 
 
@@ -138,8 +171,6 @@ def main():
     original_enumerate = ht._enumerate_usb_devices
     ht._enumerate_usb_devices = missing_usb
     try:
-        # AUTO must still use CDC/UART H:4 when native USB support is
-        # unavailable in this Python environment.
         assert ht.discover('auto', ports=ports).kind == 'serial'
 
         try:
@@ -174,7 +205,6 @@ def main():
     else:
         raise AssertionError('multiple native controllers were silently selected')
 
-    # A STALL/PIPE is an endpoint error, not proof that the USB device vanished.
     transport = ht.NativeUsbTransport.__new__(ht.NativeUsbTransport)
     transport._core = FakeUsbCore
     pipe = FakeUsbError('Pipe error', errno.EPIPE, -9)
@@ -183,7 +213,6 @@ def main():
     assert not isinstance(classified, ht.TransportGone)
     assert 'Pipe error' in str(classified)
 
-    # libusb NO_DEVICE is the condition that means the controller disappeared.
     gone = FakeUsbError('No such device', errno.ENODEV, -4)
     classified = transport._classify_usb_error('native USB read', gone)
     assert isinstance(classified, ht.TransportGone)
@@ -194,37 +223,67 @@ def main():
     assert not isinstance(classified, ht.TransportGone)
     assert 'timed out' in str(classified)
 
-    # macOS/libusb may return a partial interrupt transfer when the short
-    # polling timeout expires between USB transactions. Preserve the fragment
-    # and finish exactly the HCI event length on the next read.
+    event = bytes([0x3E, 44]) + bytes(range(44))
+    transport = fake_native(
+        event_chunks=[event[:16], event[16:32], event[32:]])
+    try:
+        packet = transport.read_packet(0.2)
+        assert packet == (ht.H4_EVENT, 0x3E, event[2:])
+        assert len(transport.event_ep.read_sizes) >= 3
+        assert all(size == 16 for size in transport.event_ep.read_sizes)
+        assert not transport._event_rx
+    finally:
+        transport.close()
+
     event = bytes([0x3E, 39]) + bytes(range(39))
     transport = fake_native(event_chunks=[event[:11]])
-    assert transport.read_packet(0.0) is None
-    assert bytes(transport._event_rx) == event[:11]
-    transport.event_ep.chunks.extend([event[11:27], event[27:]])
-    packet = transport.read_packet(0.2)
-    assert packet == (ht.H4_EVENT, 0x3E, event[2:])
-    assert not transport._event_rx
+    try:
+        assert wait_for(lambda: bytes(transport._event_rx) == event[:11])
+        assert transport.read_packet(0.0) is None
+        transport.event_ep.feed(event[11:27])
+        transport.event_ep.feed(event[27:])
+        packet = transport.read_packet(0.2)
+        assert packet == (ht.H4_EVENT, 0x3E, event[2:])
+        assert all(size == 16 for size in transport.event_ep.read_sizes)
+        assert not transport._event_rx
+    finally:
+        transport.close()
 
-    # The legacy ACL bulk endpoint needs the same protection. Split the HCI
-    # header itself so the expected length is not known until the second read.
     acl_payload = bytes(range(16))
     acl = bytes([0x01, 0x20, len(acl_payload), 0x00]) + acl_payload
-    transport = fake_native(bulk_chunks=[acl[:3], acl[3:8], acl[8:]])
-    packet = transport.read_packet(0.2)
-    assert packet == (ht.H4_ACL, None, acl)
-    assert not transport._bulk_rx
+    transport = fake_native(
+        bulk_chunks=[acl[:3], acl[3:8], acl[8:]], bulk_read_size=16)
+    try:
+        packet = transport.read_packet(0.2)
+        assert packet == (ht.H4_ACL, None, acl)
+        assert all(size == 16 for size in transport.bulk_in_ep.read_sizes)
+        assert not transport._bulk_rx
+    finally:
+        transport.close()
 
-    # Bulk Serialization already works on the board, but its host read uses
-    # the same libusb API. Keep its packet indicator and fragmented payload
-    # together if a platform ever exposes that transfer in pieces too.
     serialized = bytes([ht.H4_EVENT]) + event
     transport = fake_native(
-        bulk_chunks=[serialized[:7], serialized[7:19], serialized[19:]],
-        bulk_serialization=True)
-    packet = transport.read_packet(0.2)
-    assert packet == (ht.H4_EVENT, 0x3E, event[2:])
-    assert not transport._bulk_rx
+        bulk_chunks=[serialized[:16], serialized[16:32], serialized[32:]],
+        bulk_serialization=True, bulk_read_size=16)
+    try:
+        packet = transport.read_packet(0.2)
+        assert packet == (ht.H4_EVENT, 0x3E, event[2:])
+        assert all(size == 16 for size in transport.bulk_in_ep.read_sizes)
+        assert not transport._bulk_rx
+    finally:
+        transport.close()
+
+    transport = fake_native(
+        event_chunks=[FakeUsbError('No such device', errno.ENODEV, -4)])
+    try:
+        try:
+            transport.read_packet(0.2)
+        except ht.TransportGone as err:
+            assert 'No such device' in str(err)
+        else:
+            raise AssertionError('reader USB error was not propagated')
+    finally:
+        transport.close()
 
     print('hci_transport_test: PASS')
     return 0
