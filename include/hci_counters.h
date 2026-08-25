@@ -1,12 +1,17 @@
-/*
- * Copyright (c) 2026 I-SYST inc.
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at https://mozilla.org/MPL/2.0/.
- *
- * SPDX-License-Identifier: MPL-2.0
- */
+/**-------------------------------------------------------------------------
+@file	hci_counters.h
+
+@brief	HciController diagnostic counter readout definitions.
+
+		Defines the vendor-specific counter command, stable counter schema,
+		platform diagnostic range, and stack references used to expose
+		controller, transport, SDC, and USB diagnostics to the host.
+
+@author	Nguyen Hoan Hoang
+@date	August 2026
+
+@license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
+----------------------------------------------------------------------------*/
 
 #ifndef HCI_COUNTERS_H
 #define HCI_COUNTERS_H

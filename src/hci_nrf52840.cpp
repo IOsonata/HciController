@@ -1,12 +1,17 @@
-/*
- * Copyright (c) 2026 I-SYST inc.
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at https://mozilla.org/MPL/2.0/.
- *
- * SPDX-License-Identifier: MPL-2.0
- */
+/**-------------------------------------------------------------------------
+@file	hci_nrf52840.cpp
+
+@brief	nRF52840 MPSL, SDC, USB, and target lifecycle implementation.
+
+		Initializes MPSL and SDC resources, manages nRF52840 USB power and
+		clock sequencing, handles target interrupts, entropy, reset diagnostics,
+		and platform-specific runtime hooks.
+
+@author	Nguyen Hoan Hoang
+@date	August 2026
+
+@license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
+----------------------------------------------------------------------------*/
 
 #include "hci_nrf52840.h"
 

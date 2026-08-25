@@ -40,7 +40,7 @@ Initial HciController source release.
 
 ### Runtime mode selection
 
-- Persistent HCI mode selection on UDG-NRF52840x and IBK-NRF52840.
+- Persistent HCI mode selection on the UDG-NRF52840 family and IBK-NRF52840.
 - UDG cycles USB H:4 and native USB HCI.
 - IBK cycles UART H:4, USB H:4 and native USB HCI.
 - Mode changes stop the HCI runtime and USB/SDC/MPSL before writing internal

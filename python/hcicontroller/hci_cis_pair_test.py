@@ -1,12 +1,24 @@
 #!/usr/bin/env python3
-"""Two-controller CIS + HCI ISO data-path hardware test."""
+"""-------------------------------------------------------------------------
+@file	hci_cis_pair_test.py
+
+@brief	Two-controller CIS and HCI ISO data-path hardware test.
+
+		Establishes an ACL and CIS, configures HCI ISO input and output paths,
+		verifies bidirectional ISO SDUs over the air, and checks controller
+		counter deltas before cleanup.
+
+@author	Nguyen Hoan Hoang
+@date	August 2026
+
+@license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
+----------------------------------------------------------------------------"""
 
 import argparse
 import struct
 import sys
 import time
 
-import serial
 from serial.tools import list_ports
 
 import hci_commands
@@ -69,47 +81,7 @@ LE_EVENT_MASK_WITH_CIS = bytes.fromhex("ffffffffffffff1f")
 
 
 class IsoHci(Hci):
-    """The hardware HCI helper with H:4 ISO packet support."""
-
-    def read_wire(self, timeout=1.0):
-        deadline = time.time() + timeout
-        try:
-            first = self.ser.read(1)
-        except (serial.SerialException, OSError) as err:
-            raise HciGone(str(err))
-
-        if not first:
-            return None
-
-        kind = first[0]
-
-        if kind == H4_EVENT:
-            header = self.read_exact(2, deadline)
-            body = self.read_exact(header[1], deadline)
-            if self.raw:
-                print("   rx evt %02x" % header[0], body.hex(" "))
-            self.on_event(header[0], body)
-            return kind, header[0], body
-
-        if kind == H4_ACL:
-            header = self.read_exact(4, deadline)
-            length = struct.unpack("<H", header[2:4])[0]
-            body = self.read_exact(length, deadline)
-            if self.raw:
-                print("   rx acl", header.hex(" "), body.hex(" "))
-            return kind, None, header + body
-
-        if kind == H4_ISO:
-            header = self.read_exact(4, deadline)
-            length = struct.unpack("<H", header[2:4])[0] & 0x3FFF
-            body = self.read_exact(length, deadline)
-            if self.raw:
-                print("   rx iso", header.hex(" "), body.hex(" "))
-            return kind, None, header + body
-
-        raise HciError(
-            "bad H:4 packet indicator 0x%02X, stream out of sync" % kind
-        )
+    """The hardware HCI helper with H:4 ISO transmit support."""
 
     def send_iso(self, handle, sequence, sdu):
         if len(sdu) > 0x0FFF:

@@ -1,12 +1,17 @@
-/*
- * Copyright (c) 2026 I-SYST inc.
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at https://mozilla.org/MPL/2.0/.
- *
- * SPDX-License-Identifier: MPL-2.0
- */
+/**-------------------------------------------------------------------------
+@file	main.cpp
+
+@brief	HciController firmware entry point and board runtime selection.
+
+		Initializes board status, persistent transport mode selection, TaktOS,
+		the nRF52840 target, HCI application runtime, mode-switch handling,
+		and the firmware worker threads.
+
+@author	Nguyen Hoan Hoang
+@date	August 2026
+
+@license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
+----------------------------------------------------------------------------*/
 
 #include <stdbool.h>
 #include <stddef.h>

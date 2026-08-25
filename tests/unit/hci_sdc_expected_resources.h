@@ -1,3 +1,17 @@
+/**-------------------------------------------------------------------------
+@file	hci_sdc_expected_resources.h
+
+@brief	Expected SDC resource costs shared by resource tests.
+
+		Defines fixed expected memory terms used to compare the real nrfxlib
+		resource formulas, test stubs, and configured controller totals.
+
+@author	Nguyen Hoan Hoang
+@date	August 2026
+
+@license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
+----------------------------------------------------------------------------*/
+
 /*
  * What the resource configuration is supposed to cost.
  *
@@ -40,7 +54,7 @@
 #define EXPECT_PERIODIC_SYNC     1787   /* each, four rx buffers, with responses */
 #define EXPECT_PERIODIC_ADV_LIST   64   /* eight entries */
 #define EXPECT_SYNC_TRANSFER     2515   /* eighteen links */
-#define EXPECT_PERIODIC_ADV_RSP  1575   /* each, one tx and one rx buffer */
+#define EXPECT_PERIODIC_ADV_RSP  2014   /* each, three tx and two rx buffers */
 
 /* Isochronous channels, per term so a failure names which one moved. */
 #define EXPECT_ISO_CIG           339
@@ -53,9 +67,9 @@
 #define EXPECT_ISO_TX_SDU       1196
 #define EXPECT_ISO_TOTAL       17084
 
-/* Core 6.0 is 91296. FSU + SCI add 1236 + 948 for the Core 6.2 profile. */
-#define EXPECT_REQUIRED_6_0   91296
-#define EXPECT_REQUIRED_6_2   93480
+/* Core 6.0 is 91735. FSU + SCI add 1236 + 948 for the Core 6.2 profile. */
+#define EXPECT_REQUIRED_6_0   91735
+#define EXPECT_REQUIRED_6_2   93919
 #define EXPECT_REQUIRED       EXPECT_REQUIRED_6_2
 
 #endif

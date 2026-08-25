@@ -44,7 +44,7 @@ the selected mode is stored in NVM and survives reset and power cycle.
 
 | Board | HCI modes | Mode-button sequence |
 | --- | --- | --- |
-| I-SYST UDG-NRF52840x | USB H:4, native USB HCI | USB H:4 <-> native |
+| I-SYST UDG-NRF52840 family | USB H:4, native USB HCI | USB H:4 <-> native |
 | I-SYST IBK-NRF52840 | UART H:4, USB H:4, native USB HCI | UART -> USB H:4 -> native -> UART |
 | Nordic Thingy:91 | UART H:4 only | none |
 | I-SYST WildThing51 | UART H:4 only | none |
@@ -240,9 +240,9 @@ to keep synchronized.
 
 ## Reference hardware
 
-### UDG-NRF52840x
+### UDG-NRF52840 family
 
-The primary USB target is the I-SYST UDG-NRF52840x built on the BLYST840
+The primary USB target is the I-SYST UDG-NRF52840 family built on the BLYST840
 nRF52840 module.
 
 | Part | Connector |

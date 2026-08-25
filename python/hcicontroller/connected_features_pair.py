@@ -1,5 +1,18 @@
 #!/usr/bin/env python3
-"""Corrections for stateful release procedures built on connected_features."""
+"""-------------------------------------------------------------------------
+@file	connected_features_pair.py
+
+@brief	Stateful two-controller connected-feature release procedures.
+
+		Extends the connected-feature helpers with ACL fragment reassembly,
+		PHY and power sequencing, and OTA ACL verification used by release
+		tests.
+
+@author	Nguyen Hoan Hoang
+@date	August 2026
+
+@license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
+----------------------------------------------------------------------------"""
 
 import struct
 import time
@@ -22,6 +35,12 @@ STATUS_CONTROLLER_BUSY = 0x3A
 ACL_PB_CONTINUING = 0x01
 ACL_PB_FIRST_AUTO_FLUSHABLE = 0x02
 ACL_PB_COMPLETE = 0x03
+PHY_CODED_MASK = 0x04
+PHY_CODED = 0x03
+PHY_ALL = _base.PHY_1M | _base.PHY_2M | PHY_CODED_MASK
+PHY_OPTION_NO_PREFERENCE = 0x0000
+PHY_OPTION_CODED_S2 = 0x0001
+PHY_OPTION_CODED_S8 = 0x0002
 
 
 def wait_acl_marker(hci, expected_handle, expected_cid, expected_payload,
@@ -165,9 +184,10 @@ def _power_control(hci, handle):
     )
 
 
-def _request_phy(hci, handle, phy, expected_phy=None):
+def _request_phy(hci, handle, phy, expected_phy=None,
+                 phy_options=PHY_OPTION_NO_PREFERENCE):
     """Request a PHY preference and return the completed TX/RX PHYs."""
-    payload = struct.pack("<HBBBH", handle, 0, phy, phy, 0)
+    payload = struct.pack("<HBBBH", handle, 0, phy, phy, phy_options)
     status, _ = _command_status_retry(hci, _base.OP_LE_SET_PHY, payload)
     if status != 0:
         raise HciError("LE Set PHY returned %s" % status_text(status))
@@ -224,9 +244,71 @@ def _read_phy_exact(hci, handle, phy):
         )
 
 
+def _verify_acl_on_phy(central, peripheral,
+                       central_handle, peripheral_handle, marker_name):
+    """Prove bidirectional ACL transfer while the requested PHY is active."""
+    marker = (marker_name + " central->peripheral").encode("ascii")
+    central.send_acl(central_handle, _base.TEST_CID, marker)
+    if not wait_acl_marker(
+        peripheral, peripheral_handle, _base.TEST_CID, marker
+    ):
+        raise HciError(
+            "%s central -> peripheral ACL marker not received" % marker_name
+        )
+
+    marker = (marker_name + " peripheral->central").encode("ascii")
+    peripheral.send_acl(peripheral_handle, _base.TEST_CID, marker)
+    if not wait_acl_marker(
+        central, central_handle, _base.TEST_CID, marker
+    ):
+        raise HciError(
+            "%s peripheral -> central ACL marker not received" % marker_name
+        )
+
+
+def _run_coded_phy(book, label, central, peripheral,
+                   central_handle, peripheral_handle,
+                   phy_options, option_name):
+    """Switch to Coded PHY, prove OTA ACL traffic, then restore 1M."""
+    _request_phy(
+        central,
+        central_handle,
+        PHY_CODED_MASK,
+        expected_phy=PHY_CODED,
+        phy_options=phy_options,
+    )
+    _wait_peer_phy(peripheral, peripheral_handle, PHY_CODED)
+    _read_phy_exact(central, central_handle, PHY_CODED)
+    _read_phy_exact(peripheral, peripheral_handle, PHY_CODED)
+
+    marker_name = "%s Coded %s" % (label, option_name)
+    _verify_acl_on_phy(
+        central,
+        peripheral,
+        central_handle,
+        peripheral_handle,
+        marker_name,
+    )
+    book.passed(
+        "PHY",
+        marker_name,
+        "both controllers report Coded + bidirectional ACL",
+    )
+
+    _request_phy(
+        central,
+        central_handle,
+        _base.PHY_1M,
+        expected_phy=_base.PHY_1M,
+    )
+    _wait_peer_phy(peripheral, peripheral_handle, _base.PHY_1M)
+    _read_phy_exact(central, central_handle, _base.PHY_1M)
+    _read_phy_exact(peripheral, peripheral_handle, _base.PHY_1M)
+
+
 def _run_phy_round_trip(book, label, central, peripheral,
                         central_handle, peripheral_handle):
-    """Exercise PHY updates from both roles and restore the link to 1M."""
+    """Exercise 2M and Coded PHY updates, then leave the link on 1M."""
     _request_phy(
         peripheral, peripheral_handle, _base.PHY_2M,
         expected_phy=_base.PHY_2M,
@@ -234,20 +316,43 @@ def _run_phy_round_trip(book, label, central, peripheral,
     _wait_peer_phy(central, central_handle, _base.PHY_2M)
     book.passed("PHY", label + " peripheral request 2M")
 
-    # HCI LE Set PHY stores the local Host preference. After the Peripheral
-    # has requested 2M-only, a Central 1M-only request cannot by itself force
-    # 1M because the two Host preferences do not yet overlap. The Controller
-    # may therefore complete the Central request with the link unchanged at
-    # 2M. Record that completion, then update the Peripheral preference too.
+    # HCI LE Set PHY stores a local Host preference. The Central first asks for
+    # 1M while the Peripheral still prefers 2M-only. Then the Peripheral is
+    # changed to an all-PHY preference. The only PHY overlapping the Central's
+    # 1M-only preference is 1M, so this both restores 1M and leaves the peer
+    # permissive for the following Coded-PHY requests.
     _request_phy(central, central_handle, _base.PHY_1M)
     _request_phy(
-        peripheral, peripheral_handle, _base.PHY_1M,
+        peripheral,
+        peripheral_handle,
+        PHY_ALL,
         expected_phy=_base.PHY_1M,
     )
     _wait_peer_phy(central, central_handle, _base.PHY_1M)
     _read_phy_exact(central, central_handle, _base.PHY_1M)
     _read_phy_exact(peripheral, peripheral_handle, _base.PHY_1M)
-    book.passed("PHY", label + " both hosts return to 1M")
+    book.passed("PHY", label + " return to 1M")
+
+    _run_coded_phy(
+        book,
+        label,
+        central,
+        peripheral,
+        central_handle,
+        peripheral_handle,
+        PHY_OPTION_CODED_S2,
+        "S=2 preference",
+    )
+    _run_coded_phy(
+        book,
+        label,
+        central,
+        peripheral,
+        central_handle,
+        peripheral_handle,
+        PHY_OPTION_CODED_S8,
+        "S=8 preference",
+    )
 
 
 def run_connected_feature_phase(book, label, central, peripheral):

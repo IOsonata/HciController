@@ -1,12 +1,17 @@
-/*
- * Copyright (c) 2026 I-SYST inc.
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at https://mozilla.org/MPL/2.0/.
- *
- * SPDX-License-Identifier: MPL-2.0
- */
+/**-------------------------------------------------------------------------
+@file	hci_sdc_resources.h
+
+@brief	SoftDevice Controller feature and memory resource configuration.
+
+		Defines product profile counts, buffer sizes, and memory formulas used
+		to configure SDC and size the controller memory pool. Also declares
+		HciSdcResourcesApply() for applying that configuration.
+
+@author	Nguyen Hoan Hoang
+@date	August 2026
+
+@license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
+----------------------------------------------------------------------------*/
 
 #ifndef HCI_SDC_RESOURCES_H
 #define HCI_SDC_RESOURCES_H
@@ -51,7 +56,7 @@ extern "C" {
  *   parallel scan and initiate  384
  *   periodic adv set  753 each  periodic sync 1787 each with responses
  *   periodic adv list   8 each  sync transfer 2515 for eighteen links
- *   periodic set with responses 1575 each
+ *   periodic set with responses 2014 each
  *
  * The product profile needs up to sixteen simultaneous peripheral-role links
  * and two simultaneous central-role links. That is eighteen connection
@@ -116,16 +121,20 @@ extern "C" {
  * answers in one without forming a connection.
  *
  * Transmit buffers are what the advertiser puts in a subevent, receive buffers
- * what it collects from the response slots. The transmit size caps one
- * subevent rather than the whole period, so it is smaller than it looks.
+ * what it collects from the response slots. PAwR has Host-to-Controller timing
+ * deadlines, so using the minimum one-buffer configuration makes successful
+ * operation depend unnecessarily on host event-service latency. Keep the
+ * sdk-nrfxlib defaults here: three transmit buffers and two receive buffers.
+ * The transmit size caps one subevent rather than the whole period.
  *
  * Failure reporting tells the advertiser about slots that were expected and
  * stayed empty. Off, as it is in sdk-nrfxlib, because it costs 224 and the
- * usual question is what answered rather than what did not.
+ * usual question is what answered rather than what did not. Correct PAwR
+ * operation must not depend on those extra failure events being generated.
  */
 #define HCI_SDC_PERIODIC_ADV_RSP_COUNT      1U
-#define HCI_SDC_PERIODIC_ADV_RSP_TX_BUFFERS 1U
-#define HCI_SDC_PERIODIC_ADV_RSP_RX_BUFFERS 1U
+#define HCI_SDC_PERIODIC_ADV_RSP_TX_BUFFERS 3U
+#define HCI_SDC_PERIODIC_ADV_RSP_RX_BUFFERS 2U
 #define HCI_SDC_PERIODIC_ADV_RSP_MAX_TX_DATA                             \
     SDC_DEFAULT_PERIODIC_ADV_RSP_MAX_TX_DATA
 #define HCI_SDC_PERIODIC_ADV_RSP_FAILURE_REPORTING 0U

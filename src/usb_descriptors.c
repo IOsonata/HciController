@@ -1,12 +1,17 @@
-/*
- * Copyright (c) 2026 I-SYST inc.
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at https://mozilla.org/MPL/2.0/.
- *
- * SPDX-License-Identifier: MPL-2.0
- */
+/**-------------------------------------------------------------------------
+@file	usb_descriptors.c
+
+@brief	USB device, configuration, and string descriptors for HciController.
+
+		Defines descriptor sets for CDC H:4, native Bluetooth HCI with
+		diagnostic CDC, and log-only modes, including product identifiers,
+		endpoint layouts, interface selection, and device serial generation.
+
+@author	Nguyen Hoan Hoang
+@date	August 2026
+
+@license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
+----------------------------------------------------------------------------*/
 
 #include <stddef.h>
 #include <stdint.h>

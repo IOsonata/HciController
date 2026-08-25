@@ -1,24 +1,17 @@
-/*
- * Copyright (c) 2026 I-SYST inc.
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at https://mozilla.org/MPL/2.0/.
- *
- * SPDX-License-Identifier: MPL-2.0
- *
- * The nRF5x DCD behavior in this file was originally based on TinyUSB's
- * Nordic DCD:
- *   SPDX-FileCopyrightText: Copyright (c) 2019 Ha Thach (tinyusb.org)
- *   SPDX-License-Identifier: MIT
- *
- * Re-checked against:
- *   https://github.com/hathach/tinyusb
- *   commit fd70160a2f5fd23de1abfbaefb6399746a90b588
- *   src/portable/nordic/nrf5x/dcd_nrf5x.c
- * Re-check this local implementation against upstream whenever TinyUSB is
- * updated.
- */
+/**-------------------------------------------------------------------------
+@file	dcd_nrf5x_hci.c
+
+@brief	nRF52840 USB device controller driver for HciController.
+
+		Implements the nRF52840 USBD hardware driver used by HciController,
+		including endpoint state, EasyDMA arbitration, transfer dispatch,
+		interrupt handling, Event-IN diagnostics, and the TinyUSB DCD interface.
+
+@author	Nguyen Hoan Hoang
+@date	August 2026
+
+@license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
+----------------------------------------------------------------------------*/
 
 /*
  * Standalone nRF52840 USBD DCD for HciController.

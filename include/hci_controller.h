@@ -1,12 +1,17 @@
-/*
- * Copyright (c) 2026 I-SYST inc.
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at https://mozilla.org/MPL/2.0/.
- *
- * SPDX-License-Identifier: MPL-2.0
- */
+/**-------------------------------------------------------------------------
+@file	hci_controller.h
+
+@brief	Packet-oriented HCI controller bridge and host transport interface.
+
+		Defines the common controller bridge used by native USB and H:4
+		transports, including packet routing, local diagnostic commands,
+		transport state, and controller backend operations.
+
+@author	Nguyen Hoan Hoang
+@date	August 2026
+
+@license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
+----------------------------------------------------------------------------*/
 
 #ifndef HCI_CONTROLLER_H
 #define HCI_CONTROLLER_H

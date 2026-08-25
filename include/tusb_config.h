@@ -1,12 +1,16 @@
-/*
- * Copyright (c) 2026 I-SYST inc.
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at https://mozilla.org/MPL/2.0/.
- *
- * SPDX-License-Identifier: MPL-2.0
- */
+/**-------------------------------------------------------------------------
+@file	tusb_config.h
+
+@brief	TinyUSB compile-time configuration for HciController.
+
+		Configures full-speed device operation, memory alignment, endpoint zero,
+		and the CDC instances required by H:4, native HCI, and log-only modes.
+
+@author	Nguyen Hoan Hoang
+@date	August 2026
+
+@license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
+----------------------------------------------------------------------------*/
 
 #ifndef TUSB_CONFIG_H
 #define TUSB_CONFIG_H

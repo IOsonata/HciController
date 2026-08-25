@@ -1,12 +1,16 @@
-/*
- * Copyright (c) 2026 I-SYST inc.
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at https://mozilla.org/MPL/2.0/.
- *
- * SPDX-License-Identifier: MPL-2.0
- */
+/**-------------------------------------------------------------------------
+@file	hci_intrf_transport.h
+
+@brief	H:4 byte-stream to packet DeviceIntrf transport adapter.
+
+		Defines the transport state, diagnostics, callback API, and packet
+		DeviceIntrf wrapper used to present UART and CDC H:4 as HCI packets.
+
+@author	Nguyen Hoan Hoang
+@date	August 2026
+
+@license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
+----------------------------------------------------------------------------*/
 
 #ifndef HCI_INTRF_TRANSPORT_H
 #define HCI_INTRF_TRANSPORT_H
