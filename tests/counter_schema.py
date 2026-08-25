@@ -95,6 +95,21 @@ def main(argv):
         fail("counter trace length must be positive")
     host_count = trace_first + trace_count
 
+    trace = diagnostic_trace_tail(header)
+    if trace is None:
+        fail("firmware counter schema does not document UsbEventAckTrace")
+    documented_first, documented_last = trace
+    documented_count = documented_last - documented_first + 1
+    if documented_first != trace_first or documented_count != trace_count:
+        fail("Python ACK trace %d-%d disagrees with firmware trace %d-%d"
+             % (trace_first, trace_first + trace_count - 1,
+                documented_first, documented_last))
+
+    dcd_trace_count = c_define(dcd, "HCI_USB_EVENT_ACK_TRACE_DEPTH")
+    if dcd_trace_count != trace_count:
+        fail("DCD ACK trace depth %d disagrees with counter tail length %d"
+             % (dcd_trace_count, trace_count))
+
     if host_version == firmware_version:
         if host_count != firmware_count:
             fail("counter schema v%d covers %d fields but firmware emits %d"
@@ -103,28 +118,16 @@ def main(argv):
               % (firmware_version, named_count, trace_count))
         return 0
 
-    trace = diagnostic_trace_tail(header)
-    if trace is None:
-        fail("harness reads counter version %d but firmware emits version %d"
-             % (host_version, firmware_version))
-
-    trace_first, trace_last = trace
-    trace_count = trace_last - trace_first + 1
     if firmware_version != host_version + 1:
         fail("counter schema jumped from host v%d to firmware v%d"
              % (host_version, firmware_version))
-    if trace_first != host_count or trace_last + 1 != firmware_count:
+    if documented_first != host_count or documented_last + 1 != firmware_count:
         fail("diagnostic trace %d-%d does not exactly follow the %d host fields"
-             % (trace_first, trace_last, host_count))
-
-    dcd_trace_count = c_define(dcd, "HCI_USB_EVENT_ACK_TRACE_DEPTH")
-    if dcd_trace_count != trace_count:
-        fail("DCD ACK trace depth %d disagrees with counter tail length %d"
-             % (dcd_trace_count, trace_count))
+             % (documented_first, documented_last, host_count))
 
     print("[ok] counter schema v%d covers %d named fields; firmware v%d "
           "appends %d diagnostic ACK trace words"
-          % (host_version, host_count, firmware_version, trace_count))
+          % (host_version, host_count, firmware_version, documented_count))
     return 0
 
 
