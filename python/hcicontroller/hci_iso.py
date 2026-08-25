@@ -1,5 +1,18 @@
 #!/usr/bin/env python3
-"""Reusable HCI ISO helpers for BLE harnesses."""
+"""-------------------------------------------------------------------------
+@file	hci_iso.py
+
+@brief	Reusable HCI ISO helpers for BLE hardware harnesses.
+
+		Provides packetized HCI ISO transmit, data-path setup, buffer discovery,
+		packet decoding, and marker waits shared by connected and broadcast ISO
+		tests.
+
+@author	Nguyen Hoan Hoang
+@date	August 2026
+
+@license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
+----------------------------------------------------------------------------"""
 
 import struct
 import time

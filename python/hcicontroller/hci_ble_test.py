@@ -1,35 +1,52 @@
 #!/usr/bin/env python3
-"""HciController hardware-test CLI with probe sequencing guards.
+"""-------------------------------------------------------------------------
+@file	hci_ble_test.py
 
-The complete hardware-test implementation lives in hci_ble_test_impl.py.  This
-module keeps the public CLI/import surface unchanged while correcting probe-only
-ordering that depends on asynchronous controller state and adding host transport
-selection for serial H:4 and native Bluetooth USB HCI.
+@brief	HciController hardware-test CLI sequencing and transport wrapper.
 
-* LE Create Connection Cancel is not considered finished until its terminal LE
-  connection-complete event has arrived.  A following initiator must not start
-  in the gap between Command Complete and that terminal event.
-* the optional phone pairing wait runs after the ordinary connection-scoped
-  command rows, immediately before Disconnect, so a phone that leaves during
-  the interactive wait cannot invalidate the commands the run meant to test;
-* once the current connection has gone down, later connection-scoped rows are
-  skipped instead of being sent at a dead handle and reported as unrelated
-  Unknown Connection Identifier failures;
-* --only narrows the connection-scoped rows too, so it really isolates a
-  command after the connection preamble rather than replaying every link row;
-* LE Set PHY is not complete at Command Status.  The probe waits for its LE PHY
-  Update Complete event before another link-layer control procedure is started;
-* LE Read Remote Transmit Power Level is not complete at Command Status.  The
-  probe keeps LE Transmit Power Reporting unmasked and waits for that terminal
-  event before another power-control procedure is allowed to start;
-* VS Write Remote TX Power treats Controller Busy as transient while an
-  earlier power-control procedure finishes. It retries for a bounded interval
-  and still reports 0x3A as a failure if the controller remains busy;
-* a broad probe that reaches an advertised command and gets a status not listed
-  for that row is a failed validation run, not a successful diagnostic run;
-* advertise retains the completed connection's ATT statistics after a remote
-  disconnect instead of erasing the evidence before printing its verdict.
-"""
+		The complete hardware-test implementation lives in hci_ble_test_impl.py.
+		This module keeps the public CLI/import surface unchanged while
+		correcting probe-only ordering that depends on asynchronous controller
+		state and adding Host transport selection for serial H:4 and native
+		Bluetooth USB HCI.
+
+		* LE Create Connection Cancel is not considered finished until its
+		  terminal LE connection-complete event has arrived. A following
+		  initiator must not start in the gap between Command Complete and that
+		  terminal event.
+		* The optional phone pairing wait runs after the ordinary
+		  connection-scoped command rows, immediately before Disconnect, so a
+		  phone that leaves during the interactive wait cannot invalidate the
+		  commands the run meant to test.
+		* Once the current connection has gone down, later connection-scoped
+		  rows are skipped instead of being sent at a dead handle and reported
+		  as unrelated Unknown Connection Identifier failures.
+		* --only narrows the connection-scoped rows too, so it really isolates
+		  a command after the connection preamble rather than replaying every
+		  link row.
+		* LE Set PHY is not complete at Command Status. The probe waits for its
+		  LE PHY Update Complete event before another link-layer control
+		  procedure is started.
+		* LE Read Remote Transmit Power Level is not complete at Command Status.
+		  The probe keeps LE Transmit Power Reporting unmasked and waits for
+		  that terminal event before another power-control procedure is allowed
+		  to start.
+		* VS Write Remote TX Power treats Controller Busy as transient while an
+		  earlier power-control procedure finishes. It retries for a bounded
+		  interval and still reports 0x3A as a failure if the controller remains
+		  busy.
+		* A broad probe that reaches an advertised command and gets a status not
+		  listed for that row is a failed validation run, not a successful
+		  diagnostic run.
+		* Advertise retains the completed connection's ATT statistics after a
+		  remote disconnect instead of erasing the evidence before printing its
+		  verdict.
+
+@author	Nguyen Hoan Hoang
+@date	August 2026
+
+@license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
+----------------------------------------------------------------------------"""
 
 import argparse
 import builtins

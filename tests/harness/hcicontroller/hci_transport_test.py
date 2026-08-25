@@ -1,4 +1,19 @@
 #!/usr/bin/env python3
+"""-------------------------------------------------------------------------
+@file	hci_transport_test.py
+
+@brief	Host regression tests for HciController transport discovery and USB I/O.
+
+		Verifies serial and native USB selection, USB error classification,
+		fragment reassembly, Bulk Serialization, endpoint packet sizing, and
+		background reader error propagation.
+
+@author	Nguyen Hoan Hoang
+@date	August 2026
+
+@license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
+----------------------------------------------------------------------------"""
+
 import errno
 import threading
 import time

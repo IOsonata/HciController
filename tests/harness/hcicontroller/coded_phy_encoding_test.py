@@ -1,5 +1,17 @@
 #!/usr/bin/env python3
-"""Host regression for LE Coded PHY HCI request/result encodings."""
+"""-------------------------------------------------------------------------
+@file	coded_phy_encoding_test.py
+
+@brief	Host regression for LE Coded PHY HCI request and result encodings.
+
+		Verifies the Coded PHY request mask and result enum, the OTA ACL
+		verification path, and restoration of the connection to 1M PHY.
+
+@author	Nguyen Hoan Hoang
+@date	August 2026
+
+@license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
+----------------------------------------------------------------------------"""
 
 import _bootstrap  # noqa: F401
 from hcicontroller import connected_features_pair as pair

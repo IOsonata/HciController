@@ -1,5 +1,18 @@
 #!/usr/bin/env python3
-"""Keep the Python harness counter schema aligned with firmware."""
+"""-------------------------------------------------------------------------
+@file	counter_schema.py
+
+@brief	Validate firmware and Python HCI counter schema alignment.
+
+		Checks counter version and count, appended named fields, the USB Event
+		ACK diagnostic trace range, and DCD trace depth against the firmware
+		and Host decoder definitions.
+
+@author	Nguyen Hoan Hoang
+@date	August 2026
+
+@license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
+----------------------------------------------------------------------------"""
 
 import ast
 import os

@@ -1,5 +1,18 @@
 #!/usr/bin/env python3
-"""Regression for periodic-advertiser identity selection with multiple benches."""
+"""-------------------------------------------------------------------------
+@file	periodic_advertiser_identity_test.py
+
+@brief	Regression for periodic-advertiser identity selection.
+
+		Verifies that periodic advertising and PAwR discovery select the exact
+		advertiser address tuple when multiple test benches use the same marker
+		and SID.
+
+@author	Nguyen Hoan Hoang
+@date	August 2026
+
+@license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
+----------------------------------------------------------------------------"""
 
 import struct
 

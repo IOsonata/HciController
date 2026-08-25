@@ -1,5 +1,18 @@
 #!/usr/bin/env python3
-"""Regression for independent PAwR advertiser subevent/response servicing."""
+"""-------------------------------------------------------------------------
+@file	pawr_subevent_refill_test.py
+
+@brief	Regression for independent PAwR subevent and response servicing.
+
+		Verifies advertiser-side subevent refill, wrapped subevent numbering,
+		response-report observation, and deferred event restoration while the
+		PAwR data-service reader remains active.
+
+@author	Nguyen Hoan Hoang
+@date	August 2026
+
+@license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
+----------------------------------------------------------------------------"""
 
 import threading
 import time

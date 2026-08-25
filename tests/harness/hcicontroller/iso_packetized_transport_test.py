@@ -1,5 +1,18 @@
 #!/usr/bin/env python3
-"""Regression for ISO receive through the packetized transport layer."""
+"""-------------------------------------------------------------------------
+@file	iso_packetized_transport_test.py
+
+@brief	Regression for ISO receive through the packetized transport layer.
+
+		Verifies that both ISO HCI helpers use the common packetized receive
+		path and that ISO packet parsing preserves handle, sequence, length,
+		and payload data.
+
+@author	Nguyen Hoan Hoang
+@date	August 2026
+
+@license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
+----------------------------------------------------------------------------"""
 
 import struct
 

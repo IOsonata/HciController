@@ -1,11 +1,24 @@
 #!/usr/bin/env python3
-"""Host transports and discovery for the HciController hardware tests.
+"""-------------------------------------------------------------------------
+@file	hci_transport.py
 
-The test logic uses H:4 packet type values internally because they are also the
-Bluetooth USB Bulk Serialization packet indicators.  A serial transport puts
-that indicator on the UART/CDC byte stream.  Native USB removes it for legacy
-Bluetooth USB transfers and keeps it when Bulk Serialization is selected.
-"""
+@brief	Host transport discovery and packet I/O for HciController tests.
+
+		The test logic uses H:4 packet type values internally because they are
+		also the Bluetooth USB Bulk Serialization packet indicators. A serial
+		transport puts that indicator on the UART/CDC byte stream. Native USB
+		removes it for legacy Bluetooth USB transfers and keeps it when Bulk
+		Serialization is selected.
+
+		Supports serial H:4 and native Bluetooth USB HCI, including Bulk
+		Serialization for ISO, packet reassembly, independent USB IN readers,
+		and transport error classification.
+
+@author	Nguyen Hoan Hoang
+@date	August 2026
+
+@license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
+----------------------------------------------------------------------------"""
 
 import errno
 import sys

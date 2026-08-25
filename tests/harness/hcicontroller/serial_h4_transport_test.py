@@ -1,5 +1,18 @@
 #!/usr/bin/env python3
-"""Regression tests for nonblocking serial H:4 packet reassembly."""
+"""-------------------------------------------------------------------------
+@file	serial_h4_transport_test.py
+
+@brief	Regression tests for nonblocking serial H:4 packet reassembly.
+
+		Verifies short polling, partial packet retention, multiple buffered
+		packets, ACL and ISO fragmentation, delayed input, and invalid H:4
+		indicator handling.
+
+@author	Nguyen Hoan Hoang
+@date	August 2026
+
+@license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
+----------------------------------------------------------------------------"""
 
 import threading
 import time

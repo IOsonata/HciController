@@ -1,12 +1,17 @@
-/*
- * Copyright (c) 2026 I-SYST inc.
- *
- * This Source Code Form is subject to the terms of the Mozilla Public
- * License, v. 2.0. If a copy of the MPL was not distributed with this
- * file, You can obtain one at https://mozilla.org/MPL/2.0/.
- *
- * SPDX-License-Identifier: MPL-2.0
- */
+/**-------------------------------------------------------------------------
+@file	hci_sdc_resources.h
+
+@brief	SoftDevice Controller feature and memory resource configuration.
+
+		Defines product profile counts, buffer sizes, and memory formulas used
+		to configure SDC and size the controller memory pool. Also declares
+		HciSdcResourcesApply() for applying that configuration.
+
+@author	Nguyen Hoan Hoang
+@date	August 2026
+
+@license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
+----------------------------------------------------------------------------*/
 
 #ifndef HCI_SDC_RESOURCES_H
 #define HCI_SDC_RESOURCES_H

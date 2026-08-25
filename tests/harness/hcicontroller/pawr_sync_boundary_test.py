@@ -1,5 +1,18 @@
 #!/usr/bin/env python3
-"""Regression for periodic-sync and PAwR command/event ordering."""
+"""-------------------------------------------------------------------------
+@file	pawr_sync_boundary_test.py
+
+@brief	Regression for periodic-sync and PAwR command/event ordering.
+
+		Verifies Create Sync generation boundaries, exact advertiser matching,
+		and rejection of periodic reports received before the completed 0x2084
+		subevent-selection command.
+
+@author	Nguyen Hoan Hoang
+@date	August 2026
+
+@license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
+----------------------------------------------------------------------------"""
 
 import struct
 

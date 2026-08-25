@@ -1,5 +1,18 @@
 #!/usr/bin/env python3
-"""Two-controller CIS + HCI ISO data-path hardware test."""
+"""-------------------------------------------------------------------------
+@file	hci_cis_pair_test.py
+
+@brief	Two-controller CIS and HCI ISO data-path hardware test.
+
+		Establishes an ACL and CIS, configures HCI ISO input and output paths,
+		verifies bidirectional ISO SDUs over the air, and checks controller
+		counter deltas before cleanup.
+
+@author	Nguyen Hoan Hoang
+@date	August 2026
+
+@license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
+----------------------------------------------------------------------------"""
 
 import argparse
 import struct

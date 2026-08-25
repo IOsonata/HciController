@@ -1,5 +1,18 @@
 #!/usr/bin/env python3
-"""Corrections for stateful release procedures built on connected_features."""
+"""-------------------------------------------------------------------------
+@file	connected_features_pair.py
+
+@brief	Stateful two-controller connected-feature release procedures.
+
+		Extends the connected-feature helpers with ACL fragment reassembly,
+		PHY and power sequencing, and OTA ACL verification used by release
+		tests.
+
+@author	Nguyen Hoan Hoang
+@date	August 2026
+
+@license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
+----------------------------------------------------------------------------"""
 
 import struct
 import time

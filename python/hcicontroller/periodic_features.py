@@ -1,5 +1,18 @@
 #!/usr/bin/env python3
-"""Two-controller Periodic Advertising, PAST, and PAwR procedures."""
+"""-------------------------------------------------------------------------
+@file	periodic_features.py
+
+@brief	Two-controller Periodic Advertising, PAST, and PAwR procedures.
+
+		Configures periodic advertising and transfer procedures, correlates
+		synchronization to the exact advertiser, and enforces PAwR subevent and
+		response timing boundaries used by release validation.
+
+@author	Nguyen Hoan Hoang
+@date	August 2026
+
+@license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
+----------------------------------------------------------------------------"""
 
 import struct
 import threading

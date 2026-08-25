@@ -1,3 +1,17 @@
+/**-------------------------------------------------------------------------
+@file	hci_sdc_expected_resources.h
+
+@brief	Expected SDC resource costs shared by resource tests.
+
+		Defines fixed expected memory terms used to compare the real nrfxlib
+		resource formulas, test stubs, and configured controller totals.
+
+@author	Nguyen Hoan Hoang
+@date	August 2026
+
+@license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
+----------------------------------------------------------------------------*/
+
 /*
  * What the resource configuration is supposed to cost.
  *
