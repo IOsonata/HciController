@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Regression for IsoHci receive through the packetized transport layer."""
+"""Regression for ISO receive through the packetized transport layer."""
 
 import struct
 
 import _bootstrap  # noqa: F401
+import hci_cis_pair_test as cis
 from hcicontroller import hci_iso as iso
 
 
@@ -20,6 +21,16 @@ class FakePacketTransport:
         return packet
 
 
+def exercise_iso_hci(cls, packet):
+    # ISO helpers must inherit the common Hci.read_wire() packetized receive
+    # path. No serial object and no byte-stream read_exact() are present here.
+    assert "read_wire" not in cls.__dict__
+    hci = cls.__new__(cls)
+    hci.raw = False
+    hci.transport = FakePacketTransport(packet)
+    assert hci.read_wire(0.1) == packet
+    assert hci.transport.reads == 1
+
 
 def main():
     handle = 0x0123
@@ -30,14 +41,10 @@ def main():
     body = struct.pack("<HH", handle_flags, len(load)) + load
     packet = (iso.H4_ISO, None, body)
 
-    hci = iso.IsoHci.__new__(iso.IsoHci)
-    hci.raw = False
-    hci.transport = FakePacketTransport(packet)
-
-    # IsoHci must inherit the common Hci.read_wire() packetized receive path.
-    # No serial object and no byte-stream read_exact() are present here.
-    assert hci.read_wire(0.1) == packet
-    assert hci.transport.reads == 1
+    # The shared ISO helper and the standalone CIS helper are both used by the
+    # release suite. Keep both on the transport-owned packet parser.
+    exercise_iso_hci(iso.IsoHci, packet)
+    exercise_iso_hci(cis.IsoHci, packet)
 
     parsed = iso.parse_iso(body)
     assert parsed["handle"] == handle
