@@ -3,8 +3,8 @@
 
 @brief	Buffered HciController diagnostic trace implementation.
 
-		Initializes the IOsonata SysLog CFifo, formats trace records, selects
-		the output DeviceIntrf, and reports pending and dropped records.
+		Initializes the IOsonata SysLog record store, formats trace records,
+		and selects the output DeviceIntrf.
 
 @author	Nguyen Hoan Hoang
 @date	August 2026
@@ -17,37 +17,31 @@
 #include <stdarg.h>
 #include <stdio.h>
 
-#include "cfifo.h"
 #include "syslog.h"
 
 #define HCI_TRACE_SYS_WRITE0 0x04
 
 alignas(4) static uint8_t s_LogFifoMem[
-    CFIFO_TOTAL_MEMSIZE(HCI_TRACE_RECORD_COUNT, HCI_TRACE_RECORD_SIZE)];
+    SYSLOG_MEMSIZE(HCI_TRACE_RECORD_COUNT, HCI_TRACE_RECORD_SIZE)];
+static const SysLogCfg_t s_LogCfg = {
+    s_LogFifoMem,
+    sizeof(s_LogFifoMem),
+    HCI_TRACE_RECORD_SIZE,
+    false,
+};
 static SysLog_t s_Log;
-static hCFifo_t s_hLogFifo;
 static bool s_LogInitialized;
 
 static bool HciTraceEnsureInit(void)
 {
     if (s_LogInitialized)
     {
-        return s_hLogFifo != nullptr;
+        return true;
     }
 
-    s_hLogFifo = CFifoInit(s_LogFifoMem,
-                           sizeof(s_LogFifoMem),
-                           HCI_TRACE_RECORD_SIZE,
-                           false);
-    if (s_hLogFifo == nullptr)
-    {
-        return false;
-    }
-
-    SysLogInit(&s_Log, nullptr, 0U, nullptr, 0U);
-    SysLogSetBuffer(&s_Log, s_hLogFifo);
-    s_LogInitialized = true;
-    return true;
+    s_LogInitialized =
+        SysLogInit(&s_Log, &s_LogCfg, nullptr, 0U, nullptr, 0U);
+    return s_LogInitialized;
 }
 
 #if HCI_TRACE
@@ -120,25 +114,4 @@ void HciTraceSetSink(DevIntrf_t *pSink, uint32_t SinkAddr)
 int HciTraceFlush(void)
 {
     return HciTraceEnsureInit() ? SysLogFlush(&s_Log) : 0;
-}
-
-uint32_t HciTracePending(void)
-{
-    if (!HciTraceEnsureInit())
-    {
-        return 0U;
-    }
-
-    const int used = CFifoUsed(s_hLogFifo);
-    return used > 0 ? (uint32_t)used : 0U;
-}
-
-uint32_t HciTraceDropped(void)
-{
-    if (!HciTraceEnsureInit())
-    {
-        return 0U;
-    }
-
-    return __atomic_load_n(&s_hLogFifo->DropCnt, __ATOMIC_RELAXED);
 }

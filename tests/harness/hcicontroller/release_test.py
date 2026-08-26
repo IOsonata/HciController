@@ -12,6 +12,7 @@ import sys
 
 import _bootstrap  # noqa: F401
 from hcicontroller import bis_features
+from hcicontroller import hci_cis_pair_test as cis_pair
 from hcicontroller import stress_features
 from hcicontroller.connected_features_pair import run_connected_feature_phase, run_subrate_phase
 from hcicontroller.core_advanced import run_core_advanced_phase
@@ -175,7 +176,33 @@ def run_probe(book, label, spec, raw):
                     "exit %d" % result.returncode)
 
 
+def _run_mixed_cis(spec_a, spec_b, raw):
+    phase_a = bulk_spec(spec_a)
+    phase_b = bulk_spec(spec_b)
+    old_iso_hci = cis_pair.IsoHci
+    old_find = cis_pair.find_hci_ports
+    old_argv = sys.argv
+    cis_pair.IsoHci = NativeIsoHci
+    cis_pair.find_hci_ports = lambda: [phase_a, phase_b]
+    sys.argv = [old_argv[0]] + (["--raw"] if raw else [])
+    try:
+        return cis_pair.main()
+    finally:
+        sys.argv = old_argv
+        cis_pair.find_hci_ports = old_find
+        cis_pair.IsoHci = old_iso_hci
+
+
 def run_cis(book, spec_a, spec_b, raw):
+    if spec_a.kind != spec_b.kind:
+        result = _run_mixed_cis(spec_a, spec_b, raw)
+        if result == 0:
+            book.passed("ISO", "CIS Central/Peripheral + bidirectional HCI ISO")
+        else:
+            book.failed("ISO", "CIS Central/Peripheral + bidirectional HCI ISO",
+                        "exit %d" % result)
+        return
+
     if spec_a.kind == "usb":
         script = Path(__file__).resolve().parent / "cis_usb_pair_test.py"
     else:
@@ -208,14 +235,12 @@ def run_cis(book, spec_a, spec_b, raw):
 
 def run_iso_phase(module, callback, book, label, spec_a, spec_b,
                   raw=False, **kwargs):
-    """Run an ISO phase over H:4 or native USB Bulk Serialization."""
+    """Run an ISO phase over serial H:4, native USB, or a mixed pair."""
     old_iso_hci = module.IsoHci
-    phase_a = spec_a
-    phase_b = spec_b
-    if spec_a.kind == "usb":
+    phase_a = bulk_spec(spec_a)
+    phase_b = bulk_spec(spec_b)
+    if spec_a.kind == "usb" or spec_b.kind == "usb":
         module.IsoHci = NativeIsoHci
-        phase_a = bulk_spec(spec_a)
-        phase_b = bulk_spec(spec_b)
     try:
         callback(
             book, label, phase_a, phase_b,
@@ -231,7 +256,7 @@ def main():
     )
     parser.add_argument(
         "--transport", choices=("auto", "serial", "usb"), default="auto",
-        help="host transport; auto prefers native USB when present",
+        help="host transport; auto allows serial H:4 or native USB per controller",
     )
     parser.add_argument(
         "--a",

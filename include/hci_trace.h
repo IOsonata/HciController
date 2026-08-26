@@ -4,7 +4,7 @@
 @brief	HciController diagnostic trace interface.
 
 		Declares the buffered SysLog trace API, DeviceIntrf sink selection,
-		flush operation, and queued/dropped record diagnostics.
+		and flush operation.
 
 @author	Nguyen Hoan Hoang
 @date	August 2026
@@ -32,8 +32,8 @@ extern "C" {
 #endif
 
 /*
- * Developer trace. Every call is queued in the standard IOsonata SysLog
- * CFifo. HCI_TRACE only enables the optional ARM semihosting copy.
+ * Developer trace. Every call is written through the standard IOsonata
+ * SysLog. HCI_TRACE only enables the optional ARM semihosting copy.
  */
 void HciTrace(const char *pFormat, ...)
 #if defined(__GNUC__) || defined(__clang__)
@@ -43,17 +43,11 @@ void HciTrace(const char *pFormat, ...)
 
 void HciTraceInit(void);
 
-/* Select or detach the DeviceIntrf used when queued records are flushed. */
+/* Select or detach the DeviceIntrf used by SysLog output. */
 void HciTraceSetSink(DevIntrf_t *pSink, uint32_t SinkAddr);
 
-/* Flush one complete SysLog record through the selected DeviceIntrf. */
+/* Flush queued SysLog records through the selected DeviceIntrf. */
 int HciTraceFlush(void);
-
-/* Number of complete records currently queued in the SysLog CFifo. */
-uint32_t HciTracePending(void);
-
-/* Number of old records pushed out because the SysLog CFifo was full. */
-uint32_t HciTraceDropped(void);
 
 #ifdef __cplusplus
 }

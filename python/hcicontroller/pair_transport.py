@@ -96,6 +96,7 @@ def _candidates(kind="auto", bulk_serialization=False,
         )
 
     usb_error = None
+    usb = []
     if kind in ("auto", "usb"):
         try:
             usb = hci_transport.usb_candidates(
@@ -105,21 +106,27 @@ def _candidates(kind="auto", bulk_serialization=False,
             if kind == "usb":
                 raise
             usb_error = err
-            usb = []
-        if usb:
-            return usb
+
         if kind == "usb":
+            if usb:
+                return usb
             raise hci_transport.SelectionError(
                 "no native USB HCI controllers found"
             )
 
-    serial = hci_transport.serial_candidates(ports)
-    if serial:
-        return serial
-    if kind == "serial":
-        raise hci_transport.SelectionError(
-            "no serial H:4 HciController ports found"
-        )
+    serial = []
+    if kind in ("auto", "serial"):
+        serial = hci_transport.serial_candidates(ports)
+        if kind == "serial":
+            if serial:
+                return serial
+            raise hci_transport.SelectionError(
+                "no serial H:4 HciController ports found"
+            )
+
+    candidates = usb + serial
+    if candidates:
+        return candidates
     if usb_error is not None:
         raise usb_error
     return []
@@ -127,7 +134,7 @@ def _candidates(kind="auto", bulk_serialization=False,
 
 def resolve_pair(first=None, second=None, kind="auto",
                  bulk_serialization=False, ports=None, usb_devices=None):
-    """Resolve exactly two controllers of one transport kind."""
+    """Resolve exactly two controllers, allowing mixed transports in auto mode."""
     candidates = _candidates(
         kind,
         bulk_serialization=bulk_serialization,
@@ -169,9 +176,5 @@ def resolve_pair(first=None, second=None, kind="auto",
     if first_spec is second_spec:
         raise hci_transport.SelectionError(
             "the two HciController controllers must differ"
-        )
-    if first_spec.kind != second_spec.kind:
-        raise hci_transport.SelectionError(
-            "the two controllers must use the same host transport"
         )
     return first_spec, second_spec

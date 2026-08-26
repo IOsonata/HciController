@@ -54,14 +54,20 @@ $(USB_DESC_OBJ): $(SRC)/usb_descriptors.c $(ROOT)/include/hci_usb.h \
 	$(CC) -I$(STUBS)/nrfficr $(MOCK_INCLUDES) $(MOCK_DEFINES) $(CFLAGS) \
 	  -c $< -o $@
 
-.PHONY: check-hci-transport check-native-usb-review check-counter-schema \
-        check-harness-layout check-mode-policy
+.PHONY: check-hci-transport check-python-api check-native-usb-review \
+        check-counter-schema check-harness-layout check-mode-policy
 
 check-hci-transport:
 	@command -v $(PYTHON) >/dev/null 2>&1 || { \
 	  echo "[TEST] hci_transport_test.py skipped, no $(PYTHON)"; exit 0; }
 	@echo "[TEST] hci_transport_test.py"
 	@$(PYTHON) $(THIS_DIR)/harness/hcicontroller/hci_transport_test.py
+
+check-python-api:
+	@command -v $(PYTHON) >/dev/null 2>&1 || { \
+	  echo "[TEST] python_api_test.py skipped, no $(PYTHON)"; exit 0; }
+	@echo "[TEST] python_api_test.py"
+	@$(PYTHON) $(THIS_DIR)/harness/hcicontroller/python_api_test.py
 
 check-native-usb-review:
 	@command -v $(PYTHON) >/dev/null 2>&1 || { \
@@ -90,5 +96,5 @@ check-mode-policy:
 all: $(BUILD_DIR)/hci_usb_test $(BUILD_DIR)/hci_usb_modeswitch_test \
      $(BUILD_DIR)/hci_controller_invalid_host_test \
      $(BUILD_DIR)/hci_controller_local_commands_test
-run: check-hci-transport check-native-usb-review check-counter-schema \
-     check-harness-layout check-mode-policy
+run: check-hci-transport check-python-api check-native-usb-review \
+     check-counter-schema check-harness-layout check-mode-policy

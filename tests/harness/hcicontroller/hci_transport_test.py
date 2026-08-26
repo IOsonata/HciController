@@ -4,9 +4,9 @@
 
 @brief	Host regression tests for HciController transport discovery and USB I/O.
 
-		Verifies serial and native USB selection, USB error classification,
-		fragment reassembly, Bulk Serialization, endpoint packet sizing, and
-		background reader error propagation.
+		Verifies serial and native USB selection, mixed pair discovery, USB error
+		classification, fragment reassembly, Bulk Serialization, endpoint packet
+		sizing, and background reader error propagation.
 
 @author	Nguyen Hoan Hoang
 @date	August 2026
@@ -21,6 +21,7 @@ from types import SimpleNamespace
 
 import _bootstrap  # noqa: F401
 from hcicontroller import hci_transport as ht
+from hcicontroller import pair_transport as pt
 
 
 def port(device, vid=None, pid=None, manufacturer=None, product=None,
@@ -167,6 +168,22 @@ def main():
                        usb_devices=[native]).kind == 'usb'
     assert ht.discover('usb', 'NATIVE1', ports=ports,
                        usb_devices=[native]).kind == 'usb'
+
+    first, second = pt.resolve_pair(
+        kind='auto', ports=ports, usb_devices=[native]
+    )
+    assert {first.kind, second.kind} == {'usb', 'serial'}
+
+    first, second = pt.resolve_pair(
+        '/dev/cu.hci', 'NATIVE1', kind='auto',
+        ports=ports, usb_devices=[native]
+    )
+    assert first.kind == 'serial'
+    assert second.kind == 'usb'
+    assert pt.bulk_spec(first) is first
+    second_bulk = pt.bulk_spec(second)
+    assert second_bulk.kind == 'usb'
+    assert second_bulk.bulk_serialization
 
     production = Device(0x1234, 0x9999, 'I-SYST inc.',
                         'Production HCI Controller', 'PROD1')

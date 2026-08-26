@@ -66,26 +66,36 @@ int main(void)
 {
     HciTrace("before transport %u\n", 1U);
     HciTrace("before transport %u\n", 2U);
-    assert(HciTracePending() == 2U);
 
     DevIntrf_t sink;
     SinkInit(&sink);
     HciTraceSetSink(&sink, 0U);
 
+    assert(s_TxCalls == 0);
     assert(HciTraceFlush() > 0);
-    assert(HciTracePending() == 1U);
-    assert(HciTraceFlush() > 0);
-    assert(HciTracePending() == 0U);
     assert(s_TxCalls == 2);
-    assert(strstr(s_Output, "before transport 1") != nullptr);
-    assert(strstr(s_Output, "before transport 2") != nullptr);
 
-    for (unsigned i = 0U; i < HCI_TRACE_RECORD_COUNT + 5U; i++)
-    {
-        HciTrace("record %u\n", i);
-    }
-    assert(HciTracePending() == HCI_TRACE_RECORD_COUNT);
-    assert(HciTraceDropped() >= 5U);
+    const char *first = strstr(s_Output, "before transport 1");
+    const char *second = strstr(s_Output, "before transport 2");
+    assert(first != nullptr);
+    assert(second != nullptr);
+    assert(first < second);
+    assert(HciTraceFlush() == 0);
+
+    HciTrace("with transport %u\n", 3U);
+    assert(s_TxCalls == 3);
+    assert(strstr(s_Output, "with transport 3") != nullptr);
+
+    HciTraceSetSink(nullptr, 0U);
+    HciTrace("detached transport %u\n", 4U);
+    assert(s_TxCalls == 3);
+
+    HciTraceSetSink(&sink, 0U);
+    assert(s_TxCalls == 3);
+    assert(HciTraceFlush() > 0);
+    assert(s_TxCalls == 4);
+    assert(strstr(s_Output, "detached transport 4") != nullptr);
+    assert(HciTraceFlush() == 0);
 
     printf("HciTrace SysLog integration tests: PASS\n");
     return 0;

@@ -39,8 +39,8 @@ class DutControl:
         return None
 
     def set_test_case(self, name, parameters=None):
-        """Optional extension point for DUT-specific feature modes."""
-        raise NotImplementedError
+        """Optional hook for DUT-specific feature modes."""
+        return None
 
     def read_result(self):
         """Optional DUT-side result/log data for cross-checking radio evidence."""

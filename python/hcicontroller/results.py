@@ -47,7 +47,12 @@ class ResultBook:
         return any(r.status == INCOMPLETE for r in self.results)
 
     def release_passed(self):
-        return not self.has_failures() and not self.has_incomplete()
+        # A release result is meaningful only after at least one procedure was
+        # recorded. Treating an empty book as PASS can turn a setup/selection
+        # mistake into a false successful release report.
+        return (bool(self.results)
+                and not self.has_failures()
+                and not self.has_incomplete())
 
     def print_report(self):
         print()

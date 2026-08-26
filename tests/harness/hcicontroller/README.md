@@ -23,6 +23,12 @@ The two radios are symmetric. Tests explicitly assign Central/Peripheral,
 advertiser/scanner, sender/receiver, and broadcaster/sink roles as required by
 each phase.
 
+`release_test.py --transport auto` discovers the two controllers independently.
+A release run may therefore use two native USB controllers, two serial H:4
+controllers, or one of each. ISO phases automatically select Bluetooth USB Bulk
+Serialization only for a controller using native USB; a serial controller stays
+on H:4.
+
 The release runner reads the capability profile from both controllers, verifies
 the expected release profile, exercises every applicable capability in a valid
 radio state, and fails when an advertised feature cannot be exercised

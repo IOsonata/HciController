@@ -580,10 +580,7 @@ static void HciAppLogPortOpened(HciApp_t *pApp)
     pApp->LogPortOpen = open;
     if (open)
     {
-        HciTrace("log: port open, %lu record(s) queued, %lu dropped, host=%s\r\n",
-                 (unsigned long)HciTracePending(),
-                 (unsigned long)HciTraceDropped(),
-                 HciAppHostName(pApp));
+        HciTrace("log: port open, host=%s\r\n", HciAppHostName(pApp));
     }
 }
 

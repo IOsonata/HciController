@@ -8,6 +8,7 @@ from hci_cis_pair_test import (
     EVT_DISCONNECTION_COMPLETE,
     EVT_LE_META,
     H4_EVENT,
+    H4_ISO,
     ISO_DIRECTION_INPUT,
     ISO_DIRECTION_OUTPUT,
     IsoHci,
@@ -72,6 +73,30 @@ ERROR_COUNTERS = {
 }
 
 
+def _discard_pending_iso(hci):
+    """Drop background CIS output that is not part of the current ISO marker."""
+    if hci.pending:
+        hci.pending = [
+            packet for packet in hci.pending
+            if packet[0] != H4_ISO
+        ]
+
+
+def _wait_stress_acl_marker(hci, expected_handle, expected_cid,
+                            expected_payload, timeout=3.0):
+    """Wait for one ACL marker without carrying CIS output into the next wait."""
+    try:
+        return wait_acl_marker(
+            hci,
+            expected_handle,
+            expected_cid,
+            expected_payload,
+            timeout=timeout,
+        )
+    finally:
+        _discard_pending_iso(hci)
+
+
 def _wait_completed(hci, expected_handle, timeout=3.0):
     deferred = []
     deadline = time.time() + timeout
@@ -90,6 +115,8 @@ def _wait_completed(hci, expected_handle, timeout=3.0):
                 if (handle & 0x0FFF) == expected_handle and done:
                     _base._restore(hci, deferred)
                     return
+            continue
+        if kind == H4_ISO:
             continue
         deferred.append(packet)
     _base._restore(hci, deferred)
@@ -237,15 +264,15 @@ def run_stress_phase(book, label, central_port, peripheral_port,
             p_acl = b"P" + seq
 
             central.send_acl(central_acl, STRESS_CID, c_acl)
-            if not wait_acl_marker(
-                peripheral, peripheral_acl, STRESS_CID, c_acl, timeout=3.0
+            if not _wait_stress_acl_marker(
+                peripheral, peripheral_acl, STRESS_CID, c_acl
             ):
                 raise HciError("ACL C->P marker %u missing" % i)
             _wait_completed(central, central_acl)
 
             peripheral.send_acl(peripheral_acl, STRESS_CID, p_acl)
-            if not wait_acl_marker(
-                central, central_acl, STRESS_CID, p_acl, timeout=3.0
+            if not _wait_stress_acl_marker(
+                central, central_acl, STRESS_CID, p_acl
             ):
                 raise HciError("ACL P->C marker %u missing" % i)
             _wait_completed(peripheral, peripheral_acl)
