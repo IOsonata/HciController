@@ -240,7 +240,6 @@ static bool HciAppUsbSetup(HciApp_t *pApp, HciUsbDescriptorMode_t Mode)
         return false;
     }
 
-    HciTraceSetSink(s_LogCdc.Data(), 0U);
     pApp->UsbRunning = true;
     return true;
 }
@@ -455,6 +454,7 @@ static void HciAppLogPortOpened(HciApp_t *pApp)
     }
 
     pApp->LogPortOpen = open;
+    HciTraceSetSink(open ? s_LogCdc.Data() : nullptr, 0U);
     if (open)
     {
         HciTrace("log: port open, host=%s\r\n", HciAppHostName(pApp));
