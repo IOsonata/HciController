@@ -55,8 +55,10 @@ extern "C" {
  * appends 30 and 31, version 4 appends 32 and 33, version 5 appends the
  * four PAwR delayed-completion checkpoints at 34 to 37, version 6 appends
  * Controller-to-Host ACL success checkpoints at 38 and 39, version 7 appends
- * the nRF52840 legacy USB Event-IN checkpoints at 40 to 48, and version 8
- * appends thirteen packed EP1 acknowledgement trace words at 49 to 61.
+ * the former nRF52840 TinyUSB Event-IN checkpoints at 40 to 48, and version 8
+ * appended thirteen packed EP1 acknowledgement trace words at 49 to 61.
+ * IOsonata now owns the USB controller and those legacy slots report zero;
+ * they remain in place so deployed version-8 host decoders stay aligned.
  *
  * Indices 32 and 33 are not counters. They are the two numbers that decide
  * whether the controller starts at all, and they are here for the reason the
@@ -113,20 +115,11 @@ extern "C" {
  *  37  PawrSdcCompleteCount             matching real SDC completions received
  *  38  ControllerAclPacketCount         valid ACL packets fetched from controller
  *  39  HostAclPacketCount               ACL packets accepted by the host transport
- *  40  UsbEventEpDataCount              EP1 host transactions consumed
- *  41  UsbEventDmaEndCount              EP1 RAM-to-endpoint DMA completions
- *  42  UsbEventContinueCount            EP1 transactions that started another chunk
- *  43  UsbEventCompleteCount            EP1 logical transfers completed
- *  44  UsbEventBadAmountCount           EP1 AMOUNT differed from requested chunk
- *  45  UsbEventStaleStatusCount         EP1 status already set when a new Event armed
- *  46  UsbEventEp2CollisionCount        EP1 and EPOUT2 status were pending together
- *  47  UsbEventLateStatusCount          EP1 appeared before a shared EPDATA clear
- *  48  UsbEventEndOverlapCount          EP1 END and direct EPOUT2 END shared one IRQ
- *  49-61 UsbEventAckTrace               last thirteen ACKed EP1 payload chunks
+ *  40-48 LegacyUsbEventCounters         reserved compatibility slots; always zero
+ *  49-61 UsbEventAckTrace               reserved compatibility trace; always zero
  *
- * Each UsbEventAckTrace word stores the first three bytes of the chunk in bits
- * 0..23 and the zero-based chunk index within that logical Event transfer in
- * bits 24..31. The thirteen words are returned oldest to newest. They are a
+ * In the removed TinyUSB implementation, each UsbEventAckTrace word stored the
+ * first three bytes of a chunk and its index. The retained fields are a
  * diagnostic trace, not monotonically increasing counters.
  */
 #define HCI_COUNTERS_VERSION    8U

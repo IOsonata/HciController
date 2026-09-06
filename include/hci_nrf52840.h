@@ -3,7 +3,7 @@
 
 @brief	nRF52840 HciController target interface and runtime state.
 
-		Declares the nRF52840 target state, USB lifecycle hooks, retained reset
+		Declares the nRF52840 target state, retained reset
 		diagnostics, TaktOS integration, and the target instance factory.
 
 @author	Nguyen Hoan Hoang
@@ -27,8 +27,8 @@ extern "C" {
 #endif
 
 /*
- * The nRF52840 port: its clock, its USB device peripheral, its errata and the
- * state those need. What the SoftDevice Controller is configured for is not
+ * The nRF52840 port: its clocks, radio interrupts, errata and retained state.
+ * What the SoftDevice Controller is configured for is not
  * here, it is in hci_sdc_resources.h, because it is the same on every part.
  */
 typedef struct {
@@ -39,35 +39,18 @@ typedef struct {
     int32_t RequiredSdcMem;
     int32_t LastError;
     uint32_t FaultCount;
-    bool UsbEnabled;
     bool MpslInitialized;
     bool SdcInitialized;
     bool SdcEnabled;
     bool HfclkRequested;
-    volatile bool UsbStarted;
-    volatile bool UsbReadyDone;
-    /* Cable events, set by POWER_CLOCK and applied by the runtime thread. */
-    volatile bool UsbAttachPending;
-    volatile bool UsbDetachPending;
-    volatile uint32_t UsbAttachCount;
-    volatile uint32_t UsbDetachCount;
 
     uint32_t RandRetryCount;
-
-    volatile uint32_t UsbIrqCount;
-    volatile uint32_t UsbIrqMark;
-    volatile uint32_t UsbStuckCauseCount;
-    volatile uint32_t UsbEventCause;
-    volatile uint32_t UsbStormInten;
-    volatile uint32_t UsbStormCause;
-    volatile uint32_t UsbStormEvents;
 } HciNrf52840_t;
 
 bool HciNrf52840Init(HciNrf52840_t *pTarget,
                      HciTaktOs_t *pRuntime,
                      uint8_t *pSdcMem,
-                     size_t SdcMemCapacity,
-                     bool UsbEnabled);
+                     size_t SdcMemCapacity);
 
 void HciNrf52840GetTaktOsOps(HciNrf52840_t *pTarget,
                              HciTaktOsOps_t *pOps);
@@ -79,24 +62,6 @@ void HciNrf52840GetTaktOsOps(HciNrf52840_t *pTarget,
  * state.
  */
 void HciNrf52840ResetTrace(void);
-
-/*
- * Enables the USB hardware. Must be called after the USB device stack has been
- * initialised, and only when the target was created with UsbEnabled set.
- */
-bool HciNrf52840UsbStart(HciNrf52840_t *pTarget);
-
-/*
- * Marks the start of a device stack pump pass. Interrupts counted between two
- * marks are what the storm detector measures.
- */
-void HciNrf52840UsbPassMark(HciNrf52840_t *pTarget);
-
-/*
- * Apply a cable attach or detach recorded by the interrupt handler. Must be
- * called from the same context that pumps the device stack.
- */
-void HciNrf52840UsbPowerProcess(HciNrf52840_t *pTarget);
 
 void HciNrf52840Stop(HciNrf52840_t *pTarget);
 

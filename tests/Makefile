@@ -2,7 +2,7 @@
 #
 # Everything here is compiled with the native C/C++ compiler using the same
 # GNU C17 and GNU C++23 language standards as the nRF52840 target project. The
-# target headers that the firmware needs on device, nrf.h, MPSL, TinyUSB,
+# target headers that the firmware needs on device, nrf.h, MPSL,
 # TaktOS and the SoftDevice Controller, are replaced by the fakes under stubs,
 # so no SDK checkout is needed for the default target.
 #
@@ -50,12 +50,7 @@ CFLAGS ?= -std=gnu17 -O0 -g3 -Wall -Wextra -Werror -Wshadow -Wundef
 # dispatch test, which wants the real headers.
 MOCK_INCLUDES := -I$(STUBS)/sdc -I$(STUBS) -I$(IOSONATA) -I$(ROOT)/include \
                  -I$(IOSONATA_ROOT)/include
-# CFG_TUSB_MCU is what the firmware build passes and what tusb_config.h refuses
-# to be included without. The stub tusb.h includes the real config so a test
-# sees the real function count rather than a copy of it that can drift.
-MOCK_DEFINES := -DHCI_NRF52840_HFCLK_WAIT_LOOPS=1000 \
-                -DHCI_NRF52840_USBREG_WAIT_LOOPS=1000 \
-                -DCFG_TUSB_MCU=OPT_MCU_NRF5X
+MOCK_DEFINES := -DHCI_NRF52840_HFCLK_WAIT_LOOPS=1000
 
 # name : test source : firmware sources under test
 TESTS := hci_h4 \
@@ -66,8 +61,7 @@ TESTS := hci_h4 \
          hci_intrf_transport_integrity \
          hci_controller \
          hci_nrf52840_usb \
-         hci_taktos_poll \
-         hci_tinyusb_init
+         hci_taktos_poll
 
 hci_h4_SRC             := $(SRC)/hci_h4.cpp
 hci_cmd_dispatch_SRC   := $(SRC)/hci_cmd_dispatch.cpp
@@ -80,7 +74,6 @@ hci_controller_SRC     := $(SRC)/hci_controller.cpp \
 hci_nrf52840_usb_SRC   := $(SRC)/hci_nrf52840.cpp \
                           $(SRC)/hci_sdc_resources.cpp
 hci_taktos_poll_SRC    := $(SRC)/hci_taktos.cpp
-hci_tinyusb_init_SRC   := $(SRC)/hci_tinyusb.cpp $(CFIFO_OBJ)
 
 # Tests unrelated to logging only need trace call sites to link. The focused
 # HciTrace target below links the real standard IOsonata SysLog implementation.
@@ -104,7 +97,7 @@ TARGETS += $(HCI_TRACE_TARGET)
 # implementation may be optimized differently, so compile every source once
 # with semihosting enabled as well.
 #
-# Linking hci_app would need MPSL, TinyUSB and a controller all answering,
+# Linking hci_app would need MPSL, the USB controller and an HCI controller,
 # which is a target's job; compiling it catches structure and API drift.
 COMPILE_SRC := $(filter-out $(SRC)/hci_sdc_nrfxlib.cpp,$(wildcard $(SRC)/hci_*.cpp))
 
@@ -236,32 +229,16 @@ $(RESOURCES_TARGET): $(UNIT)/hci_sdc_resources_test.cpp \
 	  $(UNIT)/hci_sdc_resources_test.cpp -o $@
 endif
 
-# The USB descriptors against the real TinyUSB headers. src/usb_descriptors.c
-# is compiled by the target build and by nothing else, and the thing most
-# likely to be wrong in it, the declared configuration length against the
-# bytes that follow, is not an error until a host refuses to enumerate. The
-# file has a _Static_assert for exactly that; this is what runs it.
-#
-# Built when a TinyUSB checkout can be found and skipped otherwise, the same
-# way the SDC tests are.
-TINYUSB_DIR ?= $(ROOT)/../external/tinyusb
-TINYUSB_SRC := $(wildcard $(TINYUSB_DIR)/src/tusb.h)
-
+# Compile the raw native descriptors as C. Their static assertions validate
+# every configuration length before a host can reject enumeration.
 check-usb-desc:
-ifneq ($(strip $(TINYUSB_SRC)),)
-	@echo "[TEST] usb_descriptors.c against TinyUSB"
-	@$(CC) -fsyntax-only -I$(STUBS)/nrfficr -I$(ROOT)/include \
-	  -I$(TINYUSB_DIR)/src -I$(STUBS) -DCFG_TUSB_MCU=OPT_MCU_NRF5X \
-	  -std=gnu17 -Wall -Wextra -Werror $(SRC)/usb_descriptors.c
+	@echo "[TEST] usb_descriptors.c against IOsonata USB"
+	@$(CC) -fsyntax-only -I$(STUBS)/nrfficr $(MOCK_INCLUDES) \
+	  $(CFLAGS) $(SRC)/usb_descriptors.c
 	@echo "[ok] descriptor length matches what it declares"
-else
-	@echo "[TEST] usb_descriptors.c skipped, set TINYUSB_DIR to a checkout"
-endif
 
-# hci_app.cpp is compile checked but not linked by the host suite. This pins
-# the cross-layer order that defines one USB storm-counting window. In 70088f5
-# the runtime path omitted UsbPassMark, so ordinary traffic accumulated forever
-# against the startup mark and disconnected once it crossed the storm limit.
+# hci_app.cpp is compile checked but not linked by the host suite. This static
+# check pins the IOsonata USB lifecycle and processing calls used by the app.
 check-usb-runtime:
 	@command -v $(PYTHON) >/dev/null 2>&1 || { \
 	  echo "[TEST] usb_runtime_pass.py skipped, no $(PYTHON)"; exit 0; }

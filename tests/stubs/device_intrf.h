@@ -164,6 +164,31 @@ void DeviceIntrfDisable(DevIntrf_t *);
 
 #ifdef __cplusplus
 }
+
+class DeviceIntrf {
+public:
+    virtual operator DevIntrf_t * () = 0;
+    virtual uint32_t Rate(uint32_t) = 0;
+    virtual uint32_t Rate(void) = 0;
+    virtual bool RequestToSend(int) { return true; }
+    virtual int Tx(uint32_t DevAddr, const uint8_t *pData, int DataLen)
+    {
+        return DeviceIntrfTx(*this, DevAddr, pData, DataLen);
+    }
+    virtual int Rx(uint32_t DevAddr, uint8_t *pData, int DataLen)
+    {
+        return DeviceIntrfRx(*this, DevAddr, pData, DataLen);
+    }
+    virtual int TxData(const uint8_t *pData, int DataLen)
+    {
+        return DeviceIntrfTxData(*this, pData, DataLen);
+    }
+    virtual int RxData(uint8_t *pData, int DataLen)
+    {
+        return DeviceIntrfRxData(*this, pData, DataLen);
+    }
+    virtual ~DeviceIntrf() = default;
+};
 #endif
 
 #endif

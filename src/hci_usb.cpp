@@ -1,791 +1,993 @@
 /**-------------------------------------------------------------------------
 @file	hci_usb.cpp
 
-@brief	Native Bluetooth USB HCI packet DeviceIntrf implementation.
-
-		Implements packet-oriented HCI receive/transmit service over native
-		Bluetooth USB, including Event, ACL, SCO, ISO routing, Bulk
-		Serialization framing, transfer completion, and USB validation traces.
+@brief	Native Bluetooth HCI class for the IOsonata USB stack.
 
 @author	Nguyen Hoan Hoang
-@date	August 2026
+@date	September 2026
 
 @license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
 ----------------------------------------------------------------------------*/
 
-#include "hci_usb_priv.h"
+#include "hci_usb.h"
 
 #include <string.h>
 
-enum
-{
-    HCI_USB_TX_VALIDATION_VERSION = 1U,
-    HCI_USB_TX_VALIDATION_DEPTH = 8U,
-    HCI_USB_TX_VALIDATION_FIRST_LEN = 8U,
-    HCI_USB_TX_VALIDATION_LAST_LEN = 8U,
-    HCI_USB_TX_VALIDATION_RECORD_LEN = 28U,
-    HCI_USB_TX_VALIDATION_HEADER_LEN = 2U
-};
+#include "coredev/interrupt.h"
 
-#define HCI_USB_TX_VALIDATION_LENGTH_VALID     0x01U
-#define HCI_USB_TX_VALIDATION_EVENT_CODE_VALID 0x02U
+#define HCI_USB_CLASS_WIRELESS_CONTROLLER	0xE0U
+#define HCI_USB_SUBCLASS_RF_CONTROLLER		0x01U
+#define HCI_USB_PROTOCOL_BLUETOOTH			0x01U
+#define HCI_USB_CONFIG_VALUE					1U
+#define HCI_USB_COMMAND_HEADER_SIZE			3U
+#define HCI_USB_EVENT_HEADER_SIZE			2U
+#define HCI_USB_ACL_HEADER_SIZE				4U
+#define HCI_USB_SCO_HEADER_SIZE				3U
+#define HCI_USB_ISO_HEADER_SIZE				4U
+#define HCI_USB_HISTORICAL_COMMAND_REQUEST	0xE0U
 
-typedef struct
-{
-    uint32_t Sequence;
-    uint16_t Length;
-    uint8_t Flags;
-    uint8_t EventCode;
-    uint32_t Crc32;
-    uint8_t First[HCI_USB_TX_VALIDATION_FIRST_LEN];
-    uint8_t Last[HCI_USB_TX_VALIDATION_LAST_LEN];
+typedef struct {
+	uint32_t Sequence;
+	uint16_t Length;
+	uint8_t EventCode;
+	uint8_t Valid;
+	uint32_t Crc32;
 } HciUsbTxValidationRecord_t;
 
-static HciUsbTxValidationRecord_t
-    s_TxValidation[HCI_USB_TX_VALIDATION_DEPTH];
-static uint32_t s_TxValidationCount;
+#ifndef HCI_USB_TX_VALIDATION_DEPTH
+#define HCI_USB_TX_VALIDATION_DEPTH 8U
+#endif
+
+static HciUsb *s_pUsb;
+static HciUsbTxValidationRecord_t s_TxValidation[HCI_USB_TX_VALIDATION_DEPTH];
+static uint32_t s_TxValidationSequence;
+static uint32_t s_TxValidationWrite;
+
+static uint16_t HciUsbReadLe16(const uint8_t *pData)
+{
+	return (uint16_t)pData[0] | ((uint16_t)pData[1] << 8);
+}
 
 static void HciUsbWriteLe16(uint8_t *pData, uint16_t Value)
 {
-    pData[0] = (uint8_t)Value;
-    pData[1] = (uint8_t)(Value >> 8);
+	pData[0] = (uint8_t)Value;
+	pData[1] = (uint8_t)(Value >> 8);
 }
 
 static void HciUsbWriteLe32(uint8_t *pData, uint32_t Value)
 {
-    pData[0] = (uint8_t)Value;
-    pData[1] = (uint8_t)(Value >> 8);
-    pData[2] = (uint8_t)(Value >> 16);
-    pData[3] = (uint8_t)(Value >> 24);
+	pData[0] = (uint8_t)Value;
+	pData[1] = (uint8_t)(Value >> 8);
+	pData[2] = (uint8_t)(Value >> 16);
+	pData[3] = (uint8_t)(Value >> 24);
 }
 
-static uint32_t HciUsbCrc32(const uint8_t *pData, size_t Len)
+static uint32_t HciUsbCrc32(const uint8_t *pData, size_t Length)
 {
-    uint32_t crc = 0xFFFFFFFFU;
+	uint32_t crc = 0xFFFFFFFFU;
 
-    for (size_t i = 0U; i < Len; ++i)
-    {
-        crc ^= pData[i];
-        for (unsigned bit = 0U; bit < 8U; ++bit)
-        {
-            const uint32_t mask = (uint32_t)-(int32_t)(crc & 1U);
-            crc = (crc >> 1) ^ (0xEDB88320U & mask);
-        }
-    }
+	for (size_t i = 0U; i < Length; i++)
+	{
+		crc ^= pData[i];
+		for (unsigned bit = 0U; bit < 8U; bit++)
+		{
+			crc = (crc >> 1) ^ (0xEDB88320U &
+				(uint32_t)-(int32_t)(crc & 1U));
+		}
+	}
 
-    return ~crc;
+	return ~crc;
 }
 
 static bool HciUsbEventCodeValid(uint8_t Code)
 {
-    return Code != 0U && (Code <= 0x3EU || Code == 0xFFU);
+	return Code != 0U && (Code <= 0x3EU || Code == 0xFFU);
 }
 
 static void HciUsbResetTxValidation(void)
 {
-    memset(s_TxValidation, 0, sizeof(s_TxValidation));
-    s_TxValidationCount = 0U;
+	memset(s_TxValidation, 0, sizeof(s_TxValidation));
+	s_TxValidationSequence = 0U;
+	s_TxValidationWrite = 0U;
 }
 
-static void HciUsbRecordTxValidation(const uint8_t *pData, size_t Len)
+static void HciUsbRecordTxValidation(const uint8_t *pData, size_t Length)
 {
-    if (pData == nullptr || Len == 0U || Len > UINT16_MAX)
-    {
-        return;
-    }
+	if (pData == nullptr || Length == 0U || Length > UINT16_MAX)
+	{
+		return;
+	}
 
-    const uint32_t sequence = s_TxValidationCount + 1U;
-    HciUsbTxValidationRecord_t *pRecord =
-        &s_TxValidation[s_TxValidationCount % HCI_USB_TX_VALIDATION_DEPTH];
-
-    memset(pRecord, 0, sizeof(*pRecord));
-    pRecord->Sequence = sequence;
-    pRecord->Length = (uint16_t)Len;
-    pRecord->EventCode = pData[0];
-    pRecord->Crc32 = HciUsbCrc32(pData, Len);
-
-    if (Len >= 2U && Len == (size_t)pData[1] + 2U)
-    {
-        pRecord->Flags |= HCI_USB_TX_VALIDATION_LENGTH_VALID;
-    }
-    if (HciUsbEventCodeValid(pData[0]))
-    {
-        pRecord->Flags |= HCI_USB_TX_VALIDATION_EVENT_CODE_VALID;
-    }
-
-    size_t keep = Len < HCI_USB_TX_VALIDATION_FIRST_LEN ?
-                  Len : HCI_USB_TX_VALIDATION_FIRST_LEN;
-    memcpy(pRecord->First, pData, keep);
-
-    keep = Len < HCI_USB_TX_VALIDATION_LAST_LEN ?
-           Len : HCI_USB_TX_VALIDATION_LAST_LEN;
-    memcpy(pRecord->Last, &pData[Len - keep], keep);
-
-    s_TxValidationCount = sequence;
+	HciUsbTxValidationRecord_t *pRecord =
+		&s_TxValidation[s_TxValidationWrite % HCI_USB_TX_VALIDATION_DEPTH];
+	pRecord->Sequence = ++s_TxValidationSequence;
+	pRecord->Length = (uint16_t)Length;
+	pRecord->EventCode = pData[0];
+	pRecord->Valid = HciUsbEventCodeValid(pData[0]) ? 1U : 0U;
+	pRecord->Crc32 = HciUsbCrc32(pData, Length);
+	s_TxValidationWrite++;
 }
 
-/*
- * Local HCI opcode 0xFFF2 calls this before its own Command Complete is handed
- * back to USB. The returned history therefore ends at the packets that existed
- * before the diagnostic request and cannot be overwritten by the response that
- * carries the snapshot.
- */
 extern "C" size_t HciUsbPlatformReadTxValidation(uint8_t *pData,
-                                                  size_t Capacity)
+											 size_t Capacity)
 {
-    const uint32_t count = s_TxValidationCount;
-    const size_t available = count < HCI_USB_TX_VALIDATION_DEPTH ?
-                             (size_t)count : HCI_USB_TX_VALIDATION_DEPTH;
-    const size_t required = HCI_USB_TX_VALIDATION_HEADER_LEN +
-                            available * HCI_USB_TX_VALIDATION_RECORD_LEN;
+	const size_t recordSize = 12U;
+	const size_t headerSize = 8U;
+	if (pData == nullptr || Capacity < headerSize)
+	{
+		return headerSize;
+	}
 
-    if (pData == nullptr || Capacity < required)
-    {
-        return 0U;
-    }
+	const uint32_t count = s_TxValidationWrite < HCI_USB_TX_VALIDATION_DEPTH ?
+		s_TxValidationWrite : HCI_USB_TX_VALIDATION_DEPTH;
+	const size_t required = headerSize + (size_t)count * recordSize;
+	if (Capacity < required)
+	{
+		return required;
+	}
 
-    pData[0] = HCI_USB_TX_VALIDATION_VERSION;
-    pData[1] = (uint8_t)available;
+	HciUsbWriteLe32(&pData[0], s_TxValidationSequence);
+	HciUsbWriteLe32(&pData[4], count);
+	const uint32_t first = s_TxValidationWrite > count ?
+		s_TxValidationWrite - count : 0U;
+	for (uint32_t i = 0U; i < count; i++)
+	{
+		const HciUsbTxValidationRecord_t *pRecord =
+			&s_TxValidation[(first + i) % HCI_USB_TX_VALIDATION_DEPTH];
+		const size_t offset = headerSize + (size_t)i * recordSize;
+		HciUsbWriteLe32(&pData[offset], pRecord->Sequence);
+		HciUsbWriteLe16(&pData[offset + 4U], pRecord->Length);
+		pData[offset + 6U] = pRecord->EventCode;
+		pData[offset + 7U] = pRecord->Valid;
+		HciUsbWriteLe32(&pData[offset + 8U], pRecord->Crc32);
+	}
 
-    const uint32_t firstSequence = count - (uint32_t)available + 1U;
-    size_t offset = HCI_USB_TX_VALIDATION_HEADER_LEN;
-
-    for (size_t i = 0U; i < available; ++i)
-    {
-        const uint32_t sequence = firstSequence + (uint32_t)i;
-        const HciUsbTxValidationRecord_t *pRecord =
-            &s_TxValidation[(sequence - 1U) % HCI_USB_TX_VALIDATION_DEPTH];
-
-        HciUsbWriteLe32(&pData[offset], pRecord->Sequence);
-        HciUsbWriteLe16(&pData[offset + 4U], pRecord->Length);
-        pData[offset + 6U] = pRecord->Flags;
-        pData[offset + 7U] = pRecord->EventCode;
-        HciUsbWriteLe32(&pData[offset + 8U], pRecord->Crc32);
-        memcpy(&pData[offset + 12U], pRecord->First,
-               HCI_USB_TX_VALIDATION_FIRST_LEN);
-        memcpy(&pData[offset + 20U], pRecord->Last,
-               HCI_USB_TX_VALIDATION_LAST_LEN);
-        offset += HCI_USB_TX_VALIDATION_RECORD_LEN;
-    }
-
-    return required;
+	return required;
 }
 
-static bool HciUsbOutputTypeValid(HciH4PacketType_t Type)
+static size_t HciUsbPacketLength(HciH4PacketType_t Type,
+							 const uint8_t *pPacket, size_t Available)
 {
-    return Type == HCI_H4_PACKET_EVENT ||
-           Type == HCI_H4_PACKET_ACL ||
-           Type == HCI_H4_PACKET_SCO ||
-           Type == HCI_H4_PACKET_ISO;
+	if (pPacket == nullptr)
+	{
+		return 0U;
+	}
+
+	switch (Type)
+	{
+		case HCI_H4_PACKET_COMMAND:
+			return Available >= HCI_USB_COMMAND_HEADER_SIZE ?
+				HCI_USB_COMMAND_HEADER_SIZE + (size_t)pPacket[2] : 0U;
+
+		case HCI_H4_PACKET_EVENT:
+			return Available >= HCI_USB_EVENT_HEADER_SIZE ?
+				HCI_USB_EVENT_HEADER_SIZE + (size_t)pPacket[1] : 0U;
+
+		case HCI_H4_PACKET_ACL:
+			return Available >= HCI_USB_ACL_HEADER_SIZE ?
+				HCI_USB_ACL_HEADER_SIZE +
+				(size_t)HciUsbReadLe16(&pPacket[2]) : 0U;
+
+		case HCI_H4_PACKET_SCO:
+			return Available >= HCI_USB_SCO_HEADER_SIZE ?
+				HCI_USB_SCO_HEADER_SIZE + (size_t)pPacket[2] : 0U;
+
+		case HCI_H4_PACKET_ISO:
+			return Available >= HCI_USB_ISO_HEADER_SIZE ?
+				HCI_USB_ISO_HEADER_SIZE +
+				(size_t)(HciUsbReadLe16(&pPacket[2]) & 0x3FFFU) : 0U;
+
+		default:
+			return 0U;
+	}
+}
+
+static size_t HciUsbHeaderSize(HciH4PacketType_t Type)
+{
+	switch (Type)
+	{
+		case HCI_H4_PACKET_COMMAND:
+			return HCI_USB_COMMAND_HEADER_SIZE;
+		case HCI_H4_PACKET_EVENT:
+			return HCI_USB_EVENT_HEADER_SIZE;
+		case HCI_H4_PACKET_ACL:
+			return HCI_USB_ACL_HEADER_SIZE;
+		case HCI_H4_PACKET_SCO:
+			return HCI_USB_SCO_HEADER_SIZE;
+		case HCI_H4_PACKET_ISO:
+			return HCI_USB_ISO_HEADER_SIZE;
+		default:
+			return 0U;
+	}
 }
 
 static bool HciUsbHostTypeValid(HciH4PacketType_t Type)
 {
-    return Type == HCI_H4_PACKET_COMMAND ||
-           Type == HCI_H4_PACKET_ACL ||
-           Type == HCI_H4_PACKET_SCO ||
-           Type == HCI_H4_PACKET_ISO;
+	return Type == HCI_H4_PACKET_COMMAND || Type == HCI_H4_PACKET_ACL ||
+		Type == HCI_H4_PACKET_SCO || Type == HCI_H4_PACKET_ISO;
 }
 
-static uint8_t HciUsbTxEndpoint(const HciUsb_t *pUsb, HciH4PacketType_t Type)
+static bool HciUsbOutputTypeValid(HciH4PacketType_t Type)
 {
-    if (pUsb == nullptr)
-    {
-        return 0U;
-    }
-
-    if (pUsb->BulkSerialization)
-    {
-        return pUsb->BulkInEp;
-    }
-
-    switch (Type)
-    {
-        case HCI_H4_PACKET_EVENT:
-            return pUsb->EventEp;
-
-        case HCI_H4_PACKET_ACL:
-            return pUsb->BulkInEp;
-
-        case HCI_H4_PACKET_SCO:
-            return pUsb->SyncAlt != 0U ? pUsb->SyncInEp : 0U;
-
-        case HCI_H4_PACKET_ISO:
-        default:
-            return 0U;
-    }
+	return Type == HCI_H4_PACKET_EVENT || Type == HCI_H4_PACKET_ACL ||
+		Type == HCI_H4_PACKET_SCO || Type == HCI_H4_PACKET_ISO;
 }
 
-static uint16_t HciUsbTxPacketSize(const HciUsb_t *pUsb, uint8_t EpAddr)
+static bool HciUsbOpenEndpoint(int DevNo, uint8_t EpAddr, uint8_t Type,
+							   uint16_t Mps, uint8_t Interval)
 {
-    if (pUsb == nullptr)
-    {
-        return 0U;
-    }
-
-    if (EpAddr == pUsb->BulkInEp)
-    {
-        return pUsb->BulkInMps;
-    }
-
-    if (EpAddr == pUsb->EventEp)
-    {
-        tusb_desc_endpoint_t endpoint;
-        memcpy(&endpoint, pUsb->EventDesc, sizeof(endpoint));
-        return tu_edpt_packet_size(&endpoint);
-    }
-
-    return 0U;
+	UsbEndPointDesc_t desc = {};
+	desc.bLength = sizeof(desc);
+	desc.bDescriptorType = USB_DESCTYPE_ENDPOINT;
+	desc.bEndpointAddress = EpAddr;
+	desc.bmAttributes = Type;
+	desc.wMaxPacketSize = Mps;
+	desc.bInterval = Interval;
+	return UsbCtrlrEpOpen(DevNo, &desc);
 }
 
-static void HciUsbClearTx(HciUsb_t *pUsb)
+bool HciUsb::Init(const HciUsbCfg_t &Cfg)
 {
-    if (pUsb == nullptr)
-    {
-        return;
-    }
+	if ((s_pUsb != nullptr && s_pUsb != this) || Cfg.pRxFifoMem == nullptr ||
+		Cfg.pTxFifoMem == nullptr || Cfg.RxFifoMemSize <= 0 ||
+		Cfg.TxFifoMemSize <= 0 || UsbGetCfg(Cfg.DevNo) == nullptr)
+	{
+		return false;
+	}
 
-    pUsb->TxPending = false;
-    pUsb->TxActive = false;
-    pUsb->TxPayloadComplete = false;
-    pUsb->TxZlpActive = false;
-    pUsb->TxBufferBulkSerialization = false;
-    pUsb->TxType = HCI_H4_PACKET_NONE;
-    pUsb->TxLen = 0U;
-    pUsb->TxWireLen = 0U;
+	vEvtCB = Cfg.EvtCB;
+	vDevNo = Cfg.DevNo;
+	ClearRx();
+	ClearEventTx();
+	vConfigured = false;
+	vHciAlt = HCI_USB_HCI_ALT_LEGACY;
+	vBulkSerialization = false;
+	vCommandCount = 0U;
+	vAclOutCount = 0U;
+	vAclInCount = 0U;
+	vEventInCount = 0U;
+	vInvalidRxCount = 0U;
+	vTxErrorCount = 0U;
+	HciUsbResetTxValidation();
+	s_pUsb = this;
+
+	UsbIntrfCfg_t dataCfg = {};
+	dataCfg.DevNo = Cfg.DevNo;
+	dataCfg.EpNo = HCI_USB_BULK_EP_NO;
+	dataCfg.bBlocking = Cfg.bBlocking;
+	dataCfg.RxFifoMemSize = Cfg.RxFifoMemSize;
+	dataCfg.pRxFifoMem = Cfg.pRxFifoMem;
+	dataCfg.TxFifoMemSize = Cfg.TxFifoMemSize;
+	dataCfg.pTxFifoMem = Cfg.pTxFifoMem;
+	dataCfg.TxFifoBlkSize = HCI_USB_PKT_BLKSIZE;
+	dataCfg.BufferSize = sizeof(vBulkRxTransfer);
+	dataCfg.pRxBuffer = vBulkRxTransfer;
+	dataCfg.pTxBuffer = vBulkTxTransfer;
+	dataCfg.EvtCB = DataEventHandler;
+	if (!UsbIntrf::Init(dataCfg))
+	{
+		s_pUsb = nullptr;
+		return false;
+	}
+
+	vBulkRxData = vUsbDevIntrf.DevIntrf.RxData;
+	vBulkTxData = vUsbDevIntrf.DevIntrf.TxData;
+	vUsbDevIntrf.DevIntrf.StartRx = DevStartRx;
+	vUsbDevIntrf.DevIntrf.RxData = DevRxData;
+	vUsbDevIntrf.DevIntrf.StartTx = DevStartTx;
+	vUsbDevIntrf.DevIntrf.TxData = DevTxData;
+	vUsbDevIntrf.DevIntrf.TxSrData = DevTxSrData;
+	vUsbDevIntrf.DevIntrf.Reset = DevReset;
+	vUsbDevIntrf.DevIntrf.GetHandle = DevGetHandle;
+
+	if (!UsbCtrlrEpRegister(vDevNo, USB_ENDPADDR_DIRIN(HCI_USB_EVENT_EP_NO),
+		vEventTxTransfer, EventXferHandler, this))
+	{
+		s_pUsb = nullptr;
+		return false;
+	}
+
+	UsbFuncCfg_t cfg = {};
+	cfg.FirstInterface = 0U;
+	cfg.InterfaceCount = 2U;
+	cfg.EpInMask = (uint16_t)((1U << HCI_USB_EVENT_EP_NO) |
+		(1U << HCI_USB_BULK_EP_NO));
+	cfg.EpOutMask = (uint16_t)(1U << HCI_USB_BULK_EP_NO);
+	cfg.RequestHandler = RequestHandler;
+	cfg.ConfigHandler = ConfigHandler;
+	cfg.SetInterfaceHandler = SetInterfaceHandler;
+	cfg.XferHandler = XferHandler;
+	cfg.ResetHandler = ResetHandler;
+	cfg.ProcessHandler = ProcessHandler;
+	cfg.pContext = this;
+	if (!UsbRegisterFunc(vDevNo, &cfg))
+	{
+		s_pUsb = nullptr;
+		return false;
+	}
+
+	return true;
 }
 
-static void HciUsbReframeTxBuffer(HciUsb_t *pUsb)
+bool HciUsb::Open(uint8_t Alt)
 {
-    if (pUsb == nullptr || !pUsb->TxPending ||
-        pUsb->TxBufferBulkSerialization == pUsb->BulkSerialization)
-    {
-        return;
-    }
+	if (Alt > HCI_USB_HCI_ALT_SERIALIZED)
+	{
+		return false;
+	}
 
-    /*
-     * SET_INTERFACE can cancel an active IN request while the HCI packet is
-     * still owned by this transport. Preserve that pending packet while
-     * converting the same aligned buffer to the new alternate setting's wire
-     * layout. Byte 0 stays dedicated to Bulk Serialization's H4 indicator;
-     * legacy payload lives at the next word-aligned offset.
-     */
-    const size_t oldOffset = pUsb->TxBufferBulkSerialization
-                                 ? 1U
-                                 : HCI_USB_TX_LEGACY_OFFSET;
-    const size_t newOffset = pUsb->BulkSerialization
-                                 ? 1U
-                                 : HCI_USB_TX_LEGACY_OFFSET;
-    memmove(&pUsb->TxBuffer[newOffset],
-            &pUsb->TxBuffer[oldOffset],
-            pUsb->TxLen);
-    pUsb->TxBuffer[0] = (uint8_t)pUsb->TxType;
-    pUsb->TxBufferBulkSerialization = pUsb->BulkSerialization;
+	if (Alt == HCI_USB_HCI_ALT_LEGACY &&
+		!HciUsbOpenEndpoint(vDevNo, USB_ENDPADDR_DIRIN(HCI_USB_EVENT_EP_NO),
+			USB_ENDPATT_TRANS_INT, HCI_USB_EVENT_MPS, 1U))
+	{
+		return false;
+	}
+
+	if (!HciUsbOpenEndpoint(vDevNo, USB_ENDPADDR_DIROUT(HCI_USB_BULK_EP_NO),
+			USB_ENDPATT_TRANS_BULK, HCI_USB_FS_BULK_MPS, 0U) ||
+		!HciUsbOpenEndpoint(vDevNo, USB_ENDPADDR_DIRIN(HCI_USB_BULK_EP_NO),
+			USB_ENDPATT_TRANS_BULK, HCI_USB_FS_BULK_MPS, 0U) ||
+		!UsbIntrfConfigure(&vUsbDevIntrf, HCI_USB_FS_BULK_MPS))
+	{
+		UsbCtrlrEpClose(vDevNo, USB_ENDPADDR_DIRIN(HCI_USB_EVENT_EP_NO));
+		UsbCtrlrEpClose(vDevNo, USB_ENDPADDR_DIROUT(HCI_USB_BULK_EP_NO));
+		UsbCtrlrEpClose(vDevNo, USB_ENDPADDR_DIRIN(HCI_USB_BULK_EP_NO));
+		UsbIntrfUnconfigure(&vUsbDevIntrf);
+		return false;
+	}
+
+	vHciAlt = Alt;
+	vBulkSerialization = Alt == HCI_USB_HCI_ALT_SERIALIZED;
+	vConfigured = true;
+	return true;
 }
 
-bool HciUsbKickTx(HciUsb_t *pUsb)
+void HciUsb::Close(void)
 {
-    if (pUsb == nullptr || !pUsb->Configured || !pUsb->TxPending ||
-        pUsb->TxActive || pUsb->TxZlpActive)
-    {
-        return false;
-    }
-
-    const uint8_t EpAddr = HciUsbTxEndpoint(pUsb, pUsb->TxType);
-    if (EpAddr == 0U || usbd_edpt_busy(0U, EpAddr))
-    {
-        return false;
-    }
-
-    if (pUsb->TxPayloadComplete)
-    {
-        const uint16_t packetSize = HciUsbTxPacketSize(pUsb, EpAddr);
-        if (packetSize == 0U || pUsb->TxWireLen == 0U ||
-            (pUsb->TxWireLen % packetSize) != 0U)
-        {
-            HciUsbClearTx(pUsb);
-            return true;
-        }
-
-        /*
-         * Keep the zero-length transfer's data pointer in DMA-visible RAM.
-         * TinyUSB's nRF5x DCD writes the supplied pointer to EPIN[n].PTR even
-         * when MAXCNT is zero. TxBuffer is aligned RAM owned for the lifetime
-         * of this transfer; no byte is read because the transfer length is 0.
-         */
-        if (!HciUsbEdptXfer(0U, EpAddr, pUsb->TxBuffer, 0U))
-        {
-            pUsb->TxErrorCount++;
-            return false;
-        }
-
-        pUsb->TxActive = true;
-        pUsb->TxZlpActive = true;
-        return true;
-    }
-
-    HciUsbReframeTxBuffer(pUsb);
-
-    uint8_t *pWire = pUsb->BulkSerialization
-                         ? pUsb->TxBuffer
-                         : &pUsb->TxBuffer[HCI_USB_TX_LEGACY_OFFSET];
-    size_t WireLen = pUsb->TxLen;
-    if (pUsb->BulkSerialization)
-    {
-        WireLen++;
-    }
-
-    if (WireLen > UINT16_MAX ||
-        !HciUsbEdptXfer(0U, EpAddr, pWire, (uint16_t)WireLen))
-    {
-        pUsb->TxErrorCount++;
-        return false;
-    }
-
-    /*
-     * Validate the exact RAM bytes successfully handed to native Event-IN.
-     * This is deliberately above the DCD: it says what the host-side bridge
-     * supplied to USB, independent of how USB later packetizes or acknowledges
-     * it. Bulk Serialization uses a different wire format and endpoint, so it
-     * is not mixed into this legacy Event-IN history.
-     */
-    if (!pUsb->BulkSerialization &&
-        pUsb->TxType == HCI_H4_PACKET_EVENT &&
-        EpAddr == pUsb->EventEp)
-    {
-        HciUsbRecordTxValidation(pWire, WireLen);
-    }
-
-    pUsb->TxWireLen = WireLen;
-    pUsb->TxActive = true;
-    return true;
+	// Stop rearming before an endpoint close can complete a cancelled transfer.
+	vConfigured = false;
+	UsbIntrfUnconfigure(&vUsbDevIntrf);
+	UsbCtrlrEpClose(vDevNo, USB_ENDPADDR_DIRIN(HCI_USB_EVENT_EP_NO));
+	UsbCtrlrEpClose(vDevNo, USB_ENDPADDR_DIROUT(HCI_USB_BULK_EP_NO));
+	UsbCtrlrEpClose(vDevNo, USB_ENDPADDR_DIRIN(HCI_USB_BULK_EP_NO));
+	ClearRx();
+	ClearEventTx();
 }
 
-void HciUsbTxComplete(HciUsb_t *pUsb,
-                      uint8_t EpAddr,
-                      uint32_t Transferred)
+bool HciUsb::ConfigHandler(uint8_t Configuration, void *pContext)
 {
-    if (pUsb == nullptr || !pUsb->TxPending || !pUsb->TxActive)
-    {
-        return;
-    }
+	HciUsb *pUsb = static_cast<HciUsb *>(pContext);
+	if (pUsb == nullptr)
+	{
+		return false;
+	}
 
-    if (pUsb->TxZlpActive)
-    {
-        pUsb->TxActive = false;
-        pUsb->TxZlpActive = false;
-        if (Transferred != 0U)
-        {
-            pUsb->TxErrorCount++;
-        }
-        HciUsbClearTx(pUsb);
-        return;
-    }
-
-    pUsb->TxActive = false;
-    if ((size_t)Transferred != pUsb->TxWireLen)
-    {
-        /*
-         * Some part of a successful IN request may already have reached the
-         * host. Never resend the whole HCI packet after a short completion.
-         */
-        pUsb->TxErrorCount++;
-        HciUsbClearTx(pUsb);
-        return;
-    }
-
-    pUsb->TxPayloadComplete = true;
-    const uint16_t packetSize = HciUsbTxPacketSize(pUsb, EpAddr);
-    if (packetSize != 0U && pUsb->TxWireLen != 0U &&
-        (pUsb->TxWireLen % packetSize) == 0U)
-    {
-        /*
-         * A host read larger than an HCI packet needs a short transaction to
-         * terminate the USB transfer when the packet ends exactly on the IN
-         * endpoint max-packet boundary. This applies to legacy Event IN as
-         * well as Bulk IN. A failed ZLP leaves only the ZLP pending, so
-         * Process() retries it without retransmitting the completed payload.
-         */
-        (void)HciUsbKickTx(pUsb);
-        return;
-    }
-
-    HciUsbClearTx(pUsb);
+	pUsb->Close();
+	pUsb->vHciAlt = HCI_USB_HCI_ALT_LEGACY;
+	pUsb->vBulkSerialization = false;
+	return Configuration == 0U ||
+		(Configuration == HCI_USB_CONFIG_VALUE &&
+		 pUsb->Open(HCI_USB_HCI_ALT_LEGACY));
 }
 
-void HciUsbTxFailed(HciUsb_t *pUsb, uint8_t EpAddr)
+bool HciUsb::SetInterfaceHandler(uint8_t InterfaceNo, uint8_t Alt,
+									 void *pContext)
 {
-    (void)EpAddr;
-    if (pUsb == nullptr || !pUsb->TxPending)
-    {
-        return;
-    }
+	HciUsb *pUsb = static_cast<HciUsb *>(pContext);
+	if (pUsb == nullptr || !pUsb->vConfigured)
+	{
+		return false;
+	}
+	if (InterfaceNo == 1U)
+	{
+		return Alt == 0U;
+	}
+	if (InterfaceNo != 0U || Alt > HCI_USB_HCI_ALT_SERIALIZED)
+	{
+		return false;
+	}
 
-    pUsb->TxErrorCount++;
-    if (pUsb->TxZlpActive || pUsb->TxPayloadComplete)
-    {
-        /* Payload is already complete: retry only the terminating ZLP. */
-        pUsb->TxActive = false;
-        pUsb->TxZlpActive = false;
-        pUsb->TxPayloadComplete = true;
-        return;
-    }
+	const uint8_t oldAlt = pUsb->vHciAlt;
+	pUsb->Close();
+	if (pUsb->Open(Alt))
+	{
+		return true;
+	}
 
-    /* Do not duplicate an IN packet after an aborted/partial payload transfer. */
-    HciUsbClearTx(pUsb);
+	(void)pUsb->Open(oldAlt);
+	return false;
 }
 
-static HciUsb_t *HciUsbFromDev(DevIntrf_t *pDevIntrf)
+bool HciUsb::RequestHandler(const UsbSetupData_t *pSetup,
+							 UsbCtrlStage_t Stage, uint8_t **ppData,
+							 uint16_t *pLength, void *pContext)
 {
-    if (pDevIntrf == nullptr || pDevIntrf->pDevData == nullptr)
-    {
-        return nullptr;
-    }
-    return static_cast<HciUsb_t *>(pDevIntrf->pDevData);
+	HciUsb *pUsb = static_cast<HciUsb *>(pContext);
+	if (pUsb == nullptr || pSetup == nullptr || pLength == nullptr ||
+		!pUsb->vConfigured || pUsb->vBulkSerialization ||
+		(pSetup->bmRequestType & USB_REQTYPE_MASK_DIR) != USB_REQTYPE_DIRDEV ||
+		(pSetup->bmRequestType & USB_REQTYPE_MASK_TYPE) != USB_REQTYPE_CLASS ||
+		(pSetup->bRequest != 0U &&
+		 pSetup->bRequest != HCI_USB_HISTORICAL_COMMAND_REQUEST) ||
+		pSetup->wLength < HCI_USB_COMMAND_HEADER_SIZE ||
+		pSetup->wLength > sizeof(pUsb->vCommandBuffer))
+	{
+		return false;
+	}
+
+	const uint8_t recipient =
+		pSetup->bmRequestType & USB_REQTYPE_MASK_RECIPIENT;
+	if (recipient == USB_REQTYPE_INTERFACE)
+	{
+		if (pSetup->wIndex != 0U)
+		{
+			return false;
+		}
+	}
+	else if (recipient != USB_REQTYPE_DEVICE)
+	{
+		return false;
+	}
+
+	if (Stage == USB_CTRL_SETUP)
+	{
+		if (ppData == nullptr || pUsb->vCommandPending)
+		{
+			return false;
+		}
+		*ppData = pUsb->vCommandBuffer;
+		*pLength = pSetup->wLength;
+		return true;
+	}
+	if (Stage == USB_CTRL_DATA)
+	{
+		const size_t packetLen = HciUsbPacketLength(HCI_H4_PACKET_COMMAND,
+			pUsb->vCommandBuffer, *pLength);
+		return *pLength == pSetup->wLength && packetLen == *pLength;
+	}
+	if (Stage == USB_CTRL_COMPLETE)
+	{
+		pUsb->vCommandLen = pSetup->wLength;
+		pUsb->vCommandPending = true;
+		pUsb->Wake(DEVINTRF_EVT_RX_DATA, (int)pUsb->vCommandLen);
+		return true;
+	}
+	if (Stage == USB_CTRL_ABORT)
+	{
+		pUsb->vCommandLen = 0U;
+		return true;
+	}
+
+	return false;
 }
 
-static void HciUsbDevDisable(DevIntrf_t * const)
+void HciUsb::XferHandler(uint8_t EpAddr, uint16_t Length,
+							 UsbCtrlrXferResult_t Result, void *pContext)
 {
+	HciUsb *pUsb = static_cast<HciUsb *>(pContext);
+	if (pUsb != nullptr && USB_ENDPADDR_NUM(EpAddr) == HCI_USB_BULK_EP_NO)
+	{
+		UsbIntrfXferComplete(&pUsb->vUsbDevIntrf, EpAddr, Length, Result);
+	}
 }
 
-static void HciUsbDevEnable(DevIntrf_t * const)
+void HciUsb::ResetHandler(void *pContext)
 {
+	HciUsb *pUsb = static_cast<HciUsb *>(pContext);
+	if (pUsb != nullptr)
+	{
+		pUsb->Close();
+		pUsb->vHciAlt = HCI_USB_HCI_ALT_LEGACY;
+		pUsb->vBulkSerialization = false;
+	}
 }
 
-static uint32_t HciUsbDevGetRate(DevIntrf_t * const)
+void HciUsb::ProcessHandler(void *pContext)
 {
-    return 12000000U;
+	HciUsb *pUsb = static_cast<HciUsb *>(pContext);
+	if (pUsb != nullptr)
+	{
+		pUsb->Process();
+	}
 }
 
-static uint32_t HciUsbDevSetRate(DevIntrf_t * const, uint32_t)
+void HciUsb::EventXferHandler(uint8_t, uint16_t Length,
+								  UsbCtrlrXferResult_t Result, void *pContext)
 {
-    return 12000000U;
+	HciUsb *pUsb = static_cast<HciUsb *>(pContext);
+	if (pUsb == nullptr || !pUsb->vEventTxActive)
+	{
+		return;
+	}
+
+	const bool wasZlp = pUsb->vEventTxZlp;
+	const uint16_t expected = wasZlp ? 0U : pUsb->vEventTxChunkLen;
+	pUsb->vEventTxActive = false;
+	pUsb->vEventTxZlp = false;
+	if (Result != USB_CTRLR_XFER_SUCCESS || Length != expected)
+	{
+		pUsb->vTxErrorCount++;
+		pUsb->ClearEventTx();
+		pUsb->Wake(DEVINTRF_EVT_TX_TIMEOUT, Length);
+		return;
+	}
+
+	if (!wasZlp)
+	{
+		pUsb->vEventTxOffset += pUsb->vEventTxChunkLen;
+		pUsb->vEventTxChunkLen = 0U;
+		if (pUsb->vEventTxOffset < pUsb->vEventTxLen)
+		{
+			(void)pUsb->SendEventPacket();
+			return;
+		}
+	}
+
+	if (pUsb->vEventTxNeedZlp && !wasZlp)
+	{
+		(void)pUsb->SendEventZlp();
+		return;
+	}
+
+	pUsb->ClearEventTx();
+	pUsb->Wake(DEVINTRF_EVT_TX_READY, 0);
 }
 
-static bool HciUsbRxAvailable(const HciUsb_t *pUsb, HciH4PacketType_t Type)
+int HciUsb::DataEventHandler(DevIntrf_t * const, DEVINTRF_EVT Evt,
+								 uint8_t *pBuffer, int Length)
 {
-    if (pUsb == nullptr || !pUsb->Configured || !HciUsbHostTypeValid(Type))
-    {
-        return false;
-    }
+	if (s_pUsb == nullptr)
+	{
+		return Length;
+	}
 
-    if (Type == HCI_H4_PACKET_COMMAND && pUsb->CommandPending)
-    {
-        return true;
-    }
-    if (pUsb->BulkRxPending && pUsb->BulkRxType == Type)
-    {
-        return true;
-    }
-    return Type == HCI_H4_PACKET_SCO && pUsb->SyncRxPending;
+	if (Evt == DEVINTRF_EVT_RX_DATA)
+	{
+		// UsbIntrf has already copied the DMA buffer into its packet CFifo.
+		// Assembly remains in application context; this callback only wakes it.
+		s_pUsb->Wake(Evt, Length);
+		return Length;
+	}
+
+	if (s_pUsb->vEvtCB != nullptr)
+	{
+		return s_pUsb->vEvtCB(s_pUsb->Data(), Evt, pBuffer, Length);
+	}
+	return Length;
 }
 
-static bool HciUsbDevStartRx(DevIntrf_t * const pDevIntrf, uint32_t DevAddr)
+bool HciUsb::DevStartRx(DevIntrf_t * const pDev, uint32_t DevAddr)
 {
-    HciUsb_t *pUsb = HciUsbFromDev(pDevIntrf);
-    const HciH4PacketType_t Type = (HciH4PacketType_t)DevAddr;
-    if (!HciUsbRxAvailable(pUsb, Type))
-    {
-        return false;
-    }
-
-    pUsb->RxSelect = Type;
-    return true;
+	if (s_pUsb == nullptr || pDev != s_pUsb->Data())
+	{
+		return false;
+	}
+	s_pUsb->vRxSelect = static_cast<HciH4PacketType_t>(DevAddr);
+	return s_pUsb->vRxSelect == HCI_H4_PACKET_COMMAND ||
+		s_pUsb->vRxSelect == HCI_H4_PACKET_ACL ||
+		s_pUsb->vRxSelect == HCI_H4_PACKET_SCO ||
+		s_pUsb->vRxSelect == HCI_H4_PACKET_ISO;
 }
 
-static int HciUsbDevRxData(DevIntrf_t * const pDevIntrf,
-                           uint8_t *pBuffer,
-                           int BufferLen)
+int HciUsb::DevRxData(DevIntrf_t * const pDev, uint8_t *pBuffer,
+						int BufferLen)
 {
-    HciUsb_t *pUsb = HciUsbFromDev(pDevIntrf);
-    if (pUsb == nullptr || pBuffer == nullptr || BufferLen <= 0)
-    {
-        return 0;
-    }
-
-    const uint8_t *pSource = nullptr;
-    size_t Len = 0U;
-    enum { RX_NONE, RX_COMMAND, RX_BULK, RX_SYNC } Source = RX_NONE;
-
-    if (pUsb->RxSelect == HCI_H4_PACKET_COMMAND && pUsb->CommandPending)
-    {
-        pSource = pUsb->CommandBuffer;
-        Len = pUsb->CommandLen;
-        Source = RX_COMMAND;
-    }
-    else if (pUsb->BulkRxPending && pUsb->BulkRxType == pUsb->RxSelect)
-    {
-        pSource = &pUsb->BulkRxBuffer[pUsb->BulkSerialization ? 1U : 0U];
-        Len = pUsb->BulkRxLen;
-        Source = RX_BULK;
-    }
-    else if (pUsb->RxSelect == HCI_H4_PACKET_SCO && pUsb->SyncRxPending)
-    {
-        pSource = pUsb->SyncRxBuffer;
-        Len = pUsb->SyncRxLen;
-        Source = RX_SYNC;
-    }
-
-    if (Source == RX_NONE || Len == 0U || Len > (size_t)BufferLen)
-    {
-        return 0;
-    }
-
-    memcpy(pBuffer, pSource, Len);
-
-    if (Source == RX_COMMAND)
-    {
-        pUsb->CommandPending = false;
-        pUsb->CommandLen = 0U;
-        pUsb->CommandCount++;
-    }
-    else if (Source == RX_BULK)
-    {
-        switch (pUsb->BulkRxType)
-        {
-            case HCI_H4_PACKET_COMMAND:
-                pUsb->CommandCount++;
-                break;
-            case HCI_H4_PACKET_ACL:
-                pUsb->AclOutCount++;
-                break;
-            case HCI_H4_PACKET_SCO:
-                pUsb->ScoOutCount++;
-                break;
-            case HCI_H4_PACKET_ISO:
-                pUsb->IsoOutCount++;
-                break;
-            default:
-                break;
-        }
-        HciUsbResetBulkRx(pUsb);
-        (void)HciUsbArmBulkOut(pUsb);
-    }
-    else
-    {
-        pUsb->SyncRxPending = false;
-        pUsb->SyncRxLen = 0U;
-        pUsb->ScoOutCount++;
-        (void)HciUsbArmSyncOut(pUsb);
-    }
-
-    return (int)Len;
+	return s_pUsb != nullptr && pDev == s_pUsb->Data() ?
+		s_pUsb->Receive(pBuffer, BufferLen) : 0;
 }
 
-static void HciUsbDevStopRx(DevIntrf_t * const pDevIntrf)
+bool HciUsb::DevStartTx(DevIntrf_t * const pDev, uint32_t DevAddr)
 {
-    HciUsb_t *pUsb = HciUsbFromDev(pDevIntrf);
-    if (pUsb != nullptr)
-    {
-        pUsb->RxSelect = HCI_H4_PACKET_NONE;
-    }
+	if (s_pUsb == nullptr || pDev != s_pUsb->Data() ||
+		!s_pUsb->vConfigured)
+	{
+		return false;
+	}
+	s_pUsb->vTxSelect = static_cast<HciH4PacketType_t>(DevAddr);
+	return HciUsbOutputTypeValid(s_pUsb->vTxSelect);
 }
 
-static bool HciUsbDevStartTx(DevIntrf_t * const pDevIntrf, uint32_t DevAddr)
+int HciUsb::DevTxData(DevIntrf_t * const pDev, const uint8_t *pData,
+						int DataLen)
 {
-    HciUsb_t *pUsb = HciUsbFromDev(pDevIntrf);
-    const HciH4PacketType_t Type = (HciH4PacketType_t)DevAddr;
-    if (pUsb == nullptr || !pUsb->Configured || pUsb->TxPending ||
-        !HciUsbOutputTypeValid(Type))
-    {
-        if (pUsb != nullptr)
-        {
-            pUsb->TxBusyCount++;
-        }
-        return false;
-    }
-
-    const uint8_t EpAddr = HciUsbTxEndpoint(pUsb, Type);
-    if (EpAddr == 0U || usbd_edpt_busy(0U, EpAddr))
-    {
-        pUsb->TxBusyCount++;
-        return false;
-    }
-
-    pUsb->TxSelect = Type;
-    return true;
+	return s_pUsb != nullptr && pDev == s_pUsb->Data() ?
+		s_pUsb->Transmit(pData, DataLen) : 0;
 }
 
-static int HciUsbDevTxData(DevIntrf_t * const pDevIntrf,
-                           const uint8_t *pData,
-                           int DataLen)
+int HciUsb::DevTxSrData(DevIntrf_t * const pDev, const uint8_t *pData,
+						  int DataLen)
 {
-    HciUsb_t *pUsb = HciUsbFromDev(pDevIntrf);
-    if (pUsb == nullptr || pData == nullptr || DataLen <= 0 ||
-        (size_t)DataLen > HCI_USB_PACKET_SIZE ||
-        !HciUsbOutputTypeValid(pUsb->TxSelect) || pUsb->TxPending)
-    {
-        return 0;
-    }
-
-    const size_t payloadOffset = pUsb->BulkSerialization
-                                     ? 1U
-                                     : HCI_USB_TX_LEGACY_OFFSET;
-    pUsb->TxBuffer[0] = (uint8_t)pUsb->TxSelect;
-    memcpy(&pUsb->TxBuffer[payloadOffset], pData, (size_t)DataLen);
-
-    pUsb->TxType = pUsb->TxSelect;
-    pUsb->TxLen = (size_t)DataLen;
-    pUsb->TxWireLen = 0U;
-    pUsb->TxPending = true;
-    pUsb->TxActive = false;
-    pUsb->TxPayloadComplete = false;
-    pUsb->TxZlpActive = false;
-    pUsb->TxBufferBulkSerialization = pUsb->BulkSerialization;
-
-    if (!HciUsbKickTx(pUsb))
-    {
-        HciUsbClearTx(pUsb);
-        pUsb->TxBusyCount++;
-        return 0;
-    }
-
-    switch (pUsb->TxType)
-    {
-        case HCI_H4_PACKET_EVENT:
-            pUsb->EventInCount++;
-            break;
-        case HCI_H4_PACKET_ACL:
-            pUsb->AclInCount++;
-            break;
-        case HCI_H4_PACKET_SCO:
-            pUsb->ScoInCount++;
-            break;
-        case HCI_H4_PACKET_ISO:
-            pUsb->IsoInCount++;
-            break;
-        default:
-            break;
-    }
-
-    return DataLen;
+	return DevTxData(pDev, pData, DataLen);
 }
 
-static int HciUsbDevTxSrData(DevIntrf_t * const pDevIntrf,
-                             const uint8_t *pData,
-                             int DataLen)
+void HciUsb::DevReset(DevIntrf_t * const pDev)
 {
-    return HciUsbDevTxData(pDevIntrf, pData, DataLen);
+	if (s_pUsb != nullptr && pDev == s_pUsb->Data())
+	{
+		s_pUsb->ClearRx();
+		UsbIntrfUnconfigure(&s_pUsb->vUsbDevIntrf);
+	}
 }
 
-static void HciUsbDevStopTx(DevIntrf_t * const pDevIntrf)
+void *HciUsb::DevGetHandle(DevIntrf_t * const pDev)
 {
-    HciUsb_t *pUsb = HciUsbFromDev(pDevIntrf);
-    if (pUsb != nullptr)
-    {
-        pUsb->TxSelect = HCI_H4_PACKET_NONE;
-    }
+	return s_pUsb != nullptr && pDev == s_pUsb->Data() ? s_pUsb : nullptr;
 }
 
-static void HciUsbDevReset(DevIntrf_t * const pDevIntrf)
+void HciUsb::ClearRx(void)
 {
-    HciUsb_t *pUsb = HciUsbFromDev(pDevIntrf);
-    if (pUsb == nullptr)
-    {
-        return;
-    }
-
-    pUsb->CommandPending = false;
-    pUsb->CommandLen = 0U;
-    HciUsbResetBulkRx(pUsb);
-    pUsb->SyncRxPending = false;
-    pUsb->SyncRxLen = 0U;
-    pUsb->RxSelect = HCI_H4_PACKET_NONE;
-    pUsb->TxSelect = HCI_H4_PACKET_NONE;
-    HciUsbClearTx(pUsb);
-    HciUsbRearmRx(pUsb);
+	vRxSelect = HCI_H4_PACKET_NONE;
+	vBulkRxType = HCI_H4_PACKET_NONE;
+	vCommandPending = false;
+	vBulkRxPending = false;
+	vCommandLen = 0U;
+	vBulkRxLen = 0U;
+	vBulkRxExpected = 0U;
 }
 
-static void HciUsbDevPowerOff(DevIntrf_t * const pDevIntrf)
+void HciUsb::ClearEventTx(void)
 {
-    HciUsbDevDisable(pDevIntrf);
+	vEventTxActive = false;
+	vEventTxNeedZlp = false;
+	vEventTxZlp = false;
+	vEventTxLen = 0U;
+	vEventTxOffset = 0U;
+	vEventTxChunkLen = 0U;
 }
 
-static void *HciUsbDevGetHandle(DevIntrf_t * const pDevIntrf)
+void HciUsb::Wake(DEVINTRF_EVT Evt, int Length)
 {
-    return HciUsbFromDev(pDevIntrf);
+	if (vEvtCB != nullptr)
+	{
+		(void)vEvtCB(Data(), Evt, nullptr, Length);
+	}
 }
 
-bool HciUsbInit(HciUsb_t *pUsb, DevIntrfEvtHandler_t EvtCB)
+bool HciUsb::CompleteBulkPacket(void)
 {
-    if (pUsb == nullptr || (g_HciUsb != nullptr && g_HciUsb != pUsb))
-    {
-        return false;
-    }
+	if (vBulkRxLen == 0U)
+	{
+		return false;
+	}
 
-    memset(pUsb, 0, sizeof(*pUsb));
-    HciUsbResetTxValidation();
+	size_t offset = 0U;
+	HciH4PacketType_t type = HCI_H4_PACKET_ACL;
+	if (vBulkSerialization)
+	{
+		type = static_cast<HciH4PacketType_t>(vBulkRxBuffer[0]);
+		if (!HciUsbHostTypeValid(type))
+		{
+			vInvalidRxCount++;
+			vBulkRxLen = 0U;
+			return false;
+		}
+		offset = 1U;
+	}
 
-    pUsb->DevIntrf.pDevData = pUsb;
-    pUsb->DevIntrf.IntPrio = 0;
-    pUsb->DevIntrf.EvtCB = EvtCB;
-    atomic_flag_clear(&pUsb->DevIntrf.bBusy);
-    pUsb->DevIntrf.MaxRetry = 0;
-    atomic_store(&pUsb->DevIntrf.EnCnt, 0);
-    pUsb->DevIntrf.Type = DEVINTRF_TYPE_USB;
-    pUsb->DevIntrf.bDma = false;
-    pUsb->DevIntrf.bIntEn = true;
-    atomic_store(&pUsb->DevIntrf.bTxReady, true);
-    atomic_store(&pUsb->DevIntrf.bNoStop, false);
-    pUsb->DevIntrf.Disable = HciUsbDevDisable;
-    pUsb->DevIntrf.Enable = HciUsbDevEnable;
-    pUsb->DevIntrf.GetRate = HciUsbDevGetRate;
-    pUsb->DevIntrf.SetRate = HciUsbDevSetRate;
-    pUsb->DevIntrf.StartRx = HciUsbDevStartRx;
-    pUsb->DevIntrf.RxData = HciUsbDevRxData;
-    pUsb->DevIntrf.StopRx = HciUsbDevStopRx;
-    pUsb->DevIntrf.StartTx = HciUsbDevStartTx;
-    pUsb->DevIntrf.TxData = HciUsbDevTxData;
-    pUsb->DevIntrf.TxSrData = HciUsbDevTxSrData;
-    pUsb->DevIntrf.StopTx = HciUsbDevStopTx;
-    pUsb->DevIntrf.Reset = HciUsbDevReset;
-    pUsb->DevIntrf.PowerOff = HciUsbDevPowerOff;
-    pUsb->DevIntrf.GetHandle = HciUsbDevGetHandle;
+	const size_t headerSize = HciUsbHeaderSize(type);
+	if (headerSize == 0U || vBulkRxLen < offset + headerSize)
+	{
+		return false;
+	}
 
-    pUsb->RxSelect = HCI_H4_PACKET_NONE;
-    pUsb->TxSelect = HCI_H4_PACKET_NONE;
-    g_HciUsb = pUsb;
-    return true;
+	const size_t payloadLength = HciUsbPacketLength(type,
+		&vBulkRxBuffer[offset], vBulkRxLen - offset);
+	if (payloadLength == 0U || payloadLength > HCI_USB_PACKET_SIZE)
+	{
+		vInvalidRxCount++;
+		vBulkRxLen = 0U;
+		return false;
+	}
+
+	vBulkRxExpected = offset + payloadLength;
+	if (vBulkRxLen < vBulkRxExpected)
+	{
+		return false;
+	}
+	if (vBulkRxLen != vBulkRxExpected)
+	{
+		vInvalidRxCount++;
+		vBulkRxLen = 0U;
+		vBulkRxExpected = 0U;
+		return false;
+	}
+
+	vBulkRxType = type;
+	vBulkRxPending = true;
+	Wake(DEVINTRF_EVT_RX_DATA, (int)payloadLength);
+	return true;
 }
 
-void HciUsbDeinit(HciUsb_t *pUsb)
+bool HciUsb::ConsumePhysicalPacket(void)
 {
-    if (pUsb == nullptr || pUsb != g_HciUsb)
-    {
-        return;
-    }
+	UsbPkt_t *pPacket = reinterpret_cast<UsbPkt_t *>(
+		CFifoPeek(vUsbDevIntrf.hRxFifo));
+	if (pPacket == nullptr)
+	{
+		return false;
+	}
 
-    memset(pUsb, 0, sizeof(*pUsb));
-    HciUsbResetTxValidation();
-    g_HciUsb = nullptr;
+	const uint16_t length = pPacket->Hdr.Length;
+	if (length == 0U)
+	{
+		uint32_t state = DisableInterrupt();
+		(void)CFifoGet(vUsbDevIntrf.hRxFifo);
+		if (CFifoAvail(vUsbDevIntrf.hRxFifo) > 0)
+		{
+			(void)UsbCtrlrEpRxArm(vDevNo, HCI_USB_BULK_EP_NO);
+		}
+		EnableInterrupt(state);
+		if (vBulkRxLen != 0U)
+		{
+			vInvalidRxCount++;
+			vBulkRxLen = 0U;
+			vBulkRxExpected = 0U;
+		}
+		return true;
+	}
+
+	if (length > HCI_USB_FS_BULK_MPS ||
+		vBulkRxLen + length > sizeof(vBulkRxBuffer))
+	{
+		uint32_t state = DisableInterrupt();
+		(void)CFifoGet(vUsbDevIntrf.hRxFifo);
+		if (CFifoAvail(vUsbDevIntrf.hRxFifo) > 0)
+		{
+			(void)UsbCtrlrEpRxArm(vDevNo, HCI_USB_BULK_EP_NO);
+		}
+		EnableInterrupt(state);
+		vInvalidRxCount++;
+		vBulkRxLen = 0U;
+		vBulkRxExpected = 0U;
+		return true;
+	}
+
+	const int count = vBulkRxData(&vUsbDevIntrf.DevIntrf,
+		&vBulkRxBuffer[vBulkRxLen], length);
+	if (count != length)
+	{
+		vInvalidRxCount++;
+		vBulkRxLen = 0U;
+		vBulkRxExpected = 0U;
+		return count > 0;
+	}
+
+	vBulkRxLen += length;
+	if (CompleteBulkPacket())
+	{
+		return true;
+	}
+	if (vBulkRxLen != 0U && length < HCI_USB_FS_BULK_MPS)
+	{
+		vInvalidRxCount++;
+		vBulkRxLen = 0U;
+		vBulkRxExpected = 0U;
+	}
+	return true;
 }
 
-DevIntrf_t *HciUsbGetDeviceIntrf(HciUsb_t *pUsb)
+void HciUsb::ConsumeBulkRx(void)
 {
-    return pUsb != nullptr ? &pUsb->DevIntrf : nullptr;
+	while (vConfigured && !vBulkRxPending && ConsumePhysicalPacket())
+	{
+	}
 }
 
-void HciUsbProcess(HciUsb_t *pUsb)
+void HciUsb::Process(void)
 {
-    if (pUsb == nullptr || pUsb != g_HciUsb || !pUsb->Configured)
-    {
-        return;
-    }
-
-    HciUsbRearmRx(pUsb);
-    if (pUsb->TxPending && !pUsb->TxActive)
-    {
-        (void)HciUsbKickTx(pUsb);
-    }
+	if (!vConfigured)
+	{
+		return;
+	}
+	ConsumeBulkRx();
+	if (vEventTxLen != 0U && !vEventTxActive)
+	{
+		if (vEventTxOffset < vEventTxLen)
+		{
+			(void)SendEventPacket();
+		}
+		else if (vEventTxNeedZlp)
+		{
+			(void)SendEventZlp();
+		}
+	}
 }
 
-bool HciUsbIsOpen(const HciUsb_t *pUsb)
+int HciUsb::Receive(uint8_t *pBuffer, int BufferLen)
 {
-    return pUsb != nullptr && pUsb == g_HciUsb &&
-           pUsb->Configured && tud_mounted();
+	if (pBuffer == nullptr || BufferLen <= 0)
+	{
+		return 0;
+	}
+
+	if (vRxSelect == HCI_H4_PACKET_COMMAND && vCommandPending)
+	{
+		if ((size_t)BufferLen < vCommandLen)
+		{
+			return 0;
+		}
+		memcpy(pBuffer, vCommandBuffer, vCommandLen);
+		const int count = (int)vCommandLen;
+		vCommandPending = false;
+		vCommandLen = 0U;
+		vCommandCount++;
+		return count;
+	}
+
+	if (!vBulkRxPending || vRxSelect != vBulkRxType ||
+		(size_t)BufferLen < vBulkRxExpected - (vBulkSerialization ? 1U : 0U))
+	{
+		return 0;
+	}
+
+	const size_t offset = vBulkSerialization ? 1U : 0U;
+	const size_t count = vBulkRxExpected - offset;
+	memcpy(pBuffer, &vBulkRxBuffer[offset], count);
+	if (vBulkRxType == HCI_H4_PACKET_ACL)
+	{
+		vAclOutCount++;
+	}
+	vBulkRxPending = false;
+	vBulkRxType = HCI_H4_PACKET_NONE;
+	vBulkRxLen = 0U;
+	vBulkRxExpected = 0U;
+	ConsumeBulkRx();
+	return (int)count;
 }
 
-bool HciUsbBulkSerialization(const HciUsb_t *pUsb)
+int HciUsb::QueueBulk(HciH4PacketType_t Type, const uint8_t *pData,
+					 size_t DataLen)
 {
-    return pUsb != nullptr && pUsb->BulkSerialization;
+	const size_t wireLength = DataLen + (vBulkSerialization ? 1U : 0U);
+	const size_t packetCount = (wireLength + HCI_USB_FS_BULK_MPS - 1U) /
+		HCI_USB_FS_BULK_MPS;
+	const bool needZlp = wireLength != 0U &&
+		(wireLength % HCI_USB_FS_BULK_MPS) == 0U;
+	const size_t blocks = packetCount + (needZlp ? 1U : 0U);
+	if (blocks == 0U || blocks > INT32_MAX ||
+		!UsbIntrfRequestToSend(&vUsbDevIntrf,
+			(int)(blocks * HCI_USB_PKT_BLKSIZE)))
+	{
+		return 0;
+	}
+
+	alignas(4) uint8_t storage[HCI_USB_PKT_BLKSIZE] = {};
+	UsbPkt_t *pPacket = reinterpret_cast<UsbPkt_t *>(storage);
+	size_t wireOffset = 0U;
+	for (size_t packet = 0U; packet < packetCount; packet++)
+	{
+		const size_t remaining = wireLength - wireOffset;
+		const size_t length = remaining < HCI_USB_FS_BULK_MPS ?
+			remaining : HCI_USB_FS_BULK_MPS;
+		pPacket->Hdr.Length = (uint16_t)length;
+		pPacket->Hdr.Reserved = 0U;
+		for (size_t i = 0U; i < length; i++, wireOffset++)
+		{
+			pPacket->Data[i] = vBulkSerialization && wireOffset == 0U ?
+				(uint8_t)Type : pData[wireOffset -
+					(vBulkSerialization ? 1U : 0U)];
+		}
+		if (vBulkTxData(&vUsbDevIntrf.DevIntrf, storage,
+			(int)sizeof(storage)) != (int)sizeof(storage))
+		{
+			vTxErrorCount++;
+			return 0;
+		}
+	}
+
+	if (needZlp)
+	{
+		pPacket->Hdr.Length = 0U;
+		pPacket->Hdr.Reserved = 0U;
+		if (vBulkTxData(&vUsbDevIntrf.DevIntrf, storage,
+			(int)sizeof(storage)) != (int)sizeof(storage))
+		{
+			vTxErrorCount++;
+			return 0;
+		}
+	}
+
+	if (Type == HCI_H4_PACKET_ACL)
+	{
+		vAclInCount++;
+	}
+	else if (Type == HCI_H4_PACKET_EVENT)
+	{
+		vEventInCount++;
+	}
+	return (int)DataLen;
+}
+
+bool HciUsb::SendEventPacket(void)
+{
+	if (vEventTxActive || vEventTxOffset >= vEventTxLen)
+	{
+		return false;
+	}
+
+	const size_t remaining = vEventTxLen - vEventTxOffset;
+	vEventTxChunkLen = (uint16_t)(remaining < HCI_USB_EVENT_MPS ?
+		remaining : HCI_USB_EVENT_MPS);
+	memcpy(vEventTxTransfer, &vEventTxBuffer[vEventTxOffset],
+		vEventTxChunkLen);
+	vEventTxActive = true;
+	vEventTxZlp = false;
+	if (!UsbCtrlrEpSend(vDevNo, HCI_USB_EVENT_EP_NO, vEventTxChunkLen))
+	{
+		vEventTxActive = false;
+		vEventTxChunkLen = 0U;
+		return false;
+	}
+	return true;
+}
+
+int HciUsb::SendEvent(const uint8_t *pData, size_t DataLen)
+{
+	if (vEventTxActive || vEventTxLen != 0U ||
+		DataLen > sizeof(vEventTxBuffer))
+	{
+		return 0;
+	}
+	memcpy(vEventTxBuffer, pData, DataLen);
+	vEventTxLen = DataLen;
+	vEventTxOffset = 0U;
+	vEventTxNeedZlp = (DataLen % HCI_USB_EVENT_MPS) == 0U;
+	if (!SendEventPacket())
+	{
+		ClearEventTx();
+		vTxErrorCount++;
+		return 0;
+	}
+	HciUsbRecordTxValidation(pData, DataLen);
+	vEventInCount++;
+	return (int)DataLen;
+}
+
+bool HciUsb::SendEventZlp(void)
+{
+	if (!vEventTxNeedZlp || vEventTxActive)
+	{
+		return false;
+	}
+	vEventTxActive = true;
+	vEventTxZlp = true;
+	vEventTxChunkLen = 0U;
+	if (!UsbCtrlrEpSend(vDevNo, HCI_USB_EVENT_EP_NO, 0U))
+	{
+		vEventTxActive = false;
+		vEventTxZlp = false;
+		return false;
+	}
+	return true;
+}
+
+int HciUsb::Transmit(const uint8_t *pData, int DataLen)
+{
+	if (pData == nullptr || DataLen <= 0 || !vConfigured ||
+		!HciUsbOutputTypeValid(vTxSelect) ||
+		HciUsbPacketLength(vTxSelect, pData, (size_t)DataLen) !=
+			(size_t)DataLen)
+	{
+		return 0;
+	}
+
+	if (vBulkSerialization)
+	{
+		return QueueBulk(vTxSelect, pData, (size_t)DataLen);
+	}
+	if (vTxSelect == HCI_H4_PACKET_EVENT)
+	{
+		return SendEvent(pData, (size_t)DataLen);
+	}
+	if (vTxSelect == HCI_H4_PACKET_ACL)
+	{
+		return QueueBulk(vTxSelect, pData, (size_t)DataLen);
+	}
+
+	return 0;
+}
+
+bool HciUsb::IsOpen(void) const
+{
+	return vConfigured && UsbConfigured(vDevNo);
 }

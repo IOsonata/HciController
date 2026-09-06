@@ -2,8 +2,8 @@
 
 HciController is built with IOcomposer.
 
-The normal setup does not require manually installing Nordic SDKs, TinyUSB,
-IOsonata, TaktOS, or individual compiler toolchains. The IOcomposer installer
+The normal setup does not require manually installing Nordic SDKs, IOsonata,
+TaktOS, or individual compiler toolchains. The IOcomposer installer
 sets up the required development tools, SDK/external repositories, IOsonata,
 TaktOS, HciController, and the expected workspace layout so the project is ready
 to build.
@@ -50,7 +50,6 @@ IOcomposer/
     external/
         nrfx/
         sdk-nrfxlib/
-        tinyusb/
         ...
     IOsonata/
     HciController/
@@ -213,7 +212,7 @@ SDK directories manually. This keeps IOsonata, TaktOS, toolchains, and external
 repositories in the layout expected by the project.
 
 For a reproducible build, record the exact revisions of HciController,
-IOsonata, TaktOS, TinyUSB, nrfx, and sdk-nrfxlib used to produce the binary.
+IOsonata, TaktOS, nrfx, and sdk-nrfxlib used to produce the binary.
 
 ## Related documentation
 

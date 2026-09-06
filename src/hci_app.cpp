@@ -19,6 +19,7 @@
 #include "board.h"
 #include "coredev/iopincfg.h"
 #include "hci_trace.h"
+#include "hci_version.h"
 #include "sdc_hci.h"
 
 static_assert(HCI_APP_PACKET_SIZE + 1U <= HCI_INTRF_TX_STREAM_SIZE,
@@ -61,159 +62,9 @@ static_assert(HCI_SDC_ACL_TRACK_HANDLES >=
 #endif
 
 static HciApp_t *s_pApp;
-
-/*
- * Output transport for the diagnostic CDC function. SysLog owns the queued
- * log records in its CFifo. This object only owns one record that DeviceIntrf
- * has accepted and TinyUSB has not completely consumed yet.
- */
-typedef struct
-{
-    HciApp_t *pApp;
-    uint8_t Pending[HCI_TRACE_RECORD_SIZE];
-    size_t PendingOffset;
-    size_t PendingLen;
-} HciAppLogIntrf_t;
-
-static HciAppLogIntrf_t s_LogIntrfState;
-static DevIntrf_t s_LogIntrf;
-
-static void HciAppLogPump(void)
-{
-    if (s_LogIntrfState.pApp == nullptr ||
-        s_LogIntrfState.PendingOffset >= s_LogIntrfState.PendingLen)
-    {
-        s_LogIntrfState.PendingOffset = 0U;
-        s_LogIntrfState.PendingLen = 0U;
-        return;
-    }
-
-    const size_t remaining =
-        s_LogIntrfState.PendingLen - s_LogIntrfState.PendingOffset;
-    const size_t count = HciTinyUsbWrite(
-        s_LogIntrfState.pApp->LogCdcInterface,
-        &s_LogIntrfState.Pending[s_LogIntrfState.PendingOffset],
-        remaining);
-
-    if (count > remaining)
-    {
-        return;
-    }
-
-    s_LogIntrfState.PendingOffset += count;
-    if (s_LogIntrfState.PendingOffset == s_LogIntrfState.PendingLen)
-    {
-        s_LogIntrfState.PendingOffset = 0U;
-        s_LogIntrfState.PendingLen = 0U;
-    }
-}
-
-static void HciAppLogDisable(DevIntrf_t *)
-{
-}
-
-static void HciAppLogEnable(DevIntrf_t *)
-{
-}
-
-static uint32_t HciAppLogGetRate(DevIntrf_t *)
-{
-    return 0U;
-}
-
-static uint32_t HciAppLogSetRate(DevIntrf_t *, uint32_t)
-{
-    return 0U;
-}
-
-static bool HciAppLogStartRx(DevIntrf_t *, uint32_t)
-{
-    return false;
-}
-
-static int HciAppLogRxData(DevIntrf_t *, uint8_t *, int)
-{
-    return 0;
-}
-
-static void HciAppLogStopRx(DevIntrf_t *)
-{
-}
-
-static bool HciAppLogStartTx(DevIntrf_t *, uint32_t)
-{
-    return s_LogIntrfState.pApp != nullptr &&
-           s_LogIntrfState.PendingLen == 0U;
-}
-
-static int HciAppLogTxData(DevIntrf_t *, const uint8_t *pData, int DataLen)
-{
-    if (s_LogIntrfState.pApp == nullptr || pData == nullptr || DataLen <= 0 ||
-        DataLen > (int)sizeof(s_LogIntrfState.Pending) ||
-        s_LogIntrfState.PendingLen != 0U)
-    {
-        return 0;
-    }
-
-    memcpy(s_LogIntrfState.Pending, pData, (size_t)DataLen);
-    s_LogIntrfState.PendingOffset = 0U;
-    s_LogIntrfState.PendingLen = (size_t)DataLen;
-    HciAppLogPump();
-    return DataLen;
-}
-
-static void HciAppLogStopTx(DevIntrf_t *)
-{
-}
-
-static void HciAppLogReset(DevIntrf_t *)
-{
-    s_LogIntrfState.PendingOffset = 0U;
-    s_LogIntrfState.PendingLen = 0U;
-}
-
-static void HciAppLogPowerOff(DevIntrf_t *)
-{
-}
-
-static void *HciAppLogGetHandle(DevIntrf_t *)
-{
-    return nullptr;
-}
-
-static void HciAppLogIntrfInit(HciApp_t *pApp)
-{
-    memset(&s_LogIntrfState, 0, sizeof(s_LogIntrfState));
-
-    s_LogIntrfState.pApp = pApp;
-    s_LogIntrf.pDevData = &s_LogIntrfState;
-    s_LogIntrf.IntPrio = 0;
-    s_LogIntrf.EvtCB = nullptr;
-    s_LogIntrf.MaxRetry = 0;
-    s_LogIntrf.Type = DEVINTRF_TYPE_USB;
-    s_LogIntrf.bDma = false;
-    s_LogIntrf.bIntEn = false;
-    s_LogIntrf.Disable = HciAppLogDisable;
-    s_LogIntrf.Enable = HciAppLogEnable;
-    s_LogIntrf.GetRate = HciAppLogGetRate;
-    s_LogIntrf.SetRate = HciAppLogSetRate;
-    s_LogIntrf.StartRx = HciAppLogStartRx;
-    s_LogIntrf.RxData = HciAppLogRxData;
-    s_LogIntrf.StopRx = HciAppLogStopRx;
-    s_LogIntrf.StartTx = HciAppLogStartTx;
-    s_LogIntrf.TxData = HciAppLogTxData;
-    s_LogIntrf.TxSrData = HciAppLogTxData;
-    s_LogIntrf.StopTx = HciAppLogStopTx;
-    s_LogIntrf.Reset = HciAppLogReset;
-    s_LogIntrf.PowerOff = HciAppLogPowerOff;
-    s_LogIntrf.GetHandle = HciAppLogGetHandle;
-    atomic_flag_clear(&s_LogIntrf.bBusy);
-    atomic_store(&s_LogIntrf.bTxReady, true);
-    atomic_store(&s_LogIntrf.bNoStop, false);
-    atomic_store(&s_LogIntrf.EnCnt, 1);
-
-    HciTraceSetSink(&s_LogIntrf, 0U);
-}
+static UsbdCdc s_HostCdc;
+static UsbdCdc s_LogCdc;
+static HciUsb s_HciUsb;
 
 #ifdef UART_PINS
 static const IOPinCfg_t s_HciUartPins[] = UART_PINS;
@@ -302,29 +153,76 @@ static bool HciAppUsbSetup(HciApp_t *pApp, HciUsbDescriptorMode_t Mode)
     pApp->UsbDescriptorMode = Mode;
     pApp->LogCdcInterface = HciUsbDescriptorLogCdcInstance(Mode);
 
-    UsbdCdcIntrfCfg_t cfg = {};
-    cfg.bBlocking = true;
-    cfg.RxFifoMemSize = sizeof(pApp->UsbRxFifoMem);
-    cfg.pRxFifoMem = pApp->UsbRxFifoMem;
-    cfg.TxFifoMemSize = sizeof(pApp->UsbTxFifoMem);
-    cfg.pTxFifoMem = pApp->UsbTxFifoMem;
-    cfg.EvtCB = HciAppUsbEvent;
-
-    if (!UsbdCdcIntrfInit(&pApp->UsbIntrf, &cfg))
+    UsbCfg_t usbCfg = {};
+    usbCfg.DevNo = 0;
+    usbCfg.Vid = HciUsbDescriptorVid();
+    usbCfg.Pid = HciUsbDescriptorPid(Mode);
+    usbCfg.DevVer = HCI_CONTROLLER_VERSION_BCD;
+    usbCfg.pManufacturer = "I-SYST inc.";
+    usbCfg.pProduct = "HciController";
+    usbCfg.pSerial = nullptr;
+    usbCfg.pFuncName = "Bluetooth HCI";
+    usbCfg.NbCdc = Mode == HCI_USB_DESCRIPTOR_LOG_ONLY ? 1 : 2;
+    usbCfg.IntPrio = 7;
+    usbCfg.bSelfPowered = false;
+    usbCfg.bLowPowerSuspend = false;
+    usbCfg.MaxPower = 100U;
+    usbCfg.DescHandler = HciUsbDescHandler;
+    if (!UsbInit(&usbCfg))
     {
         return false;
     }
 
-    if (!HciTinyUsbInit(&pApp->Usb,
-                        &pApp->UsbIntrf,
-                        HCI_APP_CDC_INTERFACE,
-                        HciAppWake,
-                        pApp))
+    if (Mode == HCI_USB_DESCRIPTOR_NATIVE_HCI)
     {
+        HciUsbCfg_t hciCfg = {};
+        hciCfg.bBlocking = true;
+        hciCfg.RxFifoMemSize = sizeof(pApp->UsbRxFifoMem);
+        hciCfg.pRxFifoMem = pApp->UsbRxFifoMem;
+        hciCfg.TxFifoMemSize = sizeof(pApp->UsbTxFifoMem);
+        hciCfg.pTxFifoMem = pApp->UsbTxFifoMem;
+        hciCfg.DevNo = 0;
+        hciCfg.EvtCB = HciAppUsbEvent;
+        if (!s_HciUsb.Init(hciCfg))
+        {
+            UsbDisable(0);
+            return false;
+        }
+    }
+    else if (Mode == HCI_USB_DESCRIPTOR_CDC_H4)
+    {
+        UsbdCdcCfg_t hostCfg = {};
+        hostCfg.bBlocking = true;
+        hostCfg.RxFifoMemSize = sizeof(pApp->UsbRxFifoMem);
+        hostCfg.pRxFifoMem = pApp->UsbRxFifoMem;
+        hostCfg.TxFifoMemSize = sizeof(pApp->UsbTxFifoMem);
+        hostCfg.pTxFifoMem = pApp->UsbTxFifoMem;
+        hostCfg.ItfNo = HCI_APP_CDC_INTERFACE;
+        hostCfg.DevNo = 0;
+        hostCfg.EvtCB = HciAppUsbEvent;
+        if (!s_HostCdc.Init(hostCfg))
+        {
+            UsbDisable(0);
+            return false;
+        }
+    }
+
+    UsbdCdcCfg_t logCfg = {};
+    logCfg.bBlocking = true;
+    logCfg.RxFifoMemSize = sizeof(pApp->LogRxFifoMem);
+    logCfg.pRxFifoMem = pApp->LogRxFifoMem;
+    logCfg.TxFifoMemSize = sizeof(pApp->LogTxFifoMem);
+    logCfg.pTxFifoMem = pApp->LogTxFifoMem;
+    logCfg.ItfNo = pApp->LogCdcInterface;
+    logCfg.DevNo = 0;
+    logCfg.EvtCB = HciAppUsbEvent;
+    if (!s_LogCdc.Init(logCfg))
+    {
+        UsbDisable(0);
         return false;
     }
 
-    HciAppLogIntrfInit(pApp);
+    HciTraceSetSink(s_LogCdc.Data(), 0U);
     pApp->UsbRunning = true;
     return true;
 }
@@ -337,16 +235,7 @@ static void HciAppUsbRelease(HciApp_t *pApp)
     }
 
     HciTraceSetSink(nullptr, 0U);
-    s_LogIntrfState.pApp = nullptr;
-    s_LogIntrfState.PendingOffset = 0U;
-    s_LogIntrfState.PendingLen = 0U;
-
-    if (pApp->UsbHciNative)
-    {
-        HciUsbDeinit(&pApp->NativeUsb);
-    }
-
-    HciTinyUsbStop(&pApp->Usb);
+    UsbDisable(0);
     pApp->UsbRunning = false;
 }
 
@@ -402,7 +291,7 @@ bool HciAppUartEarlyInit(HciApp_t *pApp, HciTarget_t Target)
     }
 
 #if !HCI_UART_EARLY_STARTUP
-    memset(pApp, 0, sizeof(*pApp));
+    memset(static_cast<void *>(pApp), 0, sizeof(*pApp));
 #endif
     pApp->HostType = HCI_APP_HOST_UART;
     pApp->Mode = HCI_APP_MODE_UART_H4;
@@ -461,23 +350,15 @@ static bool HciAppUsbHostIsOpen(const HciApp_t *pApp)
         return false;
     }
 
-    return pApp->UsbHciNative ? HciUsbIsOpen(&pApp->NativeUsb)
-                              : HciTinyUsbIsOpen(&pApp->Usb);
+    return pApp->UsbHciNative ? s_HciUsb.IsOpen()
+                              : s_HostCdc.IsPortOpen();
 }
 
 static void HciAppStartLogPort(HciApp_t *pApp)
 {
-    if (!HciTinyUsbStart(&pApp->Usb))
+    if (!UsbEnable(0))
     {
-        HciTrace("log: HciTinyUsbStart failed\r\n");
-        HciAppUsbRelease(pApp);
-        return;
-    }
-
-    if (!pApp->Target.pOps->UsbStart(pApp->Target.pContext))
-    {
-        HciTrace("log: target UsbStart failed err=%ld\r\n",
-                 (long)HciTargetLastError(&pApp->Target));
+        HciTrace("log: UsbEnable failed\r\n");
         HciAppUsbRelease(pApp);
         return;
     }
@@ -495,16 +376,9 @@ static bool HciAppHostStart(void *pContext)
 
     if (pApp->HostType == HCI_APP_HOST_USB)
     {
-        if (!HciTinyUsbStart(&pApp->Usb))
+        if (!UsbEnable(0))
         {
-            HciTrace("host: HciTinyUsbStart failed\r\n");
-            return false;
-        }
-
-        if (!pApp->Target.pOps->UsbStart(pApp->Target.pContext))
-        {
-            HciTrace("host: target UsbStart failed err=%ld\r\n",
-                     (long)HciTargetLastError(&pApp->Target));
+            HciTrace("host: UsbEnable failed\r\n");
             return false;
         }
 
@@ -515,23 +389,9 @@ static bool HciAppHostStart(void *pContext)
                 pApp->Runtime.Ops.ProcessMpsl(pApp->Runtime.Ops.pContext);
             }
 
-            pApp->Target.pOps->UsbPowerProcess(pApp->Target.pContext);
+            UsbProcess(0);
 
-            if (HciTargetUsbStuck(&pApp->Target))
-            {
-                HciTargetUsbTrace(&pApp->Target, "storm", pass + 1U);
-                HciAppSetHostOpen(pApp, false);
-                return false;
-            }
-
-            pApp->Target.pOps->UsbPassMark(pApp->Target.pContext);
-            HciTinyUsbProcess(&pApp->Usb);
-            if (pApp->UsbHciNative)
-            {
-                HciUsbProcess(&pApp->NativeUsb);
-            }
-
-            if (HciTinyUsbIsMounted(&pApp->Usb))
+            if (UsbConfigured(0))
             {
                 break;
             }
@@ -545,17 +405,16 @@ static bool HciAppHostStart(void *pContext)
             if ((pass % HCI_APP_USB_SETTLE_REPORT) ==
                 (HCI_APP_USB_SETTLE_REPORT - 1U))
             {
-                HciTargetUsbTrace(&pApp->Target, "settling", pass + 1U);
+                HciTrace("host: settling pass=%lu\r\n",
+                         (unsigned long)pass + 1UL);
             }
         }
 
         HciAppSetHostOpen(pApp, HciAppUsbHostIsOpen(pApp));
-        HciTrace("host: %s up mounted=%u open=%u task=%lu\r\n",
+        HciTrace("host: %s up configured=%u open=%u\r\n",
                  HciAppHostName(pApp),
-                 (unsigned)HciTinyUsbIsMounted(&pApp->Usb),
-                 (unsigned)pApp->HostOpen,
-                 (unsigned long)pApp->Usb.TaskCount);
-        HciTargetUsbTrace(&pApp->Target, "usb up", 0U);
+                 (unsigned)UsbConfigured(0),
+                 (unsigned)pApp->HostOpen);
     }
     else
     {
@@ -571,7 +430,7 @@ static bool HciAppHostStart(void *pContext)
 
 static void HciAppLogPortOpened(HciApp_t *pApp)
 {
-    const bool open = HciTinyUsbPortIsOpen(pApp->LogCdcInterface);
+    const bool open = s_LogCdc.IsPortOpen();
     if (open == pApp->LogPortOpen)
     {
         return;
@@ -616,12 +475,9 @@ static void HciAppResyncOnIdle(HciApp_t *pApp)
 static void HciAppDrainLog(HciApp_t *pApp)
 {
     HciAppLogPortOpened(pApp);
-    HciAppLogPump();
-
-    if (pApp->LogPortOpen && s_LogIntrfState.PendingLen == 0U)
+    if (pApp->LogPortOpen)
     {
         (void)HciTraceFlush();
-        HciAppLogPump();
     }
 }
 
@@ -635,25 +491,7 @@ static void HciAppHostProcess(void *pContext)
 
     if (pApp->UsbRunning)
     {
-        pApp->Target.pOps->UsbPowerProcess(pApp->Target.pContext);
-
-        if (HciTargetUsbStuck(&pApp->Target))
-        {
-            HciTargetUsbTrace(&pApp->Target, "runtime storm", 0U);
-            if (pApp->HostType == HCI_APP_HOST_USB)
-            {
-                HciAppSetHostOpen(pApp, false);
-            }
-            HciTaktOsHostDown(&pApp->Runtime);
-            return;
-        }
-
-        pApp->Target.pOps->UsbPassMark(pApp->Target.pContext);
-        HciTinyUsbProcess(&pApp->Usb);
-        if (pApp->UsbHciNative)
-        {
-            HciUsbProcess(&pApp->NativeUsb);
-        }
+        UsbProcess(0);
 
         if (pApp->HostType == HCI_APP_HOST_USB)
         {
@@ -665,14 +503,6 @@ static void HciAppHostProcess(void *pContext)
     HciControllerProcess(&pApp->Controller);
     HciAppResyncOnIdle(pApp);
 
-    if (pApp->UsbRunning)
-    {
-        if (pApp->UsbHciNative)
-        {
-            HciUsbProcess(&pApp->NativeUsb);
-        }
-        HciTinyUsbProcess(&pApp->Usb);
-    }
 }
 
 static bool HciAppControllerInit(HciApp_t *pApp,
@@ -685,17 +515,7 @@ static bool HciAppControllerInit(HciApp_t *pApp,
 
     if (pApp->UsbHciNative)
     {
-        if (!HciUsbInit(&pApp->NativeUsb, HciAppUsbEvent))
-        {
-            return false;
-        }
-
-        pApp->pHostIntrf = HciUsbGetDeviceIntrf(&pApp->NativeUsb);
-        if (pApp->pHostIntrf == nullptr)
-        {
-            HciUsbDeinit(&pApp->NativeUsb);
-            return false;
-        }
+        pApp->pHostIntrf = s_HciUsb.Data();
 
         return HciControllerInitPacketTransport(&pApp->Controller,
                                                 pApp->pHostIntrf,
@@ -704,6 +524,11 @@ static bool HciAppControllerInit(HciApp_t *pApp,
                                                 pApp->ControllerPacket,
                                                 sizeof(pApp->ControllerPacket),
                                                 pControllerOps);
+    }
+
+    if (pApp->HostType == HCI_APP_HOST_USB)
+    {
+        pApp->pHostIntrf = s_HostCdc.Data();
     }
 
     return HciControllerInit(&pApp->Controller,
@@ -720,8 +545,7 @@ bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode, HciTarget_t Target)
     HciAppHost_t hostType;
     HciUsbDescriptorMode_t usbMode;
     if (!HciAppResolveMode(Mode, &hostType, &usbMode) ||
-        !HciTargetValid(&Target) ||
-        (hostType == HCI_APP_HOST_USB && !HciTargetHasUsb(&Target)))
+        !HciTargetValid(&Target))
     {
         return false;
     }
@@ -740,7 +564,7 @@ bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode, HciTarget_t Target)
 
     if (!earlyUart)
     {
-        memset(pApp, 0, sizeof(*pApp));
+        memset(static_cast<void *>(pApp), 0, sizeof(*pApp));
         s_pApp = pApp;
     }
 
@@ -770,16 +594,12 @@ bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode, HciTarget_t Target)
     if (hostType == HCI_APP_HOST_USB)
     {
         hostReady = HciAppUsbSetup(pApp, usbMode);
-        if (hostReady && !pApp->UsbHciNative)
-        {
-            pApp->pHostIntrf = &pApp->UsbIntrf.DevIntrf;
-        }
     }
     else
     {
         hostReady = earlyUart || HciAppInitUart(pApp);
 
-        if (hostReady && HCI_USB_SOCKET && HciTargetHasUsb(&pApp->Target) &&
+        if (hostReady && HCI_USB_SOCKET &&
             !HciAppUsbSetup(pApp, HCI_USB_DESCRIPTOR_LOG_ONLY))
         {
             HciTrace("init: log port setup failed, running without it\r\n");
@@ -823,8 +643,7 @@ bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode, HciTarget_t Target)
     if (!pApp->Target.pOps->Init(pApp->Target.pContext,
                                  &pApp->Runtime,
                                  reinterpret_cast<uint8_t *>(pApp->SdcMem),
-                                 sizeof(pApp->SdcMem),
-                                 pApp->UsbRunning))
+                                 sizeof(pApp->SdcMem)))
     {
         HciTrace("init: target Init failed\r\n");
         pApp->LastError = -4;
@@ -895,22 +714,18 @@ void HciAppStop(HciApp_t *pApp)
         return;
     }
 
-    if (pApp->UsbHciNative && pApp->HostOpen)
+    if (pApp->HostOpen)
     {
         HciAppSetHostOpen(pApp, false);
     }
-
-    pApp->Target.pOps->Stop(pApp->Target.pContext);
-    HciAppUsbRelease(pApp);
 
     if (!pApp->UsbHciNative && pApp->pHostIntrf != nullptr)
     {
         DeviceIntrfDisable(pApp->pHostIntrf);
     }
-    if (pApp->UsbHciNative)
-    {
-        pApp->pHostIntrf = nullptr;
-    }
+    HciAppUsbRelease(pApp);
+    pApp->Target.pOps->Stop(pApp->Target.pContext);
+    pApp->pHostIntrf = nullptr;
 
     pApp->Initialized = false;
     s_pApp = nullptr;

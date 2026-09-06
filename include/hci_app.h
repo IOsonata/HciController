@@ -26,9 +26,8 @@
 #include "hci_target.h"
 #include "hci_sdc_nrfxlib.h"
 #include "hci_taktos.h"
-#include "hci_tinyusb.h"
 #include "hci_usb.h"
-#include "usb/usbd_cdc_intrf.h"
+#include "usb/usbd_cdc.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -72,9 +71,6 @@ typedef struct
      */
 
     UARTDev_t Uart;
-    UsbdCdcDevIntrf_t UsbIntrf;
-    HciTinyUsb_t Usb;
-    HciUsb_t NativeUsb;
     DevIntrf_t *pHostIntrf;
     HciAppHost_t HostType;
     HciAppMode_t Mode;
@@ -121,6 +117,8 @@ typedef struct
     alignas(4) uint8_t UartTxFifoMem[HCI_APP_FIFO_MEM_SIZE];
     alignas(4) uint8_t UsbRxFifoMem[HCI_APP_FIFO_MEM_SIZE];
     alignas(4) uint8_t UsbTxFifoMem[HCI_APP_FIFO_MEM_SIZE];
+    alignas(4) uint8_t LogRxFifoMem[HCI_APP_FIFO_MEM_SIZE];
+    alignas(4) uint8_t LogTxFifoMem[HCI_APP_FIFO_MEM_SIZE];
 
     int LastError;
     bool Initialized;

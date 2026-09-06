@@ -4,9 +4,8 @@
 
 @brief	Validate firmware and Python HCI counter schema alignment.
 
-		Checks counter version and count, appended named fields, the USB Event
-		ACK diagnostic trace range, and DCD trace depth against the firmware
-		and Host decoder definitions.
+		Checks counter version and count and appended named fields against the
+		firmware and Host decoder definitions.
 
 @author	Nguyen Hoan Hoang
 @date	August 2026
@@ -64,7 +63,6 @@ def main(argv):
 
     root = os.path.abspath(argv[1])
     header = read(os.path.join(root, "include", "hci_counters.h"))
-    dcd = read(os.path.join(root, "nRF52840", "src", "dcd_nrf5x_hci.c"))
     python_lib = os.path.join(root, "python", "hcicontroller")
     wrapper = read(os.path.join(python_lib, "hci_ble_test.py"))
     implementation = read(os.path.join(python_lib, "hci_ble_test_impl.py"))
@@ -117,11 +115,6 @@ def main(argv):
         fail("Python ACK trace %d-%d disagrees with firmware trace %d-%d"
              % (trace_first, trace_first + trace_count - 1,
                 documented_first, documented_last))
-
-    dcd_trace_count = c_define(dcd, "HCI_USB_EVENT_ACK_TRACE_DEPTH")
-    if dcd_trace_count != trace_count:
-        fail("DCD ACK trace depth %d disagrees with counter tail length %d"
-             % (dcd_trace_count, trace_count))
 
     if host_version == firmware_version:
         if host_count != firmware_count:

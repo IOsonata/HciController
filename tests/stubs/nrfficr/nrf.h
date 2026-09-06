@@ -7,10 +7,9 @@
  * a device a host enumerates and then rejects, with nothing on either side
  * saying which number is wrong.
  *
- * So it is compiled here against the real TinyUSB headers, which is where
- * TUD_CDC_DESC_LEN and the descriptor macros live. Nothing is copied from
- * them. This header exists only so the serial number, which comes from the
- * factory information registers, does not drag the whole MCU header in.
+ * This header exists only so the serial number, which comes from the factory
+ * information registers, does not drag the whole MCU header into the host
+ * descriptor test.
  */
 #ifndef NRF_H_STUB
 #define NRF_H_STUB
