@@ -172,6 +172,8 @@ static bool HciAppUsbSetup(HciApp_t *pApp, HciUsbDescriptorMode_t Mode)
         return false;
     }
 
+    // Register the host function before the diagnostic CDC. IOsonata assigns
+    // CDC interfaces and endpoints from the remaining USB resources.
     if (Mode == HCI_USB_DESCRIPTOR_NATIVE_HCI)
     {
         HciUsbCfg_t hciCfg = {};
@@ -196,9 +198,6 @@ static bool HciAppUsbSetup(HciApp_t *pApp, HciUsbDescriptorMode_t Mode)
         hostCfg.pRxFifoMem = pApp->UsbRxFifoMem;
         hostCfg.TxFifoMemSize = sizeof(pApp->UsbTxFifoMem);
         hostCfg.pTxFifoMem = pApp->UsbTxFifoMem;
-        hostCfg.CtrlIfNo = 0U;
-        hostCfg.NotifyEpNo = 1U;
-        hostCfg.DataEpNo = 2U;
         hostCfg.DevNo = 0;
         hostCfg.EvtCB = HciAppUsbEvent;
         if (!s_HostCdc.Init(hostCfg))
@@ -214,24 +213,6 @@ static bool HciAppUsbSetup(HciApp_t *pApp, HciUsbDescriptorMode_t Mode)
     logCfg.pRxFifoMem = pApp->LogRxFifoMem;
     logCfg.TxFifoMemSize = sizeof(pApp->LogTxFifoMem);
     logCfg.pTxFifoMem = pApp->LogTxFifoMem;
-    if (Mode == HCI_USB_DESCRIPTOR_LOG_ONLY)
-    {
-        logCfg.CtrlIfNo = 0U;
-        logCfg.NotifyEpNo = 1U;
-        logCfg.DataEpNo = 2U;
-    }
-    else if (Mode == HCI_USB_DESCRIPTOR_CDC_H4)
-    {
-        logCfg.CtrlIfNo = 2U;
-        logCfg.NotifyEpNo = 3U;
-        logCfg.DataEpNo = 4U;
-    }
-    else
-    {
-        logCfg.CtrlIfNo = 2U;
-        logCfg.NotifyEpNo = 4U;
-        logCfg.DataEpNo = 5U;
-    }
     logCfg.DevNo = 0;
     logCfg.EvtCB = HciAppUsbEvent;
     if (!s_LogCdc.Init(logCfg))

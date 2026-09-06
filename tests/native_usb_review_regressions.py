@@ -84,18 +84,24 @@ def main(argv):
     if "HCI_USB_CDC_FUNCTION(2U, HCI_USB_STRING_LOG, 0x84U, 0x05U, 0x85U)" \
             not in descriptors:
         fail("native diagnostic CDC descriptor is not on interfaces 2/3, EP4/5")
-    for marker in (
-            "hostCfg.CtrlIfNo = 0U;",
-            "hostCfg.NotifyEpNo = 1U;",
-            "hostCfg.DataEpNo = 2U;",
-            "logCfg.CtrlIfNo = 2U;",
-            "logCfg.NotifyEpNo = 4U;",
-            "logCfg.DataEpNo = 5U;"):
-        if marker not in app:
-            fail("explicit CDC placement is missing %s" % marker)
-    if ".ItfNo" in app:
-        fail("HciController still configures CDC by logical instance number")
-    print("[ok] native HCI preserves product identity and CDC log placement")
+
+    for stale in (".CtrlIfNo", ".NotifyEpNo", ".DataEpNo", ".ItfNo"):
+        if stale in app:
+            fail("HciController still configures CDC USB topology: %s" % stale)
+
+    native_init = app.find("s_HciUsb.Init(hciCfg)")
+    host_cdc_init = app.find("s_HostCdc.Init(hostCfg)")
+    log_cdc_init = app.find("s_LogCdc.Init(logCfg)")
+    if native_init < 0 or host_cdc_init < 0 or log_cdc_init < 0 or \
+            native_init > log_cdc_init or host_cdc_init > log_cdc_init:
+        fail("host USB function must register before the diagnostic CDC")
+
+    registration = function_body(usb, "UsbFuncCfg_t cfg = {};",
+                                 "if (!UsbRegisterFunc(vDevNo, &cfg))")
+    if "HCI_USB_SYNC_RESERVED_EP_NO" not in usb or \
+            registration.count("HCI_USB_SYNC_RESERVED_EP_NO") != 2:
+        fail("native HCI must reserve the synchronous endpoint slot")
+    print("[ok] IOsonata auto allocation preserves released CDC layouts")
 
     target = read(os.path.join(root, "src", "hci_nrf52840.cpp"))
     if 'extern "C" bool UsbdXtalRequest(void)' not in target or \

@@ -25,6 +25,7 @@
 #define HCI_USB_SCO_HEADER_SIZE				3U
 #define HCI_USB_ISO_HEADER_SIZE				4U
 #define HCI_USB_HISTORICAL_COMMAND_REQUEST	0xE0U
+#define HCI_USB_SYNC_RESERVED_EP_NO			3U
 
 typedef struct {
 	uint32_t Sequence;
@@ -290,9 +291,15 @@ bool HciUsb::Init(const HciUsbCfg_t &Cfg)
 	UsbFuncCfg_t cfg = {};
 	cfg.FirstInterface = 0U;
 	cfg.InterfaceCount = 2U;
+	// Endpoint 3 is the Bluetooth synchronous-data slot. This LE-only image
+	// exposes only the zero-bandwidth synchronous alternate, but reserving the
+	// slot keeps the released native composite layout when IOsonata allocates
+	// the following CDC log automatically.
 	cfg.EpInMask = (uint16_t)((1U << HCI_USB_EVENT_EP_NO) |
-		(1U << HCI_USB_BULK_EP_NO));
-	cfg.EpOutMask = (uint16_t)(1U << HCI_USB_BULK_EP_NO);
+		(1U << HCI_USB_BULK_EP_NO) |
+		(1U << HCI_USB_SYNC_RESERVED_EP_NO));
+	cfg.EpOutMask = (uint16_t)((1U << HCI_USB_BULK_EP_NO) |
+		(1U << HCI_USB_SYNC_RESERVED_EP_NO));
 	cfg.RequestHandler = RequestHandler;
 	cfg.ConfigHandler = ConfigHandler;
 	cfg.SetInterfaceHandler = SetInterfaceHandler;
