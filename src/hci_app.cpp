@@ -151,7 +151,6 @@ static bool HciAppUsbSetup(HciApp_t *pApp, HciUsbDescriptorMode_t Mode)
     }
 
     pApp->UsbDescriptorMode = Mode;
-    pApp->LogCdcInterface = HciUsbDescriptorLogCdcInstance(Mode);
 
     UsbCfg_t usbCfg = {};
     usbCfg.DevNo = 0;
@@ -159,10 +158,10 @@ static bool HciAppUsbSetup(HciApp_t *pApp, HciUsbDescriptorMode_t Mode)
     usbCfg.Pid = HciUsbDescriptorPid(Mode);
     usbCfg.DevVer = HCI_CONTROLLER_VERSION_BCD;
     usbCfg.pManufacturer = "I-SYST inc.";
-    usbCfg.pProduct = "HciController";
+    usbCfg.pProduct = "I-SYST HCI Controller";
     usbCfg.pSerial = nullptr;
     usbCfg.pFuncName = "Bluetooth HCI";
-    usbCfg.NbCdc = Mode == HCI_USB_DESCRIPTOR_LOG_ONLY ? 1 : 2;
+    usbCfg.NbCdc = Mode == HCI_USB_DESCRIPTOR_CDC_H4 ? 2 : 1;
     usbCfg.IntPrio = 7;
     usbCfg.bSelfPowered = false;
     usbCfg.bLowPowerSuspend = false;
@@ -197,7 +196,9 @@ static bool HciAppUsbSetup(HciApp_t *pApp, HciUsbDescriptorMode_t Mode)
         hostCfg.pRxFifoMem = pApp->UsbRxFifoMem;
         hostCfg.TxFifoMemSize = sizeof(pApp->UsbTxFifoMem);
         hostCfg.pTxFifoMem = pApp->UsbTxFifoMem;
-        hostCfg.ItfNo = HCI_APP_CDC_INTERFACE;
+        hostCfg.CtrlIfNo = 0U;
+        hostCfg.NotifyEpNo = 1U;
+        hostCfg.DataEpNo = 2U;
         hostCfg.DevNo = 0;
         hostCfg.EvtCB = HciAppUsbEvent;
         if (!s_HostCdc.Init(hostCfg))
@@ -213,7 +214,24 @@ static bool HciAppUsbSetup(HciApp_t *pApp, HciUsbDescriptorMode_t Mode)
     logCfg.pRxFifoMem = pApp->LogRxFifoMem;
     logCfg.TxFifoMemSize = sizeof(pApp->LogTxFifoMem);
     logCfg.pTxFifoMem = pApp->LogTxFifoMem;
-    logCfg.ItfNo = pApp->LogCdcInterface;
+    if (Mode == HCI_USB_DESCRIPTOR_LOG_ONLY)
+    {
+        logCfg.CtrlIfNo = 0U;
+        logCfg.NotifyEpNo = 1U;
+        logCfg.DataEpNo = 2U;
+    }
+    else if (Mode == HCI_USB_DESCRIPTOR_CDC_H4)
+    {
+        logCfg.CtrlIfNo = 2U;
+        logCfg.NotifyEpNo = 3U;
+        logCfg.DataEpNo = 4U;
+    }
+    else
+    {
+        logCfg.CtrlIfNo = 2U;
+        logCfg.NotifyEpNo = 4U;
+        logCfg.DataEpNo = 5U;
+    }
     logCfg.DevNo = 0;
     logCfg.EvtCB = HciAppUsbEvent;
     if (!s_LogCdc.Init(logCfg))
@@ -363,7 +381,7 @@ static void HciAppStartLogPort(HciApp_t *pApp)
         return;
     }
 
-    HciTrace("log: usb up on cdc %u\r\n", (unsigned)pApp->LogCdcInterface);
+    HciTrace("log: usb up\r\n");
 }
 
 static bool HciAppHostStart(void *pContext)

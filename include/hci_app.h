@@ -35,7 +35,6 @@ extern "C" {
 
 #define HCI_APP_PACKET_SIZE         1024U
 #define HCI_APP_COMMAND_EVENT_SIZE  260U
-#define HCI_APP_CDC_INTERFACE       0U
 #define HCI_APP_FIFO_DATA_SIZE      4096U
 #define HCI_APP_FIFO_MEM_SIZE       CFIFO_MEMSIZE(HCI_APP_FIFO_DATA_SIZE)
 
@@ -75,7 +74,6 @@ typedef struct
     HciAppHost_t HostType;
     HciAppMode_t Mode;
     HciUsbDescriptorMode_t UsbDescriptorMode;
-    uint8_t LogCdcInterface;
     bool UsbHciNative;
     bool HostOpen;
 

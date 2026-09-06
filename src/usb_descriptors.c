@@ -109,8 +109,8 @@ static const uint8_t s_ConfigNative[] = {
 	HCI_USB_ENDPOINT(0x82U, USB_ENDPATT_TRANS_BULK, 64U, 0U),
 	HCI_USB_INTERFACE(1U, 0U, 0U, 0xE0U, 0x01U, 0x01U,
 		HCI_USB_STRING_BT),
-	/* CDC function 1 maps to interfaces 2/3 and endpoint numbers 3/4. */
-	HCI_USB_CDC_FUNCTION(2U, HCI_USB_STRING_LOG, 0x83U, 0x04U, 0x84U),
+	/* CDC log owns interfaces 2/3 and endpoint numbers 4/5. */
+	HCI_USB_CDC_FUNCTION(2U, HCI_USB_STRING_LOG, 0x84U, 0x05U, 0x85U),
 };
 
 static const uint8_t s_ConfigLog[] = {
@@ -134,11 +134,6 @@ bool HciUsbDescriptorSetMode(HciUsbDescriptorMode_t Mode)
 	}
 	s_DescriptorMode = Mode;
 	return true;
-}
-
-uint8_t HciUsbDescriptorLogCdcInstance(HciUsbDescriptorMode_t Mode)
-{
-	return Mode == HCI_USB_DESCRIPTOR_LOG_ONLY ? 0U : 1U;
 }
 
 uint16_t HciUsbDescriptorVid(void)

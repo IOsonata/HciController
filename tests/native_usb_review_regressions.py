@@ -72,6 +72,31 @@ def main(argv):
         fail("Event-IN must stage one endpoint packet per controller transfer")
     print("[ok] Event-IN chains registered DMA packets and its terminating ZLP")
 
+    descriptors = read(os.path.join(root, "src", "usb_descriptors.c"))
+    app = read(os.path.join(root, "src", "hci_app.cpp"))
+    app_header = read(os.path.join(root, "include", "hci_app.h"))
+    if "HciUsbDescriptorLogCdcInstance" in header or \
+            "HciUsbDescriptorLogCdcInstance" in descriptors or \
+            "LogCdcInterface" in app or "LogCdcInterface" in app_header:
+        fail("CDC runtime must not depend on a logical CDC instance number")
+    if 'usbCfg.pProduct = "I-SYST HCI Controller";' not in app:
+        fail("USB product identity changed from the released controller")
+    if "HCI_USB_CDC_FUNCTION(2U, HCI_USB_STRING_LOG, 0x84U, 0x05U, 0x85U)" \
+            not in descriptors:
+        fail("native diagnostic CDC descriptor is not on interfaces 2/3, EP4/5")
+    for marker in (
+            "hostCfg.CtrlIfNo = 0U;",
+            "hostCfg.NotifyEpNo = 1U;",
+            "hostCfg.DataEpNo = 2U;",
+            "logCfg.CtrlIfNo = 2U;",
+            "logCfg.NotifyEpNo = 4U;",
+            "logCfg.DataEpNo = 5U;"):
+        if marker not in app:
+            fail("explicit CDC placement is missing %s" % marker)
+    if ".ItfNo" in app:
+        fail("HciController still configures CDC by logical instance number")
+    print("[ok] native HCI preserves product identity and CDC log placement")
+
     target = read(os.path.join(root, "src", "hci_nrf52840.cpp"))
     if 'extern "C" bool UsbdXtalRequest(void)' not in target or \
             'extern "C" void UsbdXtalRelease(void)' not in target:

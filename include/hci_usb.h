@@ -51,7 +51,6 @@ extern "C" {
 #endif
 
 bool HciUsbDescriptorSetMode(HciUsbDescriptorMode_t Mode);
-uint8_t HciUsbDescriptorLogCdcInstance(HciUsbDescriptorMode_t Mode);
 uint16_t HciUsbDescriptorVid(void);
 uint16_t HciUsbDescriptorPid(HciUsbDescriptorMode_t Mode);
 
