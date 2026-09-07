@@ -55,11 +55,13 @@ class SelectionError(TransportError):
 
 
 class TransportSpec:
-    def __init__(self, kind, target, label=None, bulk_serialization=False):
+    def __init__(self, kind, target, label=None, bulk_serialization=False,
+                 usb_identity=None):
         self.kind = kind
         self.target = target
         self.label = label or str(target)
         self.bulk_serialization = bool(bulk_serialization)
+        self.usb_identity = usb_identity
 
     def __str__(self):
         return self.label
@@ -68,7 +70,8 @@ class TransportSpec:
         if self.kind == "serial":
             return SerialH4Transport(self.target)
         if self.kind == "usb":
-            return NativeUsbTransport(self.target,
+            device = _resolve_usb_identity(self.usb_identity)
+            return NativeUsbTransport(device,
                                       bulk_serialization=self.bulk_serialization)
         raise SelectionError("unknown transport %r" % self.kind)
 
@@ -226,6 +229,44 @@ def _enumerate_usb_devices():
         raise SelectionError("native USB enumeration failed: %s" % err) from err
 
 
+def _make_usb_identity(device):
+    return {
+        "vid": getattr(device, "idVendor", None),
+        "pid": getattr(device, "idProduct", None),
+        "serial": _safe_usb_string(device, "serial_number"),
+    }
+
+
+def _resolve_usb_identity(identity):
+    """Return a newly enumerated device for one stable native USB identity."""
+    if identity is None:
+        raise SelectionError("native USB controller has no stable identity")
+
+    matches = []
+    for device in _enumerate_usb_devices():
+        if (getattr(device, "idVendor", None),
+                getattr(device, "idProduct", None)) != (
+                    identity["vid"], identity["pid"]):
+            continue
+        if _usb_candidate(device) is None:
+            continue
+        if identity["serial"] and \
+                _safe_usb_string(device, "serial_number") != identity["serial"]:
+            continue
+        matches.append(device)
+
+    if not matches:
+        name = identity["serial"] or "%04X:%04X" % (
+            identity["vid"], identity["pid"])
+        raise SelectionError("native USB controller %s was not found" % name)
+    if len(matches) != 1:
+        name = identity["serial"] or "%04X:%04X" % (
+            identity["vid"], identity["pid"])
+        raise SelectionError(
+            "multiple native USB controllers match %s" % name)
+    return matches[0]
+
+
 def usb_candidates(devices=None, bulk_serialization=False):
     if devices is None:
         devices = _enumerate_usb_devices()
@@ -238,7 +279,8 @@ def usb_candidates(devices=None, bulk_serialization=False):
         score, serial_number, target, label = candidate
         ranked.append((score, serial_number, label,
                        TransportSpec("usb", target, label,
-                                     bulk_serialization=bulk_serialization)))
+                                     bulk_serialization=bulk_serialization,
+                                     usb_identity=_make_usb_identity(target))))
     ranked.sort(key=lambda item: (-item[0], item[1], item[2]))
     return [item[3] for item in ranked]
 

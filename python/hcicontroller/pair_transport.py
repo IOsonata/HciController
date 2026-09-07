@@ -5,8 +5,11 @@ import hci_transport
 
 
 def _usb_selector(spec):
-    device = spec.target
-    serial_number = getattr(device, "serial_number", None)
+    identity = getattr(spec, "usb_identity", None) or {}
+    serial_number = identity.get("serial")
+    if not serial_number:
+        device = spec.target
+        serial_number = getattr(device, "serial_number", None)
     if serial_number:
         return str(serial_number)
     raise hci_transport.SelectionError(
@@ -44,6 +47,7 @@ def bulk_spec(spec):
         spec.target,
         "%s bulk serialization" % spec,
         bulk_serialization=True,
+        usb_identity=spec.usb_identity,
     )
 
 

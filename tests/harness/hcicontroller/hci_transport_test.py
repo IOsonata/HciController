@@ -162,6 +162,22 @@ def main():
                     'I-SYST inc.', 'I-SYST HCI Controller', 'NATIVE1')
     specs = ht.usb_candidates([native])
     assert len(specs) == 1 and specs[0].kind == 'usb'
+    replacement = Device(ht.I_SYST_VID, ht.PID_NATIVE_HCI,
+                         'I-SYST inc.', 'I-SYST HCI Controller', 'NATIVE1')
+    opened = []
+    original_enumerate = ht._enumerate_usb_devices
+    original_transport = ht.NativeUsbTransport
+    ht._enumerate_usb_devices = lambda: [replacement]
+    ht.NativeUsbTransport = lambda device, bulk_serialization=False: (
+        opened.append((device, bulk_serialization)) or device
+    )
+    try:
+        assert specs[0].open() is replacement
+        assert opened == [(replacement, False)]
+    finally:
+        ht.NativeUsbTransport = original_transport
+        ht._enumerate_usb_devices = original_enumerate
+
     assert ht.discover('auto', ports=ports, usb_devices=[native]).kind == 'usb'
     assert ht.discover('serial', ports=ports, usb_devices=[native]).kind == 'serial'
     assert ht.discover('usb', 'CAFE:4071', ports=ports,
