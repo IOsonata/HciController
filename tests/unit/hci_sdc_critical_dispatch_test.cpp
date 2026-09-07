@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "sdc_hci.h"
 #include "sdc_hci_cmd_controller_baseband.h"
 #include "sdc_hci_cmd_info_params.h"
 #include "sdc_hci_cmd_le.h"
@@ -114,11 +115,13 @@ static void GiveControllerQueueItsTurn(const HciControllerOps_t *controller)
            HCI_CONTROLLER_GET_EMPTY);
 }
 
+#if !defined(SDC_HCI_PAWR_SYNC_RETURN_IMMEDIATELY) || \
+    !SDC_HCI_PAWR_SYNC_RETURN_IMMEDIATELY
 /*
- * The generated real-header SDC stub normally has an empty event queue. PAwR
- * response data needs a delayed Command Complete from that queue, so this one
- * test replaces only HciSdc_t::Ops.Get after the real command table has been
- * initialised. All command handlers still call the generated SDC entry points.
+ * Older SDC revisions queue the PAwR response-data Command Complete. The
+ * generated real-header stub normally has an empty event queue, so this test
+ * replaces only HciSdc_t::Ops.Get after the real command table has been
+ * initialized. All command handlers still call the generated SDC entry points.
  */
 struct TestSdcQueue
 {
@@ -137,6 +140,7 @@ static int32_t TestSdcGet(void *pContext, uint8_t *pPacket, uint8_t *pType)
     }
     return queue->Result;
 }
+#endif
 
 template <typename CmdT, typename ReturnT>
 static void TestCigVariableReturn(const HciControllerOps_t *controller,
@@ -374,8 +378,8 @@ static void TestExtendedAdvertisingV2(const HciControllerOps_t *controller)
     HciSdcNrfxlibResetAdvCommandType();
 }
 
-static void TestPawrResponseDelayedCompletion(HciSdc_t *pSdc,
-                                              const HciControllerOps_t *controller)
+static void TestPawrResponseCompletion(HciSdc_t *pSdc,
+                                       const HciControllerOps_t *controller)
 {
     const uint16_t opcode =
         SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_RESPONSE_DATA;
@@ -387,9 +391,8 @@ static void TestPawrResponseDelayedCompletion(HciSdc_t *pSdc,
     HciSdcNrfxlibResetAdvCommandType();
 
     /*
-     * A malformed body is rejected by the real nrfxlib handler before the SDC
-     * entry point is called. It has no delayed completion to wait for, so the
-     * Invalid HCI Command Parameters answer remains immediate.
+     * A malformed body is rejected before the SDC entry point is called, so it
+     * always gets an immediate Invalid HCI Command Parameters answer.
      */
     alignas(4) uint8_t malformed[16] = {0};
     assert(head + 1U <= sizeof(malformed));
@@ -429,9 +432,7 @@ static void TestPawrResponseDelayedCompletion(HciSdc_t *pSdc,
     pParams->response_data_length = 0U;
 
     /*
-     * A command rejected by the advertising-set guard never enters its handler
-     * and therefore cannot be waiting on SDC. Select the legacy set first and
-     * verify that this extended command gets an immediate Command Disallowed.
+     * A command rejected by the advertising-set guard never enters its handler.
      */
     (void)SendCommand(controller, SDC_HCI_OPCODE_CMD_LE_SET_ADV_PARAMS,
                       legacy, sizeof(legacy), event, sizeof(event));
@@ -446,10 +447,48 @@ static void TestPawrResponseDelayedCompletion(HciSdc_t *pSdc,
     HciSdcNrfxlibResetAdvCommandType();
     printf("[ok] guarded PAwR response data is rejected immediately\n");
 
+#if defined(SDC_HCI_PAWR_SYNC_RETURN_IMMEDIATELY) && \
+    SDC_HCI_PAWR_SYNC_RETURN_IMMEDIATELY
     /*
-     * From here on supply an explicit controller queue. The direct SDC command
-     * stub still supplies the real handler result; only sdc_hci_get is replaced
-     * so delayed events can be injected deterministically.
+     * Current SDC returns the 0x2083 Command Complete from the direct command
+     * call. HciController must expose that dispatcher event rather than
+     * suppressing it and waiting for an event that will never be queued.
+     */
+    g_SdcStub.NextStatus = HCI_STATUS_SUCCESS;
+    g_SdcStub.LastCall = NULL;
+    const size_t completeLen =
+        SendCommand(controller, opcode, params, head, event, sizeof(event));
+    assert(strcmp(g_SdcStub.LastCall,
+                  "sdc_hci_cmd_le_set_periodic_adv_response_data") == 0);
+    assert(!pSdc->DelayedCommandPending);
+    assert(pSdc->DelayedCommandOpcode == 0U);
+    assert(completeLen ==
+           HCI_COMMAND_COMPLETE_BASE_SIZE +
+               sizeof(sdc_hci_cmd_le_set_periodic_adv_response_data_return_t));
+    assert(pSdc->PawrDelayedCandidateCount == 0U);
+    assert(pSdc->PawrDelayedHandlerCallCount == 0U);
+    assert(pSdc->PawrSyntheticSuppressedCount == 0U);
+    assert(pSdc->PawrSdcCompleteCount == 0U);
+    GiveControllerQueueItsTurn(controller);
+    printf("[ok] current SDC returns PAwR response completion immediately\n");
+
+    HciSdcNrfxlibResetAdvCommandType();
+    g_SdcStub.NextStatus = HCI_STATUS_COMMAND_DISALLOWED;
+    g_SdcStub.LastCall = NULL;
+    assert(SendCommandStatus(controller, opcode, params, head,
+                             event, sizeof(event)) ==
+           HCI_STATUS_COMMAND_DISALLOWED);
+    assert(strcmp(g_SdcStub.LastCall,
+                  "sdc_hci_cmd_le_set_periodic_adv_response_data") == 0);
+    assert(!pSdc->DelayedCommandPending);
+    GiveControllerQueueItsTurn(controller);
+    g_SdcStub.NextStatus = HCI_STATUS_SUCCESS;
+    printf("[ok] current SDC returns PAwR response errors immediately\n");
+#else
+    /*
+     * Older SDC revisions return the real Command Complete later through
+     * sdc_hci_get. Supply that queue explicitly so the legacy compatibility
+     * path remains covered.
      */
     TestSdcQueue queue = {};
     queue.Result = pSdc->Ops.RetryError;
@@ -480,16 +519,14 @@ static void TestPawrResponseDelayedCompletion(HciSdc_t *pSdc,
     assert(controller->Get(controller->pContext, &type, event, sizeof(event),
                            &eventLen) == HCI_CONTROLLER_GET_EMPTY);
     assert(pSdc->DelayedCommandPending);
-    printf("[ok] successful PAwR response data has no synthetic completion\n");
+    printf("[ok] legacy SDC has no synthetic PAwR completion\n");
 
-    /* The Host still has no command credit, so a following Reset stays queued. */
     const uint8_t reset[] = {0x03U, 0x0CU, 0x00U};
     const uint32_t deferred = pSdc->CommandDeferredCount;
     assert(!controller->Put(controller->pContext, HCI_H4_PACKET_COMMAND,
                             reset, sizeof(reset)));
     assert(pSdc->CommandDeferredCount == deferred + 1U);
 
-    /* An unrelated controller event is forwarded and does not clear it. */
     memset(queue.Packet, 0, sizeof(queue.Packet));
     queue.Result = 0;
     queue.Type = HCI_SDC_MSG_TYPE_EVENT;
@@ -502,7 +539,6 @@ static void TestPawrResponseDelayedCompletion(HciSdc_t *pSdc,
     assert(eventLen == 3U && event[0] == 0x3EU && event[2] == 0x27U);
     assert(pSdc->DelayedCommandPending);
 
-    /* The matching real SDC Command Complete is the one that returns credit. */
     const uint8_t realComplete[] = {
         HCI_EVENT_COMMAND_COMPLETE, 0x06U, 0x01U,
         0x83U, 0x20U, HCI_STATUS_SUCCESS, 0x5AU, 0x5AU,
@@ -527,12 +563,6 @@ static void TestPawrResponseDelayedCompletion(HciSdc_t *pSdc,
     GiveControllerQueueItsTurn(controller);
     printf("[ok] real PAwR completion releases the following command\n");
 
-    /*
-     * Once the command reaches SDC, its Command Complete is delayed even when
-     * the direct entry point reports an HCI error; Nordic's wrapper only makes
-     * Unknown HCI Command immediate. This distinguishes an SDC refusal from the
-     * local guard and length refusals above.
-     */
     HciSdcNrfxlibResetAdvCommandType();
     g_SdcStub.NextStatus = HCI_STATUS_COMMAND_DISALLOWED;
     g_SdcStub.LastCall = NULL;
@@ -558,7 +588,8 @@ static void TestPawrResponseDelayedCompletion(HciSdc_t *pSdc,
     assert(memcmp(event, realError, sizeof(realError)) == 0);
     assert(!pSdc->DelayedCommandPending);
     g_SdcStub.NextStatus = HCI_STATUS_SUCCESS;
-    printf("[ok] SDC PAwR errors wait for their real completion\n");
+    printf("[ok] legacy SDC PAwR errors wait for their real completion\n");
+#endif
 }
 
 int main(void)
@@ -599,7 +630,7 @@ int main(void)
     TestAdvertisingSetRandomAddressGuard(controller);
     TestEventMaskPage2(controller);
     TestExtendedAdvertisingV2(controller);
-    TestPawrResponseDelayedCompletion(&sdc, controller);
+    TestPawrResponseCompletion(&sdc, controller);
 
     printf("All critical SDC real-header dispatch tests passed.\n");
     return 0;
