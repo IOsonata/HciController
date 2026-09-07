@@ -54,9 +54,9 @@ extern "C" {
  *   frame space update 1236 for eighteen links
  *   shorter intervals  948 for eighteen links
  *   parallel scan and initiate  384
- *   periodic adv set  753 each  periodic sync 1787 each with responses
+ *   periodic adv set  753 each  periodic sync 1786 each with responses
  *   periodic adv list   8 each  sync transfer 2515 for eighteen links
- *   periodic set with responses 2014 each
+ *   periodic set with responses 1739 each
  *
  * The product profile needs up to sixteen simultaneous peripheral-role links
  * and two simultaneous central-role links. That is eighteen connection
@@ -107,7 +107,7 @@ extern "C" {
  * address in the host. The controller defaults that list to zero entries, so
  * a host reading the size would otherwise be told it does not work.
  *
- * The syncs are the expensive part, 1787 each with responses enabled, and the
+ * The syncs are the expensive part, 1786 each with responses enabled, and the
  * first numbers to bring down if the pool has to shrink.
  */
 #define HCI_SDC_PERIODIC_ADV_COUNT         1U

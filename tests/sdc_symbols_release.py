@@ -122,6 +122,11 @@ OPTIONAL_OR_ALTERNATIVE = {
     "sdc_support_extended_feature_set",
     # Explicitly experimental in sdk-nrfxlib HEAD.
     "sdc_support_flushable_acl_data",
+    # Channel Classification, experimental in sdk-nrfxlib HEAD (DRGN-27485).
+    # Autonomous channel assessment is not supported, so the host would have
+    # to drive classification itself. A multirole build must call both.
+    "sdc_support_channel_classification_central",
+    "sdc_support_channel_classification_peripheral",
     # Board/platform integrations, not Bluetooth HCI feature capability.
     "sdc_support_mpsl_coex",
     "sdc_support_mpsl_fem",

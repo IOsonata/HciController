@@ -190,8 +190,12 @@ int main(void)
 	assert(usb.Init(cfg));
 	assert(s_Function.FirstInterface == 0U);
 	assert(s_Function.InterfaceCount == 2U);
-	assert(s_Function.EpInMask == 0x0006U);
-	assert(s_Function.EpOutMask == 0x0004U);
+	/* Bits 1 and 2 are the event and bulk endpoints. Bit 3 is the
+	 * synchronous-data slot, claimed but never described, so that the
+	 * automatically allocated CDC log lands on endpoints 4 and 5 as the
+	 * released native composite has it. */
+	assert(s_Function.EpInMask == 0x000EU);
+	assert(s_Function.EpOutMask == 0x000CU);
 	assert(s_Function.ConfigHandler(1U, s_Function.pContext));
 	assert(usb.IsOpen() && !usb.BulkSerialization());
 	assert(s_Ep[0x02U].Busy);
