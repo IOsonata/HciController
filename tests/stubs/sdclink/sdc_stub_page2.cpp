@@ -21,10 +21,13 @@ uint8_t sdc_stub_hci_cmd_le_set_periodic_adv_response_data(
     sdc_hci_cmd_le_set_periodic_adv_response_data_return_t *pReturn);
 int32_t sdc_stub_hci_get(uint8_t *pPacketOut, uint8_t *pMsgTypeOut);
 
+#if !defined(SDC_HCI_PAWR_SYNC_RETURN_IMMEDIATELY) || \
+    !SDC_HCI_PAWR_SYNC_RETURN_IMMEDIATELY
 static bool s_PawrResponseCompletePending;
 static uint8_t s_PawrResponseStatus;
 static uint8_t s_PawrResponseReturn[
     sizeof(sdc_hci_cmd_le_set_periodic_adv_response_data_return_t)];
+#endif
 
 uint8_t sdc_hci_cmd_le_set_periodic_adv_response_data(
     const sdc_hci_cmd_le_set_periodic_adv_response_data_t *pParams,
@@ -33,10 +36,13 @@ uint8_t sdc_hci_cmd_le_set_periodic_adv_response_data(
     const uint8_t status =
         sdc_stub_hci_cmd_le_set_periodic_adv_response_data(pParams, pReturn);
 
+#if !defined(SDC_HCI_PAWR_SYNC_RETURN_IMMEDIATELY) || \
+    !SDC_HCI_PAWR_SYNC_RETURN_IMMEDIATELY
     /*
-     * Match Nordic hci_internal.c: Unknown HCI Command is immediate because no
-     * delayed event follows it. Any other result from an implemented 0x2083 is
-     * completed later through sdc_hci_get(), including an SDC error status.
+     * Older SDC revisions complete implemented 0x2083 commands later through
+     * sdc_hci_get(). Unknown HCI Command is immediate because no delayed event
+     * follows it. Current SDC revisions define
+     * SDC_HCI_PAWR_SYNC_RETURN_IMMEDIATELY and must not queue this extra event.
      */
     if (status != 0x01U)
     {
@@ -52,34 +58,39 @@ uint8_t sdc_hci_cmd_le_set_periodic_adv_response_data(
         }
         s_PawrResponseCompletePending = true;
     }
+#endif
 
     return status;
 }
 
 int32_t sdc_hci_get(uint8_t *pPacketOut, uint8_t *pMsgTypeOut)
 {
-    if (!s_PawrResponseCompletePending)
+#if !defined(SDC_HCI_PAWR_SYNC_RETURN_IMMEDIATELY) || \
+    !SDC_HCI_PAWR_SYNC_RETURN_IMMEDIATELY
+    if (s_PawrResponseCompletePending)
     {
-        return sdc_stub_hci_get(pPacketOut, pMsgTypeOut);
-    }
+        if (pPacketOut == NULL || pMsgTypeOut == NULL)
+        {
+            return sdc_stub_hci_get(pPacketOut, pMsgTypeOut);
+        }
 
-    if (pPacketOut == NULL || pMsgTypeOut == NULL)
-    {
-        return sdc_stub_hci_get(pPacketOut, pMsgTypeOut);
+        /* Command Complete: Num_HCI_Command_Packets, opcode, status, sync handle. */
+        pPacketOut[0] = 0x0EU;
+        pPacketOut[1] =
+            (uint8_t)(4U + sizeof(sdc_hci_cmd_le_set_periodic_adv_response_data_return_t));
+        pPacketOut[2] = 0x01U;
+        pPacketOut[3] = 0x83U;
+        pPacketOut[4] = 0x20U;
+        pPacketOut[5] = s_PawrResponseStatus;
+        memcpy(&pPacketOut[6], s_PawrResponseReturn,
+               sizeof(s_PawrResponseReturn));
+        *pMsgTypeOut = SDC_HCI_MSG_TYPE_EVT;
+        s_PawrResponseCompletePending = false;
+        return 0;
     }
+#endif
 
-    /* Command Complete: Num_HCI_Command_Packets, opcode, status, sync handle. */
-    pPacketOut[0] = 0x0EU;
-    pPacketOut[1] =
-        (uint8_t)(4U + sizeof(sdc_hci_cmd_le_set_periodic_adv_response_data_return_t));
-    pPacketOut[2] = 0x01U;
-    pPacketOut[3] = 0x83U;
-    pPacketOut[4] = 0x20U;
-    pPacketOut[5] = s_PawrResponseStatus;
-    memcpy(&pPacketOut[6], s_PawrResponseReturn, sizeof(s_PawrResponseReturn));
-    *pMsgTypeOut = SDC_HCI_MSG_TYPE_EVT;
-    s_PawrResponseCompletePending = false;
-    return 0;
+    return sdc_stub_hci_get(pPacketOut, pMsgTypeOut);
 }
 
 uint8_t sdc_hci_cmd_cb_set_event_mask_page_2(
