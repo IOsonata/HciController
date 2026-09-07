@@ -26,52 +26,6 @@ static_assert(HCI_SDC_MEM_REQUIRED == EXPECT_REQUIRED,
 
 static NRF_POWER_Type gPower;
 NRF_POWER_Type *NRF_POWER = &gPower;
-static NRF_USBD_Type gUsbd;
-NRF_USBD_Type *NRF_USBD = &gUsbd;
-static bool gUsbdReadyRaises = true;
-
-UsbdEnableReg &UsbdEnableReg::operator=(uint32_t Setting)
-{
-    Value = Setting;
-    if (Setting != 0U && gUsbdReadyRaises)
-    {
-        gUsbd.EVENTCAUSE.Value |= USBD_EVENTCAUSE_READY_Msk;
-    }
-    return *this;
-}
-
-#define FAKE_REG_COUNT 8
-static uint32_t gFakeAddr[FAKE_REG_COUNT];
-static uint32_t gFakeVal[FAKE_REG_COUNT];
-static unsigned gFakeUsed;
-
-extern "C" uint32_t *HciTestReg(uint32_t Addr)
-{
-    for (unsigned i = 0U; i < gFakeUsed; i++)
-    {
-        if (gFakeAddr[i] == Addr)
-        {
-            return &gFakeVal[i];
-        }
-    }
-
-    assert(gFakeUsed < FAKE_REG_COUNT);
-    gFakeAddr[gFakeUsed] = Addr;
-    gFakeVal[gFakeUsed] = 0U;
-    return &gFakeVal[gFakeUsed++];
-}
-
-static uint32_t FakeRegPeek(uint32_t Addr)
-{
-    for (unsigned i = 0U; i < gFakeUsed; i++)
-    {
-        if (gFakeAddr[i] == Addr)
-        {
-            return gFakeVal[i];
-        }
-    }
-    return 0xFFFFFFFFU;
-}
 
 extern "C" bool nrf52_errata_166(void) { return true; }
 extern "C" bool nrf52_errata_171(void) { return true; }
@@ -92,10 +46,6 @@ NRF_GPIO_Type *NRF_P1 = &gP1;
 static CryptoRngNrf gRng;
 static OscDesc_t gLfOsc = { OSC_TYPE_XTAL, 32768U, 20U, 0U };
 
-static unsigned gUsbPowerEvents[3];
-static unsigned gDcdConnect;
-static unsigned gDcdDisconnect;
-static unsigned gClockRegisterWrites;
 static unsigned gHfclkRequests;
 static unsigned gHfclkReleases;
 static unsigned gLowPrioProcess;
@@ -113,16 +63,6 @@ extern "C" void NVIC_SetPriority(IRQn_Type, uint32_t) {}
 extern "C" void NVIC_EnableIRQ(IRQn_Type) {}
 extern "C" void NVIC_DisableIRQ(IRQn_Type) {}
 extern "C" void NVIC_ClearPendingIRQ(IRQn_Type) {}
-
-extern "C" void tusb_hal_nrf_power_event(uint32_t Event)
-{
-    assert(Event < 3U);
-    gUsbPowerEvents[Event]++;
-    gClockRegisterWrites++;
-}
-
-extern "C" void dcd_connect(uint8_t rhport) { assert(rhport == 0U); gDcdConnect++; }
-extern "C" void dcd_disconnect(uint8_t rhport) { assert(rhport == 0U); gDcdDisconnect++; }
 
 extern "C" int32_t mpsl_init(const mpsl_clock_lfclk_cfg_t *pCfg, IRQn_Type Irq, mpsl_assert_handler_t)
 {
@@ -219,24 +159,19 @@ extern "C" void HciUsbPlatformIrqUnexpectedCause(uint32_t Cause);
 extern "C" void HciUsbPlatformIrqStorm(uint32_t Inten,
                                        uint32_t Cause,
                                        uint32_t Events);
+extern "C" bool UsbdXtalRequest(void);
+extern "C" void UsbdXtalRelease(void);
 
 static void ResetCounters(void)
 {
-    memset(gUsbPowerEvents, 0, sizeof(gUsbPowerEvents));
-    gDcdConnect = 0U;
-    gDcdDisconnect = 0U;
-    gClockRegisterWrites = 0U;
     gHfclkRequests = 0U;
     gHfclkReleases = 0U;
     gLowPrioProcess = 0U;
     gHfclkRuns = false;
     gHfclkStartAfter = 0U;
-    gUsbdReadyRaises = true;
     gXtalSelected = true;
     gSdcAssert = nullptr;
-    gFakeUsed = 0U;
     memset(&gPower, 0, sizeof(gPower));
-    memset(&gUsbd, 0, sizeof(gUsbd));
     memset(&gClock, 0, sizeof(gClock));
     memset(&gUarte0, 0, sizeof(gUarte0));
     memset(&gUarte1, 0, sizeof(gUarte1));
@@ -244,316 +179,40 @@ static void ResetCounters(void)
     memset(&gP1, 0, sizeof(gP1));
 }
 
-static void TestBringUpOrder(void)
+
+static void TestUsbClockOwnership(void)
 {
     ResetCounters();
     gHfclkStartAfter = 3U;
-    gPower.USBREGSTATUS = POWER_USBREGSTATUS_VBUSDETECT_Msk |
-                          POWER_USBREGSTATUS_OUTPUTRDY_Msk;
 
     alignas(8) static uint8_t mem[10000];
     HciTaktOs_t runtime = {};
     HciNrf52840_t target;
     HciTaktOsOps_t ops = {};
 
-    assert(HciNrf52840Init(&target, &runtime, mem, sizeof(mem), true));
+    assert(HciNrf52840Init(&target, &runtime, mem, sizeof(mem)));
     HciNrf52840GetTaktOsOps(&target, &ops);
     assert(ops.Start(ops.pContext));
 
-    assert(gUsbPowerEvents[0] == 0U);
-    assert(gUsbPowerEvents[2] == 0U);
-    assert(gHfclkRequests == 0U);
-
-    /* The DCD may see an early IRQ, but target accounting stays inactive. */
-    assert(HciUsbPlatformIrqEnter() == 0U);
-
-    assert(HciNrf52840UsbStart(&target));
-    assert(gHfclkRequests == 1U);
+    assert(UsbdXtalRequest());
     assert(target.HfclkRequested);
-    assert(target.UsbStarted && target.UsbReadyDone);
-    assert(gUsbPowerEvents[0] == 0U);
-    assert(gUsbPowerEvents[1] == 0U);
-    assert(gUsbPowerEvents[2] == 0U);
+    assert(gHfclkRequests == 1U);
+    assert(UsbdXtalRequest());
+    assert(gHfclkRequests == 1U);
 
-    assert(gUsbd.ENABLE == 1U);
-    assert(gUsbd.USBPULLUP == 1U);
-    assert(gUsbd.ISOSPLIT == USBD_ISOSPLIT_SPLIT_HalfIN);
-    assert((gUsbd.INTENSET & USBD_INTEN_USBRESET_Msk) != 0U);
-
-    assert(FakeRegPeek(0x4006ED14UL) == 0x00000000UL);
-    assert(FakeRegPeek(0x4006EC14UL) == 0x00000000UL);
-    assert(FakeRegPeek(NRF_USBD_BASE + 0x800UL) == 0x7E3UL);
-    assert(FakeRegPeek(NRF_USBD_BASE + 0x804UL) == 0x40UL);
-    assert(gClockRegisterWrites == 0U);
-    assert((gPower.INTENSET & POWER_INTENSET_USBPWRRDY_Msk) != 0U);
-
-    gPower.INTENSET = 0U;
-    ops.ProcessMpsl(ops.pContext);
-    assert((gPower.INTENSET & POWER_INTENSET_USBDETECTED_Msk) != 0U);
-    assert((gPower.INTENSET & POWER_INTENSET_USBREMOVED_Msk) != 0U);
-    assert((gPower.INTENSET & POWER_INTENSET_USBPWRRDY_Msk) != 0U);
-
-    HciNrf52840UsbPassMark(&target);
-    assert(HciUsbPlatformIrqEnter() == 1U);
-    assert(target.UsbIrqCount == 1U);
-
-    gPower.EVENTS_USBREMOVED = 1U;
-    POWER_CLOCK_IRQHandler();
-    assert(gUsbPowerEvents[1] == 0U);
-    assert(gClockRegisterWrites == 0U);
-    assert(target.UsbDetachPending);
-    assert(gDcdDisconnect == 0U);
-
-    HciNrf52840UsbPowerProcess(&target);
-    assert(gDcdDisconnect == 1U);
-    assert(!target.UsbDetachPending);
-
-    gPower.EVENTS_USBDETECTED = 1U;
-    POWER_CLOCK_IRQHandler();
-    assert(target.UsbAttachPending);
-    assert(gDcdConnect == 0U);
-
-    HciNrf52840UsbPowerProcess(&target);
-    assert(gDcdConnect == 1U);
-    assert(gUsbPowerEvents[0] == 0U);
-
-    gPower.EVENTS_USBREMOVED = 1U;
-    POWER_CLOCK_IRQHandler();
-    gPower.EVENTS_USBDETECTED = 1U;
-    POWER_CLOCK_IRQHandler();
-    HciNrf52840UsbPowerProcess(&target);
-    assert(gDcdDisconnect == 2U && gDcdConnect == 2U);
-
-    HciNrf52840Stop(&target);
+    UsbdXtalRelease();
+    assert(!target.HfclkRequested);
     assert(gHfclkReleases == 1U);
-    assert(!target.HfclkRequested && !target.UsbStarted);
-    assert(!target.SdcInitialized);
-    assert(gUsbd.USBPULLUP == 0U);
-    assert(gUsbd.ENABLE == 0U);
-    assert(gUsbd.INTEN == 0U);
 
-    assert(ops.Start(ops.pContext));
-    HciNrf52840Stop(&target);
-
-    printf("[ok] bring up order and clock ownership\n");
-}
-
-static void TestHfclkTimeoutDoesNotHang(void)
-{
-    ResetCounters();
+    gHfclkRuns = false;
     gHfclkStartAfter = 0U;
-    gPower.USBREGSTATUS = POWER_USBREGSTATUS_VBUSDETECT_Msk |
-                          POWER_USBREGSTATUS_OUTPUTRDY_Msk;
-
-    alignas(8) static uint8_t mem[10000];
-    HciTaktOs_t runtime = {};
-    HciNrf52840_t target;
-    HciTaktOsOps_t ops = {};
-
-    assert(HciNrf52840Init(&target, &runtime, mem, sizeof(mem), true));
-    HciNrf52840GetTaktOsOps(&target, &ops);
-    assert(ops.Start(ops.pContext));
-
-    assert(!HciNrf52840UsbStart(&target));
-    assert(target.LastError == -1000);
-    assert(!target.UsbStarted);
-    assert(gHfclkRequests == 1U);
-    assert(gHfclkReleases == 1U);
+    assert(!UsbdXtalRequest());
     assert(!target.HfclkRequested);
-    assert(gUsbPowerEvents[0] == 0U && gUsbPowerEvents[2] == 0U);
-
-    gHfclkStartAfter = gLowPrioProcess + 1U;
-    assert(HciNrf52840UsbStart(&target));
     assert(gHfclkRequests == 2U);
-    assert(target.HfclkRequested);
-
-    ops.Fault(ops.pContext, -1);
-    assert(target.LastError == -1000);
-    assert(target.FaultCount == 1U);
-
-    HciNrf52840Stop(&target);
     assert(gHfclkReleases == 2U);
-    printf("[ok] crystal timeout releases its request and retry re-requests it\n");
-}
-
-static void TestUsbRegulatorTimeout(void)
-{
-    ResetCounters();
-    gHfclkStartAfter = 1U;
-    gPower.USBREGSTATUS = POWER_USBREGSTATUS_VBUSDETECT_Msk;
-
-    alignas(8) static uint8_t mem[10000];
-    HciTaktOs_t runtime = {};
-    HciNrf52840_t target;
-    HciTaktOsOps_t ops = {};
-
-    assert(HciNrf52840Init(&target, &runtime, mem, sizeof(mem), true));
-    HciNrf52840GetTaktOsOps(&target, &ops);
-    assert(ops.Start(ops.pContext));
-
-    assert(!HciNrf52840UsbStart(&target));
-    assert(target.LastError == -1001);
-    assert(!target.UsbReadyDone);
-    assert(!target.UsbStarted);
-    assert(gUsbd.ENABLE == 0U);
-    assert(gUsbd.USBPULLUP == 0U);
-    assert(gUsbd.INTEN == 0U);
-    assert(gHfclkReleases == 1U);
-    assert(!target.HfclkRequested);
-    assert(gUsbPowerEvents[0] == 0U);
-
-    gPower.USBREGSTATUS = 0U;
-    assert(!HciNrf52840UsbStart(&target));
 
     HciNrf52840Stop(&target);
-    printf("[ok] regulator wait is bounded and reports its own code\n");
-}
-
-static void TestNoVbusIsRejected(void)
-{
-    ResetCounters();
-    gHfclkStartAfter = 1U;
-    gPower.USBREGSTATUS = 0U;
-
-    alignas(8) static uint8_t mem[10000];
-    HciTaktOs_t runtime = {};
-    HciNrf52840_t target;
-    HciTaktOsOps_t ops = {};
-
-    assert(HciNrf52840Init(&target, &runtime, mem, sizeof(mem), true));
-    HciNrf52840GetTaktOsOps(&target, &ops);
-    assert(ops.Start(ops.pContext));
-
-    assert(!HciNrf52840UsbStart(&target));
-    assert(gUsbd.ENABLE == 0U);
-    assert(gUsbd.USBPULLUP == 0U);
-
-    HciNrf52840Stop(&target);
-    printf("[ok] no vbus is rejected without enabling the controller\n");
-}
-
-static void TestUsbdReadyTimeout(void)
-{
-    ResetCounters();
-    gHfclkStartAfter = 1U;
-    gUsbdReadyRaises = false;
-    gPower.USBREGSTATUS = POWER_USBREGSTATUS_VBUSDETECT_Msk |
-                          POWER_USBREGSTATUS_OUTPUTRDY_Msk;
-
-    alignas(8) static uint8_t mem[10000];
-    HciTaktOs_t runtime = {};
-    HciNrf52840_t target;
-    HciTaktOsOps_t ops = {};
-
-    assert(HciNrf52840Init(&target, &runtime, mem, sizeof(mem), true));
-    HciNrf52840GetTaktOsOps(&target, &ops);
-    assert(ops.Start(ops.pContext));
-
-    assert(!HciNrf52840UsbStart(&target));
-    assert(target.LastError == -1002);
-    assert(gUsbd.USBPULLUP == 0U);
-
-    HciNrf52840Stop(&target);
-    printf("[ok] controller ready wait is bounded\n");
-}
-
-static void TestHfxoNotOnCrystal(void)
-{
-    ResetCounters();
-    gHfclkStartAfter = 1U;
-    gXtalSelected = false;
-    gPower.USBREGSTATUS = POWER_USBREGSTATUS_VBUSDETECT_Msk |
-                          POWER_USBREGSTATUS_OUTPUTRDY_Msk;
-
-    alignas(8) static uint8_t mem[10000];
-    HciTaktOs_t runtime = {};
-    HciNrf52840_t target;
-    HciTaktOsOps_t ops = {};
-
-    assert(HciNrf52840Init(&target, &runtime, mem, sizeof(mem), true));
-    HciNrf52840GetTaktOsOps(&target, &ops);
-    assert(ops.Start(ops.pContext));
-
-    assert(!HciNrf52840UsbStart(&target));
-    assert(target.LastError == -1003);
-    assert(gUsbd.USBPULLUP == 0U);
-    assert(gClockRegisterWrites == 0U);
-
-    HciNrf52840Stop(&target);
-    printf("[ok] crystal select mismatch is caught, not spun on\n");
-}
-
-static void TestUsbIrqBookkeeping(void)
-{
-    ResetCounters();
-    gHfclkStartAfter = 1U;
-    gPower.USBREGSTATUS = POWER_USBREGSTATUS_VBUSDETECT_Msk |
-                          POWER_USBREGSTATUS_OUTPUTRDY_Msk;
-
-    alignas(8) static uint8_t mem[10000];
-    HciTaktOs_t runtime = {};
-    HciNrf52840_t target;
-    HciTaktOsOps_t ops = {};
-
-    assert(HciNrf52840Init(&target, &runtime, mem, sizeof(mem), true));
-    HciNrf52840GetTaktOsOps(&target, &ops);
-    assert(ops.Start(ops.pContext));
-    assert(HciNrf52840UsbStart(&target));
-
-    HciNrf52840UsbPassMark(&target);
-    assert(HciUsbPlatformIrqEnter() == 1U);
-    assert(HciUsbPlatformIrqEnter() == 2U);
-    assert(target.UsbIrqCount == 2U);
-
-    HciUsbPlatformIrqUnexpectedCause(USBD_EVENTCAUSE_READY_Msk);
-    assert(target.UsbStuckCauseCount == 1U);
-    assert((target.UsbEventCause & USBD_EVENTCAUSE_READY_Msk) != 0U);
-
-    HciUsbPlatformIrqStorm(0x00000001U,
-                           USBD_EVENTCAUSE_READY_Msk,
-                           0x00000001U);
-    assert(target.UsbStormEvents == 0x00000001U);
-    assert(target.UsbStormInten == 0x00000001U);
-    assert(target.UsbStormCause == USBD_EVENTCAUSE_READY_Msk);
-    assert(target.LastError == -1006);
-    assert(!target.UsbStarted);
-    assert(!target.UsbReadyDone);
-
-    HciNrf52840UsbPowerProcess(&target);
-    assert(!target.HfclkRequested);
-    assert(gUsbd.ENABLE == 0U);
-
-    HciNrf52840Stop(&target);
-    printf("[ok] usb irq bookkeeping stays outside the register dispatcher\n");
-}
-
-static void TestUartModeLeavesUsbAlone(void)
-{
-    ResetCounters();
-    gHfclkStartAfter = 1U;
-    gPower.USBREGSTATUS = POWER_USBREGSTATUS_VBUSDETECT_Msk |
-                          POWER_USBREGSTATUS_OUTPUTRDY_Msk;
-
-    alignas(8) static uint8_t mem[10000];
-    HciTaktOs_t runtime = {};
-    HciNrf52840_t target;
-    HciTaktOsOps_t ops = {};
-
-    assert(HciNrf52840Init(&target, &runtime, mem, sizeof(mem), false));
-    HciNrf52840GetTaktOsOps(&target, &ops);
-    assert(ops.Start(ops.pContext));
-
-    assert(!HciNrf52840UsbStart(&target));
-    assert(gHfclkRequests == 0U);
-    assert(gUsbPowerEvents[0] == 0U);
-
-    gPower.EVENTS_USBREMOVED = 1U;
-    POWER_CLOCK_IRQHandler();
-    assert(gDcdDisconnect == 0U);
-    assert(HciUsbPlatformIrqEnter() == 0U);
-
-    HciNrf52840Stop(&target);
-    printf("[ok] uart mode leaves the usb hardware alone\n");
+    printf("[ok] IOsonata USB crystal ownership is routed through MPSL\n");
 }
 
 static void TestUartTraceUsesDatasheetPinNames(void)
@@ -627,7 +286,7 @@ static void TestResetTraceKeepsSdcAssert(void)
     HciNrf52840_t target;
     HciTaktOsOps_t ops = {};
 
-    assert(HciNrf52840Init(&target, &runtime, mem, sizeof(mem), false));
+    assert(HciNrf52840Init(&target, &runtime, mem, sizeof(mem)));
     HciNrf52840GetTaktOsOps(&target, &ops);
     assert(ops.Start(ops.pContext));
     assert(gSdcAssert != nullptr);
@@ -654,16 +313,9 @@ static void TestResetTraceKeepsSdcAssert(void)
 
 int main(void)
 {
-    TestBringUpOrder();
-    TestHfclkTimeoutDoesNotHang();
-    TestUsbRegulatorTimeout();
-    TestNoVbusIsRejected();
-    TestUsbdReadyTimeout();
-    TestHfxoNotOnCrystal();
-    TestUsbIrqBookkeeping();
-    TestUartModeLeavesUsbAlone();
+    TestUsbClockOwnership();
     TestUartTraceUsesDatasheetPinNames();
     TestResetTraceKeepsSdcAssert();
-    printf("All nRF52840 USB bring up tests passed.\n");
+    printf("All nRF52840 target tests passed.\n");
     return 0;
 }

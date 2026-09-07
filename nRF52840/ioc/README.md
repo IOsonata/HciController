@@ -3,8 +3,9 @@
 This directory contains the IOcomposer project used to build HciController for
 nRF52840.
 
-The project links HciController with IOsonata, TaktOS, TinyUSB, Nordic nrfxlib
-MPSL, and the multirole SoftDevice Controller.
+The project links HciController with IOsonata, TaktOS, Nordic nrfxlib MPSL,
+and the multirole SoftDevice Controller. IOsonata provides the USB stack and
+nRF52840 USB controller driver.
 
 ## Development environment
 
@@ -24,7 +25,6 @@ The project expects the normal IOcomposer sibling layout:
     external/
         nrfx/
         sdk-nrfxlib/
-        tinyusb/
     IOsonata/
     HciController/
     TaktOS/
@@ -123,12 +123,12 @@ Do not add a board-specific transport decision elsewhere in the HCI stack.
 ## Build dependencies
 
 IOcomposer installs the required build dependencies and places them in the
-expected workspace. There is no separate manual nrfx, nrfxlib, TinyUSB,
-IOsonata, or TaktOS setup step for a normal HciController build.
+expected workspace. There is no separate manual nrfx, nrfxlib, IOsonata, or
+TaktOS setup step for a normal HciController build.
 
 The project links the separately built IOsonata and TaktOS libraries and uses
 the nRF52 hard-float SDC/MPSL libraries under the IOcomposer `external` tree.
-TinyUSB sources are compiled by the application project.
+Native USB sources are provided by the IOsonata library.
 
 ## Open and build
 

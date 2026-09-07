@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pin source invariants from the native USB full-tree review."""
+"""Pin ownership and data-path invariants of the IOsonata native HCI class."""
 
 import os
 import sys
@@ -36,127 +36,105 @@ def main(argv):
     format_at = trace_body.find("const int len = vsnprintf(")
     guard_at = trace_body.find("if (len >= 0)", format_at)
     output_at = trace_body.find("HciTraceWrite0(line);", guard_at)
-    syslog_at = trace_body.find("(void)SysLogVPrintf(&s_Log, pFormat, args);", output_at)
-    if (format_at < 0 or guard_at < 0 or output_at < 0 or syslog_at < 0 or
-            not format_at < guard_at < output_at < syslog_at):
-        fail("HciTrace must guard semihosting output before delegating to SysLog")
+    syslog_at = trace_body.find("(void)SysLogVPrintf(&s_Log, pFormat, args);",
+                                output_at)
+    if format_at < 0 or guard_at < 0 or output_at < 0 or syslog_at < 0 or \
+            not format_at < guard_at < output_at < syslog_at:
+        fail("HciTrace must guard semihosting output before SysLog")
     print("[ok] HciTrace guards formatting failure before semihosting output")
 
-    usb = read(os.path.join(root, "src", "hci_usb_tinyusb.cpp"))
-    open_body = function_body(usb,
-                              "static uint16_t HciUsbDriverOpen(",
-                              "static bool HciUsbOpenStoredEndpoint(")
-    claim = "HciUsbOpenHciEndpoints(pUsb, RhPort, HCI_USB_HCI_ALT_LEGACY)"
-    claim_at = open_body.find(claim)
-    sync_at = open_body.rfind("pUsb->SyncAltPresent[Alt] = 1U;")
-    configured_at = open_body.find("pUsb->Configured = true;")
-    if claim_at < 0 or sync_at < 0 or configured_at < 0:
-        fail("native USB open transaction markers are missing")
-    if not sync_at < claim_at < configured_at:
-        fail("HCI endpoints must be claimed only after the whole Bluetooth descriptor parses")
-    if "usbd_edpt_open(" in open_body or "HciUsbOpenEndpoint(" in open_body:
-        fail("HciUsbDriverOpen contains a direct endpoint claim before parse completion")
-    print("[ok] native USB parses the complete function before claiming endpoints")
+    header = read(os.path.join(root, "include", "hci_usb.h"))
+    usb = read(os.path.join(root, "src", "hci_usb.cpp"))
+    if "class HciUsb : public UsbIntrf" not in header:
+        fail("HciUsb must derive directly from UsbIntrf")
+    for marker in (
+            "dataCfg.EpNo = HCI_USB_BULK_EP_NO;",
+            "dataCfg.TxFifoBlkSize = HCI_USB_PKT_BLKSIZE;",
+            "UsbIntrf::Init(dataCfg)",
+            "UsbCtrlrEpRegister(vDevNo, USB_ENDPADDR_DIRIN(HCI_USB_EVENT_EP_NO)",
+            "UsbRegisterFunc(vDevNo, &cfg)"):
+        if marker not in usb:
+            fail("native HCI USB is missing %s" % marker)
+    print("[ok] HciUsb owns class policy while UsbIntrf owns bulk packet I/O")
 
-    close_helper = function_body(usb,
-                                 "static void HciUsbCloseEndpoint(",
-                                 "static void HciUsbCloseHciEndpoints(")
-    if "usbd_edpt_close(RhPort, EpAddr);" not in close_helper:
-        fail("native USB endpoint close no longer reaches TinyUSB")
-    if "HciUsbPlatformEndpointClosed(RhPort, EpAddr);" not in close_helper:
-        fail("native USB endpoint close no longer invokes the platform reset hook")
+    xfer = function_body(usb, "void HciUsb::XferHandler(",
+                         "void HciUsb::ResetHandler(")
+    if "UsbIntrfXferComplete" not in xfer:
+        fail("bulk transfer completion no longer delegates to UsbIntrf")
 
-    nrf_port = read(os.path.join(root, "nRF52840", "src", "dcd_nrf5x_hci.c"))
-    required_port = (
-        '#include "device/dcd.h"',
-        '#include "device/usbd_pvt.h"',
-        "typedef struct",
-        "HciUsbDcdState_t",
-        "bool dcd_init(",
-        "bool dcd_edpt_open(",
-        "void dcd_edpt_close_all(",
-        "bool dcd_edpt_xfer(",
-        "void dcd_edpt_stall(",
-        "void dcd_edpt_clear_stall(",
-        "void USBD_IRQHandler(void)",
-        "static uint32_t HciUsbCollectEvents(void)",
-        "const uint32_t DataStatus = NRF_USBD->EPDATASTATUS;",
-        "NRF_USBD->EPDATASTATUS = DataStatus;",
-        "NRF_USBD->EPOUTEN &= ~TU_BIT(EpNum);",
-        "pXfer->Started = false;",
-        "pXfer->DataReceived = false;",
-        "usbd_edpt_clear_stall(RhPort, EpAddr);",
-    )
-    for marker in required_port:
-        if marker not in nrf_port:
-            fail("nRF5x USB DCD is missing %s" % marker)
+    event = function_body(usb, "bool HciUsb::SendEventPacket(",
+                          "int HciUsb::SendEvent(")
+    zlp = usb[usb.find("bool HciUsb::SendEventZlp("):]
+    if "UsbCtrlrEpSend(vDevNo, HCI_USB_EVENT_EP_NO" not in event or \
+            "UsbCtrlrEpSend(vDevNo, HCI_USB_EVENT_EP_NO, 0U)" not in zlp:
+        fail("Event-IN data and terminating ZLP must use registered RAM")
+    if "memcpy(vEventTxTransfer" not in event:
+        fail("Event-IN must stage one endpoint packet per controller transfer")
+    print("[ok] Event-IN chains registered DMA packets and its terminating ZLP")
 
-    if "#include <portable/nordic/nrf5x/dcd_nrf5x.c>" in nrf_port:
-        fail("nRF5x USB DCD still includes TinyUSB's portable Nordic .c file")
-    if "HciUsbTinyUsb" in nrf_port:
-        fail("nRF5x USB DCD still aliases TinyUSB private DCD entry points")
-    if "HciUsbCollectTinyUsbEvents" in nrf_port:
-        fail("nRF5x USB DCD still has the split EPDATA-preservation dispatcher")
-    for helper in ("edpt_dma_end(", "edpt_dma_start(",
-                   "xact_out_dma(", "xact_in_dma(", "get_td("):
-        if helper in nrf_port:
-            fail("nRF5x HCI DCD still depends on TinyUSB private helper %s" % helper)
+    descriptors = read(os.path.join(root, "src", "usb_descriptors.c"))
+    app = read(os.path.join(root, "src", "hci_app.cpp"))
+    app_header = read(os.path.join(root, "include", "hci_app.h"))
+    if "HciUsbDescriptorLogCdcInstance" in header or \
+            "HciUsbDescriptorLogCdcInstance" in descriptors or \
+            "LogCdcInterface" in app or "LogCdcInterface" in app_header:
+        fail("CDC runtime must not depend on a logical CDC instance number")
+    if 'usbCfg.pProduct = "I-SYST HCI Controller";' not in app:
+        fail("USB product identity changed from the released controller")
+    if "HCI_USB_CDC_FUNCTION(2U, HCI_USB_STRING_LOG, 0x84U, 0x05U, 0x85U)" \
+            not in descriptors:
+        fail("native diagnostic CDC descriptor is not on interfaces 2/3, EP4/5")
 
-    irq_body = function_body(nrf_port,
-                             "void dcd_int_handler(uint8_t RhPort)",
-                             "void USBD_IRQHandler(void)")
-    if "NRF_USBD->EPDATASTATUS & ~HCI_USB_BULK_OUT_STATUS" in irq_body:
-        fail("nRF5x HCI IRQ still removes EPOUT2 from the shared status snapshot")
-    if irq_body.count("NRF_USBD->EPDATASTATUS") != 2:
-        fail("nRF5x HCI IRQ must use exactly one EPDATASTATUS snapshot and one W1C")
+    for stale in (".CtrlIfNo", ".NotifyEpNo", ".DataEpNo", ".ItfNo"):
+        if stale in app:
+            fail("HciController still configures CDC USB topology: %s" % stale)
 
-    target_nrf = read(os.path.join(root, "src", "hci_nrf52840.cpp"))
-    if "void USBD_IRQHandler(void)" in target_nrf:
-        fail("nRF52840 target still owns the USBD hardware vector")
-    if "HciNrf52840UsbdPendingEvents" in target_nrf:
-        fail("nRF52840 target still walks USBD event registers")
-    if "tusb_int_handler(0U, true)" in target_nrf:
-        fail("nRF52840 target still dispatches the USBD IRQ through TinyUSB")
+    native_init = app.find("s_HciUsb.Init(hciCfg)")
+    host_cdc_init = app.find("s_HostCdc.Init(hostCfg)")
+    log_cdc_init = app.find("s_LogCdc.Init(logCfg)")
+    if native_init < 0 or host_cdc_init < 0 or log_cdc_init < 0 or \
+            native_init > log_cdc_init or host_cdc_init > log_cdc_init:
+        fail("host USB function must register before the diagnostic CDC")
 
-    target_hooks = function_body(target_nrf,
-                                 'extern "C" uint32_t HciUsbPlatformIrqEnter(void)',
-                                 "void HciNrf52840UsbPassMark(")
-    if "NRF_USBD" in target_hooks:
-        fail("nRF52840 IRQ bookkeeping hooks still touch USBD registers")
-    print("[ok] nRF5x USBD hardware interrupt handling is standalone in the DCD")
+    registration = function_body(usb, "UsbFuncCfg_t cfg = {};",
+                                 "if (!UsbRegisterFunc(vDevNo, &cfg))")
+    if "HCI_USB_SYNC_RESERVED_EP_NO" not in usb or \
+            registration.count("HCI_USB_SYNC_RESERVED_EP_NO") != 2:
+        fail("native HCI must reserve the synchronous endpoint slot")
+    print("[ok] IOsonata auto allocation preserves released CDC layouts")
+
+    target = read(os.path.join(root, "src", "hci_nrf52840.cpp"))
+    if 'extern "C" bool UsbdXtalRequest(void)' not in target or \
+            'extern "C" void UsbdXtalRelease(void)' not in target:
+        fail("IOsonata USB crystal hooks are missing")
+    if "NRF_USBD" in target or "USBD_IRQHandler" in target:
+        fail("HciController target still owns USB controller registers or IRQ")
+    print("[ok] nRF52840 target only supplies MPSL crystal ownership hooks")
 
     project = read(os.path.join(root, "nRF52840", "ioc", ".project"))
-    local_dcd = "PARENT-1-PROJECT_LOC/src/dcd_nrf5x_hci.c"
-    external_dcd = ("PARENT-3-PROJECT_LOC/external/tinyusb/src/portable/"
-                    "nordic/nrf5x/dcd_nrf5x.c")
-    if local_dcd not in project or external_dcd in project:
-        fail("nRF52840 target must compile the standalone HciController DCD")
-    print("[ok] nRF5x HCI alt switch clears stale CBI endpoint state")
-
-    usb_tx = read(os.path.join(root, "src", "hci_usb.cpp"))
-    kick = function_body(usb_tx, "bool HciUsbKickTx(", "void HciUsbTxComplete(")
-    ram_zlp = "HciUsbEdptXfer(0U, EpAddr, pUsb->TxBuffer, 0U)"
-    if ram_zlp not in kick:
-        fail("native USB ZLP must give the nRF EasyDMA DCD a RAM pointer")
-    if "HciUsbEdptXfer(0U, EpAddr, nullptr, 0U)" in kick:
-        fail("native USB ZLP still passes a null EasyDMA pointer")
-    print("[ok] terminating USB ZLP keeps its EasyDMA pointer in aligned RAM")
+    cproject = read(os.path.join(root, "nRF52840", "ioc", ".cproject"))
+    for stale in ("TinyUSB", "tinyusb", "dcd_nrf5x_hci", "hci_tinyusb",
+                  "hci_usb_tinyusb", "hci_usb_rx"):
+        if stale in project or stale in cproject:
+            fail("Eclipse project still contains %s" % stale)
+    if "PARENT-2-PROJECT_LOC/src/hci_usb.cpp" not in project:
+        fail("Eclipse project does not compile native HciUsb")
+    print("[ok] target project contains native HciUsb and no TinyUSB sources")
 
     main_cpp = read(os.path.join(root, "src", "main.cpp"))
     udg_guard = ("BOARD == UDG_NRF52840 && "
                  "HCI_HOST_SELECT == HCI_HOST_SELECT_UART")
     if udg_guard not in main_cpp:
-        fail("UDG forced-UART build is not blocked while its pins are placeholders")
-    print("[ok] UDG forced UART stays blocked until the pin map is validated")
+        fail("UDG forced-UART build is not blocked while pins are placeholders")
+    print("[ok] UDG forced UART stays blocked until pin map validation")
 
     dispatch = read(os.path.join(root, "src", "hci_cmd_dispatch.cpp"))
     handler = dispatch.find("HciCmdResult_t result = pEntry->Handler")
     response = dispatch.find("if (result.Response != pEntry->Response)", handler)
     switch = dispatch.find("switch (result.Response)", handler)
     if handler < 0 or response < 0 or switch < 0 or not handler < response < switch:
-        fail("dispatcher must reject a handler response-kind mismatch before emitting it")
-    print("[ok] command handlers cannot change the table-declared response event type")
-
+        fail("dispatcher must reject response-kind mismatch before emitting")
+    print("[ok] command handlers cannot change the table response event type")
     return 0
 
 

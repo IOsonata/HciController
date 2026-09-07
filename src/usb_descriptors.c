@@ -1,362 +1,295 @@
 /**-------------------------------------------------------------------------
 @file	usb_descriptors.c
 
-@brief	USB device, configuration, and string descriptors for HciController.
-
-		Defines descriptor sets for CDC H:4, native Bluetooth HCI with
-		diagnostic CDC, and log-only modes, including product identifiers,
-		endpoint layouts, interface selection, and device serial generation.
+@brief	IOsonata USB descriptors for HciController.
 
 @author	Nguyen Hoan Hoang
-@date	August 2026
+@date	September 2026
 
 @license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
 ----------------------------------------------------------------------------*/
+
+#include "hci_usb.h"
+#include "hci_version.h"
 
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
-#include "hci_usb.h"
-#include "hci_version.h"
-#include "nrf.h"
-#include "tusb.h"
-
-#define HCI_USB_DEVELOPMENT_VID            0xCAFEU
-#define HCI_USB_DEVELOPMENT_PID_CDC_H4     0x4070U
-#define HCI_USB_DEVELOPMENT_PID_NATIVE_HCI 0x4071U
-#define HCI_USB_DEVELOPMENT_PID_LOG_ONLY   0x4072U
+#define HCI_USB_DEVELOPMENT_VID			0xCAFEU
+#define HCI_USB_DEVELOPMENT_PID_CDC_H4	0x4070U
+#define HCI_USB_DEVELOPMENT_PID_NATIVE	0x4071U
+#define HCI_USB_DEVELOPMENT_PID_LOG		0x4072U
 
 #ifndef HCI_USB_VID
 #define HCI_USB_VID HCI_USB_DEVELOPMENT_VID
 #endif
-
 #ifndef HCI_USB_PID_CDC_H4
 #define HCI_USB_PID_CDC_H4 HCI_USB_DEVELOPMENT_PID_CDC_H4
 #endif
-
 #ifndef HCI_USB_PID_NATIVE_HCI
-#define HCI_USB_PID_NATIVE_HCI HCI_USB_DEVELOPMENT_PID_NATIVE_HCI
+#define HCI_USB_PID_NATIVE_HCI HCI_USB_DEVELOPMENT_PID_NATIVE
 #endif
-
 #ifndef HCI_USB_PID_LOG_ONLY
-#define HCI_USB_PID_LOG_ONLY HCI_USB_DEVELOPMENT_PID_LOG_ONLY
+#define HCI_USB_PID_LOG_ONLY HCI_USB_DEVELOPMENT_PID_LOG
 #endif
 
-/*
- * Shipping/product builds can set this to 1 so the development VID/PIDs can
- * never escape into a production image by accident. The actual assigned IDs
- * belong to the product build and are not invented here.
- */
 #ifndef HCI_USB_REQUIRE_ASSIGNED_IDS
 #define HCI_USB_REQUIRE_ASSIGNED_IDS 0
 #endif
 
 #if HCI_USB_REQUIRE_ASSIGNED_IDS && \
-    (HCI_USB_VID == HCI_USB_DEVELOPMENT_VID || \
-     HCI_USB_PID_CDC_H4 == HCI_USB_DEVELOPMENT_PID_CDC_H4 || \
-     HCI_USB_PID_NATIVE_HCI == HCI_USB_DEVELOPMENT_PID_NATIVE_HCI || \
-     HCI_USB_PID_LOG_ONLY == HCI_USB_DEVELOPMENT_PID_LOG_ONLY)
+	(HCI_USB_VID == HCI_USB_DEVELOPMENT_VID || \
+	 HCI_USB_PID_CDC_H4 == HCI_USB_DEVELOPMENT_PID_CDC_H4 || \
+	 HCI_USB_PID_NATIVE_HCI == HCI_USB_DEVELOPMENT_PID_NATIVE || \
+	 HCI_USB_PID_LOG_ONLY == HCI_USB_DEVELOPMENT_PID_LOG)
 #error "production USB build requires assigned HCI_USB_VID/PID values"
 #endif
 
-#define HCI_USB_BCD                     0x0200U
-#define HCI_USB_BT_CLASS                0xE0U
-#define HCI_USB_BT_SUBCLASS             0x01U
-#define HCI_USB_BT_PROTOCOL             0x01U
-#define HCI_USB_STRING_BT               4U
-#define HCI_USB_STRING_H4               5U
-#define HCI_USB_STRING_LOG              6U
+#define HCI_USB_STRING_BT	4U
+#define HCI_USB_STRING_H4	5U
+#define HCI_USB_STRING_LOG	6U
 
-#define HCI_USB_EP_BT_EVENT             0x81U
-#define HCI_USB_EP_BT_ACL_OUT           0x02U
-#define HCI_USB_EP_BT_ACL_IN            0x82U
-#define HCI_USB_EP_NATIVE_LOG_NOTIFY    0x84U
-#define HCI_USB_EP_NATIVE_LOG_OUT       0x05U
-#define HCI_USB_EP_NATIVE_LOG_IN        0x85U
-#define HCI_USB_EP_CDC_H4_NOTIFY        0x81U
-#define HCI_USB_EP_CDC_H4_OUT           0x02U
-#define HCI_USB_EP_CDC_H4_IN            0x82U
-#define HCI_USB_EP_CDC_LOG_NOTIFY       0x83U
-#define HCI_USB_EP_CDC_LOG_OUT          0x04U
-#define HCI_USB_EP_CDC_LOG_IN           0x84U
-#define HCI_USB_EP_LOG_ONLY_NOTIFY      0x81U
-#define HCI_USB_EP_LOG_ONLY_OUT         0x02U
-#define HCI_USB_EP_LOG_ONLY_IN          0x82U
+#define HCI_USB_U16_LO(Value)	((uint8_t)((Value) & 0xFFU))
+#define HCI_USB_U16_HI(Value)	((uint8_t)(((Value) >> 8) & 0xFFU))
 
-#define HCI_USB_BT_IAD_LEN              8U
-#define HCI_USB_BT_HCI_ALT0_LEN         (9U + 3U * 7U)
-#define HCI_USB_BT_HCI_ALT1_LEN         (9U + 2U * 7U)
-#define HCI_USB_BT_SCO_ALT0_LEN         9U
-#define HCI_USB_BT_DESC_LEN \
-    (HCI_USB_BT_IAD_LEN + HCI_USB_BT_HCI_ALT0_LEN + \
-     HCI_USB_BT_HCI_ALT1_LEN + HCI_USB_BT_SCO_ALT0_LEN)
-#define HCI_USB_CONFIG_CDC_H4_TOTAL \
-    (TUD_CONFIG_DESC_LEN + 2U * TUD_CDC_DESC_LEN)
-#define HCI_USB_CONFIG_NATIVE_TOTAL \
-    (TUD_CONFIG_DESC_LEN + HCI_USB_BT_DESC_LEN + TUD_CDC_DESC_LEN)
-#define HCI_USB_CONFIG_LOG_ONLY_TOTAL \
-    (TUD_CONFIG_DESC_LEN + TUD_CDC_DESC_LEN)
-#define HCI_USB_BT_INTERFACE(Interface, Alt, EndpointCount, StringIndex) \
-    9U, TUSB_DESC_INTERFACE, Interface, Alt, EndpointCount, \
-    HCI_USB_BT_CLASS, HCI_USB_BT_SUBCLASS, HCI_USB_BT_PROTOCOL, StringIndex
-#define HCI_USB_ENDPOINT(EpAddr, TransferType, PacketSize, Interval) \
-    7U, TUSB_DESC_ENDPOINT, EpAddr, TransferType, U16_TO_U8S_LE(PacketSize), Interval
+#define HCI_USB_CONFIG_HEADER(Total, Interfaces) \
+	9U, USB_DESCTYPE_CONFIGURATION, HCI_USB_U16_LO(Total), \
+	HCI_USB_U16_HI(Total), Interfaces, 1U, 0U, USB_CONFATT_RESERVED, 50U
+
+#define HCI_USB_ENDPOINT(Address, Type, Mps, Interval) \
+	7U, USB_DESCTYPE_ENDPOINT, Address, Type, HCI_USB_U16_LO(Mps), \
+	HCI_USB_U16_HI(Mps), Interval
+
+#define HCI_USB_INTERFACE(Number, Alt, Endpoints, Class, SubClass, Protocol, String) \
+	9U, USB_DESCTYPE_INTERFACE, Number, Alt, Endpoints, Class, SubClass, \
+	Protocol, String
+
+/* CDC ACM function: IAD, control interface, class descriptors, endpoints. */
+#define HCI_USB_CDC_FUNCTION(Ctrl, String, Notify, Out, In) \
+	8U, USB_DESCTYPE_IA, Ctrl, 2U, 0x02U, 0x02U, 0x00U, 0U, \
+	HCI_USB_INTERFACE(Ctrl, 0U, 1U, 0x02U, 0x02U, 0x00U, String), \
+	5U, 0x24U, 0x00U, 0x20U, 0x01U, \
+	5U, 0x24U, 0x01U, 0x00U, (Ctrl) + 1U, \
+	4U, 0x24U, 0x02U, 0x02U, \
+	5U, 0x24U, 0x06U, Ctrl, (Ctrl) + 1U, \
+	HCI_USB_ENDPOINT(Notify, USB_ENDPATT_TRANS_INT, 8U, 16U), \
+	HCI_USB_INTERFACE((Ctrl) + 1U, 0U, 2U, 0x0AU, 0U, 0U, 0U), \
+	HCI_USB_ENDPOINT(Out, USB_ENDPATT_TRANS_BULK, 64U, 0U), \
+	HCI_USB_ENDPOINT(In, USB_ENDPATT_TRANS_BULK, 64U, 0U)
+
+#define HCI_USB_CDC_FUNCTION_LEN	66U
+#define HCI_USB_CDC_H4_CONFIG_LEN	(9U + 2U * HCI_USB_CDC_FUNCTION_LEN)
+#define HCI_USB_NATIVE_BT_LEN		(8U + 30U + 23U + 9U)
+#define HCI_USB_NATIVE_CONFIG_LEN	(9U + HCI_USB_NATIVE_BT_LEN + HCI_USB_CDC_FUNCTION_LEN)
+#define HCI_USB_LOG_CONFIG_LEN		(9U + HCI_USB_CDC_FUNCTION_LEN)
 
 static HciUsbDescriptorMode_t s_DescriptorMode = HCI_USB_DESCRIPTOR_CDC_H4;
-
-#define HCI_USB_DEVICE_DESCRIPTOR(Pid, Class, SubClass, Protocol) \
-    { \
-        .bLength = sizeof(tusb_desc_device_t), \
-        .bDescriptorType = TUSB_DESC_DEVICE, \
-        .bcdUSB = HCI_USB_BCD, \
-        .bDeviceClass = Class, \
-        .bDeviceSubClass = SubClass, \
-        .bDeviceProtocol = Protocol, \
-        .bMaxPacketSize0 = CFG_TUD_ENDPOINT0_SIZE, \
-        .idVendor = HCI_USB_VID, \
-        .idProduct = Pid, \
-        .bcdDevice = HCI_CONTROLLER_VERSION_BCD, \
-        .iManufacturer = 1U, \
-        .iProduct = 2U, \
-        .iSerialNumber = 3U, \
-        .bNumConfigurations = 1U, \
-    }
-
-static const tusb_desc_device_t s_DeviceCdcH4 =
-    HCI_USB_DEVICE_DESCRIPTOR(HCI_USB_PID_CDC_H4,
-                              TUSB_CLASS_MISC,
-                              MISC_SUBCLASS_COMMON,
-                              MISC_PROTOCOL_IAD);
-
-/*
- * Native HCI is a composite USB device: one Bluetooth function plus one CDC
- * log function. EF/02/01 tells IAD-aware hosts to enumerate those functions
- * independently. The Bluetooth IAD and interfaces below remain E0/01/01.
- */
-static const tusb_desc_device_t s_DeviceNativeHci =
-    HCI_USB_DEVICE_DESCRIPTOR(HCI_USB_PID_NATIVE_HCI,
-                              TUSB_CLASS_MISC,
-                              MISC_SUBCLASS_COMMON,
-                              MISC_PROTOCOL_IAD);
-
-static const tusb_desc_device_t s_DeviceLogOnly =
-    HCI_USB_DEVICE_DESCRIPTOR(HCI_USB_PID_LOG_ONLY,
-                              TUSB_CLASS_MISC,
-                              MISC_SUBCLASS_COMMON,
-                              MISC_PROTOCOL_IAD);
-
-enum
-{
-    HCI_USB_CDC_H4_ITF_HCI = 0,
-    HCI_USB_CDC_H4_ITF_HCI_DATA,
-    HCI_USB_CDC_H4_ITF_LOG,
-    HCI_USB_CDC_H4_ITF_LOG_DATA,
-    HCI_USB_CDC_H4_ITF_TOTAL,
-};
+static UsbDevDesc_t s_DeviceDescriptor;
+static uint8_t s_StringDescriptor[66U];
 
 static const uint8_t s_ConfigCdcH4[] = {
-    TUD_CONFIG_DESCRIPTOR(1U, HCI_USB_CDC_H4_ITF_TOTAL, 0U,
-                          HCI_USB_CONFIG_CDC_H4_TOTAL, 0U, 100U),
-    TUD_CDC_DESCRIPTOR(HCI_USB_CDC_H4_ITF_HCI, HCI_USB_STRING_H4,
-                       HCI_USB_EP_CDC_H4_NOTIFY, 16U,
-                       HCI_USB_EP_CDC_H4_OUT, HCI_USB_EP_CDC_H4_IN, 64U),
-    TUD_CDC_DESCRIPTOR(HCI_USB_CDC_H4_ITF_LOG, HCI_USB_STRING_LOG,
-                       HCI_USB_EP_CDC_LOG_NOTIFY, 16U,
-                       HCI_USB_EP_CDC_LOG_OUT, HCI_USB_EP_CDC_LOG_IN, 64U),
+	HCI_USB_CONFIG_HEADER(HCI_USB_CDC_H4_CONFIG_LEN, 4U),
+	HCI_USB_CDC_FUNCTION(0U, HCI_USB_STRING_H4, 0x81U, 0x02U, 0x82U),
+	HCI_USB_CDC_FUNCTION(2U, HCI_USB_STRING_LOG, 0x83U, 0x04U, 0x84U),
 };
 
-enum
-{
-    HCI_USB_NATIVE_ITF_HCI = 0,
-    HCI_USB_NATIVE_ITF_SCO,
-    HCI_USB_NATIVE_ITF_LOG,
-    HCI_USB_NATIVE_ITF_LOG_DATA,
-    HCI_USB_NATIVE_ITF_TOTAL,
+static const uint8_t s_ConfigNative[] = {
+	HCI_USB_CONFIG_HEADER(HCI_USB_NATIVE_CONFIG_LEN, 4U),
+	8U, USB_DESCTYPE_IA, 0U, 2U, 0xE0U, 0x01U, 0x01U,
+		HCI_USB_STRING_BT,
+	HCI_USB_INTERFACE(0U, 0U, 3U, 0xE0U, 0x01U, 0x01U,
+		HCI_USB_STRING_BT),
+	HCI_USB_ENDPOINT(0x81U, USB_ENDPATT_TRANS_INT, 16U, 1U),
+	HCI_USB_ENDPOINT(0x02U, USB_ENDPATT_TRANS_BULK, 64U, 0U),
+	HCI_USB_ENDPOINT(0x82U, USB_ENDPATT_TRANS_BULK, 64U, 0U),
+	HCI_USB_INTERFACE(0U, 1U, 2U, 0xE0U, 0x01U, 0x01U,
+		HCI_USB_STRING_BT),
+	HCI_USB_ENDPOINT(0x02U, USB_ENDPATT_TRANS_BULK, 64U, 0U),
+	HCI_USB_ENDPOINT(0x82U, USB_ENDPATT_TRANS_BULK, 64U, 0U),
+	HCI_USB_INTERFACE(1U, 0U, 0U, 0xE0U, 0x01U, 0x01U,
+		HCI_USB_STRING_BT),
+	/* CDC log owns interfaces 2/3 and endpoint numbers 4/5. */
+	HCI_USB_CDC_FUNCTION(2U, HCI_USB_STRING_LOG, 0x84U, 0x05U, 0x85U),
 };
 
-static const uint8_t s_ConfigNativeHci[] = {
-    TUD_CONFIG_DESCRIPTOR(1U, HCI_USB_NATIVE_ITF_TOTAL, 0U,
-                          HCI_USB_CONFIG_NATIVE_TOTAL, 0U, 100U),
-
-    /* Bluetooth function: HCI data interface plus synchronous interface. */
-    HCI_USB_BT_IAD_LEN, TUSB_DESC_INTERFACE_ASSOCIATION,
-    HCI_USB_NATIVE_ITF_HCI, 2U, HCI_USB_BT_CLASS, HCI_USB_BT_SUBCLASS,
-    HCI_USB_BT_PROTOCOL, HCI_USB_STRING_BT,
-
-    /* Mandatory legacy USB HCI transport. */
-    HCI_USB_BT_INTERFACE(HCI_USB_NATIVE_ITF_HCI, 0U, 3U, HCI_USB_STRING_BT),
-    HCI_USB_ENDPOINT(HCI_USB_EP_BT_EVENT, TUSB_XFER_INTERRUPT, 16U, 1U),
-    HCI_USB_ENDPOINT(HCI_USB_EP_BT_ACL_OUT, TUSB_XFER_BULK, 64U, 0U),
-    HCI_USB_ENDPOINT(HCI_USB_EP_BT_ACL_IN, TUSB_XFER_BULK, 64U, 0U),
-
-    /* Optional Bulk Serialization: packet indicator plus packet on bulk I/O. */
-    HCI_USB_BT_INTERFACE(HCI_USB_NATIVE_ITF_HCI, 1U, 2U, HCI_USB_STRING_BT),
-    HCI_USB_ENDPOINT(HCI_USB_EP_BT_ACL_OUT, TUSB_XFER_BULK, 64U, 0U),
-    HCI_USB_ENDPOINT(HCI_USB_EP_BT_ACL_IN, TUSB_XFER_BULK, 64U, 0U),
-
-    /*
-     * The nRF52840 SDC image is LE-only and exposes no SCO data path. Keep the
-     * required second Bluetooth interface at its zero-bandwidth alternate 0;
-     * do not advertise isochronous bandwidth the controller cannot consume.
-     */
-    HCI_USB_BT_INTERFACE(HCI_USB_NATIVE_ITF_SCO, 0U, 0U, HCI_USB_STRING_BT),
-
-    /* Independent diagnostic log function. */
-    TUD_CDC_DESCRIPTOR(HCI_USB_NATIVE_ITF_LOG, HCI_USB_STRING_LOG,
-                       HCI_USB_EP_NATIVE_LOG_NOTIFY, 16U,
-                       HCI_USB_EP_NATIVE_LOG_OUT, HCI_USB_EP_NATIVE_LOG_IN, 64U),
+static const uint8_t s_ConfigLog[] = {
+	HCI_USB_CONFIG_HEADER(HCI_USB_LOG_CONFIG_LEN, 2U),
+	HCI_USB_CDC_FUNCTION(0U, HCI_USB_STRING_LOG, 0x81U, 0x02U, 0x82U),
 };
 
-enum
-{
-    HCI_USB_LOG_ONLY_ITF_LOG = 0,
-    HCI_USB_LOG_ONLY_ITF_LOG_DATA,
-    HCI_USB_LOG_ONLY_ITF_TOTAL,
-};
-
-static const uint8_t s_ConfigLogOnly[] = {
-    TUD_CONFIG_DESCRIPTOR(1U, HCI_USB_LOG_ONLY_ITF_TOTAL, 0U,
-                          HCI_USB_CONFIG_LOG_ONLY_TOTAL, 0U, 100U),
-    TUD_CDC_DESCRIPTOR(HCI_USB_LOG_ONLY_ITF_LOG, HCI_USB_STRING_LOG,
-                       HCI_USB_EP_LOG_ONLY_NOTIFY, 16U,
-                       HCI_USB_EP_LOG_ONLY_OUT, HCI_USB_EP_LOG_ONLY_IN, 64U),
-};
-
-_Static_assert(sizeof(s_ConfigCdcH4) == HCI_USB_CONFIG_CDC_H4_TOTAL,
-               "CDC H:4 configuration descriptor length mismatch");
-_Static_assert(sizeof(s_ConfigNativeHci) == HCI_USB_CONFIG_NATIVE_TOTAL,
-               "native HCI configuration descriptor length mismatch");
-_Static_assert(sizeof(s_ConfigLogOnly) == HCI_USB_CONFIG_LOG_ONLY_TOTAL,
-               "log-only configuration descriptor length mismatch");
-_Static_assert(CFG_TUD_CDC >= 2,
-               "legacy H:4 configuration requires two CDC instances");
-
-static const char *const s_StringDescriptors[] = {
-    NULL,
-    "I-SYST inc.",
-    "I-SYST HCI Controller",
-    NULL,
-    "Bluetooth HCI",
-    "Bluetooth HCI H:4",
-    "HCI controller log",
-};
-
-static uint16_t s_StringDescriptor[33];
+_Static_assert(sizeof(s_ConfigCdcH4) == HCI_USB_CDC_H4_CONFIG_LEN,
+	"CDC H4 configuration descriptor length");
+_Static_assert(sizeof(s_ConfigNative) == HCI_USB_NATIVE_CONFIG_LEN,
+	"native configuration descriptor length");
+_Static_assert(sizeof(s_ConfigLog) == HCI_USB_LOG_CONFIG_LEN,
+	"log configuration descriptor length");
 
 bool HciUsbDescriptorSetMode(HciUsbDescriptorMode_t Mode)
 {
-    if (Mode != HCI_USB_DESCRIPTOR_LOG_ONLY &&
-        Mode != HCI_USB_DESCRIPTOR_CDC_H4 &&
-        Mode != HCI_USB_DESCRIPTOR_NATIVE_HCI)
-    {
-        return false;
-    }
-
-    s_DescriptorMode = Mode;
-    return true;
+	if (Mode < HCI_USB_DESCRIPTOR_LOG_ONLY ||
+		Mode > HCI_USB_DESCRIPTOR_NATIVE_HCI)
+	{
+		return false;
+	}
+	s_DescriptorMode = Mode;
+	return true;
 }
 
-uint8_t HciUsbDescriptorLogCdcInstance(HciUsbDescriptorMode_t Mode)
+uint16_t HciUsbDescriptorVid(void)
 {
-    return Mode == HCI_USB_DESCRIPTOR_CDC_H4 ? 1U : 0U;
+	return HCI_USB_VID;
 }
 
-static char HciUsbHexDigit(uint8_t Value)
+uint16_t HciUsbDescriptorPid(HciUsbDescriptorMode_t Mode)
 {
-    Value &= 0x0FU;
-    return Value < 10U ? (char)('0' + Value) : (char)('A' + Value - 10U);
+	switch (Mode)
+	{
+		case HCI_USB_DESCRIPTOR_NATIVE_HCI:
+			return HCI_USB_PID_NATIVE_HCI;
+		case HCI_USB_DESCRIPTOR_LOG_ONLY:
+			return HCI_USB_PID_LOG_ONLY;
+		case HCI_USB_DESCRIPTOR_CDC_H4:
+		default:
+			return HCI_USB_PID_CDC_H4;
+	}
 }
 
-static size_t HciUsbSerial(uint16_t *pOutput, size_t Capacity)
+static const uint8_t *HciUsbDeviceDescriptor(uint16_t *pLength)
 {
-    if (pOutput == NULL || Capacity < 16U)
-    {
-        return 0U;
-    }
+	const UsbCfg_t *pCfg = UsbGetCfg(0);
+	if (pCfg == NULL || pLength == NULL)
+	{
+		return NULL;
+	}
 
-    const uint32_t Words[2] = { NRF_FICR->DEVICEID[1], NRF_FICR->DEVICEID[0] };
-    size_t Out = 0U;
-    for (size_t Word = 0U; Word < 2U; ++Word)
-    {
-        for (int Shift = 28; Shift >= 0; Shift -= 4)
-        {
-            pOutput[Out++] = (uint16_t)HciUsbHexDigit((uint8_t)(Words[Word] >> Shift));
-        }
-    }
-    return Out;
+	memset(&s_DeviceDescriptor, 0, sizeof(s_DeviceDescriptor));
+	s_DeviceDescriptor.bLength = sizeof(s_DeviceDescriptor);
+	s_DeviceDescriptor.bDescriptorType = USB_DESCTYPE_DEVICE;
+	s_DeviceDescriptor.bcdUSB = 0x0200U;
+	s_DeviceDescriptor.bDeviceClass = USB_DEVCLASS_MISC;
+	s_DeviceDescriptor.bDeviceSubClass = 0x02U;
+	s_DeviceDescriptor.bDeviceProtocol = 0x01U;
+	s_DeviceDescriptor.bMaxPacketSize = 64U;
+	s_DeviceDescriptor.idVendor = pCfg->Vid;
+	s_DeviceDescriptor.idProduct = pCfg->Pid;
+	s_DeviceDescriptor.bcdDevice = pCfg->DevVer;
+	s_DeviceDescriptor.iManufacturer = pCfg->pManufacturer != NULL ? 1U : 0U;
+	s_DeviceDescriptor.iProduct = pCfg->pProduct != NULL ? 2U : 0U;
+	s_DeviceDescriptor.iSerialNumber = 3U;
+	s_DeviceDescriptor.bNumConfigurations = 1U;
+	*pLength = sizeof(s_DeviceDescriptor);
+	return (const uint8_t *)&s_DeviceDescriptor;
 }
 
-uint8_t const *tud_descriptor_device_cb(void)
+static const uint8_t *HciUsbConfigDescriptor(uint8_t Index,
+										 uint16_t *pLength)
 {
-    switch (s_DescriptorMode)
-    {
-        case HCI_USB_DESCRIPTOR_NATIVE_HCI:
-            return (const uint8_t *)&s_DeviceNativeHci;
+	if (Index != 0U || pLength == NULL)
+	{
+		return NULL;
+	}
 
-        case HCI_USB_DESCRIPTOR_LOG_ONLY:
-            return (const uint8_t *)&s_DeviceLogOnly;
-
-        case HCI_USB_DESCRIPTOR_CDC_H4:
-        default:
-            return (const uint8_t *)&s_DeviceCdcH4;
-    }
+	switch (s_DescriptorMode)
+	{
+		case HCI_USB_DESCRIPTOR_NATIVE_HCI:
+			*pLength = sizeof(s_ConfigNative);
+			return s_ConfigNative;
+		case HCI_USB_DESCRIPTOR_LOG_ONLY:
+			*pLength = sizeof(s_ConfigLog);
+			return s_ConfigLog;
+		case HCI_USB_DESCRIPTOR_CDC_H4:
+		default:
+			*pLength = sizeof(s_ConfigCdcH4);
+			return s_ConfigCdcH4;
+	}
 }
 
-uint8_t const *tud_descriptor_configuration_cb(uint8_t Index)
+static const char *HciUsbString(uint8_t Index)
 {
-    (void)Index;
+	const UsbCfg_t *pCfg = UsbGetCfg(0);
+	if (pCfg == NULL)
+	{
+		return NULL;
+	}
 
-    switch (s_DescriptorMode)
-    {
-        case HCI_USB_DESCRIPTOR_NATIVE_HCI:
-            return s_ConfigNativeHci;
-
-        case HCI_USB_DESCRIPTOR_LOG_ONLY:
-            return s_ConfigLogOnly;
-
-        case HCI_USB_DESCRIPTOR_CDC_H4:
-        default:
-            return s_ConfigCdcH4;
-    }
+	switch (Index)
+	{
+		case 1U:
+			return pCfg->pManufacturer;
+		case 2U:
+			return pCfg->pProduct;
+		case 3U:
+			return UsbGetSerial(0);
+		case HCI_USB_STRING_BT:
+			return "Bluetooth HCI";
+		case HCI_USB_STRING_H4:
+			return "Bluetooth HCI H:4";
+		case HCI_USB_STRING_LOG:
+			return "HCI controller log";
+		default:
+			return NULL;
+	}
 }
 
-uint16_t const *tud_descriptor_string_cb(uint8_t Index, uint16_t LanguageId)
+static const uint8_t *HciUsbStringDescriptor(uint8_t Index, uint16_t LangId,
+										 uint16_t *pLength)
 {
-    (void)LanguageId;
-    size_t Count = 0U;
+	if (pLength == NULL)
+	{
+		return NULL;
+	}
+	if (Index == 0U)
+	{
+		s_StringDescriptor[0] = 4U;
+		s_StringDescriptor[1] = USB_DESCTYPE_STRING;
+		s_StringDescriptor[2] = 0x09U;
+		s_StringDescriptor[3] = 0x04U;
+		*pLength = 4U;
+		return s_StringDescriptor;
+	}
+	if (LangId != 0U && LangId != 0x0409U)
+	{
+		return NULL;
+	}
 
-    if (Index == 0U)
-    {
-        s_StringDescriptor[1] = 0x0409U;
-        Count = 1U;
-    }
-    else if (Index == 3U)
-    {
-        Count = HciUsbSerial(&s_StringDescriptor[1], 32U);
-    }
-    else
-    {
-        if (Index >= (sizeof(s_StringDescriptors) / sizeof(s_StringDescriptors[0])) ||
-            s_StringDescriptors[Index] == NULL)
-        {
-            return NULL;
-        }
+	const char *pString = HciUsbString(Index);
+	if (pString == NULL)
+	{
+		return NULL;
+	}
+	size_t length = strlen(pString);
+	if (length > 32U)
+	{
+		length = 32U;
+	}
+	s_StringDescriptor[0] = (uint8_t)(2U + 2U * length);
+	s_StringDescriptor[1] = USB_DESCTYPE_STRING;
+	for (size_t i = 0U; i < length; i++)
+	{
+		s_StringDescriptor[2U + 2U * i] = (uint8_t)pString[i];
+		s_StringDescriptor[3U + 2U * i] = 0U;
+	}
+	*pLength = s_StringDescriptor[0];
+	return s_StringDescriptor;
+}
 
-        const char *pString = s_StringDescriptors[Index];
-        Count = strlen(pString);
-        if (Count > 32U)
-        {
-            Count = 32U;
-        }
+const uint8_t *HciUsbDescHandler(uint8_t DescType, uint8_t DescIndex,
+								 uint16_t LangId, UsbSpeed_t Speed,
+								 uint16_t *pLength, void *pContext)
+{
+	(void)Speed;
+	(void)pContext;
 
-        for (size_t Char = 0U; Char < Count; ++Char)
-        {
-            s_StringDescriptor[Char + 1U] = (uint16_t)(uint8_t)pString[Char];
-        }
-    }
-
-    s_StringDescriptor[0] =
-        (uint16_t)((TUSB_DESC_STRING << 8) | (2U * Count + 2U));
-    return s_StringDescriptor;
+	switch (DescType)
+	{
+		case USB_DESCTYPE_DEVICE:
+			return DescIndex == 0U ? HciUsbDeviceDescriptor(pLength) : NULL;
+		case USB_DESCTYPE_CONFIGURATION:
+			return HciUsbConfigDescriptor(DescIndex, pLength);
+		case USB_DESCTYPE_STRING:
+			return HciUsbStringDescriptor(DescIndex, LangId, pLength);
+		default:
+			return NULL;
+	}
 }

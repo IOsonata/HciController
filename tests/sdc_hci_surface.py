@@ -59,6 +59,17 @@ HCI_CLASSIFIED_NOT_ROUTED = {
         "nRF52840 has no Direction Finding radio support; connectionless CTE transmitter support is excluded",
     "sdc_hci_cmd_le_set_connless_cte_transmit_params":
         "nRF52840 has no Direction Finding radio support; connectionless CTE transmit parameters are unusable",
+
+    # Channel Classification is experimental in sdk-nrfxlib HEAD (DRGN-27485)
+    # and this release does not call sdc_support_channel_classification_central()
+    # or sdc_support_channel_classification_peripheral(), so the controller does
+    # not advertise these commands.
+    "sdc_hci_cmd_cb_read_afh_channel_assessment_mode":
+        "Channel Classification is experimental and not enabled by this release",
+    "sdc_hci_cmd_cb_write_afh_channel_assessment_mode":
+        "Channel Classification is experimental and not enabled by this release",
+    "sdc_hci_cmd_vs_channel_reporting_enable":
+        "vendor-specific central-only Channel Classification reporting; experimental and not enabled by this release",
 }
 
 

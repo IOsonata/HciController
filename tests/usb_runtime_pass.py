@@ -1,12 +1,5 @@
 #!/usr/bin/env python3
-"""Guard the USB IRQ storm pass boundary in hci_app.cpp.
-
-The nRF52840 storm detector measures USBD IRQs since UsbPassMark.  A missing
-steady-state mark in 70088f5 made ordinary sustained traffic eventually look
-like a storm and deliberately disconnected USB after the cumulative IRQ count
-crossed the limit.  The nRF unit test checks the detector itself; this check
-pins the application-side call ordering that defines each measurement window.
-"""
+"""Guard IOsonata USB lifecycle and processing in hci_app.cpp."""
 
 from pathlib import Path
 import sys
@@ -73,26 +66,6 @@ def function_body(source: str, signature: str) -> str:
     return ""
 
 
-def require_usb_pass_order(body: str, label: str) -> None:
-    names = (
-        "UsbPowerProcess",
-        "HciTargetUsbStuck",
-        "UsbPassMark",
-        "HciTinyUsbProcess",
-    )
-    positions = [body.find(name) for name in names]
-
-    missing = [name for name, pos in zip(names, positions) if pos < 0]
-    if missing:
-        die(f"{label}: missing {', '.join(missing)}")
-
-    if positions != sorted(positions):
-        die(
-            f"{label}: expected UsbPowerProcess -> UsbStuck -> "
-            "UsbPassMark -> HciTinyUsbProcess"
-        )
-
-
 def main() -> None:
     if len(sys.argv) != 2:
         die("usage: usb_runtime_pass.py /path/to/HciController")
@@ -106,14 +79,24 @@ def main() -> None:
     settle_at = start.find("for (uint32_t pass")
     if settle_at < 0:
         die("HciAppHostStart: cannot find USB settle loop")
-    require_usb_pass_order(start[settle_at:], "USB enumeration")
+    process_at = start.find("UsbProcess(0)", settle_at)
+    configured_at = start.find("UsbConfigured(0)", process_at)
+    if process_at < 0 or configured_at < 0 or process_at > configured_at:
+        die("USB enumeration must process IOsonata before testing configured")
 
     runtime = function_body(
         source, "static void HciAppHostProcess(void *pContext)"
     )
-    require_usb_pass_order(runtime, "steady-state USB")
+    if "UsbProcess(0)" not in runtime:
+        die("steady-state USB must pump IOsonata")
 
-    print("[ok] USB IRQ storm window is reset before each TinyUSB service pass")
+    stop = function_body(source, "void HciAppStop(HciApp_t *pApp)")
+    release_at = stop.find("HciAppUsbRelease(pApp)")
+    target_at = stop.find("pApp->Target.pOps->Stop")
+    if release_at < 0 or target_at < 0 or release_at > target_at:
+        die("USB must be disabled before MPSL target teardown")
+
+    print("[ok] IOsonata USB is pumped and disabled before target teardown")
 
 
 if __name__ == "__main__":

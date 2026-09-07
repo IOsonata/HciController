@@ -34,10 +34,6 @@
 
 #include "sdc.h"
 #include "sdc_soc.h"
-#include "tusb.h"
-#include "device/dcd.h"
-#include "nrf_erratas.h"
-
 #include "coredev/system_core_clock.h"
 #include "crypto_rng_nrf.h"
 #include "hci_trace.h"
@@ -50,28 +46,10 @@
 #define HCI_NRF52840_CLOCK_IRQ_PRIORITY 4U
 #endif
 
-#ifndef HCI_NRF52840_USB_IRQ_PRIORITY
-#define HCI_NRF52840_USB_IRQ_PRIORITY 7U
-#endif
-
 /* Bounded wait for the crystal. Worst case ramp-up is 1400 us. */
 #ifndef HCI_NRF52840_HFCLK_WAIT_LOOPS
 #define HCI_NRF52840_HFCLK_WAIT_LOOPS 1000000U
 #endif
-
-/*
- * Bounded wait for the USB 3.3 V regulator. POWER and CLOCK are one peripheral
- * on this part, NRF_POWER_BASE and NRF_CLOCK_BASE are both 0x40000000, so they
- * share one INTENSET and one interrupt line that MPSL owns. USBPWRRDY cannot be
- * relied on, so the status is polled instead. Settling is a few milliseconds.
- */
-#ifndef HCI_NRF52840_USBREG_WAIT_LOOPS
-#define HCI_NRF52840_USBREG_WAIT_LOOPS 2000000U
-#endif
-
-#define HCI_NRF52840_USB_INT_MASK (POWER_INTENSET_USBDETECTED_Msk | \
-                                   POWER_INTENSET_USBREMOVED_Msk | \
-                                   POWER_INTENSET_USBPWRRDY_Msk)
 
 /*
  * Attempts allowed when proving the entropy source at start up. This bounds a
@@ -82,29 +60,8 @@
 #endif
 
 #define HCI_NRF52840_ERR_HFCLK_TIMEOUT      (-1000)
-#define HCI_NRF52840_ERR_USBREG_TIMEOUT     (-1001)
-#define HCI_NRF52840_ERR_USBD_READY_TIMEOUT (-1002)
-#define HCI_NRF52840_ERR_HFXO_NOT_XTAL      (-1003)
-/* Cable absent is not the same fault as a regulator that never came up. */
-#define HCI_NRF52840_ERR_NO_VBUS            (-1004)
 /* The entropy source SDC requires is absent or produces nothing. */
 #define HCI_NRF52840_ERR_NO_ENTROPY         (-1005)
-/* An interrupt source re-asserted faster than the runtime could consume it. */
-#define HCI_NRF52840_ERR_USB_STORM          (-1006)
-
-/*
- * The crystal check the TinyUSB nRF5x port spins on. MPSL reporting the clock
- * as running is its own bookkeeping, which is not the same as the hardware
- * having switched HFCLKSTAT.SRC to the crystal.
- */
-static bool HciNrf52840HfxoOnXtal(void)
-{
-    uint32_t stat = NRF_CLOCK->HFCLKSTAT;
-
-    return (stat & CLOCK_HFCLKSTAT_STATE_Msk) != 0U &&
-           ((stat & CLOCK_HFCLKSTAT_SRC_Msk) >> CLOCK_HFCLKSTAT_SRC_Pos) ==
-               CLOCK_HFCLKSTAT_SRC_Xtal;
-}
 
 static HciNrf52840_t *s_pTarget;
 
@@ -145,93 +102,6 @@ typedef struct {
 
 alignas(4) HCI_NRF52840_ASSERT_STORAGE
 static volatile HciNrf52840AssertRecord_t s_AssertRecord;
-
-/*
- * The USBD startup sequence is driven here rather than through
- * tusb_hal_nrf_power_event. That helper calls hfclk_enable() on both its
- * detected and its ready path, and the clock belongs to MPSL on this target.
- *
- * The sequence and the errata workarounds follow the nRF52840 product
- * specification USBD startup sequence and errata 187, 171 and 166.
- */
-#ifndef HCI_NRF52840_REG32
-#define HCI_NRF52840_REG32(Addr) (*(volatile uint32_t *)(uintptr_t)(Addr))
-#endif
-
-#define HCI_NRF52840_ERRATA_UNLOCK_REG 0x4006EC00UL
-#define HCI_NRF52840_ERRATA_UNLOCK_KEY 0x00009375UL
-#define HCI_NRF52840_ERRATA_171_REG    0x4006EC14UL
-#define HCI_NRF52840_ERRATA_187_REG    0x4006ED14UL
-#define HCI_NRF52840_ERRATA_166_REG_A  (NRF_USBD_BASE + 0x800UL)
-#define HCI_NRF52840_ERRATA_166_REG_B  (NRF_USBD_BASE + 0x804UL)
-
-static void HciNrf52840ErrataWrite(uint32_t Reg, uint32_t Value)
-{
-    if (HCI_NRF52840_REG32(HCI_NRF52840_ERRATA_UNLOCK_REG) == 0x00000000UL)
-    {
-        HCI_NRF52840_REG32(HCI_NRF52840_ERRATA_UNLOCK_REG) =
-            HCI_NRF52840_ERRATA_UNLOCK_KEY;
-        HCI_NRF52840_REG32(Reg) = Value;
-        HCI_NRF52840_REG32(HCI_NRF52840_ERRATA_UNLOCK_REG) =
-            HCI_NRF52840_ERRATA_UNLOCK_KEY;
-    }
-    else
-    {
-        HCI_NRF52840_REG32(Reg) = Value;
-    }
-}
-
-/*
- * The cable event flags are written by POWER_CLOCK and read by the runtime
- * thread, so the read and clear must be one operation. PRIMASK is used rather
- * than the TaktOS critical section because this file must stay usable before
- * the runtime exists.
- */
-static uint32_t HciNrf52840EnterCritical(void)
-{
-    uint32_t primask = __get_PRIMASK();
-    __disable_irq();
-    return primask;
-}
-
-static void HciNrf52840ExitCritical(uint32_t State)
-{
-    __set_PRIMASK(State);
-}
-
-static void HciNrf52840UsbdErrataApply(void)
-{
-    if (nrf52_errata_187())
-    {
-        HciNrf52840ErrataWrite(HCI_NRF52840_ERRATA_187_REG, 0x00000003UL);
-    }
-
-    if (nrf52_errata_171())
-    {
-        HciNrf52840ErrataWrite(HCI_NRF52840_ERRATA_171_REG, 0x000000C0UL);
-    }
-}
-
-static void HciNrf52840UsbdErrataRevert(void)
-{
-    if (nrf52_errata_171())
-    {
-        HciNrf52840ErrataWrite(HCI_NRF52840_ERRATA_171_REG, 0x00000000UL);
-    }
-
-    if (nrf52_errata_187())
-    {
-        HciNrf52840ErrataWrite(HCI_NRF52840_ERRATA_187_REG, 0x00000000UL);
-    }
-
-    if (nrf52_errata_166())
-    {
-        HCI_NRF52840_REG32(HCI_NRF52840_ERRATA_166_REG_A) = 0x7E3UL;
-        HCI_NRF52840_REG32(HCI_NRF52840_ERRATA_166_REG_B) = 0x40UL;
-        __ISB();
-        __DSB();
-    }
-}
 
 /*
  * MPSL owns NRF_CLOCK on this target, so the crystal is taken from MPSL and
@@ -325,124 +195,22 @@ static bool HciNrf52840HfclkStart(HciNrf52840_t *pTarget)
         pTarget, HCI_NRF52840_ERR_HFCLK_TIMEOUT);
 }
 
-/*
- * Finish shutting down a USB port after the DCD has contained an IRQ storm.
- * Clock ownership belongs to MPSL and is therefore unwound from thread
- * context, not from USBD_IRQHandler.
- */
-static void HciNrf52840UsbAbort(HciNrf52840_t *pTarget, int32_t Error)
+/* The IOsonata USB controller owns USBD; MPSL owns its crystal. */
+extern "C" bool UsbdXtalRequest(void)
 {
-    NVIC_DisableIRQ(USBD_IRQn);
-    NRF_USBD->INTEN = 0U;
-    NRF_USBD->USBPULLUP = 0U;
-    NRF_USBD->ENABLE = 0U;
-    __ISB();
-    __DSB();
+    return s_pTarget != nullptr && s_pTarget->MpslInitialized &&
+           HciNrf52840HfclkStart(s_pTarget);
+}
 
-    NRF_POWER->INTENCLR = HCI_NRF52840_USB_INT_MASK;
-
-    if (pTarget->HfclkRequested)
+extern "C" void UsbdXtalRelease(void)
+{
+    if (s_pTarget != nullptr && s_pTarget->HfclkRequested)
     {
         (void)HciNrf52840HfclkRelease();
-        pTarget->HfclkRequested = false;
-    }
-
-    pTarget->UsbStarted = false;
-    pTarget->UsbReadyDone = false;
-    pTarget->UsbAttachPending = false;
-    pTarget->UsbDetachPending = false;
-    pTarget->LastError = Error;
-}
-
-/*
- * Record the cable event and leave. dcd_connect and dcd_disconnect must not
- * run from here.
- *
- * dcd_disconnect pushes into the TinyUSB event queue, and under CFG_TUSB_OS
- * OPT_OS_NONE the only mutual exclusion on that queue is masking USBD_IRQn.
- * This handler shares POWER_CLOCK with MPSL and runs above the thread that
- * calls tud_task, so that mask does not hold it off: it would write the queue
- * while tud_task is reading it, and on the way out it would re-enable an
- * interrupt the thread had deliberately masked.
- *
- * The flags are acted on in HciNrf52840UsbPowerProcess, in the same context as
- * tud_task, where the mask means what TinyUSB expects it to mean.
- */
-static void HciNrf52840UsbPowerIrq(void)
-{
-    bool wake = false;
-
-    if (NRF_POWER->EVENTS_USBDETECTED != 0U)
-    {
-        NRF_POWER->EVENTS_USBDETECTED = 0U;
-        s_pTarget->UsbAttachPending = true;
-        s_pTarget->UsbAttachCount = s_pTarget->UsbAttachCount + 1U;
-        wake = true;
-    }
-
-    if (NRF_POWER->EVENTS_USBREMOVED != 0U)
-    {
-        NRF_POWER->EVENTS_USBREMOVED = 0U;
-        s_pTarget->UsbDetachPending = true;
-        s_pTarget->UsbDetachCount = s_pTarget->UsbDetachCount + 1U;
-        wake = true;
-    }
-
-    if (NRF_POWER->EVENTS_USBPWRRDY != 0U)
-    {
-        NRF_POWER->EVENTS_USBPWRRDY = 0U;
-    }
-
-    if (wake && s_pTarget->pRuntime != nullptr)
-    {
-        HciTaktOsWake(s_pTarget->pRuntime, HCI_TAKTOS_EVENT_HOST);
+        s_pTarget->HfclkRequested = false;
     }
 }
 
-/*
- * Apply a cable event recorded by the interrupt handler. Runs in the thread
- * that pumps tud_task, so the TinyUSB queue is protected the way TinyUSB
- * assumes. A detach followed by an attach before this runs collapses to an
- * attach, which is the state the hardware is actually in.
- */
-void HciNrf52840UsbPowerProcess(HciNrf52840_t *pTarget)
-{
-    if (pTarget == nullptr)
-    {
-        return;
-    }
-
-    if (pTarget->UsbStormEvents != 0U)
-    {
-        HciNrf52840UsbAbort(pTarget, HCI_NRF52840_ERR_USB_STORM);
-        return;
-    }
-
-    if (!pTarget->UsbReadyDone)
-    {
-        return;
-    }
-
-    uint32_t state = HciNrf52840EnterCritical();
-    const bool attach = pTarget->UsbAttachPending;
-    const bool detach = pTarget->UsbDetachPending;
-    pTarget->UsbAttachPending = false;
-    pTarget->UsbDetachPending = false;
-    HciNrf52840ExitCritical(state);
-
-    if (detach && !attach)
-    {
-        dcd_disconnect(0U);
-    }
-    else if (attach)
-    {
-        if (detach)
-        {
-            dcd_disconnect(0U);
-        }
-        dcd_connect(0U);
-    }
-}
 
 static void HciNrf52840AssertFileCopy(const char *pFile)
 {
@@ -786,13 +554,7 @@ static bool HciNrf52840Start(void *pContext)
 static void HciNrf52840ProcessMpsl(void *pContext)
 {
     mpsl_low_priority_process();
-
-    HciNrf52840_t *pTarget = static_cast<HciNrf52840_t *>(pContext);
-    if (pTarget != nullptr && pTarget->UsbStarted &&
-        pTarget->UsbStormEvents == 0U)
-    {
-        NRF_POWER->INTENSET = HCI_NRF52840_USB_INT_MASK;
-    }
+    (void)pContext;
 }
 
 static void HciNrf52840Fault(void *pContext, int Error)
@@ -808,177 +570,11 @@ static void HciNrf52840Fault(void *pContext, int Error)
     }
 }
 
-static bool HciNrf52840UsbStartFailed(HciNrf52840_t *pTarget,
-                                      int32_t Error,
-                                      bool ErrataApplied)
-{
-    if (ErrataApplied)
-    {
-        HciNrf52840UsbdErrataRevert();
-    }
-
-    NRF_USBD->INTEN = 0U;
-    NRF_USBD->USBPULLUP = 0U;
-    NRF_USBD->ENABLE = 0U;
-    __ISB();
-    __DSB();
-
-    NVIC_DisableIRQ(USBD_IRQn);
-    NRF_POWER->INTENCLR = HCI_NRF52840_USB_INT_MASK;
-
-    (void)HciNrf52840HfclkRelease();
-    pTarget->HfclkRequested = false;
-
-    pTarget->UsbStarted = false;
-    pTarget->UsbReadyDone = false;
-    pTarget->LastError = Error;
-    return false;
-}
-
-bool HciNrf52840UsbStart(HciNrf52840_t *pTarget)
-{
-    if (pTarget == nullptr || pTarget != s_pTarget || !pTarget->UsbEnabled ||
-        !pTarget->MpslInitialized)
-    {
-        return false;
-    }
-
-    if (pTarget->UsbStormEvents != 0U)
-    {
-        pTarget->LastError = HCI_NRF52840_ERR_USB_STORM;
-        return false;
-    }
-
-    if (pTarget->UsbStarted)
-    {
-        return true;
-    }
-
-    if (!HciNrf52840HfclkStart(pTarget))
-    {
-        return false;
-    }
-
-    NRF_POWER->EVENTS_USBDETECTED = 0U;
-    NRF_POWER->EVENTS_USBREMOVED = 0U;
-    NRF_POWER->EVENTS_USBPWRRDY = 0U;
-    NRF_POWER->INTENSET = HCI_NRF52840_USB_INT_MASK;
-
-    NVIC_SetPriority(USBD_IRQn, HCI_NRF52840_USB_IRQ_PRIORITY);
-
-    uint32_t status = NRF_POWER->USBREGSTATUS;
-    HciTrace("usb: start usbregstatus=0x%08lX inten=0x%08lX\r\n",
-             (unsigned long)status, (unsigned long)NRF_POWER->INTENSET);
-
-    if ((status & POWER_USBREGSTATUS_VBUSDETECT_Msk) == 0U)
-    {
-        HciTrace("usb: no vbus\r\n");
-        return HciNrf52840UsbStartFailed(pTarget, HCI_NRF52840_ERR_NO_VBUS,
-                                         false);
-    }
-
-    NRF_USBD->EVENTCAUSE = USBD_EVENTCAUSE_READY_Msk;
-    __ISB();
-    __DSB();
-
-    HciNrf52840UsbdErrataApply();
-
-    NRF_USBD->ENABLE = 1U;
-    __ISB();
-    __DSB();
-
-    HciTrace("usb: enable set hfclkstat=0x%08lX\r\n",
-             (unsigned long)NRF_CLOCK->HFCLKSTAT);
-
-    uint32_t loop = 0U;
-    while ((NRF_USBD->EVENTCAUSE & USBD_EVENTCAUSE_READY_Msk) == 0U &&
-           loop < HCI_NRF52840_USBREG_WAIT_LOOPS)
-    {
-        mpsl_low_priority_process();
-        loop++;
-    }
-
-    if ((NRF_USBD->EVENTCAUSE & USBD_EVENTCAUSE_READY_Msk) == 0U)
-    {
-        HciTrace("usb: controller ready timeout eventcause=0x%08lX\r\n",
-                 (unsigned long)NRF_USBD->EVENTCAUSE);
-        return HciNrf52840UsbStartFailed(pTarget,
-                                         HCI_NRF52840_ERR_USBD_READY_TIMEOUT,
-                                         true);
-    }
-
-    NRF_USBD->EVENTCAUSE = USBD_EVENTCAUSE_READY_Msk;
-    __ISB();
-    __DSB();
-
-    HciTrace("usb: controller ready after %lu polls\r\n", (unsigned long)loop);
-
-    HciNrf52840UsbdErrataRevert();
-
-    NRF_USBD->ISOSPLIT = USBD_ISOSPLIT_SPLIT_HalfIN;
-
-    NRF_USBD->EVENTCAUSE = NRF_USBD->EVENTCAUSE;
-    NRF_USBD->EVENTS_USBEVENT = 0U;
-    __ISB();
-    __DSB();
-
-    NRF_USBD->INTENSET = USBD_INTEN_USBRESET_Msk;
-
-    NVIC_ClearPendingIRQ(USBD_IRQn);
-    NVIC_EnableIRQ(USBD_IRQn);
-
-    loop = 0U;
-    while ((status & POWER_USBREGSTATUS_OUTPUTRDY_Msk) == 0U &&
-           loop < HCI_NRF52840_USBREG_WAIT_LOOPS)
-    {
-        mpsl_low_priority_process();
-        status = NRF_POWER->USBREGSTATUS;
-        loop++;
-    }
-
-    if ((status & POWER_USBREGSTATUS_OUTPUTRDY_Msk) == 0U)
-    {
-        HciTrace("usb: regulator timeout usbregstatus=0x%08lX\r\n",
-                 (unsigned long)status);
-        return HciNrf52840UsbStartFailed(pTarget,
-                                         HCI_NRF52840_ERR_USBREG_TIMEOUT,
-                                         false);
-    }
-
-    HciTrace("usb: outrdy after %lu polls\r\n", (unsigned long)loop);
-
-    if (!HciNrf52840HfxoOnXtal())
-    {
-        HciTrace("usb: hfxo not on crystal hfclkstat=0x%08lX\r\n",
-                 (unsigned long)NRF_CLOCK->HFCLKSTAT);
-        return HciNrf52840UsbStartFailed(pTarget,
-                                         HCI_NRF52840_ERR_HFXO_NOT_XTAL,
-                                         false);
-    }
-
-    NRF_USBD->USBPULLUP = 1U;
-    __ISB();
-    __DSB();
-
-    pTarget->UsbStarted = true;
-    pTarget->UsbReadyDone = true;
-
-    NRF_POWER->INTENSET = HCI_NRF52840_USB_INT_MASK;
-
-    HciTrace("usb: started pullup=%lu enable=%lu hfclkstat=0x%08lX inten=0x%08lX\r\n",
-             (unsigned long)NRF_USBD->USBPULLUP,
-             (unsigned long)NRF_USBD->ENABLE,
-             (unsigned long)NRF_CLOCK->HFCLKSTAT,
-             (unsigned long)NRF_POWER->INTENSET);
-
-    return true;
-}
 
 bool HciNrf52840Init(HciNrf52840_t *pTarget,
                      HciTaktOs_t *pRuntime,
                      uint8_t *pSdcMem,
-                     size_t SdcMemCapacity,
-                     bool UsbEnabled)
+                     size_t SdcMemCapacity)
 {
     if (pTarget == nullptr || pRuntime == nullptr || pSdcMem == nullptr ||
         SdcMemCapacity == 0U || (((uintptr_t)pSdcMem & 7U) != 0U))
@@ -990,7 +586,6 @@ bool HciNrf52840Init(HciNrf52840_t *pTarget,
     pTarget->pRuntime = pRuntime;
     pTarget->pSdcMem = pSdcMem;
     pTarget->SdcMemCapacity = SdcMemCapacity;
-    pTarget->UsbEnabled = UsbEnabled;
     return true;
 }
 
@@ -1013,25 +608,6 @@ void HciNrf52840Stop(HciNrf52840_t *pTarget)
     if (pTarget == nullptr || pTarget != s_pTarget)
     {
         return;
-    }
-
-    if (pTarget->UsbEnabled)
-    {
-        NVIC_DisableIRQ(USBD_IRQn);
-        NRF_POWER->INTENCLR = POWER_INTENCLR_USBDETECTED_Msk |
-                              POWER_INTENCLR_USBREMOVED_Msk |
-                              POWER_INTENCLR_USBPWRRDY_Msk;
-
-        NRF_USBD->USBPULLUP = 0U;
-        NRF_USBD->INTEN = 0U;
-        NRF_USBD->ENABLE = 0U;
-        __ISB();
-        __DSB();
-
-        pTarget->UsbStarted = false;
-        pTarget->UsbReadyDone = false;
-        pTarget->UsbAttachPending = false;
-        pTarget->UsbDetachPending = false;
     }
 
     if (pTarget->SdcInitialized || pTarget->SdcEnabled)
@@ -1088,67 +664,8 @@ extern "C" void TIMER0_IRQHandler(void)
 extern "C" void POWER_CLOCK_IRQHandler(void)
 {
     MPSL_IRQ_CLOCK_Handler();
-    if (s_pTarget != nullptr && s_pTarget->UsbEnabled)
-    {
-        HciNrf52840UsbPowerIrq();
-    }
 }
 
-/*
- * USBD register handling lives in nRF52840/src/dcd_nrf5x_hci.c. These hooks
- * keep only target/runtime bookkeeping here.
- */
-extern "C" uint32_t HciUsbPlatformIrqEnter(void)
-{
-    if (s_pTarget == nullptr || !s_pTarget->UsbStarted)
-    {
-        return 0U;
-    }
-
-    s_pTarget->UsbIrqCount = s_pTarget->UsbIrqCount + 1U;
-    return s_pTarget->UsbIrqCount - s_pTarget->UsbIrqMark;
-}
-
-extern "C" void HciUsbPlatformIrqUnexpectedCause(uint32_t Cause)
-{
-    if (s_pTarget == nullptr || Cause == 0U)
-    {
-        return;
-    }
-
-    s_pTarget->UsbEventCause = s_pTarget->UsbEventCause | Cause;
-    s_pTarget->UsbStuckCauseCount = s_pTarget->UsbStuckCauseCount + 1U;
-}
-
-extern "C" void HciUsbPlatformIrqStorm(uint32_t Inten,
-                                       uint32_t Cause,
-                                       uint32_t Events)
-{
-    if (s_pTarget == nullptr || s_pTarget->UsbStormEvents != 0U)
-    {
-        return;
-    }
-
-    s_pTarget->UsbStormInten = Inten;
-    s_pTarget->UsbStormCause = Cause;
-    s_pTarget->UsbStormEvents = Events;
-    s_pTarget->LastError = HCI_NRF52840_ERR_USB_STORM;
-    s_pTarget->UsbStarted = false;
-    s_pTarget->UsbReadyDone = false;
-
-    if (s_pTarget->pRuntime != nullptr)
-    {
-        HciTaktOsWake(s_pTarget->pRuntime, HCI_TAKTOS_EVENT_HOST);
-    }
-}
-
-void HciNrf52840UsbPassMark(HciNrf52840_t *pTarget)
-{
-    if (pTarget != nullptr)
-    {
-        pTarget->UsbIrqMark = pTarget->UsbIrqCount;
-    }
-}
 
 /*
  * The target interface. Thin wrappers rather than casting the function
@@ -1157,11 +674,10 @@ void HciNrf52840UsbPassMark(HciNrf52840_t *pTarget)
 static bool HciNrf52840TargetInit(void *pContext,
                                   HciTaktOs_t *pRuntime,
                                   uint8_t *pSdcMem,
-                                  size_t SdcMemCapacity,
-                                  bool UsbEnabled)
+                                  size_t SdcMemCapacity)
 {
     return HciNrf52840Init(static_cast<HciNrf52840_t *>(pContext), pRuntime,
-                           pSdcMem, SdcMemCapacity, UsbEnabled);
+                           pSdcMem, SdcMemCapacity);
 }
 
 static void HciNrf52840TargetGetTaktOsOps(void *pContext,
@@ -1170,55 +686,6 @@ static void HciNrf52840TargetGetTaktOsOps(void *pContext,
     HciNrf52840GetTaktOsOps(static_cast<HciNrf52840_t *>(pContext), pOps);
 }
 
-static bool HciNrf52840TargetUsbStart(void *pContext)
-{
-    return HciNrf52840UsbStart(static_cast<HciNrf52840_t *>(pContext));
-}
-
-static void HciNrf52840TargetUsbPassMark(void *pContext)
-{
-    HciNrf52840UsbPassMark(static_cast<HciNrf52840_t *>(pContext));
-}
-
-static void HciNrf52840TargetUsbPowerProcess(void *pContext)
-{
-    HciNrf52840UsbPowerProcess(static_cast<HciNrf52840_t *>(pContext));
-}
-
-static bool HciNrf52840TargetUsbStuck(const void *pContext)
-{
-    const HciNrf52840_t *pTarget =
-        static_cast<const HciNrf52840_t *>(pContext);
-
-    return pTarget != nullptr && pTarget->UsbStormEvents != 0U;
-}
-
-static void HciNrf52840TargetUsbTrace(const void *pContext,
-                                      const char *pLabel,
-                                      uint32_t Pass)
-{
-    const HciNrf52840_t *pTarget =
-        static_cast<const HciNrf52840_t *>(pContext);
-
-    if (pTarget == nullptr)
-    {
-        return;
-    }
-
-    HciTrace("host: %s pass=%lu irq=%lu stuck=%lu evtcause=0x%08lX "
-             "inten=0x%08lX storm=0x%08lX stormcause=0x%08lX\r\n",
-             pLabel,
-             (unsigned long)Pass,
-             (unsigned long)pTarget->UsbIrqCount,
-             (unsigned long)pTarget->UsbStuckCauseCount,
-             (unsigned long)pTarget->UsbEventCause,
-             (unsigned long)pTarget->UsbStormInten,
-             (unsigned long)pTarget->UsbStormEvents,
-             (unsigned long)pTarget->UsbStormCause);
-
-    (void)pLabel;
-    (void)Pass;
-}
 
 #define HCI_NRF52840_PSEL_DISCONNECTED 0x80000000UL
 #define HCI_NRF52840_UARTE_HWFC_MASK   0x00000001UL
@@ -1349,11 +816,6 @@ static int32_t HciNrf52840TargetLastError(const void *pContext)
 static const HciTargetOps_t s_Nrf52840Ops = {
     HciNrf52840TargetInit,
     HciNrf52840TargetGetTaktOsOps,
-    HciNrf52840TargetUsbStart,
-    HciNrf52840TargetUsbPassMark,
-    HciNrf52840TargetUsbPowerProcess,
-    HciNrf52840TargetUsbStuck,
-    HciNrf52840TargetUsbTrace,
     HciNrf52840TargetUartTrace,
     HciNrf52840TargetStop,
     HciNrf52840TargetGetSdcMem,

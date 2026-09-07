@@ -26,8 +26,8 @@ make -C tests run
 ```
 
 The host suite compiles C as GNU C17 and C++ as GNU C++23, matching the
-nRF52840 target project. Target dependencies such as nRF, MPSL, TinyUSB, TaktOS
-and the SoftDevice Controller are replaced by the fakes under `stubs/`, except
+nRF52840 target project. Target dependencies such as nRF, MPSL, IOsonata,
+TaktOS and the SoftDevice Controller are replaced by the fakes under `stubs/`, except
 where a test deliberately compiles against the real nrfxlib headers.
 
 The Makefile looks for the real nrfxlib tree at the sibling path

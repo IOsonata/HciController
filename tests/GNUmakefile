@@ -19,24 +19,27 @@ $(error $(CXX) does not support GNU C++23 (-std=gnu++23 or -std=gnu++2b))
 endif
 
 CXXFLAGS ?= -std=$(HCI_CXX23_STD) -O0 -g3 -Wall -Wextra -Werror -Wshadow -Wundef
+HCI_CLASS_MEMACCESS_FLAG := $(shell \
+	printf '' | $(CXX) -x c++ -Werror -Wno-error=class-memaccess \
+	-fsyntax-only - >/dev/null 2>&1 && printf '%s' '-Wno-error=class-memaccess')
+CXXFLAGS += $(HCI_CLASS_MEMACCESS_FLAG)
 
 include Makefile
+
+MOCK_INCLUDES := -I$(IOSONATA_ROOT)/tests/usb/hostport $(MOCK_INCLUDES)
 
 # The focused trace integration test compiles IOsonata device_intrf.cpp, which
 # contains a GNU C++ variable-length array. Keep that dependency diagnostic
 # visible, but do not promote it to an HciController host-test failure.
 $(HCI_TRACE_TARGET): CXXFLAGS += -Wno-error=vla
-
 USB_DESC_OBJ := $(BUILD_DIR)/usb_descriptors_test.o
 
-TESTS += hci_usb hci_usb_modeswitch hci_controller_invalid_host \
+TESTS += hci_usb hci_controller_invalid_host \
          hci_controller_local_commands
 hci_usb_SRC := $(SRC)/hci_usb.cpp \
-               $(SRC)/hci_usb_rx.cpp \
-               $(SRC)/hci_usb_tinyusb.cpp \
+               $(IOSONATA_ROOT)/src/usb/usb_intrf.cpp \
                $(USB_DESC_OBJ) \
                $(CFIFO_OBJ)
-hci_usb_modeswitch_SRC := $(hci_usb_SRC)
 hci_controller_invalid_host_SRC := $(SRC)/hci_controller.cpp \
                                    $(SRC)/hci_intrf_transport.cpp \
                                    $(SRC)/hci_h4.cpp
@@ -44,12 +47,10 @@ hci_controller_local_commands_SRC := $(SRC)/hci_controller.cpp \
                                      $(SRC)/hci_intrf_transport.cpp \
                                      $(SRC)/hci_h4.cpp
 TARGETS += $(BUILD_DIR)/hci_usb_test \
-           $(BUILD_DIR)/hci_usb_modeswitch_test \
            $(BUILD_DIR)/hci_controller_invalid_host_test \
            $(BUILD_DIR)/hci_controller_local_commands_test
 
-$(USB_DESC_OBJ): $(SRC)/usb_descriptors.c $(ROOT)/include/hci_usb.h \
-                 $(STUBS)/tusb.h $(STUBS)/nrfficr/nrf.h | check-root
+$(USB_DESC_OBJ): $(SRC)/usb_descriptors.c $(ROOT)/include/hci_usb.h | check-root
 	@mkdir -p $(dir $@)
 	$(CC) -I$(STUBS)/nrfficr $(MOCK_INCLUDES) $(MOCK_DEFINES) $(CFLAGS) \
 	  -c $< -o $@
@@ -93,7 +94,7 @@ check-mode-policy:
 	@echo "[TEST] mode_policy.py"
 	@$(PYTHON) $(THIS_DIR)/mode_policy.py $(ROOT)
 
-all: $(BUILD_DIR)/hci_usb_test $(BUILD_DIR)/hci_usb_modeswitch_test \
+all: $(BUILD_DIR)/hci_usb_test \
      $(BUILD_DIR)/hci_controller_invalid_host_test \
      $(BUILD_DIR)/hci_controller_local_commands_test
 run: check-hci-transport check-python-api check-native-usb-review \

@@ -266,16 +266,16 @@ void sdc_support_bis_sink(void);
 #define SDC_MEM_PER_PERIODIC_ADV_SET(max_adv_data) ((max_adv_data<255)?\
     (__MEM_PER_PERIODIC_ADV_SET_LOW(max_adv_data)):\
     (__MEM_PER_PERIODIC_ADV_SET_HIGH(max_adv_data)))
-#define SDC_MEM_PER_PERIODIC_SYNC(buffer_count) (256 + (buffer_count) * 278)
+#define SDC_MEM_PER_PERIODIC_SYNC(buffer_count) (254 + (buffer_count) * 278)
 #define SDC_MEM_PERIODIC_ADV_LIST(list_size) ((list_size) * 8)
 #define SDC_DEFAULT_PERIODIC_ADV_RSP_MAX_TX_DATA 73
 #define __MEM_PER_PERIODIC_ADV_RSP_TX_BUFFER(max_tx_data_size) ((max_tx_data_size) + 5)
-#define __MEM_PER_PERIODIC_ADV_RSP_RX_BUFFER (283)
-#define __MEM_MINIMAL_PERIODIC_ADV_RSP_SET_SIZE_WITH_RX (461)
-#define __MEM_MINIMAL_PERIODIC_ADV_RSP_SET_SIZE_WITHOUT_RX (161)
+#define __MEM_PER_PERIODIC_ADV_RSP_RX_BUFFER (282)
+#define __MEM_MINIMAL_PERIODIC_ADV_RSP_SET_SIZE_WITH_RX (188)
+#define __MEM_MINIMAL_PERIODIC_ADV_RSP_SET_SIZE_WITHOUT_RX (170)
 #define __MEM_FOR_PERIODIC_ADV_RSP_FAILURE_REPORTING (224)
 #define SDC_MEM_PER_PERIODIC_SYNC_RSP(tx_buffer_count, rx_buffer_count) \
-    (671 + (tx_buffer_count - 1) * 255 + (rx_buffer_count) * 279)
+    (420 + (tx_buffer_count) * 254 + (rx_buffer_count) * 278)
 #define SDC_MEM_PER_PERIODIC_ADV_RSP_SET(max_adv_data, tx_buffer_count, rx_buffer_count, max_tx_data_size, failure_reporting_enabled) \
      (SDC_MEM_PER_PERIODIC_ADV_SET(max_adv_data) \
      + ((rx_buffer_count) > 0 ? __MEM_MINIMAL_PERIODIC_ADV_RSP_SET_SIZE_WITH_RX : \

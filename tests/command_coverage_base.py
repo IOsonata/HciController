@@ -136,31 +136,17 @@ def validate_source_contracts(root):
                 raise SystemExit("Core 6.2 resource term %s is missing" % macro)
         print("[ok] Core 6.2 profile has Extended Features, FSU and SCI resources")
 
-    init_mode_at = app_source.find("bool HciAppInitMode(")
-    init_compat_at = app_source.find("\nbool HciAppInit(", init_mode_at)
-    if init_mode_at < 0 or init_compat_at < 0:
-        raise SystemExit("HciAppInitMode not found")
-    init_mode_body = app_source[init_mode_at:init_compat_at]
-    if not re.search(
-        r"hostType\s*==\s*HCI_APP_HOST_USB\s*&&\s*!HciTargetHasUsb\(&Target\)",
-        init_mode_body,
-    ):
-        raise SystemExit(
-            "HciAppInitMode does not reject USB host selection on a target without USB operations"
-        )
-    print("[ok] USB host selection is guarded by HciTargetHasUsb")
-
     stop_at = app_source.find("void HciAppStop(")
     if stop_at < 0:
         raise SystemExit("HciAppStop not found")
     stop_body = app_source[stop_at:]
     target_stop = stop_body.find("pApp->Target.pOps->Stop")
     usb_release = stop_body.find("HciAppUsbRelease(pApp)")
-    if target_stop < 0 or usb_release < 0 or target_stop > usb_release:
+    if target_stop < 0 or usb_release < 0 or usb_release > target_stop:
         raise SystemExit(
-            "HciAppStop must stop target USB hardware before releasing TinyUSB"
+            "HciAppStop must disable IOsonata USB before releasing MPSL clocks"
         )
-    print("[ok] application stop orders target teardown before TinyUSB release")
+    print("[ok] application disables IOsonata USB before target teardown")
 
 
 def opcode_values(nrfxlib, root):
