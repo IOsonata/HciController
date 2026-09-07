@@ -22,6 +22,10 @@
 #include "hci_version.h"
 #include "sdc_hci.h"
 
+#if defined(NRF52840_XXAA)
+#include "nrf.h"
+#endif
+
 static_assert(HCI_APP_PACKET_SIZE + 1U <= HCI_INTRF_TX_STREAM_SIZE,
               "controller packet plus indicator must fit the transport stream");
 static_assert(HCI_APP_PACKET_SIZE >= HCI_MSG_BUFFER_MAX_SIZE,
@@ -60,20 +64,12 @@ static_assert(HCI_SDC_ACL_TRACK_HANDLES >=
 #ifndef HCI_APP_USB_POLL_MS
 #define HCI_APP_USB_POLL_MS 5U
 #endif
-#ifndef HCI_APP_USB_RECONNECT_PASSES
-#define HCI_APP_USB_RECONNECT_PASSES 10U
-#endif
-
-#if HCI_APP_USB_RECONNECT_PASSES < 1U
-#error "HCI_APP_USB_RECONNECT_PASSES must be at least one"
-#endif
 
 static HciApp_t *s_pApp;
 static UsbdCdc s_HostCdc;
 static UsbdCdc s_LogCdc;
 static BtHciUsb s_HciUsb;
 static bool s_UsbSuspendSeen;
-static uint32_t s_UsbReconnectPasses;
 
 #ifdef UART_PINS
 static const IOPinCfg_t s_HciUartPins[] = UART_PINS;
@@ -161,7 +157,6 @@ static bool HciAppUsbSetup(HciApp_t *pApp, HciUsbDescriptorMode_t Mode)
 
     pApp->UsbDescriptorMode = Mode;
     s_UsbSuspendSeen = false;
-    s_UsbReconnectPasses = 0U;
 
     UsbCfg_t usbCfg = {};
     usbCfg.DevNo = 0;
@@ -257,7 +252,6 @@ static void HciAppUsbRelease(HciApp_t *pApp)
     UsbDisable(0);
     pApp->UsbRunning = false;
     s_UsbSuspendSeen = false;
-    s_UsbReconnectPasses = 0U;
 }
 
 #ifndef UART_FLOWCTRL
@@ -514,26 +508,6 @@ static void HciAppHostProcess(void *pContext)
 
     if (pApp->UsbRunning)
     {
-        /*
-         * A Host sleep can abandon an IN transfer after the class accepted the
-         * packet but before the Host completed it. Reusing that configured USB
-         * session after wake leaves both CDC and native HCI with stale endpoint
-         * state. Keep the pull-up down for several host-pump passes after a
-         * suspended bus resumes, then enumerate a fresh session. UsbDisable()
-         * resets every registered function but preserves the registrations, so
-         * UsbEnable() brings back the same descriptor set and serial identity.
-         */
-        if (pApp->HostType == HCI_APP_HOST_USB &&
-            s_UsbReconnectPasses != 0U)
-        {
-            s_UsbReconnectPasses--;
-            if (s_UsbReconnectPasses == 0U)
-            {
-                (void)UsbEnable(0);
-            }
-            return;
-        }
-
         UsbProcess(0);
 
         if (pApp->HostType == HCI_APP_HOST_USB)
@@ -552,7 +526,13 @@ static void HciAppHostProcess(void *pContext)
                 HciTraceSetSink(nullptr, 0U);
                 pApp->LogPortOpen = false;
                 UsbDisable(0);
-                s_UsbReconnectPasses = HCI_APP_USB_RECONNECT_PASSES;
+#if defined(NRF52840_XXAA)
+                __disable_irq();
+                __DSB();
+                NVIC_SystemReset();
+#else
+                (void)UsbEnable(0);
+#endif
                 return;
             }
 
