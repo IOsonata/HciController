@@ -126,7 +126,7 @@ def _is_command_complete_for(packet, opcode):
 
 def _verify_pawr_response_completion(
         hci, before, after, expected_count=1):
-    """Reject duplicate 0x2083 completions and verify the firmware checkpoints."""
+    """Reject duplicate 0x2083 completions and verify its completion mode."""
     duplicates = []
     kept = []
     for packet in hci.pending:
@@ -152,10 +152,11 @@ def _verify_pawr_response_completion(
             % (len(duplicates), detail)
         )
 
-    expected = (expected_count,) * 4
-    if delta is not None and delta != expected:
+    legacy = (expected_count,) * 4
+    immediate = (0, 0, 0, 0)
+    if delta is not None and delta not in (legacy, immediate):
         raise HciError(
-            "PAwR delayed completion path mismatch after %u response command(s): "
+            "PAwR completion path mismatch after %u response command(s): "
             "candidate=%u handler=%u suppressed=%u sdc_complete=%u"
             % ((expected_count,) + delta)
         )
