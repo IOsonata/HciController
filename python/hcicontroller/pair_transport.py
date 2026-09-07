@@ -1,7 +1,18 @@
 #!/usr/bin/env python3
 """Transport-neutral two-controller selection for the official harness."""
 
+import struct
+import time
+
 import hci_transport
+
+
+_USB_READY_OPCODE = 0x1009
+_USB_READY_EVENT_COMPLETE = 0x0E
+_USB_READY_EVENT_STATUS = 0x0F
+_USB_READY_TIMEOUT = 5.0
+_USB_READY_ATTEMPT_TIMEOUT = 0.5
+_USB_READY_RETRY_DELAY = 0.1
 
 
 def _usb_selector(spec):
@@ -136,6 +147,80 @@ def _candidates(kind="auto", bulk_serialization=False,
     return []
 
 
+def _probe_native_usb_ready(spec):
+    """Open one fresh native USB session and prove Read BD_ADDR round-trips."""
+    transport = None
+    try:
+        transport = spec.open()
+        command = struct.pack(
+            "<BHB", hci_transport.H4_COMMAND, _USB_READY_OPCODE, 0
+        )
+        transport.write_packet(command)
+        deadline = time.monotonic() + _USB_READY_ATTEMPT_TIMEOUT
+
+        while time.monotonic() < deadline:
+            remaining = deadline - time.monotonic()
+            packet = transport.read_packet(min(0.1, max(0.0, remaining)))
+            if packet is None:
+                continue
+
+            kind, code, body = packet
+            if kind != hci_transport.H4_EVENT:
+                continue
+
+            if code == _USB_READY_EVENT_COMPLETE and len(body) >= 4 and \
+                    int.from_bytes(body[1:3], "little") == _USB_READY_OPCODE:
+                if body[3] != 0:
+                    return False, "Read BD_ADDR returned 0x%02X" % body[3]
+                if len(body) < 10:
+                    return False, "short Read BD_ADDR Command Complete"
+                return True, ""
+
+            if code == _USB_READY_EVENT_STATUS and len(body) >= 4 and \
+                    int.from_bytes(body[2:4], "little") == _USB_READY_OPCODE:
+                return False, "Read BD_ADDR returned Command Status 0x%02X" % body[0]
+
+        return False, "no event for opcode 0x%04X" % _USB_READY_OPCODE
+    except (hci_transport.TransportError, OSError) as err:
+        return False, str(err)
+    finally:
+        if transport is not None:
+            try:
+                transport.close()
+            except Exception:
+                pass
+
+
+def _wait_native_usb_ready(spec):
+    if spec.kind != "usb":
+        return
+
+    deadline = time.monotonic() + _USB_READY_TIMEOUT
+    attempt = 0
+    last_error = "native USB did not answer"
+
+    while True:
+        attempt += 1
+        ready, detail = _probe_native_usb_ready(spec)
+        if ready:
+            if attempt > 1:
+                print(
+                    "HOST-RECOVERY: %s became HCI-ready after %u attempt(s)"
+                    % (spec, attempt)
+                )
+            return
+
+        last_error = detail
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise hci_transport.SelectionError(
+                "%s enumerated but did not become HCI-ready after wake: %s"
+                % (spec, last_error)
+            )
+
+        time.sleep(min(_USB_READY_RETRY_DELAY, remaining))
+
+
 def resolve_pair(first=None, second=None, kind="auto",
                  bulk_serialization=False, ports=None, usb_devices=None):
     """Resolve exactly two controllers, allowing mixed transports in auto mode."""
@@ -181,4 +266,13 @@ def resolve_pair(first=None, second=None, kind="auto",
         raise hci_transport.SelectionError(
             "the two HciController controllers must differ"
         )
+
+    # Injected discovery lists are test snapshots. Real harness discovery uses
+    # the host OS and must also prove that an enumerated native interface is a
+    # usable HCI session. After macOS sleep the old USB object can remain visible
+    # briefly while firmware deliberately disconnects and re-enumerates.
+    if ports is None and usb_devices is None:
+        _wait_native_usb_ready(first_spec)
+        _wait_native_usb_ready(second_spec)
+
     return first_spec, second_spec
