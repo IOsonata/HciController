@@ -80,7 +80,7 @@
 #define HCI_USB_CDC_FUNCTION_LEN	66U
 #define HCI_USB_CDC_H4_CONFIG_LEN	(9U + 2U * HCI_USB_CDC_FUNCTION_LEN)
 #define HCI_USB_NATIVE_CONFIG_MAX_LEN \
-	(9U + sizeof(UsbdHciSerialDesc_t) + HCI_USB_CDC_FUNCTION_LEN)
+	(9U + sizeof(BtHciUsbSerialDesc_t) + HCI_USB_CDC_FUNCTION_LEN)
 #define HCI_USB_LOG_CONFIG_LEN		(9U + HCI_USB_CDC_FUNCTION_LEN)
 
 static HciUsbDescriptorMode_t s_DescriptorMode = HCI_USB_DESCRIPTOR_CDC_H4;
@@ -176,7 +176,7 @@ static bool HciUsbDescriptorBuildNative(const void *pHci,
 	return true;
 }
 
-bool HciUsbDescriptorSetHci(const UsbdHciDesc_t *pHci)
+bool HciUsbDescriptorSetHci(const BtHciUsbDesc_t *pHci)
 {
 	if (pHci == NULL || pHci->Association.bFirstInterface != 0U ||
 		pHci->Association.bInterfaceCount != 2U ||
@@ -194,7 +194,7 @@ bool HciUsbDescriptorSetHci(const UsbdHciDesc_t *pHci)
 		pHci->AclOut.bEndpointAddress, pHci->AclIn.bEndpointAddress);
 }
 
-bool HciUsbDescriptorSetSerialHci(const UsbdHciSerialDesc_t *pHci)
+bool HciUsbDescriptorSetSerialHci(const BtHciUsbSerialDesc_t *pHci)
 {
 	if (pHci == NULL || pHci->Association.bFirstInterface != 0U ||
 		pHci->Association.bInterfaceCount != 2U ||

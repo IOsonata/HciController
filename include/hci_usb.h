@@ -3,7 +3,7 @@
 
 @brief	USB identity and descriptor integration for HciController.
 
-		Native Bluetooth transport is implemented by IOsonata UsbdHci. This
+		Native Bluetooth transport is implemented by IOsonata BtHciUsb. This
 		header retains only HciController product identities, transport-mode
 		selection and composite descriptor assembly.
 
@@ -19,13 +19,13 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "usb/usbd_hci.h"
+#include "bluetooth/bt_hci_usb.h"
 
-#define HCI_USB_PACKET_SIZE			USBD_HCI_PACKET_MAX_SIZE
-#define HCI_USB_COMMAND_SIZE			USBD_HCI_COMMAND_MAX_SIZE
-#define HCI_USB_FS_BULK_MPS			USBD_HCI_ACL_FS_MPS
-#define HCI_USB_EVENT_MPS			USBD_HCI_EVENT_FS_MPS
-#define HCI_USB_PKT_BLKSIZE			USBD_HCI_ACL_PKT_BLKSIZE
+#define HCI_USB_PACKET_SIZE			BT_HCI_USB_PACKET_MAX_SIZE
+#define HCI_USB_COMMAND_SIZE			BT_HCI_USB_COMMAND_MAX_SIZE
+#define HCI_USB_FS_BULK_MPS			BT_HCI_USB_ACL_FS_MPS
+#define HCI_USB_EVENT_MPS			BT_HCI_USB_EVENT_FS_MPS
+#define HCI_USB_PKT_BLKSIZE			BT_HCI_USB_ACL_PKT_BLKSIZE
 
 #define HCI_USB_HCI_TRANSPORT_CDC_H4	1
 #define HCI_USB_HCI_TRANSPORT_NATIVE	2
@@ -47,8 +47,8 @@ extern "C" {
 #endif
 
 bool HciUsbDescriptorSetMode(HciUsbDescriptorMode_t Mode);
-bool HciUsbDescriptorSetHci(const UsbdHciDesc_t *pHci);
-bool HciUsbDescriptorSetSerialHci(const UsbdHciSerialDesc_t *pHci);
+bool HciUsbDescriptorSetHci(const BtHciUsbDesc_t *pHci);
+bool HciUsbDescriptorSetSerialHci(const BtHciUsbSerialDesc_t *pHci);
 uint16_t HciUsbDescriptorVid(void);
 uint16_t HciUsbDescriptorPid(HciUsbDescriptorMode_t Mode);
 

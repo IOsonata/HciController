@@ -1,4 +1,4 @@
-/* Native Bluetooth HCI class tests over the IOsonata USB interface. */
+/* Native Bluetooth HCI transport tests over the IOsonata USB interface. */
 
 #include "hci_usb.h"
 #include "hci_h4.h"
@@ -156,10 +156,10 @@ static void CompleteIn(uint8_t EpNo)
 				 USB_CTRLR_XFER_SUCCESS, pEp->pContext);
 }
 
-static void CheckDescriptors(const UsbdHciDesc_t *pHci)
+static void CheckDescriptors(const BtHciUsbSerialDesc_t *pHci)
 {
 	assert(HciUsbDescriptorSetMode(HCI_USB_DESCRIPTOR_NATIVE_HCI));
-	assert(HciUsbDescriptorSetHci(pHci));
+	assert(HciUsbDescriptorSetSerialHci(pHci));
 	uint16_t length = 0U;
 	const uint8_t *p = HciUsbDescHandler(USB_DESCTYPE_DEVICE, 0U, 0U,
 		USB_SPEED_FULL, &length, nullptr);
@@ -175,6 +175,15 @@ static void CheckDescriptors(const UsbdHciDesc_t *pHci)
 	assert(((uint16_t)p[2] | ((uint16_t)p[3] << 8)) == length);
 	assert(p[4] == 4U);
 	assert(memcmp(&p[9], pHci, sizeof(*pHci)) == 0);
+	assert(pHci->Hci.bInterfaceNumber == 0U);
+	assert(pHci->Hci.bAlternateSetting == 0U);
+	assert(pHci->Serialized.Interface.bInterfaceNumber == 0U);
+	assert(pHci->Serialized.Interface.bAlternateSetting == 1U);
+	assert(pHci->Serialized.Interface.bNumEndpoints == 2U);
+	assert(pHci->Serialized.Out.bEndpointAddress ==
+		pHci->AclOut.bEndpointAddress);
+	assert(pHci->Serialized.In.bEndpointAddress ==
+		pHci->AclIn.bEndpointAddress);
 	const size_t log = 9U + sizeof(*pHci);
 	assert(p[log] == 8U && p[log + 1U] == USB_DESCTYPE_IA);
 	assert(p[log + 2U] == 2U);
@@ -189,8 +198,9 @@ int main(void)
 
 	alignas(4) uint8_t rxMem[CFIFO_TOTAL_MEMSIZE(8U, HCI_USB_PKT_BLKSIZE)];
 	alignas(4) uint8_t txMem[CFIFO_TOTAL_MEMSIZE(20U, HCI_USB_PKT_BLKSIZE)];
-	UsbdHciCfg_t cfg = {};
+	BtHciUsbCfg_t cfg = {};
 	cfg.bBlocking = true;
+	cfg.bBulkSerialization = true;
 	cfg.RxFifoMemSize = sizeof(rxMem);
 	cfg.pRxFifoMem = rxMem;
 	cfg.TxFifoMemSize = sizeof(txMem);
@@ -198,10 +208,10 @@ int main(void)
 	cfg.DevNo = 0;
 	cfg.InterfaceString = HCI_USB_STRING_BT;
 
-	UsbdHci usb;
+	BtHciUsb usb;
 	assert(usb.Init(cfg));
-	UsbdHciDesc_t hciDesc = {};
-	assert(usb.MakeDesc(&hciDesc, USB_SPEED_FULL));
+	BtHciUsbSerialDesc_t hciDesc = {};
+	assert(usb.MakeSerialDesc(&hciDesc, USB_SPEED_FULL));
 	CheckDescriptors(&hciDesc);
 	const uint8_t eventEp = USB_ENDPADDR_NUM(hciDesc.EventIn.bEndpointAddress);
 	const uint8_t aclEp = USB_ENDPADDR_NUM(hciDesc.AclIn.bEndpointAddress);
@@ -327,7 +337,8 @@ int main(void)
 	assert(s_Ep[0x82U].Busy && s_Ep[0x82U].Length == 0U);
 	CompleteIn(aclEp);
 
-	assert(!s_Function.SetInterfaceHandler(0U, 1U, s_Function.pContext));
+	assert(s_Function.SetInterfaceHandler(0U, 1U, s_Function.pContext));
+	assert(s_Function.SetInterfaceHandler(0U, 0U, s_Function.pContext));
 
 	puts("hci_usb_test: pass");
 	return 0;

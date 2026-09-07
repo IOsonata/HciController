@@ -64,7 +64,7 @@ static_assert(HCI_SDC_ACL_TRACK_HANDLES >=
 static HciApp_t *s_pApp;
 static UsbdCdc s_HostCdc;
 static UsbdCdc s_LogCdc;
-static UsbdHci s_HciUsb;
+static BtHciUsb s_HciUsb;
 
 #ifdef UART_PINS
 static const IOPinCfg_t s_HciUartPins[] = UART_PINS;
@@ -176,7 +176,7 @@ static bool HciAppUsbSetup(HciApp_t *pApp, HciUsbDescriptorMode_t Mode)
     // CDC interfaces and endpoints from the remaining USB resources.
     if (Mode == HCI_USB_DESCRIPTOR_NATIVE_HCI)
     {
-        UsbdHciCfg_t hciCfg = {};
+        BtHciUsbCfg_t hciCfg = {};
         hciCfg.bBlocking = true;
         hciCfg.bBulkSerialization = true;
         hciCfg.RxFifoMemSize = sizeof(pApp->UsbRxFifoMem);
@@ -192,7 +192,7 @@ static bool HciAppUsbSetup(HciApp_t *pApp, HciUsbDescriptorMode_t Mode)
             return false;
         }
 
-        UsbdHciSerialDesc_t hciDesc = {};
+        BtHciUsbSerialDesc_t hciDesc = {};
         if (!s_HciUsb.MakeSerialDesc(&hciDesc, USB_SPEED_FULL) ||
             !HciUsbDescriptorSetSerialHci(&hciDesc))
         {

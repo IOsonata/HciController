@@ -36,7 +36,7 @@ USB_DESC_OBJ := $(BUILD_DIR)/usb_descriptors_test.o
 
 TESTS += hci_usb hci_controller_invalid_host \
          hci_controller_local_commands
-hci_usb_SRC := $(IOSONATA_ROOT)/src/usb/usbd_hci.cpp \
+hci_usb_SRC := $(IOSONATA_ROOT)/src/bluetooth/bt_hci_usb.cpp \
                $(IOSONATA_ROOT)/src/usb/usb_intrf.cpp \
                $(USB_DESC_OBJ) \
                $(CFIFO_OBJ)
@@ -51,7 +51,7 @@ TARGETS += $(BUILD_DIR)/hci_usb_test \
            $(BUILD_DIR)/hci_controller_local_commands_test
 
 $(USB_DESC_OBJ): $(SRC)/usb_descriptors.c $(ROOT)/include/hci_usb.h \
-                 $(IOSONATA_ROOT)/include/usb/usbd_hci.h | check-root
+                 $(IOSONATA_ROOT)/include/bluetooth/bt_hci_usb.h | check-root
 	@mkdir -p $(dir $@)
 	$(CC) -I$(STUBS)/nrfficr $(MOCK_INCLUDES) $(MOCK_DEFINES) $(CFLAGS) \
 	  -c $< -o $@
