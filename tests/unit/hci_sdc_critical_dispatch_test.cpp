@@ -102,17 +102,26 @@ static uint8_t SendCommandStatus(const HciControllerOps_t *controller,
 static void GiveControllerQueueItsTurn(const HciControllerOps_t *controller)
 {
     HciH4PacketType_t type = HCI_H4_PACKET_NONE;
-    uint8_t packet[16];
+    uint8_t packet[300];
     size_t packetLen = 0U;
 
     /*
-     * Command responses deliberately set CommandEventLast. One poll of the SDC
-     * queue clears that fairness bit; the generated SDC stub has an empty queue
-     * and returns -NRF_EAGAIN.
+     * Command responses deliberately set CommandEventLast. One poll of the
+     * controller queue clears that fairness bit. The queue may also yield
+     * unrelated asynchronous traffic, so emptiness is not required here.
+     * A second Command Complete or Command Status is still a failure because
+     * the send helper already consumed the command response.
      */
-    assert(controller->Get(controller->pContext, &type, packet,
-                           sizeof(packet), &packetLen) ==
-           HCI_CONTROLLER_GET_EMPTY);
+    const HciControllerGetResult_t result =
+        controller->Get(controller->pContext, &type, packet,
+                        sizeof(packet), &packetLen);
+    assert(result != HCI_CONTROLLER_GET_ERROR);
+    if (result == HCI_CONTROLLER_GET_PACKET &&
+        type == HCI_H4_PACKET_EVENT && packetLen != 0U)
+    {
+        assert(packet[0] != HCI_EVENT_COMMAND_COMPLETE);
+        assert(packet[0] != HCI_EVENT_COMMAND_STATUS);
+    }
 }
 
 #if !defined(SDC_HCI_PAWR_SYNC_RETURN_IMMEDIATELY) || \
