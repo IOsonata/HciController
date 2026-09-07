@@ -48,6 +48,7 @@ extern "C" {
 
 bool HciUsbDescriptorSetMode(HciUsbDescriptorMode_t Mode);
 bool HciUsbDescriptorSetHci(const UsbdHciDesc_t *pHci);
+bool HciUsbDescriptorSetSerialHci(const UsbdHciSerialDesc_t *pHci);
 uint16_t HciUsbDescriptorVid(void);
 uint16_t HciUsbDescriptorPid(HciUsbDescriptorMode_t Mode);
 

@@ -178,6 +178,7 @@ static bool HciAppUsbSetup(HciApp_t *pApp, HciUsbDescriptorMode_t Mode)
     {
         UsbdHciCfg_t hciCfg = {};
         hciCfg.bBlocking = true;
+        hciCfg.bBulkSerialization = true;
         hciCfg.RxFifoMemSize = sizeof(pApp->UsbRxFifoMem);
         hciCfg.pRxFifoMem = pApp->UsbRxFifoMem;
         hciCfg.TxFifoMemSize = sizeof(pApp->UsbTxFifoMem);
@@ -191,9 +192,9 @@ static bool HciAppUsbSetup(HciApp_t *pApp, HciUsbDescriptorMode_t Mode)
             return false;
         }
 
-        UsbdHciDesc_t hciDesc = {};
-        if (!s_HciUsb.MakeDesc(&hciDesc, USB_SPEED_FULL) ||
-            !HciUsbDescriptorSetHci(&hciDesc))
+        UsbdHciSerialDesc_t hciDesc = {};
+        if (!s_HciUsb.MakeSerialDesc(&hciDesc, USB_SPEED_FULL) ||
+            !HciUsbDescriptorSetSerialHci(&hciDesc))
         {
             UsbDisable(0);
             return false;
