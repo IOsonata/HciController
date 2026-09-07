@@ -101,26 +101,13 @@ python3 tests/harness/hcicontroller/release_test.py
 # Focused CIS/ISO test over H:4 controllers
 python3 tests/harness/hcicontroller/cis_pair_test.py
 
-# Focused CIS/ISO test over two native Bluetooth USB HCI controllers
-python3 tests/harness/hcicontroller/cis_usb_pair_test.py
-
 # Broad command/radio probe
 python3 tests/harness/hcicontroller/probe_test.py --help
 ```
 
-The native USB CIS test auto-selects exactly two compatible controllers. When
-more than two are connected, select them by USB serial number:
-
-```sh
-python3 tests/harness/hcicontroller/cis_usb_pair_test.py \
-    --central SERIAL_A \
-    --peripheral SERIAL_B
-```
-
 Native USB legacy mode carries commands on EP0, events on interrupt IN and ACL
-on bulk IN/OUT. Bulk Serialization uses alternate setting 1 and carries the HCI
-packet indicator on the bulk endpoint pair; the focused native USB CIS test uses
-Bulk Serialization because HCI ISO is carried there.
+on bulk IN/OUT. This firmware milestone does not advertise SCO, ISO or Bulk
+Serialization. Run CIS/ISO hardware validation through CDC/UART H:4.
 
 ## Harness organization
 

@@ -181,11 +181,6 @@
 			<locationURI>PARENT-2-PROJECT_LOC/src/hci_trace.cpp</locationURI>
 		</link>
 		<link>
-			<name>src/hci_usb.cpp</name>
-			<type>1</type>
-			<locationURI>PARENT-2-PROJECT_LOC/src/hci_usb.cpp</locationURI>
-		</link>
-		<link>
 			<name>src/main.cpp</name>
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/src/main.cpp</locationURI>

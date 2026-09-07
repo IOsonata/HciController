@@ -1,6 +1,7 @@
 /* Native Bluetooth HCI class tests over the IOsonata USB interface. */
 
 #include "hci_usb.h"
+#include "hci_h4.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -32,7 +33,10 @@ const char *UsbGetSerial(int DevNo)
 
 bool UsbRegisterFunc(int DevNo, const UsbFuncCfg_t *pCfg)
 {
-	if (DevNo != 0 || pCfg == nullptr)
+	if (DevNo != 0 || pCfg == nullptr ||
+		(((pCfg->EpInMask | pCfg->EpOutMask) & 1U) != 0U) ||
+		((pCfg->EpInMask | pCfg->EpOutMask) != 0U &&
+		 pCfg->XferHandler == nullptr))
 	{
 		return false;
 	}
@@ -152,9 +156,10 @@ static void CompleteIn(uint8_t EpNo)
 				 USB_CTRLR_XFER_SUCCESS, pEp->pContext);
 }
 
-static void CheckDescriptors(void)
+static void CheckDescriptors(const UsbdHciDesc_t *pHci)
 {
 	assert(HciUsbDescriptorSetMode(HCI_USB_DESCRIPTOR_NATIVE_HCI));
+	assert(HciUsbDescriptorSetHci(pHci));
 	uint16_t length = 0U;
 	const uint8_t *p = HciUsbDescHandler(USB_DESCTYPE_DEVICE, 0U, 0U,
 		USB_SPEED_FULL, &length, nullptr);
@@ -169,36 +174,43 @@ static void CheckDescriptors(void)
 	assert(p != nullptr && length > 9U);
 	assert(((uint16_t)p[2] | ((uint16_t)p[3] << 8)) == length);
 	assert(p[4] == 4U);
+	assert(memcmp(&p[9], pHci, sizeof(*pHci)) == 0);
+	const size_t log = 9U + sizeof(*pHci);
+	assert(p[log] == 8U && p[log + 1U] == USB_DESCTYPE_IA);
+	assert(p[log + 2U] == 2U);
+	assert(p[log + 38U] == USB_ENDPADDR_DIRIN(3U));
+	assert(p[log + 54U] == USB_ENDPADDR_DIROUT(4U));
+	assert(p[log + 61U] == USB_ENDPADDR_DIRIN(4U));
 }
 
 int main(void)
 {
 	ResetFake();
-	CheckDescriptors();
 
 	alignas(4) uint8_t rxMem[CFIFO_TOTAL_MEMSIZE(8U, HCI_USB_PKT_BLKSIZE)];
 	alignas(4) uint8_t txMem[CFIFO_TOTAL_MEMSIZE(20U, HCI_USB_PKT_BLKSIZE)];
-	HciUsbCfg_t cfg = {};
+	UsbdHciCfg_t cfg = {};
 	cfg.bBlocking = true;
 	cfg.RxFifoMemSize = sizeof(rxMem);
 	cfg.pRxFifoMem = rxMem;
 	cfg.TxFifoMemSize = sizeof(txMem);
 	cfg.pTxFifoMem = txMem;
 	cfg.DevNo = 0;
+	cfg.InterfaceString = HCI_USB_STRING_BT;
 
-	HciUsb usb;
+	UsbdHci usb;
 	assert(usb.Init(cfg));
+	UsbdHciDesc_t hciDesc = {};
+	assert(usb.MakeDesc(&hciDesc, USB_SPEED_FULL));
+	CheckDescriptors(&hciDesc);
+	const uint8_t eventEp = USB_ENDPADDR_NUM(hciDesc.EventIn.bEndpointAddress);
+	const uint8_t aclEp = USB_ENDPADDR_NUM(hciDesc.AclIn.bEndpointAddress);
 	assert(s_Function.FirstInterface == 0U);
 	assert(s_Function.InterfaceCount == 2U);
-	/* Bits 1 and 2 are the event and bulk endpoints. Bit 3 is the
-	 * synchronous-data slot, claimed but never described, so that the
-	 * automatically allocated CDC log lands on endpoints 4 and 5 as the
-	 * released native composite has it. */
-	assert(s_Function.EpInMask == 0x000EU);
-	assert(s_Function.EpOutMask == 0x000CU);
+	assert(s_Function.EpInMask == 0x0006U);
+	assert(s_Function.EpOutMask == 0x0004U);
 	assert(s_Function.ConfigHandler(1U, s_Function.pContext));
-	assert(usb.IsOpen() && !usb.BulkSerialization());
-	assert(s_Ep[0x02U].Busy);
+	assert(s_Ep[USB_ENDPADDR_DIROUT(aclEp)].Busy);
 
 	UsbSetupData_t request = {};
 	request.bmRequestType = USB_REQTYPE_DIRDEV | USB_REQTYPE_CLASS |
@@ -223,8 +235,7 @@ int main(void)
 	assert(memcmp(received, command, sizeof(command)) == 0);
 
 	const uint8_t aclOut[] = { 1U, 0U, 3U, 0U, 0xA1U, 0xA2U, 0xA3U };
-	CompleteOut(HCI_USB_BULK_EP_NO, aclOut, sizeof(aclOut));
-	usb.Process();
+	CompleteOut(aclEp, aclOut, sizeof(aclOut));
 	assert(DeviceIntrfRx(usb.Data(), HCI_H4_PACKET_ACL, received,
 		sizeof(received)) == (int)sizeof(aclOut));
 	assert(memcmp(received, aclOut, sizeof(aclOut)) == 0);
@@ -234,12 +245,10 @@ int main(void)
 	{
 		longAclOut[i] = (uint8_t)(0x80U + i);
 	}
-	CompleteOut(HCI_USB_BULK_EP_NO, longAclOut, 64U);
-	usb.Process();
+	CompleteOut(aclEp, longAclOut, 64U);
 	assert(DeviceIntrfRx(usb.Data(), HCI_H4_PACKET_ACL, received,
 		sizeof(received)) == 0);
-	CompleteOut(HCI_USB_BULK_EP_NO, &longAclOut[64], 10U);
-	usb.Process();
+	CompleteOut(aclEp, &longAclOut[64], 10U);
 	assert(DeviceIntrfRx(usb.Data(), HCI_H4_PACKET_ACL, received,
 		sizeof(received)) == (int)sizeof(longAclOut));
 	assert(memcmp(received, longAclOut, sizeof(longAclOut)) == 0);
@@ -250,21 +259,18 @@ int main(void)
 	{
 		fullAclOut[i] = (uint8_t)(0x60U + i);
 	}
-	CompleteOut(HCI_USB_BULK_EP_NO, fullAclOut, sizeof(fullAclOut));
-	usb.Process();
+	CompleteOut(aclEp, fullAclOut, sizeof(fullAclOut));
 	assert(DeviceIntrfRx(usb.Data(), HCI_H4_PACKET_ACL, received,
 		sizeof(received)) == (int)sizeof(fullAclOut));
 	assert(memcmp(received, fullAclOut, sizeof(fullAclOut)) == 0);
-	CompleteOut(HCI_USB_BULK_EP_NO, fullAclOut, 0U);
-	usb.Process();
-	assert(usb.InvalidRxCount() == 0U);
+	CompleteOut(aclEp, fullAclOut, 0U);
 
 	const uint8_t event[] = { 0x0EU, 0x02U, 0x01U, 0x00U };
 	assert(DeviceIntrfTx(usb.Data(), HCI_H4_PACKET_EVENT, event,
 		sizeof(event)) == (int)sizeof(event));
 	assert(s_Ep[0x81U].Busy && s_Ep[0x81U].Length == sizeof(event));
 	assert(memcmp(s_Ep[0x81U].pBuffer, event, sizeof(event)) == 0);
-	CompleteIn(HCI_USB_EVENT_EP_NO);
+	CompleteIn(eventEp);
 
 	uint8_t longEvent[20U] = { 0x0EU, 18U };
 	for (size_t i = 2U; i < sizeof(longEvent); i++)
@@ -275,11 +281,11 @@ int main(void)
 		sizeof(longEvent)) == (int)sizeof(longEvent));
 	assert(s_Ep[0x81U].Busy && s_Ep[0x81U].Length == HCI_USB_EVENT_MPS);
 	assert(memcmp(s_Ep[0x81U].pBuffer, longEvent, HCI_USB_EVENT_MPS) == 0);
-	CompleteIn(HCI_USB_EVENT_EP_NO);
+	CompleteIn(eventEp);
 	assert(s_Ep[0x81U].Busy && s_Ep[0x81U].Length == 4U);
 	assert(memcmp(s_Ep[0x81U].pBuffer,
 		&longEvent[HCI_USB_EVENT_MPS], 4U) == 0);
-	CompleteIn(HCI_USB_EVENT_EP_NO);
+	CompleteIn(eventEp);
 
 	uint8_t fullEvent[HCI_USB_EVENT_MPS] = { 0x0EU,
 		HCI_USB_EVENT_MPS - 2U };
@@ -290,9 +296,9 @@ int main(void)
 	assert(DeviceIntrfTx(usb.Data(), HCI_H4_PACKET_EVENT, fullEvent,
 		sizeof(fullEvent)) == (int)sizeof(fullEvent));
 	assert(s_Ep[0x81U].Busy && s_Ep[0x81U].Length == sizeof(fullEvent));
-	CompleteIn(HCI_USB_EVENT_EP_NO);
+	CompleteIn(eventEp);
 	assert(s_Ep[0x81U].Busy && s_Ep[0x81U].Length == 0U);
-	CompleteIn(HCI_USB_EVENT_EP_NO);
+	CompleteIn(eventEp);
 
 	uint8_t aclIn[70] = { 1U, 0U, 66U, 0U };
 	for (size_t i = 4U; i < sizeof(aclIn); i++)
@@ -303,10 +309,10 @@ int main(void)
 		sizeof(aclIn)) == (int)sizeof(aclIn));
 	assert(s_Ep[0x82U].Busy && s_Ep[0x82U].Length == 64U);
 	assert(memcmp(s_Ep[0x82U].pBuffer, aclIn, 64U) == 0);
-	CompleteIn(HCI_USB_BULK_EP_NO);
+	CompleteIn(aclEp);
 	assert(s_Ep[0x82U].Busy && s_Ep[0x82U].Length == 6U);
 	assert(memcmp(s_Ep[0x82U].pBuffer, &aclIn[64], 6U) == 0);
-	CompleteIn(HCI_USB_BULK_EP_NO);
+	CompleteIn(aclEp);
 
 	uint8_t fullAclIn[HCI_USB_FS_BULK_MPS] = { 3U, 0U,
 		HCI_USB_FS_BULK_MPS - 4U, 0U };
@@ -317,35 +323,11 @@ int main(void)
 	assert(DeviceIntrfTx(usb.Data(), HCI_H4_PACKET_ACL, fullAclIn,
 		sizeof(fullAclIn)) == (int)sizeof(fullAclIn));
 	assert(s_Ep[0x82U].Busy && s_Ep[0x82U].Length == sizeof(fullAclIn));
-	CompleteIn(HCI_USB_BULK_EP_NO);
+	CompleteIn(aclEp);
 	assert(s_Ep[0x82U].Busy && s_Ep[0x82U].Length == 0U);
-	CompleteIn(HCI_USB_BULK_EP_NO);
+	CompleteIn(aclEp);
 
-	assert(s_Function.SetInterfaceHandler(0U, HCI_USB_HCI_ALT_SERIALIZED,
-		s_Function.pContext));
-	assert(usb.BulkSerialization());
-	const uint8_t serializedAcl[] = {
-		(uint8_t)HCI_H4_PACKET_ACL, 2U, 0U, 2U, 0U, 0x55U, 0xAAU
-	};
-	CompleteOut(HCI_USB_BULK_EP_NO, serializedAcl, sizeof(serializedAcl));
-	usb.Process();
-	assert(DeviceIntrfRx(usb.Data(), HCI_H4_PACKET_ACL, received,
-		sizeof(received)) == (int)sizeof(serializedAcl) - 1);
-	assert(memcmp(received, &serializedAcl[1], sizeof(serializedAcl) - 1) == 0);
-
-	assert(DeviceIntrfTx(usb.Data(), HCI_H4_PACKET_EVENT, event,
-		sizeof(event)) == (int)sizeof(event));
-	assert(s_Ep[0x82U].Busy && s_Ep[0x82U].Length == sizeof(event) + 1U);
-	assert(s_Ep[0x82U].pBuffer[0] == HCI_H4_PACKET_EVENT);
-	assert(memcmp(&s_Ep[0x82U].pBuffer[1], event, sizeof(event)) == 0);
-	CompleteIn(HCI_USB_BULK_EP_NO);
-
-	assert(usb.CommandCount() == 1U);
-	assert(usb.AclOutCount() == 4U);
-	assert(usb.AclInCount() == 2U);
-	assert(usb.EventInCount() == 4U);
-	assert(usb.InvalidRxCount() == 0U);
-	assert(usb.TxErrorCount() == 0U);
+	assert(!s_Function.SetInterfaceHandler(0U, 1U, s_Function.pContext));
 
 	puts("hci_usb_test: pass");
 	return 0;

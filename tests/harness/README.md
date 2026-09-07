@@ -57,17 +57,17 @@ Focused entry points include:
 pair_smoke_test.py      profile + ACL role validation
 probe_test.py           broad command/radio probe
 cis_pair_test.py        CIS/ISO over H:4
-cis_usb_pair_test.py    CIS/ISO over native USB Bulk Serialization
+cis_usb_pair_test.py    retained for controllers with Bulk Serialization
 release_test.py         complete release acceptance run
 ```
 
 ## Native USB
 
 Legacy Bluetooth USB HCI uses EP0 for commands, interrupt IN for events and bulk
-IN/OUT for ACL. Bulk Serialization uses alternate setting 1 of the Bluetooth
-interface and carries an HCI packet indicator on the bulk endpoint pair. The
-focused native USB CIS/ISO path uses Bulk Serialization so HCI ISO traffic can
-share the packetized bulk transport.
+IN/OUT for ACL. The current IOsonata `UsbdHci` integration does not advertise
+SCO, ISO or Bulk Serialization. Use CDC/UART H:4 for HciController CIS/ISO
+release phases. The native USB CIS entry point remains useful only with a
+controller firmware that advertises Bulk Serialization.
 
 For more than two native controllers, select the required devices by USB serial
 number. Do not rely on enumeration order in an automated fixture.

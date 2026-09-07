@@ -46,7 +46,6 @@
 #error "production USB build requires assigned HCI_USB_VID/PID values"
 #endif
 
-#define HCI_USB_STRING_BT	4U
 #define HCI_USB_STRING_H4	5U
 #define HCI_USB_STRING_LOG	6U
 
@@ -80,37 +79,20 @@
 
 #define HCI_USB_CDC_FUNCTION_LEN	66U
 #define HCI_USB_CDC_H4_CONFIG_LEN	(9U + 2U * HCI_USB_CDC_FUNCTION_LEN)
-#define HCI_USB_NATIVE_BT_LEN		(8U + 30U + 23U + 9U)
-#define HCI_USB_NATIVE_CONFIG_LEN	(9U + HCI_USB_NATIVE_BT_LEN + HCI_USB_CDC_FUNCTION_LEN)
+#define HCI_USB_NATIVE_CONFIG_LEN \
+	(9U + sizeof(UsbdHciDesc_t) + HCI_USB_CDC_FUNCTION_LEN)
 #define HCI_USB_LOG_CONFIG_LEN		(9U + HCI_USB_CDC_FUNCTION_LEN)
 
 static HciUsbDescriptorMode_t s_DescriptorMode = HCI_USB_DESCRIPTOR_CDC_H4;
 static UsbDevDesc_t s_DeviceDescriptor;
 static uint8_t s_StringDescriptor[66U];
+static uint8_t s_ConfigNative[HCI_USB_NATIVE_CONFIG_LEN];
+static bool s_NativeConfigValid;
 
 static const uint8_t s_ConfigCdcH4[] = {
 	HCI_USB_CONFIG_HEADER(HCI_USB_CDC_H4_CONFIG_LEN, 4U),
 	HCI_USB_CDC_FUNCTION(0U, HCI_USB_STRING_H4, 0x81U, 0x02U, 0x82U),
 	HCI_USB_CDC_FUNCTION(2U, HCI_USB_STRING_LOG, 0x83U, 0x04U, 0x84U),
-};
-
-static const uint8_t s_ConfigNative[] = {
-	HCI_USB_CONFIG_HEADER(HCI_USB_NATIVE_CONFIG_LEN, 4U),
-	8U, USB_DESCTYPE_IA, 0U, 2U, 0xE0U, 0x01U, 0x01U,
-		HCI_USB_STRING_BT,
-	HCI_USB_INTERFACE(0U, 0U, 3U, 0xE0U, 0x01U, 0x01U,
-		HCI_USB_STRING_BT),
-	HCI_USB_ENDPOINT(0x81U, USB_ENDPATT_TRANS_INT, 16U, 1U),
-	HCI_USB_ENDPOINT(0x02U, USB_ENDPATT_TRANS_BULK, 64U, 0U),
-	HCI_USB_ENDPOINT(0x82U, USB_ENDPATT_TRANS_BULK, 64U, 0U),
-	HCI_USB_INTERFACE(0U, 1U, 2U, 0xE0U, 0x01U, 0x01U,
-		HCI_USB_STRING_BT),
-	HCI_USB_ENDPOINT(0x02U, USB_ENDPATT_TRANS_BULK, 64U, 0U),
-	HCI_USB_ENDPOINT(0x82U, USB_ENDPATT_TRANS_BULK, 64U, 0U),
-	HCI_USB_INTERFACE(1U, 0U, 0U, 0xE0U, 0x01U, 0x01U,
-		HCI_USB_STRING_BT),
-	/* CDC log owns interfaces 2/3 and endpoint numbers 4/5. */
-	HCI_USB_CDC_FUNCTION(2U, HCI_USB_STRING_LOG, 0x84U, 0x05U, 0x85U),
 };
 
 static const uint8_t s_ConfigLog[] = {
@@ -120,10 +102,76 @@ static const uint8_t s_ConfigLog[] = {
 
 _Static_assert(sizeof(s_ConfigCdcH4) == HCI_USB_CDC_H4_CONFIG_LEN,
 	"CDC H4 configuration descriptor length");
-_Static_assert(sizeof(s_ConfigNative) == HCI_USB_NATIVE_CONFIG_LEN,
-	"native configuration descriptor length");
 _Static_assert(sizeof(s_ConfigLog) == HCI_USB_LOG_CONFIG_LEN,
 	"log configuration descriptor length");
+
+static uint8_t HciUsbFreeEndpoint(uint16_t InMask, uint16_t OutMask,
+								  bool Pair)
+{
+	for (uint8_t ep = 1U; ep < 16U; ep++)
+	{
+		const uint16_t bit = (uint16_t)(1U << ep);
+		if ((InMask & bit) == 0U && (!Pair || (OutMask & bit) == 0U))
+		{
+			return ep;
+		}
+	}
+	return 0U;
+}
+
+bool HciUsbDescriptorSetHci(const UsbdHciDesc_t *pHci)
+{
+	if (pHci == NULL || pHci->Association.bFirstInterface != 0U ||
+		pHci->Association.bInterfaceCount != 2U ||
+		pHci->Hci.bInterfaceNumber != 0U ||
+		pHci->Sync.bInterfaceNumber != 1U ||
+		(pHci->EventIn.bEndpointAddress & USB_ENDPADDR_DIR_MASK) == 0U ||
+		(pHci->AclOut.bEndpointAddress & USB_ENDPADDR_DIR_MASK) != 0U ||
+		(pHci->AclIn.bEndpointAddress & USB_ENDPADDR_DIR_MASK) == 0U)
+	{
+		return false;
+	}
+
+	const uint8_t eventEp = USB_ENDPADDR_NUM(pHci->EventIn.bEndpointAddress);
+	const uint8_t aclOutEp = USB_ENDPADDR_NUM(pHci->AclOut.bEndpointAddress);
+	const uint8_t aclInEp = USB_ENDPADDR_NUM(pHci->AclIn.bEndpointAddress);
+	if (eventEp == 0U || aclOutEp == 0U || aclOutEp != aclInEp)
+	{
+		return false;
+	}
+
+	uint16_t inMask = (uint16_t)((1U << eventEp) | (1U << aclInEp));
+	const uint16_t outMask = (uint16_t)(1U << aclOutEp);
+	const uint8_t notifyEp = HciUsbFreeEndpoint(inMask, outMask, false);
+	if (notifyEp == 0U)
+	{
+		return false;
+	}
+	inMask |= (uint16_t)(1U << notifyEp);
+	const uint8_t dataEp = HciUsbFreeEndpoint(inMask, outMask, true);
+	if (dataEp == 0U)
+	{
+		return false;
+	}
+
+	const uint8_t header[] = {
+		HCI_USB_CONFIG_HEADER(HCI_USB_NATIVE_CONFIG_LEN, 4U),
+	};
+	const uint8_t log[] = {
+		HCI_USB_CDC_FUNCTION(2U, HCI_USB_STRING_LOG,
+			USB_ENDPADDR_DIRIN(notifyEp), USB_ENDPADDR_DIROUT(dataEp),
+			USB_ENDPADDR_DIRIN(dataEp)),
+	};
+	_Static_assert(sizeof(header) == 9U, "configuration header length");
+	_Static_assert(sizeof(log) == HCI_USB_CDC_FUNCTION_LEN,
+		"native log CDC descriptor length");
+
+	memcpy(s_ConfigNative, header, sizeof(header));
+	memcpy(&s_ConfigNative[sizeof(header)], pHci, sizeof(*pHci));
+	memcpy(&s_ConfigNative[sizeof(header) + sizeof(*pHci)], log, sizeof(log));
+	s_NativeConfigValid = true;
+	return true;
+}
 
 bool HciUsbDescriptorSetMode(HciUsbDescriptorMode_t Mode)
 {
@@ -133,6 +181,10 @@ bool HciUsbDescriptorSetMode(HciUsbDescriptorMode_t Mode)
 		return false;
 	}
 	s_DescriptorMode = Mode;
+	if (Mode == HCI_USB_DESCRIPTOR_NATIVE_HCI)
+	{
+		s_NativeConfigValid = false;
+	}
 	return true;
 }
 
@@ -193,6 +245,10 @@ static const uint8_t *HciUsbConfigDescriptor(uint8_t Index,
 	switch (s_DescriptorMode)
 	{
 		case HCI_USB_DESCRIPTOR_NATIVE_HCI:
+			if (!s_NativeConfigValid)
+			{
+				return NULL;
+			}
 			*pLength = sizeof(s_ConfigNative);
 			return s_ConfigNative;
 		case HCI_USB_DESCRIPTOR_LOG_ONLY:

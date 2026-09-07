@@ -64,7 +64,7 @@ static_assert(HCI_SDC_ACL_TRACK_HANDLES >=
 static HciApp_t *s_pApp;
 static UsbdCdc s_HostCdc;
 static UsbdCdc s_LogCdc;
-static HciUsb s_HciUsb;
+static UsbdHci s_HciUsb;
 
 #ifdef UART_PINS
 static const IOPinCfg_t s_HciUartPins[] = UART_PINS;
@@ -176,15 +176,24 @@ static bool HciAppUsbSetup(HciApp_t *pApp, HciUsbDescriptorMode_t Mode)
     // CDC interfaces and endpoints from the remaining USB resources.
     if (Mode == HCI_USB_DESCRIPTOR_NATIVE_HCI)
     {
-        HciUsbCfg_t hciCfg = {};
+        UsbdHciCfg_t hciCfg = {};
         hciCfg.bBlocking = true;
         hciCfg.RxFifoMemSize = sizeof(pApp->UsbRxFifoMem);
         hciCfg.pRxFifoMem = pApp->UsbRxFifoMem;
         hciCfg.TxFifoMemSize = sizeof(pApp->UsbTxFifoMem);
         hciCfg.pTxFifoMem = pApp->UsbTxFifoMem;
         hciCfg.DevNo = 0;
+        hciCfg.InterfaceString = HCI_USB_STRING_BT;
         hciCfg.EvtCB = HciAppUsbEvent;
         if (!s_HciUsb.Init(hciCfg))
+        {
+            UsbDisable(0);
+            return false;
+        }
+
+        UsbdHciDesc_t hciDesc = {};
+        if (!s_HciUsb.MakeDesc(&hciDesc, USB_SPEED_FULL) ||
+            !HciUsbDescriptorSetHci(&hciDesc))
         {
             UsbDisable(0);
             return false;
@@ -348,7 +357,7 @@ static bool HciAppUsbHostIsOpen(const HciApp_t *pApp)
         return false;
     }
 
-    return pApp->UsbHciNative ? s_HciUsb.IsOpen()
+    return pApp->UsbHciNative ? s_HciUsb.Rate() != 0U
                               : s_HostCdc.IsPortOpen();
 }
 

@@ -151,8 +151,8 @@ UART H:4 / log-only USB    CDC 0 log
 log path is non-blocking and is available without semihosting. `HCI_TRACE=1`
 adds the semihosting copy; it is not required for the USB log.
 
-See [USB-HCI.md](USB-HCI.md) for the endpoint layout, Bulk Serialization and USB
-state-machine behavior.
+See [USB-HCI.md](USB-HCI.md) for transport ownership, allocator-owned endpoint
+layout and USB state-machine behavior.
 
 ## Python HCI and BLE validation library
 
@@ -349,7 +349,7 @@ binary inputs.
 ## Architecture
 
 ```text
-native USB HCI ---> HciUsb packet DeviceIntrf -------------------+
+native USB HCI ---> IOsonata UsbdHci packet DeviceIntrf --------+
                                                                   |
 USB CDC/H:4 ---> UsbdCdcIntrf ---> H:4 packet adapter -----------+--> HCI controller
                                                                   |
