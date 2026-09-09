@@ -26,6 +26,7 @@
 #define HCI_USB_FS_BULK_MPS			BT_HCI_USB_ACL_FS_MPS
 #define HCI_USB_EVENT_MPS			BT_HCI_USB_EVENT_FS_MPS
 #define HCI_USB_PKT_BLKSIZE			BT_HCI_USB_ACL_PKT_BLKSIZE
+#define HCI_USB_SCO_MAX_MPS			BT_HCI_USB_SCO_MAX_MPS
 
 #define HCI_USB_HCI_TRANSPORT_CDC_H4	1
 #define HCI_USB_HCI_TRANSPORT_NATIVE	2
@@ -49,6 +50,7 @@ extern "C" {
 bool HciUsbDescriptorSetMode(HciUsbDescriptorMode_t Mode);
 bool HciUsbDescriptorSetHci(const BtHciUsbDesc_t *pHci);
 bool HciUsbDescriptorSetSerialHci(const BtHciUsbSerialDesc_t *pHci);
+bool HciUsbDescriptorSetFullHci(const BtHciUsbFullDesc_t *pHci);
 uint16_t HciUsbDescriptorVid(void);
 uint16_t HciUsbDescriptorPid(HciUsbDescriptorMode_t Mode);
 

@@ -38,6 +38,7 @@ TESTS += hci_usb hci_controller_invalid_host \
          hci_controller_local_commands
 hci_usb_SRC := $(IOSONATA_ROOT)/src/bluetooth/bt_hci_usb.cpp \
                $(IOSONATA_ROOT)/src/usb/usb_intrf.cpp \
+               $(IOSONATA_ROOT)/src/usb/usb_iso.cpp \
                $(USB_DESC_OBJ) \
                $(CFIFO_OBJ)
 hci_controller_invalid_host_SRC := $(SRC)/hci_controller.cpp \

@@ -182,8 +182,10 @@ static bool HciAppUsbSetup(HciApp_t *pApp, HciUsbDescriptorMode_t Mode)
     // CDC interfaces and endpoints from the remaining USB resources.
     if (Mode == HCI_USB_DESCRIPTOR_NATIVE_HCI)
     {
+        BtHciUsbFullDesc_t hciDesc = {};
         BtHciUsbCfg_t hciCfg = {};
         hciCfg.bBlocking = true;
+        hciCfg.bSco = true;
         hciCfg.bBulkSerialization = true;
         hciCfg.RxFifoMemSize = sizeof(pApp->UsbRxFifoMem);
         hciCfg.pRxFifoMem = pApp->UsbRxFifoMem;
@@ -191,16 +193,10 @@ static bool HciAppUsbSetup(HciApp_t *pApp, HciUsbDescriptorMode_t Mode)
         hciCfg.pTxFifoMem = pApp->UsbTxFifoMem;
         hciCfg.DevNo = 0;
         hciCfg.InterfaceString = HCI_USB_STRING_BT;
+        hciCfg.pFullDesc = &hciDesc;
         hciCfg.EvtCB = HciAppUsbEvent;
-        if (!s_HciUsb.Init(hciCfg))
-        {
-            UsbDisable(0);
-            return false;
-        }
-
-        BtHciUsbSerialDesc_t hciDesc = {};
-        if (!s_HciUsb.MakeSerialDesc(&hciDesc, USB_SPEED_FULL) ||
-            !HciUsbDescriptorSetSerialHci(&hciDesc))
+        if (!s_HciUsb.Init(hciCfg) ||
+            !HciUsbDescriptorSetFullHci(&hciDesc))
         {
             UsbDisable(0);
             return false;
@@ -617,7 +613,6 @@ bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode, HciTarget_t Target)
     pApp->Mode = Mode;
     pApp->Target = Target;
     pApp->UsbHciNative = Mode == HCI_APP_MODE_USB_NATIVE;
-
     HciCountersInit(&pApp->Counters, &pApp->Sdc, &pApp->Controller);
 
     if (!HciSdcNrfxlibInit(&pApp->Sdc,

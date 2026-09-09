@@ -80,7 +80,7 @@
 #define HCI_USB_CDC_FUNCTION_LEN	66U
 #define HCI_USB_CDC_H4_CONFIG_LEN	(9U + 2U * HCI_USB_CDC_FUNCTION_LEN)
 #define HCI_USB_NATIVE_CONFIG_MAX_LEN \
-	(9U + sizeof(BtHciUsbSerialDesc_t) + HCI_USB_CDC_FUNCTION_LEN)
+	(9U + sizeof(BtHciUsbFullDesc_t) + HCI_USB_CDC_FUNCTION_LEN)
 #define HCI_USB_LOG_CONFIG_LEN		(9U + HCI_USB_CDC_FUNCTION_LEN)
 
 static HciUsbDescriptorMode_t s_DescriptorMode = HCI_USB_DESCRIPTOR_CDC_H4;
@@ -124,7 +124,9 @@ static bool HciUsbDescriptorBuildNative(const void *pHci,
 									 size_t HciLength,
 									 uint8_t EventAddr,
 									 uint8_t AclOutAddr,
-									 uint8_t AclInAddr)
+									 uint8_t AclInAddr,
+									 uint8_t ScoOutAddr,
+									 uint8_t ScoInAddr)
 {
 	if (pHci == NULL || HciLength == 0U ||
 		9U + HciLength + HCI_USB_CDC_FUNCTION_LEN > sizeof(s_ConfigNative))
@@ -141,7 +143,21 @@ static bool HciUsbDescriptorBuildNative(const void *pHci,
 	}
 
 	uint16_t inMask = (uint16_t)((1U << eventEp) | (1U << aclInEp));
-	const uint16_t outMask = (uint16_t)(1U << aclOutEp);
+	uint16_t outMask = (uint16_t)(1U << aclOutEp);
+	if (ScoOutAddr != 0U || ScoInAddr != 0U)
+	{
+		const uint8_t scoOutEp = USB_ENDPADDR_NUM(ScoOutAddr);
+		const uint8_t scoInEp = USB_ENDPADDR_NUM(ScoInAddr);
+		if (scoOutEp == 0U || scoInEp == 0U || scoOutEp != scoInEp ||
+			(ScoOutAddr & USB_ENDPADDR_DIR_MASK) != 0U ||
+			(ScoInAddr & USB_ENDPADDR_DIR_MASK) == 0U)
+		{
+			return false;
+		}
+		inMask |= (uint16_t)(1U << scoInEp);
+		outMask |= (uint16_t)(1U << scoOutEp);
+	}
+
 	const uint8_t notifyEp = HciUsbFreeEndpoint(inMask, outMask, false);
 	if (notifyEp == 0U)
 	{
@@ -176,6 +192,27 @@ static bool HciUsbDescriptorBuildNative(const void *pHci,
 	return true;
 }
 
+static bool HciUsbSerialDescriptorValid(const BtHciUsbSerialDesc_t *pHci)
+{
+	return pHci != NULL &&
+		pHci->Association.bFirstInterface == 0U &&
+		pHci->Association.bInterfaceCount == 2U &&
+		pHci->Hci.bInterfaceNumber == 0U &&
+		pHci->Hci.bAlternateSetting == 0U &&
+		pHci->Serialized.Interface.bInterfaceNumber == 0U &&
+		pHci->Serialized.Interface.bAlternateSetting == 1U &&
+		pHci->Serialized.Interface.bNumEndpoints == 2U &&
+		pHci->Sync.bInterfaceNumber == 1U &&
+		pHci->Sync.bAlternateSetting == 0U &&
+		(pHci->EventIn.bEndpointAddress & USB_ENDPADDR_DIR_MASK) != 0U &&
+		(pHci->AclOut.bEndpointAddress & USB_ENDPADDR_DIR_MASK) == 0U &&
+		(pHci->AclIn.bEndpointAddress & USB_ENDPADDR_DIR_MASK) != 0U &&
+		pHci->Serialized.Out.bEndpointAddress == pHci->AclOut.bEndpointAddress &&
+		pHci->Serialized.In.bEndpointAddress == pHci->AclIn.bEndpointAddress &&
+		(pHci->Serialized.Out.bmAttributes & 0x03U) == USB_ENDPATT_TRANS_BULK &&
+		(pHci->Serialized.In.bmAttributes & 0x03U) == USB_ENDPATT_TRANS_BULK;
+}
+
 bool HciUsbDescriptorSetHci(const BtHciUsbDesc_t *pHci)
 {
 	if (pHci == NULL || pHci->Association.bFirstInterface != 0U ||
@@ -191,38 +228,62 @@ bool HciUsbDescriptorSetHci(const BtHciUsbDesc_t *pHci)
 
 	return HciUsbDescriptorBuildNative(
 		pHci, sizeof(*pHci), pHci->EventIn.bEndpointAddress,
-		pHci->AclOut.bEndpointAddress, pHci->AclIn.bEndpointAddress);
+		pHci->AclOut.bEndpointAddress, pHci->AclIn.bEndpointAddress, 0U, 0U);
 }
 
 bool HciUsbDescriptorSetSerialHci(const BtHciUsbSerialDesc_t *pHci)
 {
-	if (pHci == NULL || pHci->Association.bFirstInterface != 0U ||
-		pHci->Association.bInterfaceCount != 2U ||
-		pHci->Hci.bInterfaceNumber != 0U ||
-		pHci->Hci.bAlternateSetting != 0U ||
-		pHci->Serialized.Interface.bInterfaceNumber != 0U ||
-		pHci->Serialized.Interface.bAlternateSetting != 1U ||
-		pHci->Serialized.Interface.bNumEndpoints != 2U ||
-		pHci->Sync.bInterfaceNumber != 1U ||
-		pHci->Sync.bAlternateSetting != 0U ||
-		(pHci->EventIn.bEndpointAddress & USB_ENDPADDR_DIR_MASK) == 0U ||
-		(pHci->AclOut.bEndpointAddress & USB_ENDPADDR_DIR_MASK) != 0U ||
-		(pHci->AclIn.bEndpointAddress & USB_ENDPADDR_DIR_MASK) == 0U ||
-		pHci->Serialized.Out.bEndpointAddress !=
-			pHci->AclOut.bEndpointAddress ||
-		pHci->Serialized.In.bEndpointAddress !=
-			pHci->AclIn.bEndpointAddress ||
-		(pHci->Serialized.Out.bmAttributes & 0x03U) !=
-			USB_ENDPATT_TRANS_BULK ||
-		(pHci->Serialized.In.bmAttributes & 0x03U) !=
-			USB_ENDPATT_TRANS_BULK)
+	if (!HciUsbSerialDescriptorValid(pHci))
 	{
 		return false;
 	}
 
 	return HciUsbDescriptorBuildNative(
 		pHci, sizeof(*pHci), pHci->EventIn.bEndpointAddress,
-		pHci->AclOut.bEndpointAddress, pHci->AclIn.bEndpointAddress);
+		pHci->AclOut.bEndpointAddress, pHci->AclIn.bEndpointAddress, 0U, 0U);
+}
+
+bool HciUsbDescriptorSetFullHci(const BtHciUsbFullDesc_t *pHci)
+{
+	if (pHci == NULL || !HciUsbSerialDescriptorValid(&pHci->Base))
+	{
+		return false;
+	}
+
+	const uint8_t scoOutAddr = pHci->Alt[0].Out.bEndpointAddress;
+	const uint8_t scoInAddr = pHci->Alt[0].In.bEndpointAddress;
+	const uint8_t scoEp = USB_ENDPADDR_NUM(scoOutAddr);
+	if (scoEp == 0U || scoEp != USB_ENDPADDR_NUM(scoInAddr))
+	{
+		return false;
+	}
+
+	for (uint8_t i = 0U; i < BT_HCI_USB_SCO_ALT_COUNT; i++)
+	{
+		const BtHciUsbScoAltDesc_t *pAlt = &pHci->Alt[i];
+		if (pAlt->Interface.bInterfaceNumber != pHci->Base.Sync.bInterfaceNumber ||
+			pAlt->Interface.bAlternateSetting != (uint8_t)(i + 1U) ||
+			pAlt->Interface.bNumEndpoints != 2U ||
+			(pAlt->Out.bEndpointAddress & USB_ENDPADDR_DIR_MASK) != 0U ||
+			(pAlt->In.bEndpointAddress & USB_ENDPADDR_DIR_MASK) == 0U ||
+			USB_ENDPADDR_NUM(pAlt->Out.bEndpointAddress) != scoEp ||
+			USB_ENDPADDR_NUM(pAlt->In.bEndpointAddress) != scoEp ||
+			(pAlt->Out.bmAttributes & 0x03U) != USB_ENDPATT_TRANS_ISO ||
+			(pAlt->In.bmAttributes & 0x03U) != USB_ENDPATT_TRANS_ISO ||
+			pAlt->Out.wMaxPacketSize == 0U ||
+			pAlt->Out.wMaxPacketSize > HCI_USB_SCO_MAX_MPS ||
+			pAlt->In.wMaxPacketSize != pAlt->Out.wMaxPacketSize ||
+			pAlt->Out.bInterval == 0U ||
+			pAlt->In.bInterval != pAlt->Out.bInterval)
+		{
+			return false;
+		}
+	}
+
+	return HciUsbDescriptorBuildNative(
+		pHci, sizeof(*pHci), pHci->Base.EventIn.bEndpointAddress,
+		pHci->Base.AclOut.bEndpointAddress, pHci->Base.AclIn.bEndpointAddress,
+		scoOutAddr, scoInAddr);
 }
 
 bool HciUsbDescriptorSetMode(HciUsbDescriptorMode_t Mode)
