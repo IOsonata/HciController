@@ -150,7 +150,8 @@ static const char *HciAppHostName(const HciApp_t *pApp)
 
 static bool HciAppUsbSetup(HciApp_t *pApp, HciUsbDescriptorMode_t Mode)
 {
-    if (!HciUsbDescriptorSetMode(Mode))
+    if (Mode < HCI_USB_DESCRIPTOR_LOG_ONLY ||
+        Mode > HCI_USB_DESCRIPTOR_NATIVE_HCI)
     {
         return false;
     }
@@ -160,29 +161,33 @@ static bool HciAppUsbSetup(HciApp_t *pApp, HciUsbDescriptorMode_t Mode)
 
     UsbCfg_t usbCfg = {};
     usbCfg.DevNo = 0;
+    usbCfg.Mode = USB_MODE_DEVICE;
     usbCfg.Vid = HciUsbDescriptorVid();
     usbCfg.Pid = HciUsbDescriptorPid(Mode);
     usbCfg.DevVer = HCI_CONTROLLER_VERSION_BCD;
     usbCfg.pManufacturer = "I-SYST inc.";
     usbCfg.pProduct = "I-SYST HCI Controller";
     usbCfg.pSerial = nullptr;
-    usbCfg.pFuncName = "Bluetooth HCI";
-    usbCfg.NbCdc = Mode == HCI_USB_DESCRIPTOR_CDC_H4 ? 2 : 1;
+    usbCfg.pFuncName = "HCI Controller";
     usbCfg.IntPrio = 7;
+    usbCfg.DeviceClass = USB_DEVCLASS_MISC;
+    usbCfg.DeviceSubClass = 2U;
+    usbCfg.DeviceProtocol = 1U;
     usbCfg.bSelfPowered = false;
+    usbCfg.bRemoteWakeup = false;
     usbCfg.bLowPowerSuspend = false;
     usbCfg.MaxPower = 100U;
-    usbCfg.DescHandler = HciUsbDescHandler;
+    usbCfg.EvtHandler = nullptr;
     if (!UsbInit(&usbCfg))
     {
         return false;
     }
 
-    // Register the host function before the diagnostic CDC. IOsonata assigns
-    // CDC interfaces and endpoints from the remaining USB resources.
+    // Register the host class before the diagnostic CDC. IOsonata allocates
+    // interfaces/endpoints and assembles the complete configuration descriptor
+    // from the class-owned descriptor fragments in registration order.
     if (Mode == HCI_USB_DESCRIPTOR_NATIVE_HCI)
     {
-        BtHciUsbFullDesc_t hciDesc = {};
         BtHciUsbCfg_t hciCfg = {};
         hciCfg.bBlocking = true;
         hciCfg.bSco = true;
@@ -192,11 +197,9 @@ static bool HciAppUsbSetup(HciApp_t *pApp, HciUsbDescriptorMode_t Mode)
         hciCfg.TxFifoMemSize = sizeof(pApp->UsbTxFifoMem);
         hciCfg.pTxFifoMem = pApp->UsbTxFifoMem;
         hciCfg.DevNo = 0;
-        hciCfg.InterfaceString = HCI_USB_STRING_BT;
-        hciCfg.pFullDesc = &hciDesc;
+        hciCfg.InterfaceString = HCI_USB_STRING_FUNCTION;
         hciCfg.EvtCB = HciAppUsbEvent;
-        if (!s_HciUsb.Init(hciCfg) ||
-            !HciUsbDescriptorSetFullHci(&hciDesc))
+        if (!s_HciUsb.Init(hciCfg))
         {
             UsbDisable(0);
             return false;

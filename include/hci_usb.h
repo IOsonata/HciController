@@ -1,11 +1,11 @@
 /**-------------------------------------------------------------------------
 @file	hci_usb.h
 
-@brief	USB identity and descriptor integration for HciController.
+@brief	USB identity integration for HciController.
 
-		Native Bluetooth transport is implemented by IOsonata BtHciUsb. This
-		header retains only HciController product identities, transport-mode
-		selection and composite descriptor assembly.
+		Native Bluetooth transport, class registration and descriptor assembly
+		are implemented by IOsonata. This header retains only HciController
+		product identities and transport-mode selection.
 
 @author	Nguyen Hoan Hoang
 @date	September 2026
@@ -16,7 +16,6 @@
 #ifndef HCI_USB_H
 #define HCI_USB_H
 
-#include <stdbool.h>
 #include <stdint.h>
 
 #include "bluetooth/bt_hci_usb.h"
@@ -35,7 +34,7 @@
 #define HCI_USB_HCI_TRANSPORT HCI_USB_HCI_TRANSPORT_NATIVE
 #endif
 
-#define HCI_USB_STRING_BT	4U
+#define HCI_USB_STRING_FUNCTION	4U
 
 typedef enum {
 	HCI_USB_DESCRIPTOR_LOG_ONLY = 0,
@@ -47,16 +46,8 @@ typedef enum {
 extern "C" {
 #endif
 
-bool HciUsbDescriptorSetMode(HciUsbDescriptorMode_t Mode);
-bool HciUsbDescriptorSetHci(const BtHciUsbDesc_t *pHci);
-bool HciUsbDescriptorSetSerialHci(const BtHciUsbSerialDesc_t *pHci);
-bool HciUsbDescriptorSetFullHci(const BtHciUsbFullDesc_t *pHci);
 uint16_t HciUsbDescriptorVid(void);
 uint16_t HciUsbDescriptorPid(HciUsbDescriptorMode_t Mode);
-
-const uint8_t *HciUsbDescHandler(uint8_t DescType, uint8_t DescIndex,
-								 uint16_t LangId, UsbSpeed_t Speed,
-								 uint16_t *pLength, void *pContext);
 
 #ifdef __cplusplus
 }

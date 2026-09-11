@@ -28,17 +28,23 @@ include Makefile
 
 MOCK_INCLUDES := -I$(IOSONATA_ROOT)/tests/usb/hostport $(MOCK_INCLUDES)
 
-# The focused trace integration test compiles IOsonata device_intrf.cpp, which
-# contains a GNU C++ variable-length array. Keep that dependency diagnostic
-# visible, but do not promote it to an HciController host-test failure.
+# Focused integration targets compile IOsonata device_intrf.cpp, which contains
+# a GNU C++ variable-length array. Keep that dependency diagnostic visible, but
+# do not promote it to an HciController host-test failure.
 $(HCI_TRACE_TARGET): CXXFLAGS += -Wno-error=vla
+$(BUILD_DIR)/hci_usb_test: CXXFLAGS += -Wno-error=vla
 USB_DESC_OBJ := $(BUILD_DIR)/usb_descriptors_test.o
 
 TESTS += hci_usb hci_controller_invalid_host \
          hci_controller_local_commands
 hci_usb_SRC := $(IOSONATA_ROOT)/src/bluetooth/bt_hci_usb.cpp \
+               $(IOSONATA_ROOT)/src/usb/usb.cpp \
+               $(IOSONATA_ROOT)/src/usb/usbd_epalloc.cpp \
                $(IOSONATA_ROOT)/src/usb/usb_intrf.cpp \
                $(IOSONATA_ROOT)/src/usb/usb_iso.cpp \
+               $(IOSONATA_ROOT)/src/usb/usbd_cdc.cpp \
+               $(IOSONATA_ROOT)/src/usb/usbd_cdc_desc.cpp \
+               $(IOSONATA_ROOT)/src/device_intrf.cpp \
                $(USB_DESC_OBJ) \
                $(CFIFO_OBJ)
 hci_controller_invalid_host_SRC := $(SRC)/hci_controller.cpp \
