@@ -153,6 +153,11 @@ static inline void DeviceIntrfStopTx(DevIntrf_t * const pDev)
     atomic_flag_clear(&pDev->bBusy);
 }
 
+static inline void DeviceIntrfReset(DevIntrf_t * const pDev)
+{
+    pDev->Reset(pDev);
+}
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -186,6 +191,10 @@ public:
     virtual int RxData(uint8_t *pData, int DataLen)
     {
         return DeviceIntrfRxData(*this, pData, DataLen);
+    }
+    virtual void Reset(void)
+    {
+        DeviceIntrfReset(*this);
     }
     virtual ~DeviceIntrf() = default;
 };
