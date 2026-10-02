@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pin ownership and data-path invariants of the IOsonata native HCI class."""
+"""Pin ownership and data-path invariants of the IOsonata Bluetooth HCI USB transport."""
 
 import os
 import sys
@@ -44,33 +44,18 @@ def main(argv):
     print("[ok] HciTrace guards formatting failure before semihosting output")
 
     header = read(os.path.join(root, "include", "hci_usb.h"))
-    usb = read(os.path.join(root, "src", "hci_usb.cpp"))
-    if "class HciUsb : public UsbIntrf" not in header:
-        fail("HciUsb must derive directly from UsbIntrf")
-    for marker in (
-            "dataCfg.EpNo = HCI_USB_BULK_EP_NO;",
-            "dataCfg.TxFifoBlkSize = HCI_USB_PKT_BLKSIZE;",
-            "UsbIntrf::Init(dataCfg)",
-            "UsbCtrlrEpRegister(vDevNo, USB_ENDPADDR_DIRIN(HCI_USB_EVENT_EP_NO)",
-            "UsbRegisterFunc(vDevNo, &cfg)"):
-        if marker not in usb:
-            fail("native HCI USB is missing %s" % marker)
-    print("[ok] HciUsb owns class policy while UsbIntrf owns bulk packet I/O")
-
-    xfer = function_body(usb, "void HciUsb::XferHandler(",
-                         "void HciUsb::ResetHandler(")
-    if "UsbIntrfXferComplete" not in xfer:
-        fail("bulk transfer completion no longer delegates to UsbIntrf")
-
-    event = function_body(usb, "bool HciUsb::SendEventPacket(",
-                          "int HciUsb::SendEvent(")
-    zlp = usb[usb.find("bool HciUsb::SendEventZlp("):]
-    if "UsbCtrlrEpSend(vDevNo, HCI_USB_EVENT_EP_NO" not in event or \
-            "UsbCtrlrEpSend(vDevNo, HCI_USB_EVENT_EP_NO, 0U)" not in zlp:
-        fail("Event-IN data and terminating ZLP must use registered RAM")
-    if "memcpy(vEventTxTransfer" not in event:
-        fail("Event-IN must stage one endpoint packet per controller transfer")
-    print("[ok] Event-IN chains registered DMA packets and its terminating ZLP")
+    if '#include "bluetooth/bt_hci_usb.h"' not in header:
+        fail("native HCI must use IOsonata BtHciUsb")
+    if "usb/usbd_hci.h" in header:
+        fail("native HCI still includes the old USB-owned HCI header")
+    if "class HciUsb" in header or \
+            os.path.exists(os.path.join(root, "src", "hci_usb.cpp")):
+        fail("HciController still contains a private native HCI transport")
+    for stale in ("HciUsbDescriptorSetHci", "HciUsbDescriptorSetSerialHci",
+                  "HciUsbDescriptorSetFullHci", "HciUsbDescHandler"):
+        if stale in header:
+            fail("HciController still exposes custom descriptor assembly: %s" % stale)
+    print("[ok] IOsonata BtHciUsb exclusively owns native HCI transport")
 
     descriptors = read(os.path.join(root, "src", "usb_descriptors.c"))
     app = read(os.path.join(root, "src", "hci_app.cpp"))
@@ -81,27 +66,48 @@ def main(argv):
         fail("CDC runtime must not depend on a logical CDC instance number")
     if 'usbCfg.pProduct = "I-SYST HCI Controller";' not in app:
         fail("USB product identity changed from the released controller")
-    if "HCI_USB_CDC_FUNCTION(2U, HCI_USB_STRING_LOG, 0x84U, 0x05U, 0x85U)" \
-            not in descriptors:
-        fail("native diagnostic CDC descriptor is not on interfaces 2/3, EP4/5")
+
+    for marker in ("HCI_USB_DEVELOPMENT_VID", "HCI_USB_DEVELOPMENT_PID_CDC_H4",
+                   "HCI_USB_DEVELOPMENT_PID_NATIVE", "HCI_USB_DEVELOPMENT_PID_LOG",
+                   "HciUsbDescriptorVid", "HciUsbDescriptorPid"):
+        if marker not in descriptors:
+            fail("USB identity module is missing %s" % marker)
+    for stale in ("s_ConfigNative", "HCI_USB_NATIVE_CONFIG_MAX_LEN",
+                  "HciUsbDescriptorBuildNative", "HciUsbDescHandler",
+                  "HciUsbDescriptorSetFullHci", "HCI_USB_CDC_FUNCTION"):
+        if stale in descriptors:
+            fail("HciController still assembles USB descriptors: %s" % stale)
 
     for stale in (".CtrlIfNo", ".NotifyEpNo", ".DataEpNo", ".ItfNo"):
         if stale in app:
             fail("HciController still configures CDC USB topology: %s" % stale)
+
+    for marker in (
+            "static BtHciUsb s_HciUsb;",
+            "BtHciUsbCfg_t hciCfg = {};",
+            "hciCfg.bSco = false;",
+            "hciCfg.bBulkSerialization = true;",
+            "usbCfg.Mode = USB_MODE_DEVICE;",
+            "usbCfg.DeviceClass = USB_DEVCLASS_MISC;",
+            "usbCfg.DeviceSubClass = 2U;",
+            "usbCfg.DeviceProtocol = 1U;",
+            "usbCfg.bRemoteWakeup = false;",
+            "hciCfg.InterfaceString = HCI_USB_STRING_FUNCTION;"):
+        if marker not in app:
+            fail("native application path is missing %s" % marker)
+
+    for stale in ("usbCfg.NbCdc", "usbCfg.DescHandler", "hciCfg.pFullDesc",
+                  "BtHciUsbFullDesc_t hciDesc", "HciUsbDescriptorSetFullHci"):
+        if stale in app:
+            fail("application still uses pre-main IOsonata USB API: %s" % stale)
 
     native_init = app.find("s_HciUsb.Init(hciCfg)")
     host_cdc_init = app.find("s_HostCdc.Init(hostCfg)")
     log_cdc_init = app.find("s_LogCdc.Init(logCfg)")
     if native_init < 0 or host_cdc_init < 0 or log_cdc_init < 0 or \
             native_init > log_cdc_init or host_cdc_init > log_cdc_init:
-        fail("host USB function must register before the diagnostic CDC")
-
-    registration = function_body(usb, "UsbFuncCfg_t cfg = {};",
-                                 "if (!UsbRegisterFunc(vDevNo, &cfg))")
-    if "HCI_USB_SYNC_RESERVED_EP_NO" not in usb or \
-            registration.count("HCI_USB_SYNC_RESERVED_EP_NO") != 2:
-        fail("native HCI must reserve the synchronous endpoint slot")
-    print("[ok] IOsonata auto allocation preserves released CDC layouts")
+        fail("host USB class must register before the diagnostic CDC")
+    print("[ok] IOsonata main owns HCI/CDC allocation and composite descriptor assembly")
 
     target = read(os.path.join(root, "src", "hci_nrf52840.cpp"))
     if 'extern "C" bool UsbdXtalRequest(void)' not in target or \
@@ -117,9 +123,28 @@ def main(argv):
                   "hci_usb_tinyusb", "hci_usb_rx"):
         if stale in project or stale in cproject:
             fail("Eclipse project still contains %s" % stale)
-    if "PARENT-2-PROJECT_LOC/src/hci_usb.cpp" not in project:
-        fail("Eclipse project does not compile native HciUsb")
-    print("[ok] target project contains native HciUsb and no TinyUSB sources")
+    if "PARENT-2-PROJECT_LOC/src/hci_usb.cpp" in project:
+        fail("Eclipse project still compiles the removed private HCI transport")
+
+    makefile = read(os.path.join(root, "tests", "GNUmakefile"))
+    for marker in (
+            "$(IOSONATA_ROOT)/src/bluetooth/bt_hci_usb.cpp",
+            "$(IOSONATA_ROOT)/src/usb/usb.cpp",
+            "$(IOSONATA_ROOT)/src/usb/usbd_epalloc.cpp",
+            "$(IOSONATA_ROOT)/src/usb/usb_iso.cpp",
+            "$(IOSONATA_ROOT)/src/usb/usbd_cdc.cpp",
+            "$(IOSONATA_ROOT)/src/usb/usbd_cdc_desc.cpp"):
+        if marker not in makefile:
+            fail("host test does not compile current IOsonata main source: %s" % marker)
+    if "$(IOSONATA_ROOT)/src/usb/usbd_hci.cpp" in makefile:
+        fail("host test still references the old USB-owned HCI path")
+
+    hci_usb_test = read(os.path.join(root, "tests", "unit", "hci_usb_test.cpp"))
+    if "UsbGetDescriptor(0, USB_DESCTYPE_CONFIGURATION" not in hci_usb_test or \
+            "sizeof(BtHciUsbSerialDesc_t)" not in hci_usb_test or \
+            "sizeof(UsbdCdcDesc_t)" not in hci_usb_test:
+        fail("native USB integration test does not exercise generic descriptor composition")
+    print("[ok] target consumes IOsonata main HCI, ISO, allocator and descriptor core")
 
     main_cpp = read(os.path.join(root, "src", "main.cpp"))
     udg_guard = ("BOARD == UDG_NRF52840 && "

@@ -1,352 +1,216 @@
-/* Native Bluetooth HCI class tests over the IOsonata USB interface. */
+/* Native Bluetooth HCI composite topology over IOsonata main USB core.
+ * LE-only controller: no SCO alternates. */
 
 #include "hci_usb.h"
+#include "usb/usbd_cdc.h"
 
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
 
-typedef struct {
-	uint8_t *pBuffer;
-	UsbCtrlrEpHandler_t Handler;
-	void *pContext;
-	uint16_t Length;
-	bool Busy;
-} FakeEp_t;
-
-static UsbCfg_t s_UsbCfg;
-static UsbFuncCfg_t s_Function;
-static FakeEp_t s_Ep[256];
-static bool s_Configured;
+static int s_RegisteredEpCount;
+static bool s_CtrlrInitialized;
 
 extern "C" {
-const UsbCfg_t *UsbGetCfg(int DevNo)
-{
-	return DevNo == 0 ? &s_UsbCfg : nullptr;
-}
-
-const char *UsbGetSerial(int DevNo)
-{
-	return DevNo == 0 ? s_UsbCfg.pSerial : nullptr;
-}
-
-bool UsbRegisterFunc(int DevNo, const UsbFuncCfg_t *pCfg)
+bool UsbCtrlrInit(int DevNo, const UsbCtrlrCfg_t *pCfg)
 {
 	if (DevNo != 0 || pCfg == nullptr)
 	{
 		return false;
 	}
-	s_Function = *pCfg;
+	s_CtrlrInitialized = true;
 	return true;
 }
 
-bool UsbConfigured(int DevNo) { return DevNo == 0 && s_Configured; }
+bool UsbCtrlrStart(int DevNo) { return DevNo == 0; }
+void UsbCtrlrStop(int) {}
+void UsbCtrlrProcess(int) {}
+bool UsbCtrlrVbusDetected(int DevNo) { return DevNo == 0; }
 bool UsbCtrlrHighSpeed(int) { return false; }
-bool UsbCtrlrEpOpen(int, const UsbEndPointDesc_t *) { return true; }
-void UsbCtrlrEpClose(int, uint8_t EpAddr) { s_Ep[EpAddr].Busy = false; }
-
-bool UsbCtrlrEpRegister(int, uint8_t EpAddr, uint8_t *pBuffer,
-						UsbCtrlrEpHandler_t Handler, void *pContext)
+void UsbCtrlrIntEnable(int) {}
+void UsbCtrlrIntDisable(int) {}
+void UsbCtrlrConnect(int) {}
+void UsbCtrlrDisconnect(int) {}
+void UsbCtrlrRemoteWakeup(int) {}
+void UsbCtrlrSofEnable(int, bool) {}
+void UsbCtrlrSetAddress(int, uint8_t) {}
+bool UsbCtrlrEpOpen(int DevNo, const UsbEndPointDesc_t *pDesc)
 {
-	s_Ep[EpAddr].pBuffer = pBuffer;
-	s_Ep[EpAddr].Handler = Handler;
-	s_Ep[EpAddr].pContext = pContext;
-	return true;
+	return DevNo == 0 && pDesc != nullptr;
 }
+void UsbCtrlrEpClose(int, uint8_t, bool) {}
+void UsbCtrlrEpCloseAll(int) {}
 
-bool UsbCtrlrEpRxArm(int, uint8_t EpNo)
+void UsbCtrlrEpBind(int DevNo, uint8_t, bool, bool,
+					 UsbCtrlrEpHandler_t Handler, void *)
 {
-	FakeEp_t *pEp = &s_Ep[USB_ENDPADDR_DIROUT(EpNo)];
-	if (pEp->Busy)
+	if (DevNo == 0 && Handler != nullptr)
 	{
-		return false;
+		s_RegisteredEpCount++;
 	}
-	pEp->Busy = true;
-	return true;
 }
 
-bool UsbCtrlrEpSend(int, uint8_t EpNo, uint16_t Length)
+bool UsbCtrlrEpReceive(int DevNo, uint8_t, uint8_t *pBuffer, uint16_t)
 {
-	FakeEp_t *pEp = &s_Ep[USB_ENDPADDR_DIRIN(EpNo)];
-	if (pEp->Busy)
+	return DevNo == 0 && pBuffer != nullptr;
+}
+
+void UsbCtrlrEpProcessEvent(int, uint8_t, bool, UsbCtrlrEvtType_t, uint16_t) {}
+bool UsbCtrlrEpSend(int DevNo, uint8_t, uint8_t *, uint16_t) { return DevNo == 0; }
+bool UsbCtrlrIsoSend(int DevNo, uint8_t, uint8_t *, uint16_t) { return DevNo == 0; }
+uint16_t UsbCtrlrIsoTraceSnapshot(int, uint8_t **ppData)
+{
+	if (ppData != nullptr)
 	{
-		return false;
+		*ppData = nullptr;
 	}
-	pEp->Busy = true;
-	pEp->Length = Length;
-	return true;
+	return 0U;
 }
-
-void DeviceIntrfEnable(DevIntrf_t *pDev)
+int UsbCtrlrEp0Send(int DevNo, uint8_t *, int Length)
 {
-	atomic_fetch_add(&pDev->EnCnt, 1);
-	pDev->Enable(pDev);
+	return DevNo == 0 ? Length : -1;
 }
-
-void DeviceIntrfDisable(DevIntrf_t *pDev)
+bool UsbCtrlrEp0Status(int DevNo, uint8_t) { return DevNo == 0; }
+void UsbCtrlrEpStall(int, uint8_t, bool) {}
+void UsbCtrlrEpClearStall(int, uint8_t, bool) {}
+size_t UsbCtrlrGetSerial(int DevNo, char *pBuff, size_t BuffLen)
 {
-	if (atomic_load(&pDev->EnCnt) > 0)
+	static const char serial[] = "01234567";
+	if (DevNo != 0 || pBuff == nullptr || BuffLen == 0U)
 	{
-		atomic_fetch_sub(&pDev->EnCnt, 1);
+		return 0U;
 	}
-	pDev->Disable(pDev);
-}
-
-int DeviceIntrfRx(DevIntrf_t *pDev, uint32_t DevAddr,
-				   uint8_t *pData, int Length)
-{
-	if (!DeviceIntrfStartRx(pDev, DevAddr))
-	{
-		return 0;
-	}
-	const int count = DeviceIntrfRxData(pDev, pData, Length);
-	DeviceIntrfStopRx(pDev);
-	return count;
-}
-
-int DeviceIntrfTx(DevIntrf_t *pDev, uint32_t DevAddr,
-				   const uint8_t *pData, int Length)
-{
-	if (!DeviceIntrfStartTx(pDev, DevAddr))
-	{
-		return 0;
-	}
-	const int count = DeviceIntrfTxData(pDev, pData, Length);
-	DeviceIntrfStopTx(pDev);
-	return count;
+	const size_t len = sizeof(serial) - 1U;
+	const size_t copy = len < BuffLen - 1U ? len : BuffLen - 1U;
+	memcpy(pBuff, serial, copy);
+	pBuff[copy] = 0;
+	return copy;
 }
 }
 
-static void ResetFake(void)
+static void CheckHci(const BtHciUsbSerialDesc_t *pHci)
 {
-	memset(&s_UsbCfg, 0, sizeof(s_UsbCfg));
-	memset(&s_Function, 0, sizeof(s_Function));
-	memset(s_Ep, 0, sizeof(s_Ep));
-	s_UsbCfg.DevNo = 0;
-	s_UsbCfg.Vid = HciUsbDescriptorVid();
-	s_UsbCfg.Pid = HciUsbDescriptorPid(HCI_USB_DESCRIPTOR_NATIVE_HCI);
-	s_UsbCfg.DevVer = 0x0100U;
-	s_UsbCfg.pManufacturer = "I-SYST inc.";
-	s_UsbCfg.pProduct = "HciController";
-	s_UsbCfg.pSerial = "01234567";
-	s_Configured = true;
+	assert(pHci != nullptr);
+	assert(pHci->Association.bFirstInterface == 0U);
+	assert(pHci->Association.bInterfaceCount == 2U);
+	assert(pHci->Hci.bInterfaceNumber == 0U);
+	assert(pHci->Hci.bAlternateSetting == 0U);
+	assert(pHci->Hci.bNumEndpoints == 3U);
+	assert(pHci->EventIn.bEndpointAddress == USB_ENDPADDR_DIRIN(1U));
+	assert(pHci->AclOut.bEndpointAddress == USB_ENDPADDR_DIROUT(2U));
+	assert(pHci->AclIn.bEndpointAddress == USB_ENDPADDR_DIRIN(2U));
+	assert(pHci->Serialized.Interface.bInterfaceNumber == 0U);
+	assert(pHci->Serialized.Interface.bAlternateSetting == 1U);
+	assert(pHci->Serialized.Interface.bNumEndpoints == 2U);
+	assert(pHci->Serialized.Out.bEndpointAddress ==
+		pHci->AclOut.bEndpointAddress);
+	assert(pHci->Serialized.In.bEndpointAddress ==
+		pHci->AclIn.bEndpointAddress);
+	assert(pHci->Sync.bInterfaceNumber == 1U);
+	assert(pHci->Sync.bAlternateSetting == 0U);
+	assert(pHci->Sync.bNumEndpoints == 0U);
 }
 
-static void CompleteOut(uint8_t EpNo, const uint8_t *pData, uint16_t Length)
+int main(void)
 {
-	FakeEp_t *pEp = &s_Ep[USB_ENDPADDR_DIROUT(EpNo)];
-	assert(pEp->Busy && pEp->Handler != nullptr);
-	memcpy(pEp->pBuffer, pData, Length);
-	pEp->Busy = false;
-	pEp->Handler(USB_ENDPADDR_DIROUT(EpNo), Length,
-				 USB_CTRLR_XFER_SUCCESS, pEp->pContext);
-}
+	alignas(4) uint8_t hciRx[BT_HCI_USB_ACL_RXMEM_SIZE(8U)];
+	alignas(4) uint8_t hciTx[BT_HCI_USB_ACL_TXMEM_SIZE(20U)];
+	alignas(4) uint8_t logRx[USB_INTRF_RXMEM_SIZE(8U, USB_CTRLR_PKT_LEN_MAX(0, BULK))];
+	alignas(4) uint8_t logTx[CFIFO_MEMSIZE(4096U)];
 
-static void CompleteIn(uint8_t EpNo)
-{
-	FakeEp_t *pEp = &s_Ep[USB_ENDPADDR_DIRIN(EpNo)];
-	assert(pEp->Busy && pEp->Handler != nullptr);
-	const uint16_t length = pEp->Length;
-	pEp->Busy = false;
-	pEp->Handler(USB_ENDPADDR_DIRIN(EpNo), length,
-				 USB_CTRLR_XFER_SUCCESS, pEp->pContext);
-}
+	UsbCfg_t usbCfg = {};
+	usbCfg.DevNo = 0;
+	usbCfg.Mode = USB_MODE_DEVICE;
+	usbCfg.Vid = HciUsbDescriptorVid();
+	usbCfg.Pid = HciUsbDescriptorPid(HCI_USB_DESCRIPTOR_NATIVE_HCI);
+	usbCfg.DevVer = 0x0100U;
+	usbCfg.pManufacturer = "I-SYST inc.";
+	usbCfg.pProduct = "I-SYST HCI Controller";
+	usbCfg.pSerial = nullptr;
+	usbCfg.pFuncName = "HCI Controller";
+	usbCfg.IntPrio = 7;
+	usbCfg.DeviceClass = USB_DEVCLASS_MISC;
+	usbCfg.DeviceSubClass = 2U;
+	usbCfg.DeviceProtocol = 1U;
+	usbCfg.bSelfPowered = false;
+	usbCfg.bRemoteWakeup = false;
+	usbCfg.bLowPowerSuspend = false;
+	usbCfg.MaxPower = 100U;
+	assert(UsbInit(&usbCfg));
 
-static void CheckDescriptors(void)
-{
-	assert(HciUsbDescriptorSetMode(HCI_USB_DESCRIPTOR_NATIVE_HCI));
+	BtHciUsb hci;
+	BtHciUsbCfg_t hciCfg = {};
+	hciCfg.DevNo = 0;
+	hciCfg.bBlocking = true;
+	hciCfg.bSco = false;
+	hciCfg.bBulkSerialization = true;
+	hciCfg.RxFifoMemSize = sizeof(hciRx);
+	hciCfg.pRxFifoMem = hciRx;
+	hciCfg.TxFifoMemSize = sizeof(hciTx);
+	hciCfg.pTxFifoMem = hciTx;
+	hciCfg.InterfaceString = HCI_USB_STRING_FUNCTION;
+	assert(hci.Init(hciCfg));
+
+	UsbdCdc log;
+	UsbdCdcCfg_t logCfg = {};
+	logCfg.DevNo = 0;
+	logCfg.bBlocking = true;
+	logCfg.RxFifoMemSize = sizeof(logRx);
+	logCfg.pRxFifoMem = logRx;
+	logCfg.TxFifoMemSize = sizeof(logTx);
+	logCfg.pTxFifoMem = logTx;
+	assert(log.Init(logCfg));
+
+	assert(hci.FirstInterface() == 0U);
+	assert(hci.InterfaceCount() == 2U);
+	assert(hci.EpInMask() == ((1U << 1) | (1U << 2)));
+	assert(hci.EpOutMask() == (1U << 2));
+	assert(log.FirstInterface() == 2U);
+	assert(log.InterfaceCount() == 2U);
+	assert(log.EpInMask() == ((1U << 3) | (1U << 4)));
+	assert(log.EpOutMask() == (1U << 4));
+
 	uint16_t length = 0U;
-	const uint8_t *p = HciUsbDescHandler(USB_DESCTYPE_DEVICE, 0U, 0U,
-		USB_SPEED_FULL, &length, nullptr);
+	const uint8_t *p = UsbGetDescriptor(0, USB_DESCTYPE_DEVICE, 0U, 0U,
+		USB_SPEED_FULL, &length);
 	assert(p != nullptr && length == sizeof(UsbDevDesc_t));
 	const UsbDevDesc_t *pDevice = reinterpret_cast<const UsbDevDesc_t *>(p);
 	assert(pDevice->idVendor == HciUsbDescriptorVid());
 	assert(pDevice->idProduct ==
 		HciUsbDescriptorPid(HCI_USB_DESCRIPTOR_NATIVE_HCI));
+	assert(pDevice->bDeviceClass == USB_DEVCLASS_MISC);
+	assert(pDevice->bDeviceSubClass == 2U);
+	assert(pDevice->bDeviceProtocol == 1U);
 
-	p = HciUsbDescHandler(USB_DESCTYPE_CONFIGURATION, 0U, 0U,
-		USB_SPEED_FULL, &length, nullptr);
-	assert(p != nullptr && length > 9U);
-	assert(((uint16_t)p[2] | ((uint16_t)p[3] << 8)) == length);
-	assert(p[4] == 4U);
-}
+	p = UsbGetDescriptor(0, USB_DESCTYPE_CONFIGURATION, 0U, 0U,
+		USB_SPEED_FULL, &length);
+	assert(p != nullptr);
+	assert(length == sizeof(UsbCfgDesc_t) + sizeof(BtHciUsbSerialDesc_t) +
+		sizeof(UsbdCdcDesc_t));
+	const UsbCfgDesc_t *pConfig = reinterpret_cast<const UsbCfgDesc_t *>(p);
+	assert(pConfig->wTotalLength == length);
+	assert(pConfig->bNumInterfaces == 4U);
+	assert((pConfig->bmAttributes & USB_CONFATT_REMOTE_WAKEUP) == 0U);
 
-int main(void)
-{
-	ResetFake();
-	CheckDescriptors();
+	const size_t hciOffset = sizeof(UsbCfgDesc_t);
+	const BtHciUsbSerialDesc_t *pHci =
+		reinterpret_cast<const BtHciUsbSerialDesc_t *>(&p[hciOffset]);
+	CheckHci(pHci);
 
-	alignas(4) uint8_t rxMem[CFIFO_TOTAL_MEMSIZE(8U, HCI_USB_PKT_BLKSIZE)];
-	alignas(4) uint8_t txMem[CFIFO_TOTAL_MEMSIZE(20U, HCI_USB_PKT_BLKSIZE)];
-	HciUsbCfg_t cfg = {};
-	cfg.bBlocking = true;
-	cfg.RxFifoMemSize = sizeof(rxMem);
-	cfg.pRxFifoMem = rxMem;
-	cfg.TxFifoMemSize = sizeof(txMem);
-	cfg.pTxFifoMem = txMem;
-	cfg.DevNo = 0;
+	const size_t logOffset = hciOffset + sizeof(BtHciUsbSerialDesc_t);
+	const UsbdCdcDesc_t *pLog =
+		reinterpret_cast<const UsbdCdcDesc_t *>(&p[logOffset]);
+	assert(pLog->Association.bFirstInterface == 2U);
+	assert(pLog->Control.bInterfaceNumber == 2U);
+	assert(pLog->Data.bInterfaceNumber == 3U);
+	assert(pLog->Notification.bEndpointAddress == USB_ENDPADDR_DIRIN(3U));
+	assert(pLog->Out.bEndpointAddress == USB_ENDPADDR_DIROUT(4U));
+	assert(pLog->In.bEndpointAddress == USB_ENDPADDR_DIRIN(4U));
 
-	HciUsb usb;
-	assert(usb.Init(cfg));
-	assert(s_Function.FirstInterface == 0U);
-	assert(s_Function.InterfaceCount == 2U);
-	/* Bits 1 and 2 are the event and bulk endpoints. Bit 3 is the
-	 * synchronous-data slot, claimed but never described, so that the
-	 * automatically allocated CDC log lands on endpoints 4 and 5 as the
-	 * released native composite has it. */
-	assert(s_Function.EpInMask == 0x000EU);
-	assert(s_Function.EpOutMask == 0x000CU);
-	assert(s_Function.ConfigHandler(1U, s_Function.pContext));
-	assert(usb.IsOpen() && !usb.BulkSerialization());
-	assert(s_Ep[0x02U].Busy);
+	assert(s_CtrlrInitialized);
+	assert(s_RegisteredEpCount >= 6);
+	assert(UsbEnable(0));
 
-	UsbSetupData_t request = {};
-	request.bmRequestType = USB_REQTYPE_DIRDEV | USB_REQTYPE_CLASS |
-		USB_REQTYPE_INTERFACE;
-	request.bRequest = 0U;
-	request.wIndex = 0U;
-	request.wLength = 3U;
-	uint8_t *pControl = nullptr;
-	uint16_t controlLength = 0U;
-	assert(s_Function.RequestHandler(&request, USB_CTRL_SETUP, &pControl,
-		&controlLength, s_Function.pContext));
-	const uint8_t command[] = { 0x03U, 0x0CU, 0x00U };
-	memcpy(pControl, command, sizeof(command));
-	controlLength = sizeof(command);
-	assert(s_Function.RequestHandler(&request, USB_CTRL_DATA, &pControl,
-		&controlLength, s_Function.pContext));
-	assert(s_Function.RequestHandler(&request, USB_CTRL_COMPLETE, &pControl,
-		&controlLength, s_Function.pContext));
-	uint8_t received[80] = {};
-	assert(DeviceIntrfRx(usb.Data(), HCI_H4_PACKET_COMMAND, received,
-		sizeof(received)) == (int)sizeof(command));
-	assert(memcmp(received, command, sizeof(command)) == 0);
-
-	const uint8_t aclOut[] = { 1U, 0U, 3U, 0U, 0xA1U, 0xA2U, 0xA3U };
-	CompleteOut(HCI_USB_BULK_EP_NO, aclOut, sizeof(aclOut));
-	usb.Process();
-	assert(DeviceIntrfRx(usb.Data(), HCI_H4_PACKET_ACL, received,
-		sizeof(received)) == (int)sizeof(aclOut));
-	assert(memcmp(received, aclOut, sizeof(aclOut)) == 0);
-
-	uint8_t longAclOut[74] = { 2U, 0U, 70U, 0U };
-	for (size_t i = 4U; i < sizeof(longAclOut); i++)
-	{
-		longAclOut[i] = (uint8_t)(0x80U + i);
-	}
-	CompleteOut(HCI_USB_BULK_EP_NO, longAclOut, 64U);
-	usb.Process();
-	assert(DeviceIntrfRx(usb.Data(), HCI_H4_PACKET_ACL, received,
-		sizeof(received)) == 0);
-	CompleteOut(HCI_USB_BULK_EP_NO, &longAclOut[64], 10U);
-	usb.Process();
-	assert(DeviceIntrfRx(usb.Data(), HCI_H4_PACKET_ACL, received,
-		sizeof(received)) == (int)sizeof(longAclOut));
-	assert(memcmp(received, longAclOut, sizeof(longAclOut)) == 0);
-
-	uint8_t fullAclOut[HCI_USB_FS_BULK_MPS] = { 3U, 0U,
-		HCI_USB_FS_BULK_MPS - 4U, 0U };
-	for (size_t i = 4U; i < sizeof(fullAclOut); i++)
-	{
-		fullAclOut[i] = (uint8_t)(0x60U + i);
-	}
-	CompleteOut(HCI_USB_BULK_EP_NO, fullAclOut, sizeof(fullAclOut));
-	usb.Process();
-	assert(DeviceIntrfRx(usb.Data(), HCI_H4_PACKET_ACL, received,
-		sizeof(received)) == (int)sizeof(fullAclOut));
-	assert(memcmp(received, fullAclOut, sizeof(fullAclOut)) == 0);
-	CompleteOut(HCI_USB_BULK_EP_NO, fullAclOut, 0U);
-	usb.Process();
-	assert(usb.InvalidRxCount() == 0U);
-
-	const uint8_t event[] = { 0x0EU, 0x02U, 0x01U, 0x00U };
-	assert(DeviceIntrfTx(usb.Data(), HCI_H4_PACKET_EVENT, event,
-		sizeof(event)) == (int)sizeof(event));
-	assert(s_Ep[0x81U].Busy && s_Ep[0x81U].Length == sizeof(event));
-	assert(memcmp(s_Ep[0x81U].pBuffer, event, sizeof(event)) == 0);
-	CompleteIn(HCI_USB_EVENT_EP_NO);
-
-	uint8_t longEvent[20U] = { 0x0EU, 18U };
-	for (size_t i = 2U; i < sizeof(longEvent); i++)
-	{
-		longEvent[i] = (uint8_t)(0x20U + i);
-	}
-	assert(DeviceIntrfTx(usb.Data(), HCI_H4_PACKET_EVENT, longEvent,
-		sizeof(longEvent)) == (int)sizeof(longEvent));
-	assert(s_Ep[0x81U].Busy && s_Ep[0x81U].Length == HCI_USB_EVENT_MPS);
-	assert(memcmp(s_Ep[0x81U].pBuffer, longEvent, HCI_USB_EVENT_MPS) == 0);
-	CompleteIn(HCI_USB_EVENT_EP_NO);
-	assert(s_Ep[0x81U].Busy && s_Ep[0x81U].Length == 4U);
-	assert(memcmp(s_Ep[0x81U].pBuffer,
-		&longEvent[HCI_USB_EVENT_MPS], 4U) == 0);
-	CompleteIn(HCI_USB_EVENT_EP_NO);
-
-	uint8_t fullEvent[HCI_USB_EVENT_MPS] = { 0x0EU,
-		HCI_USB_EVENT_MPS - 2U };
-	for (size_t i = 2U; i < sizeof(fullEvent); i++)
-	{
-		fullEvent[i] = (uint8_t)i;
-	}
-	assert(DeviceIntrfTx(usb.Data(), HCI_H4_PACKET_EVENT, fullEvent,
-		sizeof(fullEvent)) == (int)sizeof(fullEvent));
-	assert(s_Ep[0x81U].Busy && s_Ep[0x81U].Length == sizeof(fullEvent));
-	CompleteIn(HCI_USB_EVENT_EP_NO);
-	assert(s_Ep[0x81U].Busy && s_Ep[0x81U].Length == 0U);
-	CompleteIn(HCI_USB_EVENT_EP_NO);
-
-	uint8_t aclIn[70] = { 1U, 0U, 66U, 0U };
-	for (size_t i = 4U; i < sizeof(aclIn); i++)
-	{
-		aclIn[i] = (uint8_t)i;
-	}
-	assert(DeviceIntrfTx(usb.Data(), HCI_H4_PACKET_ACL, aclIn,
-		sizeof(aclIn)) == (int)sizeof(aclIn));
-	assert(s_Ep[0x82U].Busy && s_Ep[0x82U].Length == 64U);
-	assert(memcmp(s_Ep[0x82U].pBuffer, aclIn, 64U) == 0);
-	CompleteIn(HCI_USB_BULK_EP_NO);
-	assert(s_Ep[0x82U].Busy && s_Ep[0x82U].Length == 6U);
-	assert(memcmp(s_Ep[0x82U].pBuffer, &aclIn[64], 6U) == 0);
-	CompleteIn(HCI_USB_BULK_EP_NO);
-
-	uint8_t fullAclIn[HCI_USB_FS_BULK_MPS] = { 3U, 0U,
-		HCI_USB_FS_BULK_MPS - 4U, 0U };
-	for (size_t i = 4U; i < sizeof(fullAclIn); i++)
-	{
-		fullAclIn[i] = (uint8_t)(0x40U + i);
-	}
-	assert(DeviceIntrfTx(usb.Data(), HCI_H4_PACKET_ACL, fullAclIn,
-		sizeof(fullAclIn)) == (int)sizeof(fullAclIn));
-	assert(s_Ep[0x82U].Busy && s_Ep[0x82U].Length == sizeof(fullAclIn));
-	CompleteIn(HCI_USB_BULK_EP_NO);
-	assert(s_Ep[0x82U].Busy && s_Ep[0x82U].Length == 0U);
-	CompleteIn(HCI_USB_BULK_EP_NO);
-
-	assert(s_Function.SetInterfaceHandler(0U, HCI_USB_HCI_ALT_SERIALIZED,
-		s_Function.pContext));
-	assert(usb.BulkSerialization());
-	const uint8_t serializedAcl[] = {
-		(uint8_t)HCI_H4_PACKET_ACL, 2U, 0U, 2U, 0U, 0x55U, 0xAAU
-	};
-	CompleteOut(HCI_USB_BULK_EP_NO, serializedAcl, sizeof(serializedAcl));
-	usb.Process();
-	assert(DeviceIntrfRx(usb.Data(), HCI_H4_PACKET_ACL, received,
-		sizeof(received)) == (int)sizeof(serializedAcl) - 1);
-	assert(memcmp(received, &serializedAcl[1], sizeof(serializedAcl) - 1) == 0);
-
-	assert(DeviceIntrfTx(usb.Data(), HCI_H4_PACKET_EVENT, event,
-		sizeof(event)) == (int)sizeof(event));
-	assert(s_Ep[0x82U].Busy && s_Ep[0x82U].Length == sizeof(event) + 1U);
-	assert(s_Ep[0x82U].pBuffer[0] == HCI_H4_PACKET_EVENT);
-	assert(memcmp(&s_Ep[0x82U].pBuffer[1], event, sizeof(event)) == 0);
-	CompleteIn(HCI_USB_BULK_EP_NO);
-
-	assert(usb.CommandCount() == 1U);
-	assert(usb.AclOutCount() == 4U);
-	assert(usb.AclInCount() == 2U);
-	assert(usb.EventInCount() == 4U);
-	assert(usb.InvalidRxCount() == 0U);
-	assert(usb.TxErrorCount() == 0U);
-
-	puts("hci_usb_test: pass");
+	printf("hci_usb_test: pass\n");
 	return 0;
 }

@@ -19,6 +19,7 @@
 #include <stddef.h>
 #include <string.h>
 
+#include "sdc_hci.h"
 #include "sdc_hci_cmd_controller_baseband.h"
 #include "sdc_hci_vs.h"
 #if HCI_CONTROLLER_TARGET_CORE_VERSION >= HCI_CORE_VERSION_6_2
@@ -946,8 +947,13 @@ static void HciSdcAclTrackEvent(HciSdc_t *pSdc,
  * ------------------------------------------------------------------------- */
 
 /*
- * LE Set Periodic Advertising Response Data is variable length. Its direct SDC
- * entry point is reached only after the fixed eight-octet head is present and
+ * Older SDC revisions delay LE Set Periodic Advertising Response Data until
+ * the response has been transmitted. Current nrfxlib defines
+ * SDC_HCI_PAWR_SYNC_RETURN_IMMEDIATELY and returns the command credit directly
+ * from the command handler, so that completion must remain in the dispatcher.
+ *
+ * For the legacy path, the command is variable length. Its direct SDC entry
+ * point is reached only after the fixed eight-octet head is present and
  * Response_Data_Length agrees exactly with the bytes that follow. Mirror that
  * small structural check here so HandlerCallCount can distinguish an SDC call
  * from a guard/local rejection without teaching the generic dispatcher about
@@ -957,6 +963,13 @@ static bool HciSdcDelayedCommandCandidate(const HciCmdDispatch_t *pDispatch,
                                           const uint8_t *pPacket,
                                           size_t PacketLen)
 {
+#if defined(SDC_HCI_PAWR_SYNC_RETURN_IMMEDIATELY) && \
+    SDC_HCI_PAWR_SYNC_RETURN_IMMEDIATELY
+    (void)pDispatch;
+    (void)pPacket;
+    (void)PacketLen;
+    return false;
+#else
     if (pDispatch == NULL || pPacket == NULL ||
         PacketLen < HCI_DISPATCH_COMMAND_HEADER_SIZE)
     {
@@ -979,14 +992,16 @@ static bool HciSdcDelayedCommandCandidate(const HciCmdDispatch_t *pDispatch,
                 HCI_SDC_PAW_RESPONSE_DATA_LEN_OFFSET];
     return paramLen - HCI_SDC_PAW_RESPONSE_FIXED_PARAM_LEN ==
            (size_t)dataLen;
+#endif
 }
 
 /*
- * SDC raises the real Command Complete for the command above later through
- * sdc_hci_get. Once the structurally valid command actually entered its
- * handler, suppress the dispatcher's temporary completion and wait for that
- * controller event. Unknown HCI Command is the exception documented by Nordic:
- * an SDC build that does not support the command has no delayed event coming.
+ * Legacy SDC raises the real Command Complete for the command above later
+ * through sdc_hci_get. Once the structurally valid command actually entered
+ * its handler, suppress the dispatcher's temporary completion and wait for
+ * that controller event. Unknown HCI Command is the exception documented by
+ * Nordic: an SDC build that does not support the command has no delayed event
+ * coming.
  */
 static bool HciSdcDelayCommandComplete(HciSdc_t *pSdc,
                                        uint16_t Opcode,

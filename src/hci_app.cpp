@@ -4,7 +4,7 @@
 @brief	Application-level HCI transport, controller, and target integration.
 
 		Initializes runtime transport modes, SDC routing, target services,
-		diagnostic USB logging, Host state, and orderly controller shutdown.
+	diagnostic USB logging, Host state, and orderly controller shutdown.
 
 @author	Nguyen Hoan Hoang
 @date	August 2026
@@ -64,7 +64,7 @@ static_assert(HCI_SDC_ACL_TRACK_HANDLES >=
 static HciApp_t *s_pApp;
 static UsbdCdc s_HostCdc;
 static UsbdCdc s_LogCdc;
-static HciUsb s_HciUsb;
+static BtHciUsb s_HciUsb;
 
 #ifdef UART_PINS
 static const IOPinCfg_t s_HciUartPins[] = UART_PINS;
@@ -145,7 +145,8 @@ static const char *HciAppHostName(const HciApp_t *pApp)
 
 static bool HciAppUsbSetup(HciApp_t *pApp, HciUsbDescriptorMode_t Mode)
 {
-    if (!HciUsbDescriptorSetMode(Mode))
+    if (Mode < HCI_USB_DESCRIPTOR_LOG_ONLY ||
+        Mode > HCI_USB_DESCRIPTOR_NATIVE_HCI)
     {
         return false;
     }
@@ -154,35 +155,44 @@ static bool HciAppUsbSetup(HciApp_t *pApp, HciUsbDescriptorMode_t Mode)
 
     UsbCfg_t usbCfg = {};
     usbCfg.DevNo = 0;
+    usbCfg.Mode = USB_MODE_DEVICE;
     usbCfg.Vid = HciUsbDescriptorVid();
     usbCfg.Pid = HciUsbDescriptorPid(Mode);
     usbCfg.DevVer = HCI_CONTROLLER_VERSION_BCD;
     usbCfg.pManufacturer = "I-SYST inc.";
     usbCfg.pProduct = "I-SYST HCI Controller";
-    usbCfg.pSerial = nullptr;
-    usbCfg.pFuncName = "Bluetooth HCI";
-    usbCfg.NbCdc = Mode == HCI_USB_DESCRIPTOR_CDC_H4 ? 2 : 1;
+    usbCfg.pSerial = HciUsbDescriptorSerial();
+    usbCfg.pFuncName = "HCI Controller";
     usbCfg.IntPrio = 7;
+    usbCfg.DeviceClass = USB_DEVCLASS_MISC;
+    usbCfg.DeviceSubClass = 2U;
+    usbCfg.DeviceProtocol = 1U;
     usbCfg.bSelfPowered = false;
+    usbCfg.bRemoteWakeup = false;
     usbCfg.bLowPowerSuspend = false;
     usbCfg.MaxPower = 100U;
-    usbCfg.DescHandler = HciUsbDescHandler;
+    usbCfg.EvtHandler = nullptr;
     if (!UsbInit(&usbCfg))
     {
         return false;
     }
 
-    // Register the host function before the diagnostic CDC. IOsonata assigns
-    // CDC interfaces and endpoints from the remaining USB resources.
+    // Register the host class before the diagnostic CDC. IOsonata allocates
+    // interfaces/endpoints and assembles the complete configuration descriptor
+    // from the class-owned descriptor fragments in registration order.
     if (Mode == HCI_USB_DESCRIPTOR_NATIVE_HCI)
     {
-        HciUsbCfg_t hciCfg = {};
+        BtHciUsbCfg_t hciCfg = {};
         hciCfg.bBlocking = true;
+        // LE-only SDC: no SCO data path, so no synchronous alternates.
+        hciCfg.bSco = false;
+        hciCfg.bBulkSerialization = true;
         hciCfg.RxFifoMemSize = sizeof(pApp->UsbRxFifoMem);
         hciCfg.pRxFifoMem = pApp->UsbRxFifoMem;
         hciCfg.TxFifoMemSize = sizeof(pApp->UsbTxFifoMem);
         hciCfg.pTxFifoMem = pApp->UsbTxFifoMem;
         hciCfg.DevNo = 0;
+        hciCfg.InterfaceString = HCI_USB_STRING_FUNCTION;
         hciCfg.EvtCB = HciAppUsbEvent;
         if (!s_HciUsb.Init(hciCfg))
         {
@@ -348,7 +358,7 @@ static bool HciAppUsbHostIsOpen(const HciApp_t *pApp)
         return false;
     }
 
-    return pApp->UsbHciNative ? s_HciUsb.IsOpen()
+    return pApp->UsbHciNative ? s_HciUsb.Rate() != 0U
                               : s_HostCdc.IsPortOpen();
 }
 
@@ -494,6 +504,12 @@ static void HciAppHostProcess(void *pContext)
 
         if (pApp->HostType == HCI_APP_HOST_USB)
         {
+            /*
+             * Bus suspend is not the end of the HCI session. The host keeps
+             * its configuration and its link state across it; a controller
+             * packet that cannot go out while the bus sleeps stays pending in
+             * the bridge and leaves with the first poll after resume.
+             */
             HciAppSetHostOpen(pApp, HciAppUsbHostIsOpen(pApp));
         }
         HciAppDrainLog(pApp);
@@ -501,7 +517,6 @@ static void HciAppHostProcess(void *pContext)
 
     HciControllerProcess(&pApp->Controller);
     HciAppResyncOnIdle(pApp);
-
 }
 
 static bool HciAppControllerInit(HciApp_t *pApp,
@@ -571,7 +586,6 @@ bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode, HciTarget_t Target)
     pApp->Mode = Mode;
     pApp->Target = Target;
     pApp->UsbHciNative = Mode == HCI_APP_MODE_USB_NATIVE;
-
     HciCountersInit(&pApp->Counters, &pApp->Sdc, &pApp->Controller);
 
     if (!HciSdcNrfxlibInit(&pApp->Sdc,

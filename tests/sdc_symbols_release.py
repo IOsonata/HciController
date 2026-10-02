@@ -127,6 +127,10 @@ OPTIONAL_OR_ALTERNATIVE = {
     # to drive classification itself. A multirole build must call both.
     "sdc_support_channel_classification_central",
     "sdc_support_channel_classification_peripheral",
+    # Vendor extension: appends the advertising channel index after RSSI in
+    # standard LE Advertising Report events, which changes the Core event
+    # layout a generic host parses. Not enabled.
+    "sdc_support_chan_idx_in_adv_report",
     # Board/platform integrations, not Bluetooth HCI feature capability.
     "sdc_support_mpsl_coex",
     "sdc_support_mpsl_fem",

@@ -1,44 +1,138 @@
-# Native Bluetooth USB HCI
+# HciController USB HCI transport
 
-HciController supports three host-side HCI transports without changing the
-controller routing layer:
+HciController uses IOsonata's USB device stack: the generic device core, the
+`BtHciUsb` Bluetooth HCI class and the `UsbdCdc` class, all built into the
+IOsonata nRF52840 library. The 1.0.0 release used TinyUSB with a transport
+class of its own; that code is gone.
 
-| Host link | Physical `DeviceIntrf` | Packet framing seen by `HciController` |
+## Transport boundary
+
+HciController always works with complete HCI packets at its controller boundary.
+`DevAddr` identifies the HCI packet type and the packet buffer does not include
+an H:4 indicator.
+
+| Host transport | Wire format | HciController boundary |
 | --- | --- | --- |
-| UART | UART byte stream | H:4 adapter exposes packet `DeviceIntrf` |
-| USB CDC compatibility mode | CDC byte stream | H:4 adapter exposes packet `DeviceIntrf` |
-| Native Bluetooth USB | Bluetooth USB class | native packet `DeviceIntrf` |
+| UART | H:4 byte stream | packet `DeviceIntrf` through H:4 adapter |
+| USB CDC compatibility | H:4 byte stream | packet `DeviceIntrf` through H:4 adapter |
+| Native Bluetooth USB | IOsonata `BtHciUsb` | native packet `DeviceIntrf` |
 
-The common interface at the controller boundary is `DevIntrf_t *`.
-`HciController` does not have a USB-specific controller API.
+Bulk Serialization uses a one-byte H:4 packet indicator on its USB bulk wire
+format. `BtHciUsb` adds/removes that indicator internally.
 
-For every packet-oriented HCI `DeviceIntrf`:
+## Ownership
+
+IOsonata `main` owns the complete USB device architecture used here:
 
 ```text
-DevAddr = HciH4PacketType_t
-pData   = complete HCI packet bytes, without an H:4 indicator
-one successful DeviceIntrfRx/Tx = one complete HCI packet
+UsbInit
+  -> generic USB device core
+      -> UsbDeviceClass registration
+      -> interface/endpoint allocation
+      -> configuration descriptor assembly
+      -> Chapter 9 dispatch
+
+BtHciUsb
+  -> HCI interface
+  -> ACL bulk transport
+  -> Event interrupt transport
+  -> optional Bulk Serialization (enabled here)
+  -> optional synchronous SCO alternates over UsbIsoIntrf (not enabled here)
+
+UsbdCdc
+  -> diagnostic or H:4 CDC ACM function
 ```
 
-`DevAddr` is packet metadata. UART and CDC add/remove the H:4 indicator below
-that boundary; native USB already has packet boundaries.
+HciController does **not** construct USB configuration descriptors and does not
+assign interface or endpoint numbers. Its USB-specific source owns only product
+identity policy (VID/PID per runtime mode) and application-level transport
+selection.
 
-## UART and CDC/H:4
+The application initializes every class before `UsbEnable()`. Each class asks
+IOsonata's allocator for interfaces/endpoints and registers its own descriptor
+fragment. `UsbEnable()` asks the generic core for the complete configuration
+descriptor; the core concatenates registered class fragments in registration
+order.
 
-UART and CDC are byte streams. `HciIntrfTransport` parses and emits H:4 on the
-physical `DeviceIntrf`, then exposes another packet-oriented `DevIntrf_t` above
-it. The H:4 indicator therefore exists only on the UART/CDC wire.
+## Native HCI layout
 
-## Native Bluetooth USB
+Native mode initializes `BtHciUsb` before the diagnostic CDC and requests:
 
-`HciUsb` derives directly from IOsonata's internal `UsbIntrf`. `HciUsb` owns
-Bluetooth class policy and buffers; `UsbIntrf` owns the EP2 packet FIFOs and
-generic endpoint-pair data path. IOsonata's USB controller owns DMA arbitration,
-endpoint registration, interrupts, and transfer completion.
+```text
+bSco                 false
+bBulkSerialization   true
+```
 
-Native mode is a composite USB device: a Bluetooth Controller function plus an
-independent CDC log function. The device descriptor uses the IAD-aware
-composite tuple:
+On nRF52840 the resulting full-speed layout is expected to be:
+
+```text
+interface 0 alt 0   Bluetooth HCI legacy transport
+interface 0 alt 1   Bluetooth HCI Bulk Serialization
+interface 1 alt 0   synchronous interface, no endpoints
+interface 2 alt 0   diagnostic CDC control
+interface 3 alt 0   diagnostic CDC data
+```
+
+The allocator normally assigns:
+
+```text
+Event IN             EP1
+ACL OUT / IN         EP2
+CDC notification IN  EP3
+CDC data OUT / IN    EP4
+```
+
+The 1.0.0 release placed the diagnostic CDC on EP4/EP5 because its static
+descriptor reserved EP3 for the synchronous slot. IOsonata allocates from the
+lowest free endpoint, so the CDC log now sits on EP3/EP4. Hosts find the log
+port by VID/PID and interface class, not by endpoint number.
+
+### HCI interface 0
+
+Alternate setting 0 is the standard Bluetooth USB HCI transport:
+
+| Direction | HCI packet | USB transport |
+| --- | --- | --- |
+| Host -> controller | Command | class OUT control request |
+| Host -> controller | ACL | bulk OUT |
+| Controller -> host | Event | interrupt IN |
+| Controller -> host | ACL | bulk IN |
+
+Alternate setting 1 is Bluetooth HCI Bulk Serialization. It reuses the ACL bulk
+endpoint pair and carries Command, Event, ACL, SCO and ISO packet types with the
+H:4 indicator.
+
+### Synchronous interface 1
+
+Alternate setting 0 only, with no endpoints, as the Bluetooth HCI USB function
+requires. The nRF52840 SoftDevice Controller is an LE controller with no SCO
+data path, so the synchronous alternates `BtHciUsb` can publish (`bSco`) are
+not enabled: they would advertise ISO endpoints that never carry anything.
+CIS/BIS traffic uses HCI packet type `0x05` through Bulk Serialization.
+
+## Runtime modes and USB identities
+
+HciController keeps three runtime modes:
+
+```text
+UART H:4       USB log only
+USB H:4        CDC H:4 + diagnostic CDC
+USB native     BtHciUsb + diagnostic CDC
+```
+
+Development identities are:
+
+| Mode | VID:PID |
+| --- | --- |
+| CDC H:4 | `CAFE:4070` |
+| Native HCI | `CAFE:4071` |
+| Log only | `CAFE:4072` |
+
+Product builds can override `HCI_USB_VID`, `HCI_USB_PID_CDC_H4`,
+`HCI_USB_PID_NATIVE_HCI`, and `HCI_USB_PID_LOG_ONLY`. Define
+`HCI_USB_REQUIRE_ASSIGNED_IDS=1` to reject development IDs at compile time.
+
+The generic IOsonata device descriptor uses the IAD-aware composite tuple:
 
 ```text
 bDeviceClass    0xEF
@@ -46,183 +140,46 @@ bDeviceSubClass 0x02
 bDeviceProtocol 0x01
 ```
 
-The Bluetooth function keeps the Bluetooth Controller tuple in its IAD and
-interface descriptors:
+## Suspend/wake policy
+
+USB bus suspend does not end the HCI session. The device keeps its
+configuration, `BtHciUsb` keeps its endpoint state and the SoftDevice
+Controller keeps its links. A controller packet that cannot be sent while the
+bus sleeps stays pending in the HCI bridge and goes out with the first host
+poll after resume. Remote wakeup is not advertised, so an event raised during
+suspend waits for the host to resume on its own.
+
+The Python host transport resolves the native USB device by VID/PID/serial and
+retries `Read BD_ADDR` for a bounded interval after a host wake, so a resume
+that overlaps a test run is treated as transport settling.
+
+## Validation
+
+The HciController host gate compiles the IOsonata `main` USB components used by
+the integration:
 
 ```text
-bFunctionClass / bInterfaceClass       0xE0
-bFunctionSubClass / bInterfaceSubClass 0x01
-bFunctionProtocol / bInterfaceProtocol 0x01
+src/usb/usb.cpp
+src/usb/usbd_epalloc.cpp
+src/usb/usb_intrf.cpp
+src/usb/usb_iso.cpp
+src/usb/usbd_cdc.cpp
+src/usb/usbd_cdc_desc.cpp
+src/bluetooth/bt_hci_usb.cpp
 ```
 
-The Bluetooth function has two interfaces.
+`hci_usb_test` initializes the real generic USB core, `BtHciUsb` and the
+diagnostic `UsbdCdc`, then verifies the assembled device/configuration
+descriptors, interface allocation and endpoint masks. IOsonata's own USB and
+Bluetooth host tests cover the class internals, ISO service behavior, SCO packet
+assembly/segmentation and controller-port rules.
 
-### Interface 0 alternate 0: legacy Bluetooth USB HCI
+Hardware acceptance remains:
 
-```text
-Host -> Controller Command   EP0 class control transfer
-Controller -> Host Event     interrupt IN
-Host -> Controller ACL       bulk OUT
-Controller -> Host ACL       bulk IN
+```bash
+./.venv/bin/python3 tests/harness/hcicontroller/release_test.py
 ```
 
-There is no H:4 packet indicator on these transfers.
-
-In a composite device, hosts normally address HCI commands to the Bluetooth HCI
-interface. The class driver also accepts device-targeted HCI command requests
-for host compatibility, including the historical `bRequest = 0xE0` form.
-
-### Interface 0 alternate 1: Bulk Serialization
-
-Commands, Events, ACL and ISO use the bulk endpoint pair. Each serialized packet
-carries the standard one-byte HCI packet indicator on the USB wire.
-`HciUsb` removes/adds that indicator below `DeviceIntrf`, so the controller
-still sees a normal packet interface.
-
-ISO HCI data uses Bulk Serialization. It is not mapped onto the legacy USB
-synchronous endpoints.
-
-### Interface 1 alternate 0: zero synchronous bandwidth
-
-The nRF52840 SoftDevice Controller release profile is LE-only and has no SCO
-data path. The required synchronous Bluetooth interface is therefore present at
-alternate setting 0 with no endpoints. Non-zero SCO bandwidth settings are not
-advertised.
-
-The independent CDC function in the native descriptor is the diagnostic log;
-it is not an HCI transport.
-
-## Runtime HCI mode selection
-
-`HCI_USB_HCI_TRANSPORT` is the default USB mode used when no persisted mode is
-available:
-
-```text
-HCI_USB_HCI_TRANSPORT_NATIVE   native Bluetooth USB HCI
-HCI_USB_HCI_TRANSPORT_CDC_H4   CDC byte stream carrying H:4
-```
-
-`HCI_HOST_SELECT` similarly controls the default host family on boards where
-UART is legal. On boards with `HCI_MODE_SWITCH=1`, these are first-boot/default
-choices, not permanent build-time transport locks.
-
-The release board policy is:
-
-| Board | Runtime modes | Button sequence |
-| --- | --- | --- |
-| UDG-NRF52840 family | USB H:4, native USB HCI | USB H:4 <-> native |
-| IBK-NRF52840 | UART H:4, USB H:4, native USB HCI | UART -> USB H:4 -> native -> UART |
-| Thingy:91 | UART H:4 only | none |
-| WildThing51 | UART H:4 only | none |
-| WildThing91 | UART H:4 only | none |
-
-On a confirmed mode-button press, HciController does not write flash while SDC
-is active. It stops the HCI runtime, target USB, SDC and MPSL, writes and
-verifies the new mode in `NVM0`, then resets. The next boot loads the persisted
-mode before USB descriptors or the radio are started.
-
-The selected mode therefore survives software reset and power cycle. The mode
-is not handed through GPREGRET/GPREGRET2 or another bootloader-owned retained
-register.
-
-The physical NVM address is linker-owned and must match the installed DFU
-layout. See [BUILDING.md](BUILDING.md) and
-[nRF52840/ioc/README.md](nRF52840/ioc/README.md) for the build configurations
-and memory maps.
-
-## Diagnostic CDC log
-
-The log is a separate USB CDC function:
-
-```text
-native Bluetooth USB HCI   Bluetooth function + CDC 1 log
-CDC/H:4 compatibility      CDC 0 HCI H:4 + CDC 1 log
-UART host / log-only USB   CDC 0 log
-```
-
-The log function exists independently of HCI transport selection so startup,
-mode and controller diagnostics remain observable without a debugger.
-
-## USB identities
-
-The open-source repository intentionally defaults to development identities:
-
-```text
-VID       0xCAFE
-CDC/H4    PID 0x4070
-native    PID 0x4071
-log-only  PID 0x4072
-bcdDevice 0x0100 for HciController 1.0.0
-```
-
-A product build can override `HCI_USB_VID`, `HCI_USB_PID_CDC_H4`,
-`HCI_USB_PID_NATIVE_HCI` and `HCI_USB_PID_LOG_ONLY`.
-
-Define:
-
-```text
-HCI_USB_REQUIRE_ASSIGNED_IDS=1
-```
-
-for a product build that must fail at compile time if a development USB
-identity is still selected. The USB device release value is derived from
-`FIRMWARE_VERSION`; there is no independent USB release-version setting to
-maintain.
-
-## Official harness transport
-
-The official hardware/release test system is under `tests/harness/`. Reusable
-HCI event, command, transport and CIS/ISO support lives in
-`python/hcicontroller/`; HciController entry points live in
-`tests/harness/hcicontroller/`.
-
-`python/hcicontroller/hci_transport.py` discovers native USB controllers through
-PyUSB/libusb. In legacy native mode it routes commands/events/ACL according to
-the Bluetooth USB endpoints. Bulk Serialization selects alternate setting 1 and
-carries the HCI packet indicator, including HCI ISO packets.
-
-Focused native USB CIS/ISO test:
-
-```sh
-python3 tests/harness/hcicontroller/cis_usb_pair_test.py
-```
-
-With more than two compatible controllers attached, select the pair by USB
-serial number:
-
-```sh
-python3 tests/harness/hcicontroller/cis_usb_pair_test.py \
-    --central SERIAL_A --peripheral SERIAL_B
-```
-
-Full native USB release run:
-
-```sh
-python3 tests/harness/hcicontroller/release_test.py \
-    --transport usb --a SERIAL_A --b SERIAL_B
-```
-
-The release runner uses legacy native USB for ordinary HCI phases and switches
-to Bulk Serialization for ISO phases, so alternate-setting transitions are
-exercised as part of the same release run.
-
-## State-machine rules covered by host tests
-
-The native USB host tests exercise the real configuration descriptor and pin:
-
-- the composite device descriptor is `EF/02/01`, while the Bluetooth IAD and
-  interfaces remain `E0/01/01`;
-- device-targeted EP0 HCI commands are accepted, including historical
-  `bRequest = 0xE0`, while an interface-targeted request must select the
-  Bluetooth HCI interface;
-- failed HCI alternate-setting changes restore the old endpoints and mode;
-- ACL OUT packets spanning multiple 64-byte USB transactions are reassembled
-  before they are exposed through the packet `DeviceIntrf`;
-- a bulk payload whose size is an exact endpoint-MPS multiple gets a terminating
-  ZLP;
-- an exact-MPS Event-IN transfer gets a terminating ZLP;
-- Bulk Serialization removes/adds the packet indicator below `DeviceIntrf`.
-
-See [tests/README.md](tests/README.md) and
-[tests/harness/README.md](tests/harness/README.md) for the source checks and
-hardware validation entry points.
+The release suite validates command routing, connections, periodic procedures,
+PAST/PAwR, native Bulk Serialization, CIS/BIS HCI ISO, recovery and concurrent
+ACL/ISO/event stress.

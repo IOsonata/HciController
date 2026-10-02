@@ -27,11 +27,14 @@ def _bulk_spec(spec):
         spec.target,
         "%s bulk serialization" % spec,
         bulk_serialization=True,
+        usb_identity=spec.usb_identity,
     )
 
 
 def _serial_number(spec):
-    return str(getattr(spec.target, "serial_number", "") or "")
+    identity = getattr(spec, "usb_identity", None) or {}
+    return str(identity.get("serial") or
+               getattr(spec.target, "serial_number", "") or "")
 
 
 def _select(specs, selector, role):

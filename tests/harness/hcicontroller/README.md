@@ -16,7 +16,7 @@ pair_smoke_test.py      basic profile and both ACL role assignments
 release_test.py         full release-strict feature/compliance run
 probe_test.py           broad HCI command/radio probe
 cis_pair_test.py        focused two-controller CIS/ISO over H:4
-cis_usb_pair_test.py    focused CIS/ISO over native USB Bulk Serialization
+cis_usb_pair_test.py    retained for controllers with Bulk Serialization
 ```
 
 The two radios are symmetric. Tests explicitly assign Central/Peripheral,
@@ -24,10 +24,9 @@ advertiser/scanner, sender/receiver, and broadcaster/sink roles as required by
 each phase.
 
 `release_test.py --transport auto` discovers the two controllers independently.
-A release run may therefore use two native USB controllers, two serial H:4
-controllers, or one of each. ISO phases automatically select Bluetooth USB Bulk
-Serialization only for a controller using native USB; a serial controller stays
-on H:4.
+Native USB alternate 0 carries Command, Event and ACL; ISO phases need either
+Bulk Serialization (`cis_usb_pair_test.py`, `--usb-bulk`) or two serial H:4
+controllers.
 
 The release runner reads the capability profile from both controllers, verifies
 the expected release profile, exercises every applicable capability in a valid

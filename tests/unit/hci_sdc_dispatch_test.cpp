@@ -62,30 +62,52 @@ static Response Exchange(uint16_t opcode, const uint8_t *pParams, size_t len)
     }
 
     /*
-     * The routing layer holds the next command until the controller queue has
-     * had the outgoing slot, so a command can be refused once and has to be
-     * offered again, exactly as the H:4 parser does. Model that here rather
-     * than assuming the first offer is taken.
+     * The routing layer may refuse the next command until the controller queue
+     * has had its outgoing turn. That turn can also produce unrelated traffic,
+     * so keep draining it until this command is accepted and its own Command
+     * Complete or Command Status arrives.
      */
     HciH4PacketType_t type = HCI_H4_PACKET_NONE;
     uint8_t out[300];
     size_t outLen = 0U;
     HciControllerGetResult_t result = HCI_CONTROLLER_GET_EMPTY;
     bool put = false;
+    bool matched = false;
 
-    for (unsigned pass = 0U; pass < 4U && result != HCI_CONTROLLER_GET_PACKET;
-         pass++)
+    for (unsigned pass = 0U; pass < 16U && !matched; pass++)
     {
         if (!put)
         {
             put = gOps->Put(gOps->pContext, HCI_H4_PACKET_COMMAND, packet,
                             3U + len);
         }
+
         result = gOps->Get(gOps->pContext, &type, out, sizeof(out), &outLen);
+        if (!put || result != HCI_CONTROLLER_GET_PACKET ||
+            type != HCI_H4_PACKET_EVENT || outLen < 6U)
+        {
+            continue;
+        }
+
+        uint16_t responseOpcode = 0U;
+        if (out[0] == EVENT_COMMAND_COMPLETE)
+        {
+            responseOpcode = (uint16_t)(out[3] | ((uint16_t)out[4] << 8));
+        }
+        else if (out[0] == EVENT_COMMAND_STATUS)
+        {
+            responseOpcode = (uint16_t)(out[4] | ((uint16_t)out[5] << 8));
+        }
+        else
+        {
+            continue;
+        }
+
+        matched = responseOpcode == opcode;
     }
 
     assert(put);
-    assert(result == HCI_CONTROLLER_GET_PACKET);
+    assert(matched);
     assert(type == HCI_H4_PACKET_EVENT);
     assert(outLen >= 6U);
 

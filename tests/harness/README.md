@@ -57,17 +57,17 @@ Focused entry points include:
 pair_smoke_test.py      profile + ACL role validation
 probe_test.py           broad command/radio probe
 cis_pair_test.py        CIS/ISO over H:4
-cis_usb_pair_test.py    CIS/ISO over native USB Bulk Serialization
+cis_usb_pair_test.py    retained for controllers with Bulk Serialization
 release_test.py         complete release acceptance run
 ```
 
 ## Native USB
 
-Legacy Bluetooth USB HCI uses EP0 for commands, interrupt IN for events and bulk
-IN/OUT for ACL. Bulk Serialization uses alternate setting 1 of the Bluetooth
-interface and carries an HCI packet indicator on the bulk endpoint pair. The
-focused native USB CIS/ISO path uses Bulk Serialization so HCI ISO traffic can
-share the packetized bulk transport.
+Legacy Bluetooth USB HCI (alternate 0) uses EP0 for commands, interrupt IN for
+events and bulk IN/OUT for ACL. Alternate 1, Bulk Serialization, carries every
+packet type including ISO on the bulk pair; `cis_usb_pair_test.py` and
+`--usb-bulk` select it. SCO alternates are not advertised. CIS/ISO can also run
+over CDC/UART H:4.
 
 For more than two native controllers, select the required devices by USB serial
 number. Do not rely on enumeration order in an automated fixture.

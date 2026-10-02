@@ -28,7 +28,11 @@ make -C tests run
 The host suite compiles C as GNU C17 and C++ as GNU C++23, matching the
 nRF52840 target project. Target dependencies such as nRF, MPSL, IOsonata,
 TaktOS and the SoftDevice Controller are replaced by the fakes under `stubs/`, except
-where a test deliberately compiles against the real nrfxlib headers.
+where a test deliberately compiles against the real nrfxlib headers. IOsonata
+is not faked: the host builds include its real headers from the sibling
+`../IOsonata` checkout (override with `IOSONATA_ROOT`), and `hci_usb_test`
+compiles the real USB core, `BtHciUsb` and `UsbdCdc` against a fake controller
+port, so an IOsonata API change fails here before it fails on the target.
 
 The Makefile looks for the real nrfxlib tree at the sibling path
 `$(ROOT)/../external/sdk-nrfxlib`. If nrfxlib is elsewhere, override it with an
@@ -101,26 +105,15 @@ python3 tests/harness/hcicontroller/release_test.py
 # Focused CIS/ISO test over H:4 controllers
 python3 tests/harness/hcicontroller/cis_pair_test.py
 
-# Focused CIS/ISO test over two native Bluetooth USB HCI controllers
-python3 tests/harness/hcicontroller/cis_usb_pair_test.py
-
 # Broad command/radio probe
 python3 tests/harness/hcicontroller/probe_test.py --help
 ```
 
-The native USB CIS test auto-selects exactly two compatible controllers. When
-more than two are connected, select them by USB serial number:
-
-```sh
-python3 tests/harness/hcicontroller/cis_usb_pair_test.py \
-    --central SERIAL_A \
-    --peripheral SERIAL_B
-```
-
-Native USB legacy mode carries commands on EP0, events on interrupt IN and ACL
-on bulk IN/OUT. Bulk Serialization uses alternate setting 1 and carries the HCI
-packet indicator on the bulk endpoint pair; the focused native USB CIS test uses
-Bulk Serialization because HCI ISO is carried there.
+Native USB alternate 0 carries commands on EP0, events on interrupt IN and ACL
+on bulk IN/OUT. Alternate 1 is Bulk Serialization: every packet type, ISO
+included, on the bulk pair with an H:4 indicator. `cis_usb_pair_test.py` opens
+both controllers that way. No SCO alternates are advertised; the controller is
+LE only.
 
 ## Harness organization
 

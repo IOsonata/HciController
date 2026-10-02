@@ -28,18 +28,45 @@ include Makefile
 
 MOCK_INCLUDES := -I$(IOSONATA_ROOT)/tests/usb/hostport $(MOCK_INCLUDES)
 
-# The focused trace integration test compiles IOsonata device_intrf.cpp, which
-# contains a GNU C++ variable-length array. Keep that dependency diagnostic
-# visible, but do not promote it to an HciController host-test failure.
+# hci_usb_test compiles the real IOsonata USB stack. Put IOsonata's public
+# headers before HciController's generic host stubs so device_intrf.h and the
+# USB class hierarchy come from the same mainline source set being tested.
+HCI_USB_MOCK_INCLUDES := -I$(IOSONATA_ROOT)/tests/usb/hostport \
+                         -I$(IOSONATA_ROOT)/include \
+                         -I$(STUBS)/sdc -I$(STUBS) -I$(IOSONATA) \
+                         -I$(ROOT)/include
+$(BUILD_DIR)/hci_usb_test: MOCK_INCLUDES := $(HCI_USB_MOCK_INCLUDES)
+
+# Focused integration targets compile IOsonata device_intrf.cpp, which contains
+# a GNU C++ variable-length array. Keep that dependency diagnostic visible, but
+# do not promote it to an HciController host-test failure.
 $(HCI_TRACE_TARGET): CXXFLAGS += -Wno-error=vla
+$(BUILD_DIR)/hci_usb_test: CXXFLAGS += -Wno-error=vla
 USB_DESC_OBJ := $(BUILD_DIR)/usb_descriptors_test.o
 
 TESTS += hci_usb hci_controller_invalid_host \
          hci_controller_local_commands
-hci_usb_SRC := $(SRC)/hci_usb.cpp \
+hci_usb_SRC := $(IOSONATA_ROOT)/src/bluetooth/bt_hci_usb.cpp \
+               $(IOSONATA_ROOT)/src/usb/usb.cpp \
+               $(IOSONATA_ROOT)/src/usb/usbd_epalloc.cpp \
                $(IOSONATA_ROOT)/src/usb/usb_intrf.cpp \
+               $(IOSONATA_ROOT)/src/usb/usb_iso.cpp \
+               $(IOSONATA_ROOT)/src/usb/usbd_cdc.cpp \
+               $(IOSONATA_ROOT)/src/usb/usbd_cdc_desc.cpp \
+               $(IOSONATA_ROOT)/src/app_evt_handler.cpp \
+               $(IOSONATA_ROOT)/src/device_intrf.cpp \
                $(USB_DESC_OBJ) \
                $(CFIFO_OBJ)
+HCI_USB_HEADERS := $(IOSONATA_ROOT)/include/device_intrf.h \
+                   $(IOSONATA_ROOT)/include/bluetooth/bt_hci_usb.h \
+                   $(IOSONATA_ROOT)/include/usb/usb.h \
+                   $(IOSONATA_ROOT)/include/usb/usb_def.h \
+                   $(IOSONATA_ROOT)/include/usb/usb_intrf.h \
+                   $(IOSONATA_ROOT)/include/usb/usb_iso.h \
+                   $(IOSONATA_ROOT)/include/usb/usbd_cdc.h \
+                   $(IOSONATA_ROOT)/include/usb/usbd_epalloc.h
+$(BUILD_DIR)/hci_usb_test: $(HCI_USB_HEADERS)
+
 hci_controller_invalid_host_SRC := $(SRC)/hci_controller.cpp \
                                    $(SRC)/hci_intrf_transport.cpp \
                                    $(SRC)/hci_h4.cpp
@@ -50,7 +77,8 @@ TARGETS += $(BUILD_DIR)/hci_usb_test \
            $(BUILD_DIR)/hci_controller_invalid_host_test \
            $(BUILD_DIR)/hci_controller_local_commands_test
 
-$(USB_DESC_OBJ): $(SRC)/usb_descriptors.c $(ROOT)/include/hci_usb.h | check-root
+$(USB_DESC_OBJ): $(SRC)/usb_descriptors.c $(ROOT)/include/hci_usb.h \
+                 $(IOSONATA_ROOT)/include/bluetooth/bt_hci_usb.h | check-root
 	@mkdir -p $(dir $@)
 	$(CC) -I$(STUBS)/nrfficr $(MOCK_INCLUDES) $(MOCK_DEFINES) $(CFLAGS) \
 	  -c $< -o $@

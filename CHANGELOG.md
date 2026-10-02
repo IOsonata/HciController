@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased
+
+### Host transports
+
+- Native Bluetooth USB HCI is now IOsonata's `BtHciUsb` class on the IOsonata
+  USB device core. TinyUSB and the HciController USB transport class are
+  removed; HciController keeps only VID/PID policy and the serial string.
+- Interface and endpoint numbers are allocated by IOsonata. The diagnostic
+  CDC function moves from EP4/EP5 to EP3/EP4 in native mode. Hosts locate it
+  by VID/PID and interface class.
+- The USB serial string keeps the 1.0.0 byte order (DEVICEID[1] then
+  DEVICEID[0]); IOsonata's default would have reversed it.
+- USB bus suspend keeps the HCI session: configuration, endpoints and links
+  are retained and pending packets go out after resume.
+- No SCO alternate settings are advertised; the controller is LE only.
+
+### Controller
+
+- sdk-nrfxlib baseline moved: per link memory changed, Core 6.2 pool is 93530
+  of 94042 bytes. `sdc_support_chan_idx_in_adv_report` is not enabled since it
+  alters the standard LE Advertising Report layout.
+
+### Tests
+
+- Host suite builds against the real IOsonata headers and USB core; the
+  DeviceIntrf host stub is gone.
+
 ## 1.0.0
 
 Initial HciController source release.

@@ -213,18 +213,22 @@ ifneq ($(strip $(SDC_INCLUDE)),)
 $(SDC_TARGET): $(SDC_SOURCES) | check-root
 	@mkdir -p $(dir $@)
 	$(CXX) -I$(STUBS)/sdclink -I$(STUBS) -I$(SDC_INCLUDE) -I$(ROOT)/include \
+	  -I$(IOSONATA_ROOT)/include \
 	  -DNRF52840_XXAA -DHCI_TRACE=0 $(CXXFLAGS) $(SDC_SOURCES) -o $@
 
 $(SDC_CRITICAL_TARGET): $(SDC_CRITICAL_SOURCES) | check-root
 	@mkdir -p $(dir $@)
 	$(CXX) -I$(STUBS)/sdclink -I$(STUBS) -I$(SDC_INCLUDE) -I$(ROOT)/include \
+	  -I$(IOSONATA_ROOT)/include \
 	  -DNRF52840_XXAA -DHCI_TRACE=0 $(CXXFLAGS) $(SDC_CRITICAL_SOURCES) -o $@
 
 # No stubs/sdc on the path, so the real sdc.h is the one that answers.
 $(RESOURCES_TARGET): $(UNIT)/hci_sdc_resources_test.cpp \
+                     $(UNIT)/hci_sdc_expected_resources.h \
                      $(ROOT)/include/hci_sdc_resources.h | check-root
 	@mkdir -p $(dir $@)
 	$(CXX) -I$(STUBS) -I$(SDC_INCLUDE) -I$(ROOT)/include \
+	  -I$(IOSONATA_ROOT)/include \
 	  -DNRF52840_XXAA -DHCI_TRACE=0 $(CXXFLAGS) \
 	  $(UNIT)/hci_sdc_resources_test.cpp -o $@
 endif
