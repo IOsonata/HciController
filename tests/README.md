@@ -34,6 +34,13 @@ is not faked: the host builds include its real headers from the sibling
 compiles the real USB core, `BtHciUsb` and `UsbdCdc` against a fake controller
 port, so an IOsonata API change fails here before it fails on the target.
 
+The USB test uses the actual `hci_app.cpp` setup and worker queue. It covers
+all three USB layouts, queue saturation and retry, bounded draining, stop/start
+with a pending process event, and a log-only cable attached after startup.
+The nRF52840 test links IOsonata's real shared POWER_CLOCK dispatcher to catch
+duplicate vector ownership and checks MPSL crystal request/release and failure
+cleanup. These host tests do not establish hardware timing or enumeration.
+
 The Makefile looks for the real nrfxlib tree at the sibling path
 `$(ROOT)/../external/sdk-nrfxlib`. If nrfxlib is elsewhere, override it with an
 absolute path:
@@ -129,3 +136,4 @@ available control channel.
 A feature advertised by the DUT must be exercised positively. If the harness
 cannot create the required state, the release result is incomplete/failing;
 `N/A` is reserved for capability outside the target profile.
+

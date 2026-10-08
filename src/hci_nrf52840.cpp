@@ -37,6 +37,8 @@
 #include "coredev/system_core_clock.h"
 #include "crypto_rng_nrf.h"
 #include "hci_trace.h"
+#include "usb/usb.h"
+#include "power_clock_irq_nrf52.h"
 
 #ifndef HCI_NRF52840_LOW_IRQ_PRIORITY
 #define HCI_NRF52840_LOW_IRQ_PRIORITY 7U
@@ -105,7 +107,9 @@ static volatile HciNrf52840AssertRecord_t s_AssertRecord;
 
 /*
  * MPSL owns NRF_CLOCK on this target, so the crystal is taken from MPSL and
- * held for as long as USB is up. Nothing here starts or stops it.
+ * held from target startup until USB is stopped and the target shuts down.
+ * IOsonata's controller clock helper is private; application link-time
+ * UsbdXtalRequest/Release overrides are no longer called.
  */
 /*
  * mpsl_clock_hfclk_request, _is_running and _release carry
@@ -193,22 +197,6 @@ static bool HciNrf52840HfclkStart(HciNrf52840_t *pTarget)
     HciTrace("hfclk: timeout\r\n");
     return HciNrf52840HfclkStartFailed(
         pTarget, HCI_NRF52840_ERR_HFCLK_TIMEOUT);
-}
-
-/* The IOsonata USB controller owns USBD; MPSL owns its crystal. */
-extern "C" bool UsbdXtalRequest(void)
-{
-    return s_pTarget != nullptr && s_pTarget->MpslInitialized &&
-           HciNrf52840HfclkStart(s_pTarget);
-}
-
-extern "C" void UsbdXtalRelease(void)
-{
-    if (s_pTarget != nullptr && s_pTarget->HfclkRequested)
-    {
-        (void)HciNrf52840HfclkRelease();
-        s_pTarget->HfclkRequested = false;
-    }
 }
 
 
@@ -462,7 +450,7 @@ static bool HciNrf52840MpslInit(HciNrf52840_t *pTarget)
     NVIC_EnableIRQ(RADIO_IRQn);
     NVIC_EnableIRQ(RTC0_IRQn);
     NVIC_EnableIRQ(TIMER0_IRQn);
-    NVIC_EnableIRQ(POWER_CLOCK_IRQn);
+    nRFPowerClockIrqEnable(HCI_NRF52840_CLOCK_IRQ_PRIORITY);
     NVIC_EnableIRQ(SWI5_EGU5_IRQn);
 
     pTarget->MpslInitialized = true;
@@ -542,7 +530,12 @@ static bool HciNrf52840Start(void *pContext)
         return false;
     }
 
-    if (!HciNrf52840SdcInit(pTarget))
+    // HciApp initializes the USB classes before starting the target, and
+    // enables USB only after this succeeds. Hold an MPSL XO request for that
+    // entire lifetime, including cable removal and reconnect. UART-only
+    // startup has no initialized USB configuration and takes no request.
+    if ((UsbGetCfg(0) != nullptr && !HciNrf52840HfclkStart(pTarget)) ||
+        !HciNrf52840SdcInit(pTarget))
     {
         HciNrf52840Stop(pTarget);
         return false;
@@ -661,9 +654,13 @@ extern "C" void TIMER0_IRQHandler(void)
     MPSL_IRQ_TIMER0_Handler();
 }
 
-extern "C" void POWER_CLOCK_IRQHandler(void)
+extern "C" void nRFClockIrqHandler(void)
 {
-    MPSL_IRQ_CLOCK_Handler();
+    // USB can enable the shared vector before MPSL starts.
+    if (s_pTarget != nullptr && s_pTarget->MpslInitialized)
+    {
+        MPSL_IRQ_CLOCK_Handler();
+    }
 }
 
 
@@ -829,3 +826,4 @@ HciTarget_t HciNrf52840Target(void)
     HciTarget_t target = { &s_Nrf52840Ops, &s_Nrf52840 };
     return target;
 }
+

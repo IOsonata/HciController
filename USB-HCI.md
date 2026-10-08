@@ -54,6 +54,39 @@ fragment. `UsbEnable()` asks the generic core for the complete configuration
 descriptor; the core concatenates registered class fragments in registration
 order.
 
+## USB worker and MPSL integration
+
+The application overrides `UsbEvtQue` with a static 16-entry CFifo, following
+IOsonata's USB TaktOS examples. Producers copy the event ID, context and handler
+with interrupts masked and wake the existing HCI worker. That worker alone
+executes deferred USB callbacks, both during enumeration and in normal service.
+It retries refused process work with `UsbCheckStatus()` and wakes itself when a
+bounded drain leaves queued work. It does not call `UsbProcess()` directly or
+drain the bare-metal AppEvt queue. Nordic endpoint data callbacks still wake the
+worker directly from the USB interrupt.
+
+The queue survives USB stop/start so a queued core process event is not lost.
+It is not executed while USB is stopped: a process callback can reconnect a
+device whose cable is still present. The 5 ms worker timeout remains for bridge
+retry and host-open state checks.
+UART mode keeps an initialized diagnostic USB port available when there is no
+cable at boot, so a later attach event can connect it.
+
+IOsonata owns `POWER_CLOCK_IRQHandler` and dispatches its clock and USB cable
+owners. HciController supplies `nRFClockIrqHandler` for MPSL and ignores clock
+callbacks before MPSL is initialized. The old `UsbdXtalRequest/Release` overrides
+are no longer an IOsonata integration point. After MPSL initialization, the
+target requests the XO when USB has been initialized, before the application
+enables USB. It holds that request through disconnect/reconnect and releases it
+at target shutdown, after USB has stopped. A cold UART-only startup takes no
+USB crystal request.
+
+This integration was checked against IOsonata `main` commit
+`05e00ed094aaa0f5cb21493e5ed8dda871de7c26`. Rebuild the IOsonata nRF52840 library
+before rebuilding HciController; mixing old archives with current headers is
+not supported. Hardware enumeration, traffic and suspend/resume still require
+validation with the rebuilt firmware.
+
 ## Native HCI layout
 
 Native mode initializes `BtHciUsb` before the diagnostic CDC and requests:
@@ -168,9 +201,10 @@ src/usb/usbd_cdc_desc.cpp
 src/bluetooth/bt_hci_usb.cpp
 ```
 
-`hci_usb_test` initializes the real generic USB core, `BtHciUsb` and the
-diagnostic `UsbdCdc`, then verifies the assembled device/configuration
-descriptors, interface allocation and endpoint masks. IOsonata's own USB and
+`hci_usb_test` runs the application's real USB setup and work queue with the
+generic core, `BtHciUsb` and `UsbdCdc`. It checks descriptor composition,
+endpoint allocation, queue-full retry, bounded draining, pending work across
+stop/start, and a diagnostic cable attached after startup. IOsonata's own USB and
 Bluetooth host tests cover the class internals, ISO service behavior, SCO packet
 assembly/segmentation and controller-port rules.
 
@@ -183,3 +217,4 @@ Hardware acceptance remains:
 The release suite validates command routing, connections, periodic procedures,
 PAST/PAwR, native Bulk Serialization, CIS/BIS HCI ISO, recovery and concurrent
 ACL/ISO/event stress.
+

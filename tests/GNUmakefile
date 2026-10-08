@@ -27,6 +27,11 @@ CXXFLAGS += $(HCI_CLASS_MEMACCESS_FLAG)
 include Makefile
 
 MOCK_INCLUDES := -I$(IOSONATA_ROOT)/tests/usb/hostport $(MOCK_INCLUDES)
+MOCK_INCLUDES += -I$(IOSONATA_ROOT)/ARM/Nordic/include
+
+# Compile the shared vector too: a private POWER_CLOCK_IRQHandler in the
+# target would otherwise pass host tests and fail the firmware link.
+hci_nrf52840_usb_SRC += $(IOSONATA_ROOT)/ARM/Nordic/nRF52/src/power_clock_irq_nrf52.cpp
 
 # hci_usb_test compiles the real IOsonata USB stack. Put IOsonata's public
 # headers before HciController's generic host stubs so device_intrf.h and the
@@ -54,6 +59,7 @@ hci_usb_SRC := $(IOSONATA_ROOT)/src/bluetooth/bt_hci_usb.cpp \
                $(IOSONATA_ROOT)/src/usb/usbd_cdc.cpp \
                $(IOSONATA_ROOT)/src/usb/usbd_cdc_desc.cpp \
                $(IOSONATA_ROOT)/src/app_evt_handler.cpp \
+               $(IOSONATA_ROOT)/src/app_run.cpp \
                $(IOSONATA_ROOT)/src/device_intrf.cpp \
                $(USB_DESC_OBJ) \
                $(CFIFO_OBJ)
@@ -66,6 +72,20 @@ HCI_USB_HEADERS := $(IOSONATA_ROOT)/include/device_intrf.h \
                    $(IOSONATA_ROOT)/include/usb/usbd_cdc.h \
                    $(IOSONATA_ROOT)/include/usb/usbd_epalloc.h
 $(BUILD_DIR)/hci_usb_test: $(HCI_USB_HEADERS)
+
+# This integration fixture includes hci_app.cpp to exercise its actual class
+# setup and RTOS queue. Discard only unrelated application/radio entry points.
+ifeq ($(shell uname -s),Darwin)
+HCI_USB_GC_LDFLAGS := -Wl,-dead_strip
+else
+HCI_USB_GC_LDFLAGS := -Wl,--gc-sections
+endif
+$(BUILD_DIR)/hci_usb_test: $(SRC)/hci_app.cpp $(UNIT)/hci_usb_test.cpp \
+                         $(hci_usb_SRC) $(COMMON_SRC) $(HEADERS) | check-root
+	@mkdir -p $(dir $@)
+	$(CXX) $(MOCK_INCLUDES) $(MOCK_DEFINES) -DHCI_TRACE=0 $(CXXFLAGS) \
+	  -ffunction-sections -fdata-sections $(HCI_USB_GC_LDFLAGS) \
+	  $(UNIT)/hci_usb_test.cpp $(hci_usb_SRC) $(COMMON_SRC) -o $@
 
 hci_controller_invalid_host_SRC := $(SRC)/hci_controller.cpp \
                                    $(SRC)/hci_intrf_transport.cpp \
@@ -127,3 +147,4 @@ all: $(BUILD_DIR)/hci_usb_test \
      $(BUILD_DIR)/hci_controller_local_commands_test
 run: check-hci-transport check-python-api check-native-usb-review \
      check-counter-schema check-harness-layout check-mode-policy
+

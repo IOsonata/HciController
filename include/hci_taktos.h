@@ -47,8 +47,9 @@ typedef struct {
 
     /*
      * Milliseconds between forced Process calls when no wake arrives. Zero
-     * waits for a wake only. A USB host stack has to be pumped even if a wake
-     * is lost, otherwise enumeration stalls with no way to recover.
+     * waits for a wake only. USB work normally wakes the worker through
+     * UsbEvtQue or its data callback; the timeout also polls host-open state
+     * and retries bridge packets waiting on transport capacity.
      */
     uint32_t PollIntervalMs;
 } HciTaktOsHostOps_t;
@@ -127,3 +128,4 @@ void HciTaktOsThread(void *pContext);
 #endif
 
 #endif /* HCI_TAKTOS_H */
+

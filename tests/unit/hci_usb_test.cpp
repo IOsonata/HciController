@@ -4,14 +4,29 @@
 #include "hci_usb.h"
 #include "usb/usbd_cdc.h"
 
+// Exercise the application setup and worker with the real IOsonata stack.
+// Unused radio/application entry points are discarded by the test link.
+#include "../../src/hci_app.cpp"
+
+#include "app_evt_handler.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
 
 static int s_RegisteredEpCount;
 static bool s_CtrlrInitialized;
+static unsigned s_WorkWakeCount;
+static unsigned s_ProcessCount;
+static unsigned s_StartCount;
+static bool s_Vbus = true;
+
+extern "C" void HciTaktOsWake(HciTaktOs_t *, uint32_t)
+{
+	s_WorkWakeCount++;
+}
 
 extern "C" {
+void AppWait(void) {}
 bool UsbCtrlrInit(int DevNo, const UsbCtrlrCfg_t *pCfg)
 {
 	if (DevNo != 0 || pCfg == nullptr)
@@ -22,9 +37,9 @@ bool UsbCtrlrInit(int DevNo, const UsbCtrlrCfg_t *pCfg)
 	return true;
 }
 
-bool UsbCtrlrStart(int DevNo) { return DevNo == 0; }
+bool UsbCtrlrStart(int DevNo) { s_StartCount++; return DevNo == 0 && s_Vbus; }
 void UsbCtrlrStop(int) {}
-void UsbCtrlrProcess(int) {}
+void UsbCtrlrProcess(int) { s_ProcessCount++; }
 bool UsbCtrlrVbusDetected(int DevNo) { return DevNo == 0; }
 bool UsbCtrlrHighSpeed(int) { return false; }
 void UsbCtrlrIntEnable(int) {}
@@ -111,55 +126,85 @@ static void CheckHci(const BtHciUsbSerialDesc_t *pHci)
 	assert(pHci->Sync.bNumEndpoints == 0U);
 }
 
+static unsigned s_WorkCount;
+static unsigned s_RequeueRemaining;
+
+static void Work(uint32_t EvtId, void *pCtx)
+{
+	assert(pCtx == &s_WorkCount);
+	assert(EvtId == s_WorkCount);
+	s_WorkCount++;
+	if (s_RequeueRemaining != 0U)
+	{
+		s_RequeueRemaining--;
+		assert(UsbEvtQue(s_WorkCount, pCtx, Work));
+	}
+}
+
+static void CheckWorkerQueue(HciApp_t &App)
+{
+	assert(!UsbEvtQue(0U, nullptr, nullptr));
+	s_WorkCount = 0U;
+	for (unsigned i = 0; i < HCI_USB_WORK_COUNT; i++)
+		assert(UsbEvtQue(i, &s_WorkCount, Work));
+	assert(!UsbEvtQue(HCI_USB_WORK_COUNT, &s_WorkCount, Work));
+	assert(s_WorkCount == 0U); // Producers must never execute callbacks.
+	const unsigned processed = s_ProcessCount;
+	UsbProcessQue(0); // Full queue: IOsonata owes the process event.
+	HciAppUsbWorkExec();
+	assert(s_WorkCount == HCI_USB_WORK_COUNT);
+	assert(CFifoPeek(s_hUsbWork) != nullptr);
+	HciAppUsbWorkExec();
+	assert(s_ProcessCount == processed + 1U);
+
+	s_WorkCount = 0U;
+	s_RequeueRemaining = HCI_USB_WORK_PER_PASS + 4U;
+	assert(UsbEvtQue(0U, &s_WorkCount, Work));
+	HciAppUsbWorkExec();
+	assert(s_WorkCount == HCI_USB_WORK_PER_PASS);
+	assert(CFifoPeek(s_hUsbWork) != nullptr);
+	HciAppUsbWorkExec();
+	assert(s_WorkCount == HCI_USB_WORK_PER_PASS + 5U);
+	assert(CFifoPeek(s_hUsbWork) == nullptr);
+
+	// A queued core event must survive stop/reinit without running while
+	// USB is down (UsbProcess would reconnect a cable that is still present).
+	UsbProcessQue(0);
+	const unsigned starts = s_StartCount;
+	HciAppUsbRelease(&App);
+	assert(!App.UsbRunning);
+	assert(s_StartCount == starts);
+	assert(HciAppUsbSetup(&App, HCI_USB_DESCRIPTOR_CDC_H4));
+	assert(UsbEnable(0));
+	HciAppUsbWorkExec();
+	const unsigned afterRestart = s_ProcessCount;
+	UsbProcessQue(0);
+	HciAppUsbWorkExec();
+	assert(s_ProcessCount == afterRestart + 1U); // No stranded queued latch.
+	assert(!AppEvtHandlerPending());
+	HciAppUsbRelease(&App);
+	assert(HciAppUsbSetup(&App, HCI_USB_DESCRIPTOR_LOG_ONLY));
+	assert(s_LogCdc.FirstInterface() == 0U);
+	s_Vbus = false;
+	HciAppStartLogPort(&App);
+	assert(App.UsbRunning);
+	HciAppUsbWorkExec();
+	const unsigned beforeAttach = s_StartCount;
+	s_Vbus = true;
+	UsbProcessQue(0);
+	HciAppUsbWorkExec();
+	assert(s_StartCount == beforeAttach + 1U);
+	HciAppUsbRelease(&App);
+}
+
 int main(void)
 {
-	alignas(4) uint8_t hciRx[BT_HCI_USB_ACL_RXMEM_SIZE(8U)];
-	alignas(4) uint8_t hciTx[BT_HCI_USB_ACL_TXMEM_SIZE(20U)];
-	alignas(4) uint8_t logRx[USB_INTRF_RXMEM_SIZE(8U, USB_CTRLR_PKT_LEN_MAX(0, BULK))];
-	alignas(4) uint8_t logTx[CFIFO_MEMSIZE(4096U)];
-
-	UsbCfg_t usbCfg = {};
-	usbCfg.DevNo = 0;
-	usbCfg.Mode = USB_MODE_DEVICE;
-	usbCfg.Vid = HciUsbDescriptorVid();
-	usbCfg.Pid = HciUsbDescriptorPid(HCI_USB_DESCRIPTOR_NATIVE_HCI);
-	usbCfg.DevVer = 0x0100U;
-	usbCfg.pManufacturer = "I-SYST inc.";
-	usbCfg.pProduct = "I-SYST HCI Controller";
-	usbCfg.pSerial = nullptr;
-	usbCfg.pFuncName = "HCI Controller";
-	usbCfg.IntPrio = 7;
-	usbCfg.DeviceClass = USB_DEVCLASS_MISC;
-	usbCfg.DeviceSubClass = 2U;
-	usbCfg.DeviceProtocol = 1U;
-	usbCfg.bSelfPowered = false;
-	usbCfg.bRemoteWakeup = false;
-	usbCfg.bLowPowerSuspend = false;
-	usbCfg.MaxPower = 100U;
-	assert(UsbInit(&usbCfg));
-
-	BtHciUsb hci;
-	BtHciUsbCfg_t hciCfg = {};
-	hciCfg.DevNo = 0;
-	hciCfg.bBlocking = true;
-	hciCfg.bSco = false;
-	hciCfg.bBulkSerialization = true;
-	hciCfg.RxFifoMemSize = sizeof(hciRx);
-	hciCfg.pRxFifoMem = hciRx;
-	hciCfg.TxFifoMemSize = sizeof(hciTx);
-	hciCfg.pTxFifoMem = hciTx;
-	hciCfg.InterfaceString = HCI_USB_STRING_FUNCTION;
-	assert(hci.Init(hciCfg));
-
-	UsbdCdc log;
-	UsbdCdcCfg_t logCfg = {};
-	logCfg.DevNo = 0;
-	logCfg.bBlocking = true;
-	logCfg.RxFifoMemSize = sizeof(logRx);
-	logCfg.pRxFifoMem = logRx;
-	logCfg.TxFifoMemSize = sizeof(logTx);
-	logCfg.pTxFifoMem = logTx;
-	assert(log.Init(logCfg));
+	static HciApp_t app;
+	s_pApp = &app;
+	assert(HciAppUsbSetup(&app, HCI_USB_DESCRIPTOR_NATIVE_HCI));
+	app.Initialized = true;
+	BtHciUsb &hci = s_HciUsb;
+	UsbdCdc &log = s_LogCdc;
 
 	assert(hci.FirstInterface() == 0U);
 	assert(hci.InterfaceCount() == 2U);
@@ -211,6 +256,13 @@ int main(void)
 	assert(s_RegisteredEpCount >= 6);
 	assert(UsbEnable(0));
 
+	assert(s_ProcessCount == 0U);
+	assert(s_WorkWakeCount != 0U);
+	HciAppUsbWorkExec();
+	assert(s_ProcessCount == 1U);
+	assert(!AppEvtHandlerPending());
+	CheckWorkerQueue(app);
 	printf("hci_usb_test: pass\n");
 	return 0;
 }
+
