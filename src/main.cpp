@@ -26,7 +26,11 @@
 #include "coredev/iopincfg.h"
 #include "coredev/system_core_clock.h"
 #include "hci_app.h"
+#if defined(NRF54LM20B_XXAA) || defined(NRF54LM20A_XXAA)
+#include "hci_nrf54lm20.h"
+#else
 #include "hci_nrf52840.h"
+#endif
 #include "hci_trace.h"
 #include "hci_version.h"
 #include "iopinctrl.h"
@@ -179,7 +183,13 @@ static HciAppMode_t HciUsbBuildDefaultMode(void)
 
 static HciAppMode_t HciBoardDefaultMode(void)
 {
-#if BOARD == UDG_NRF52840
+#if defined(NRF54LM20B_XXAA) || defined(NRF54LM20A_XXAA)
+#if HCI_HOST_SELECT == HCI_HOST_SELECT_UART
+    return HCI_APP_MODE_UART_H4;
+#else
+    return HciUsbBuildDefaultMode();
+#endif
+#elif BOARD == UDG_NRF52840
     return HciUsbBuildDefaultMode();
 #elif BOARD == IBK_NRF52840
 #if HCI_HOST_SELECT == HCI_HOST_SELECT_UART
@@ -197,7 +207,10 @@ static HciAppMode_t HciBoardDefaultMode(void)
 
 static bool HciModeAllowed(HciAppMode_t Mode)
 {
-#if BOARD == UDG_NRF52840
+#if defined(NRF54LM20B_XXAA) || defined(NRF54LM20A_XXAA)
+    return Mode == HCI_APP_MODE_UART_H4 || Mode == HCI_APP_MODE_USB_H4 ||
+           Mode == HCI_APP_MODE_USB_NATIVE;
+#elif BOARD == UDG_NRF52840
     return Mode == HCI_APP_MODE_USB_H4 || Mode == HCI_APP_MODE_USB_NATIVE;
 #elif BOARD == IBK_NRF52840
     return Mode == HCI_APP_MODE_UART_H4 || Mode == HCI_APP_MODE_USB_H4 ||
@@ -434,7 +447,12 @@ int main(void)
 #if HCI_UART_EARLY_STARTUP
     /* Fixed UART boards that are reset-coupled must arm receive immediately. */
     HciUartHostNotReady();
-    HciTarget_t target = HciNrf52840Target();
+    HciTarget_t target =
+#if defined(NRF54LM20B_XXAA) || defined(NRF54LM20A_XXAA)
+        HciNrf54lm20Target();
+#else
+        HciNrf52840Target();
+#endif
     const bool earlyUartReady = HciAppUartEarlyInit(&s_HciApp, target);
 #else
     HciTarget_t target = HciNrf52840Target();
@@ -452,7 +470,9 @@ int main(void)
 #endif
 
     HciTraceInit();
+#if !defined(NRF54LM20B_XXAA) && !defined(NRF54LM20A_XXAA)
     HciNrf52840ResetTrace();
+#endif
 
 #if HCI_UART_EARLY_STARTUP
     if (!earlyUartReady)
@@ -485,6 +505,13 @@ int main(void)
         HciFatal();
     }
 
+#if defined(NRF54LM20B_XXAA) || defined(NRF54LM20A_XXAA)
+    /* nRF54L USB VBUS is managed by the IOsonata USB controller.
+     * nRF52 NRF_POWER->USBREGSTATUS does not exist on this target.
+     */
+    HciTrace("boot: board=%s mode=%s stored=%u\r\n",
+             BOARD_NAME, HciModeName(s_HciMode), (unsigned)storedMode);
+#else
     const uint32_t usbReg = NRF_POWER->USBREGSTATUS;
     HciTrace("boot: board=%s usbregstatus=0x%08lX vbus=%u outrdy=%u mode=%s stored=%u\r\n",
              BOARD_NAME,
@@ -493,6 +520,7 @@ int main(void)
              (unsigned)((usbReg & POWER_USBREGSTATUS_OUTPUTRDY_Msk) != 0U),
              HciModeName(s_HciMode),
              (unsigned)storedMode);
+#endif
 
     TaktOSCfg_t kernelCfg = {};
     kernelCfg.KernClockHz = SystemCoreClockGet();
