@@ -34,17 +34,31 @@
 #endif
 static HciNrf54lm20_t *s_pTarget;
 
+/* Called from a time-critical fault context: never perform blocking
+ * UART/USB tracing or allocate before resetting the controller.
+ */
+static void HciRadioAssert(uint32_t reason)
+{
+    if (s_pTarget != nullptr)
+    {
+        s_pTarget->FaultCount++;
+        s_pTarget->LastError = (int32_t)reason;
+    }
+    __DSB();
+    NVIC_SystemReset();
+    for (;;) { __WFE(); }
+}
 static void HciMpslAssert(const char *file, uint32_t line)
 {
-    HciTrace("MPSL assertion %s:%lu\r\n", file, (unsigned long)line);
-    NVIC_SystemReset();
-    for (;;) {}
+    (void)file;
+    (void)line;
+    HciRadioAssert(0x1003U);
 }
 static void HciSdcAssert(const char *file, uint32_t line)
 {
-    HciTrace("SDC assertion %s:%lu\r\n", file, (unsigned long)line);
-    NVIC_SystemReset();
-    for (;;) {}
+    (void)file;
+    (void)line;
+    HciRadioAssert(0x1004U);
 }
 static void HciRandPoll(uint8_t *pBuffer, uint8_t Length)
 {
