@@ -104,17 +104,27 @@ policy through `BOARD` in `nRF54LM20/src/board.h`.
 | `NORDIC_DK_NRF54LM20` (201) | USB by default, UART optional | HciController diagnostic CDC | DK UARTE20 when UART selected |
 | `WILDTHING51_NRF54LM20` (101) | nRF91 H:4 at 1 Mbaud with RTS/CTS | Dedicated nRF91 115200 baud UART trace CDC plus controller diagnostic CDC | Two *different* UART instances |
 
-**WildThing51 wiring prerequisite:** the nRF54LM20-side UART pins and
-peripheral instance IDs are not present in the reviewed IOsonata repository.
-The existing WildThing51 nRF52840/BLYST840 pins describe a different MCU
-and must not be copied. Until an nRF54LM20 schematic is available the build
-requires externally supplied `WILDTHING51_HCI_UART_DEVNO`,
-`WILDTHING51_HCI_{RX,TX,RTS,CTS}_{PORT,PIN}`,
-`WILDTHING51_TRACE_UART_DEVNO`, and
-`WILDTHING51_TRACE_{RX,TX}_{PORT,PIN}` defines.
-The board header emits a compile-time error when any mapping is absent or
-both UARTs use the same instance. The HCI and trace baud rates are fixed at
-1000000 and 115200 respectively; debug trace does not enter the H:4 stream.
+**WildThing51 shared BLE footprint:** the supplied WildThing51 schematic
+(BLE sheet, page 3) labels the module `BLYST840/LM20`. Each BTLTE net
+shows the nRF52840 pin first and the nRF54LM20 pin second:
+
+| Net | nRF52840 | nRF54LM20 | HCI use |
+| --- | --- | --- | --- |
+| BTLTE0 | P0.23 | P1.14 | BLE RX |
+| BTLTE1 | P0.24 | P3.04 | BLE TX |
+| BTLTE2 | P0.21 | P3.05 | BLE CTS |
+| BTLTE3 | P1.04 | P1.13 | BLE RTS |
+
+The nRF54LM20 HCI pin mapping is now in `board.h`. The build still
+requires `WILDTHING51_HCI_UART_DEVNO` to identify the IOsonata UARTE
+instance actually wired to these pins. **All four interconnect nets are
+occupied by HCI.** The supplied schematic does not show a second,
+independent nRF9151 debug UART TX/RX routed to the BLE module. Thus the
+trace bridge cannot be enabled correctly without additional verified
+connections; it still requires `WILDTHING51_TRACE_UART_DEVNO` and
+`WILDTHING51_TRACE_{RX,TX}_{PORT,PIN}`. The board header deliberately
+rejects builds with missing trace wiring rather than inventing a route.
+The HCI and trace speeds remain 1000000 and 115200 respectively.
 
 The existing `HCI_NRF91_TRACE_BRIDGE` implementation in `hci_app.cpp` owns
 the second UART and CDC class. It is enabled for WildThing51 and disabled for
