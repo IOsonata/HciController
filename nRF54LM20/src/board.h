@@ -92,23 +92,38 @@
 #define HCI_HOST_SELECT HCI_HOST_SELECT_UART
 
 /*
- * WildThing51: UART/H:4 between the nRF54LM20 and nRF91, 1 Mbaud,
- * hardware RTS/CTS. A second UART receives the nRF91's 115200 baud
- * debug console and forwards it through an independent USB CDC port.
+ * WildThing51 BLE footprint M2 is pin-compatible at board level with
+ * either BLYST840/nRF52840 or nRF54LM20. Each net has two pin labels
+ * separated by '/', the second belonging to nRF54LM20 (BLE sheet 3).
  *
- * The nRF54LM20-side schematic has not been supplied. Do NOT substitute
- * BLYST840/nRF52840 or DK pins. Define each WILDTHING51_* value using the
- * actual nRF54LM20 wiring in the build's board-specific definitions.
+ * Net       nRF9151      nRF52840      nRF54LM20      HCI direction
+ * BTLTE0    P0.00        P0.23         P1.14          BLE RX
+ * BTLTE1    P0.01        P0.24         P3.04          BLE TX
+ * BTLTE2    P0.02        P0.21         P3.05          BLE CTS
+ * BTLTE3    P0.03        P1.04         P1.13          BLE RTS
+ *
+ * The four BTLTE nets are all allocated to HCI UART (1 Mbaud, RTS/CTS).
+ * The supplied schematic does NOT route an additional nRF91 debug UART
+ * TX/RX to this BLE footprint. An independent nRF91 trace UART therefore
+ * requires confirmed additional wiring; do not guess or borrow HCI pins.
  */
-#if !defined(WILDTHING51_HCI_UART_DEVNO) || \
-    !defined(WILDTHING51_HCI_RX_PORT) || !defined(WILDTHING51_HCI_RX_PIN) || \
-    !defined(WILDTHING51_HCI_TX_PORT) || !defined(WILDTHING51_HCI_TX_PIN) || \
-    !defined(WILDTHING51_HCI_RTS_PORT) || !defined(WILDTHING51_HCI_RTS_PIN) || \
-    !defined(WILDTHING51_HCI_CTS_PORT) || !defined(WILDTHING51_HCI_CTS_PIN) || \
-    !defined(WILDTHING51_TRACE_UART_DEVNO) || \
+#define UART_RX_PORT 1
+#define UART_RX_PIN 14
+#define UART_TX_PORT 3
+#define UART_TX_PIN 4
+#define UART_CTS_PORT 3
+#define UART_CTS_PIN 5
+#define UART_RTS_PORT 1
+#define UART_RTS_PIN 13
+
+/* The selected IOsonata UARTE instance must support these P1/P3 pin routes. */
+#if !defined(WILDTHING51_HCI_UART_DEVNO)
+#error "Select the nRF54LM20 UARTE instance for WildThing51 HCI"
+#endif
+#if !defined(WILDTHING51_TRACE_UART_DEVNO) || \
     !defined(WILDTHING51_TRACE_RX_PORT) || !defined(WILDTHING51_TRACE_RX_PIN) || \
     !defined(WILDTHING51_TRACE_TX_PORT) || !defined(WILDTHING51_TRACE_TX_PIN)
-#error "WildThing51 nRF54LM20 UART wiring is required; do not use nRF52840/DK pins"
+#error "WildThing51 schematic has no separate nRF91 trace RX/TX interconnect; supply verified wiring"
 #endif
 
 #if WILDTHING51_HCI_UART_DEVNO == WILDTHING51_TRACE_UART_DEVNO
@@ -117,14 +132,6 @@
 
 #define UART_DEVNO WILDTHING51_HCI_UART_DEVNO
 #define UART_RATE 1000000
-#define UART_RX_PORT WILDTHING51_HCI_RX_PORT
-#define UART_RX_PIN WILDTHING51_HCI_RX_PIN
-#define UART_TX_PORT WILDTHING51_HCI_TX_PORT
-#define UART_TX_PIN WILDTHING51_HCI_TX_PIN
-#define UART_RTS_PORT WILDTHING51_HCI_RTS_PORT
-#define UART_RTS_PIN WILDTHING51_HCI_RTS_PIN
-#define UART_CTS_PORT WILDTHING51_HCI_CTS_PORT
-#define UART_CTS_PIN WILDTHING51_HCI_CTS_PIN
 #define UART_RX_PINOP 1
 #define UART_TX_PINOP 1
 #define UART_RTS_PINOP 1
