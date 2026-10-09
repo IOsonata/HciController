@@ -284,87 +284,36 @@
 	{BUTTON1_PORT, BUTTON1_PIN, BUTTON1_PINOP, IOPINDIR_INPUT, IOPINRES_PULLUP, IOPINTYPE_NORMAL},}
 
 //=============================================================================
-// UART Pin Definitions
+// Nordic Thingy:91 UART mapping
 //=============================================================================
 
 /*
- * From sdk-nrf, boards/nordic/thingy91/thingy91_nrf52840-pinctrl.dtsi, the
- * uart1 node, which is the one wired to the nRF9160:
+ * Nordic Thingy:91 reference configuration:
  *
- *     UART_TX  P0.25      UART_RX  P1.00
- *     UART_RTS P0.22      UART_CTS P0.19
+ * Interface        nRF9160                         nRF52840
+ * Debug UART0      TX P0.18, RX P0.19             TX P0.15, RX P0.11
+ *                  RTS P0.20, CTS P0.21          (no flow control)
+ *                  115200 baud, no flow control
  *
- * and the far side, thingy91_nrf9160_common-pinctrl.dtsi uart1:
+ * HCI UART1        TX P0.22, RX P0.23             TX P0.25, RX P1.00
+ *                  RTS P0.24, CTS P0.25          RTS P0.22, CTS P0.19
+ *                  1000000 baud, hardware flow control
  *
- *     UART_TX  P0.22      UART_RX  P0.23
- *     UART_RTS P0.24      UART_CTS P0.25
+ * Source: Nordic Thingy:91 pinctrl mapping supplied for this project.
+ * Do not confuse the debug UART0 console with the UART1 HCI link.
  *
- * Both board files say current-speed 1000000. TX and RX below are those two
- * and are confirmed on the hardware. The measured RTS/CTS assignment differs
- * from the nRF52840 pinctrl labels and is documented immediately below.
- *
- * The other UART on each part is that part's own console, at 115200:
- *
- *     nRF52840 uart0   TX P0.15  RX P0.11  RTS P0.21  CTS P0.20
- *     nRF9160  uart0   TX P0.18  RX P0.19  RTS P0.20  CTS P0.21
- *
- * Written down because the two pairs are easy to confuse and picking the
- * wrong one gives a link with somebody's log on it at the wrong speed
- * rather than a link that fails. Both uart1 nodes ship status "disabled", so
- * an application that wants this interconnect enables it and chooses what
- * goes on it, and nothing in the board files can say what that turned out to
- * be.
- *
- * All four wires exist, so flow control is on. Off, this part never asserts
- * RTS, and a host that has flow control on never sees its CTS asserted and so
- * never transmits: the first command times out with nothing on the wire in
- * either direction, and no side can tell why.
- *
- * This link holds two things, not one, and that is the whole of what was wrong
- * with it for weeks. The nRF9160's bootloader prints on it before the
- * application ever opens it:
- *
- *     All pins have been configured as non-secure...
- *     <esc>[1;34mBooting TF-M...
- *
- * captured here off the wire. Then the application starts and uses the same
- * UART for HCI. The text is a prefix, not a permanent tenant, so the link does
- * become an HCI link, but this side is handed several hundred octets of it
- * first, on every reboot of the nRF9160.
- *
- * H:4 has no framing, so text that happens to hold an octet in the indicator
- * range makes this side read a payload length out of more text and wait for a
- * payload that never comes. The HCI Reset behind it is eaten as that payload.
- * Nothing in the octets says so, and the host times out after ten seconds with
- * a link that looks correct from both ends.
- *
- * The gap between the banner and the first command is the only thing that
- * separates them: the banner is printed before Zephyr starts and the Reset
- * arrives about a hundred milliseconds into the application. So the transport
- * gives up a half built packet once the link has been quiet, which lands in
- * that gap and takes the Reset cleanly. See HCI_APP_LINK_IDLE_PASSES.
- *
- * The start up No Operation Command Complete is sent on this board, see
- * HCI_SDC_STARTUP_NOP below. Nordic's own controller for it sends one:
- * samples/bluetooth/hci_lpuart, boards/thingy91_nrf52840.conf, which sets
- * CONFIG_BT_WAIT_NOP=y in a CONFIG_BT_HCI_RAW build, where that option makes
- * the controller emit the event rather than wait for it.
- *
- * A host built with the same option holds its command semaphore at zero until
- * that event arrives, so a controller that never sends it leaves such a host
- * silent with nothing on the wire to say why. The host on this board is not
- * one of those, since it sends Reset about a hundred milliseconds in without
- * being prompted, and the event costs it nothing either: Zephyr reads a
- * Command Complete for opcode 0x0000 as unsolicited, takes the command credit
- * from it and completes no command with it. See hci_cmd_done in
- * subsys/bluetooth/host/hci_core.c.
- *
- * What has been checked, against sdk-nrf and the Thingy:91 hardware guide:
- * the four pins above and their rate, that the low frequency crystal is on
- * P0.00 and P0.01 so the default LFXO clock configuration is right for this
- * board, and that the commands a Zephyr host sends during bt_enable are all
- * dispatched here.
+ * This deliberately follows the Nordic UART1 RTS/CTS mapping. Previous
+ * Thingy:91 hardware tests in this project reported the opposite RTS/CTS
+ * behavior (RTS P0.19, CTS P0.22). The discrepancy still needs an on-board
+ * verification before treating the changed HCI link as validated.
  */
+#define THINGY91_DEBUG_UART_DEVNO  0
+#define THINGY91_DEBUG_UART_TX_PORT 0
+#define THINGY91_DEBUG_UART_TX_PIN  15
+#define THINGY91_DEBUG_UART_RX_PORT 0
+#define THINGY91_DEBUG_UART_RX_PIN  11
+#define THINGY91_DEBUG_UART_RATE    115200
+
 #define UART_TX_PORT            0
 #define UART_TX_PIN             25
 #define UART_TX_PINOP           0
@@ -373,43 +322,34 @@
 #define UART_RX_PIN             0
 #define UART_RX_PINOP           0
 
-/*
- * RTS is P0.19 and CTS is P0.22, which is the opposite of what the sdk-nrf
- * pinctrl above assigns, and the hardware is what says so:
- *
- *     RTS on P0.19   the peer transmits, thousands of octets a second
- *     RTS on P0.22   the peer transmits nothing at all
- *
- * Measured on the board, both ways round, more than once. RTS is what tells
- * the peer it may send, so driving the wrong pin leaves the peer's clear to
- * send never asserted and the peer silent. That is what P0.22 gives. TX and RX
- * are not affected and stay as the pinctrl has them.
- *
- * Why a Nordic board file would disagree about its own peripheral assignment
- * is not resolved here, and guessing at it is what caused the damage. This
- * pair has now been changed three times on reasoning rather than measurement,
- * twice into a state that does not work, and each time the reasoning sounded
- * good. The measurement is short, repeatable and was available throughout.
- * Nothing about this pair gets changed again without one.
- */
 #define UART_RTS_PORT           0
-#define UART_RTS_PIN            19
+#define UART_RTS_PIN            22
 #define UART_RTS_PINOP          0
 
 #define UART_CTS_PORT           0
-#define UART_CTS_PIN            22
+#define UART_CTS_PIN            19
 #define UART_CTS_PINOP          0
 
-#define UART_HW_FLOWCTRL	1
-
-#define UART_DEVNO			0
-
-#define UART_RATE			1000000
+#define UART_HW_FLOWCTRL        1
+#define UART_DEVNO              1
+#define UART_RATE               1000000
 
 /*
- * Say the controller is ready with a No Operation Command Complete once the
- * stack is up, because the reference controller for this board does. The UART
- * note above has the sample it comes from and what the host makes of it.
+ * Signal-only counterpart mapping on the nRF9160, for reference.
+ * These pins are not configured by the nRF52840 firmware.
+ */
+#define THINGY91_NRF9160_HCI_TX_PORT  0
+#define THINGY91_NRF9160_HCI_TX_PIN   22
+#define THINGY91_NRF9160_HCI_RX_PORT  0
+#define THINGY91_NRF9160_HCI_RX_PIN   23
+#define THINGY91_NRF9160_HCI_RTS_PORT 0
+#define THINGY91_NRF9160_HCI_RTS_PIN  24
+#define THINGY91_NRF9160_HCI_CTS_PORT 0
+#define THINGY91_NRF9160_HCI_CTS_PIN  25
+
+/*
+ * Send the startup No Operation Command Complete expected by the
+ * Thingy:91 HCI UART host.
  */
 #define HCI_SDC_STARTUP_NOP             1
 
