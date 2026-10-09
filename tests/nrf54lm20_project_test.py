@@ -61,6 +61,26 @@ class Nrf54lm20ProjectTest(unittest.TestCase):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, content)
 
+    def test_board_policy_usb_dongle_vs_dual_uart(self):
+        board = (PORT / "src" / "board.h").read_text()
+        source = (ROOT / "src" / "main.cpp").read_text()
+        udg = board.split("#if BOARD == UDG_NRF54LM20", 1)[1].split(
+            "#elif BOARD == NORDIC_DK_NRF54LM20", 1)[0]
+        wildthing = board.split("#elif BOARD == WILDTHING51_NRF54LM20", 1)[1].split(
+            "#else\\n#error \"Unsupported nRF54LM20 board\"", 1)[0]
+        self.assertIn("#define HCI_BOARD_HAS_UART 0", udg)
+        self.assertIn("#define HCI_HOST_SELECT HCI_HOST_SELECT_USB", udg)
+        self.assertNotIn("#define UART_DEVNO", udg)
+        self.assertNotIn("HCI_NRF91_TRACE_BRIDGE", udg)
+        self.assertIn("#define HCI_HOST_SELECT HCI_HOST_SELECT_UART", wildthing)
+        self.assertIn("#define HCI_NRF91_TRACE_BRIDGE 1", wildthing)
+        self.assertIn("#define UART_RATE 1000000", wildthing)
+        self.assertIn("#define HCI_NRF91_TRACE_UART_RATE 115200", wildthing)
+        self.assertIn("WildThing51 nRF54LM20 UART wiring is required", wildthing)
+        self.assertIn("HCI and trace UARTs must be different", wildthing)
+        self.assertIn("BOARD == UDG_NRF54LM20", source)
+        self.assertIn("BOARD == WILDTHING51_NRF54LM20", source)
+
     def test_target_selection_and_mpsl_separation(self):
         startup = (ROOT / "src" / "main.cpp").read_text()
         source = (ROOT / "src" / "hci_nrf54lm20.cpp").read_text()
