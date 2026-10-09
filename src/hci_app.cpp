@@ -12,11 +12,10 @@
 @license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
 ----------------------------------------------------------------------------*/
 
+#include "board.h"
 #include "hci_app.h"
 
 #include <string.h>
-
-#include "board.h"
 #include "coredev/iopincfg.h"
 #include "coredev/interrupt.h"
 #include "hci_trace.h"
