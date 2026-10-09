@@ -434,7 +434,7 @@ static void HciStatusThread(void *)
     }
 }
 
-#if HCI_UART_EARLY_STARTUP
+#if HCI_UART_EARLY_STARTUP && UART_HW_FLOWCTRL
 #if UART_RTS_PORT != 0 && UART_RTS_PORT != 1
 #error "early UART RTS must be on nRF52840 P0 or P1"
 #endif
@@ -455,7 +455,9 @@ int main(void)
 {
 #if HCI_UART_EARLY_STARTUP
     /* Fixed UART boards that are reset-coupled must arm receive immediately. */
+#if UART_HW_FLOWCTRL
     HciUartHostNotReady();
+#endif
     HciTarget_t target =
 #if defined(NRF54LM20B_XXAA) || defined(NRF54LM20A_XXAA)
         HciNrf54lm20Target();
@@ -464,7 +466,12 @@ int main(void)
 #endif
     const bool earlyUartReady = HciAppUartEarlyInit(&s_HciApp, target);
 #else
-    HciTarget_t target = HciNrf52840Target();
+    HciTarget_t target =
+#if defined(NRF54LM20B_XXAA) || defined(NRF54LM20A_XXAA)
+        HciNrf54lm20Target();
+#else
+        HciNrf52840Target();
+#endif
 #endif
 
 #if HCI_STATUS_LEDS
