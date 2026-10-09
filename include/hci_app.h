@@ -70,6 +70,13 @@ typedef struct
      */
 
     UARTDev_t Uart;
+#if defined(HCI_NRF91_TRACE_BRIDGE) && HCI_NRF91_TRACE_BRIDGE
+    UARTDev_t TraceUart;
+    bool TraceUartReady;
+    uint8_t TracePending[64];
+    uint16_t TracePendingLen;
+    uint16_t TracePendingOffset;
+#endif
     DevIntrf_t *pHostIntrf;
     HciAppHost_t HostType;
     HciAppMode_t Mode;
@@ -112,6 +119,12 @@ typedef struct
     uint64_t SdcMem[(HCI_SDC_MEM_SIZE + 7U) / 8U];
 
     alignas(4) uint8_t UartRxFifoMem[HCI_APP_FIFO_MEM_SIZE];
+#if defined(HCI_NRF91_TRACE_BRIDGE) && HCI_NRF91_TRACE_BRIDGE
+    alignas(4) uint8_t TraceUartRxMem[HCI_APP_FIFO_MEM_SIZE];
+    alignas(4) uint8_t TraceUartTxMem[HCI_APP_FIFO_MEM_SIZE];
+    alignas(4) uint8_t TraceUsbRxMem[HCI_APP_FIFO_MEM_SIZE];
+    alignas(4) uint8_t TraceUsbTxMem[HCI_APP_FIFO_MEM_SIZE];
+#endif
     alignas(4) uint8_t UartTxFifoMem[HCI_APP_FIFO_MEM_SIZE];
     alignas(4) uint8_t UsbRxFifoMem[HCI_APP_FIFO_MEM_SIZE];
     alignas(4) uint8_t UsbTxFifoMem[HCI_APP_FIFO_MEM_SIZE];
