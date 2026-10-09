@@ -35,6 +35,16 @@ extern "C" {
 #define HCI_SDC_RETRY_ERROR     (-11)
 
 /*
+ * Current nrfxlib returns PAwR response-data status from the direct command
+ * handler (DRGN-29455). It exposes no feature macro for that API behavior.
+ * Set this to 1 across the build only when using an older nrfxlib revision
+ * whose API documents a delayed Command Complete through sdc_hci_get().
+ */
+#ifndef HCI_SDC_LEGACY_PAWR_COMPLETION
+#define HCI_SDC_LEGACY_PAWR_COMPLETION 0
+#endif
+
+/*
  * nrfxlib's multirole SDC does not export an entry point for this mandatory LE
  * Controller command. The generic HCI layer supplies it instead, so the normal
  * dispatcher and the early-UART suspect filter both have to know the opcode.
@@ -285,3 +295,4 @@ const HciControllerOps_t *HciSdcGetControllerOps(HciSdc_t *pSdc);
 #endif
 
 #endif /* HCI_SDC_H */
+

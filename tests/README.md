@@ -49,6 +49,16 @@ absolute path:
 make -C tests run NRFXLIB_DIR=/absolute/path/to/sdk-nrfxlib
 ```
 
+The default PAwR completion contract follows current nrfxlib (DRGN-29455):
+the direct response-data handler returns status immediately. Nordic exposes no
+`SDC_HCI_PAWR_SYNC_RETURN_IMMEDIATELY` feature macro. Only builds using an older
+SDK that documents a delayed completion through `sdc_hci_get()` should define
+`HCI_SDC_LEGACY_PAWR_COMPLETION=1` consistently across all translation units.
+The ordinary `hci_sdc_test` checks that successful and rejected `0x2083`
+commands return exactly one completion and allow a subsequent Reset without
+depending on vendor feature macros. The real-header critical dispatch test
+also checks the selected SDK contract.
+
 A release run must not report that the real-header SDC dispatch, critical or
 resource tests were skipped.
 
@@ -139,4 +149,5 @@ available control channel.
 A feature advertised by the DUT must be exercised positively. If the harness
 cannot create the required state, the release result is incomplete/failing;
 `N/A` is reserved for capability outside the target profile.
+
 

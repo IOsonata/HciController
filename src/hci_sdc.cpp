@@ -948,9 +948,10 @@ static void HciSdcAclTrackEvent(HciSdc_t *pSdc,
 
 /*
  * Older SDC revisions delay LE Set Periodic Advertising Response Data until
- * the response has been transmitted. Current nrfxlib defines
- * SDC_HCI_PAWR_SYNC_RETURN_IMMEDIATELY and returns the command credit directly
+ * the response has been transmitted. Current nrfxlib returns status directly
  * from the command handler, so that completion must remain in the dispatcher.
+ * There is no Nordic feature macro for this behavior; legacy SDK builds must
+ * select the old contract explicitly.
  *
  * For the legacy path, the command is variable length. Its direct SDC entry
  * point is reached only after the fixed eight-octet head is present and
@@ -963,8 +964,7 @@ static bool HciSdcDelayedCommandCandidate(const HciCmdDispatch_t *pDispatch,
                                           const uint8_t *pPacket,
                                           size_t PacketLen)
 {
-#if defined(SDC_HCI_PAWR_SYNC_RETURN_IMMEDIATELY) && \
-    SDC_HCI_PAWR_SYNC_RETURN_IMMEDIATELY
+#if !HCI_SDC_LEGACY_PAWR_COMPLETION
     (void)pDispatch;
     (void)pPacket;
     (void)PacketLen;
@@ -1362,3 +1362,4 @@ const HciControllerOps_t *HciSdcGetControllerOps(HciSdc_t *pSdc)
 {
     return pSdc != NULL ? &pSdc->ControllerOps : NULL;
 }
+
