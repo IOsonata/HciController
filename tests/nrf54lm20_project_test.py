@@ -76,15 +76,17 @@ class Nrf54lm20ProjectTest(unittest.TestCase):
         self.assertIn("#define HCI_NRF91_TRACE_BRIDGE 1", wildthing)
         self.assertIn("#define UART_RATE 1000000", wildthing)
         self.assertIn("#define HCI_NRF91_TRACE_UART_RATE 115200", wildthing)
-        self.assertIn("BLE footprint M2 is pin-compatible", wildthing)
+        self.assertIn("#define UART_HW_FLOWCTRL 0", wildthing)
+        self.assertIn("#define UART_DEVNO 1", wildthing)
+        self.assertIn("#define HCI_NRF91_TRACE_UART_DEVNO 2", wildthing)
         for name, pin in (("UART_RX_PORT", 1), ("UART_RX_PIN", 14),
-                          ("UART_TX_PORT", 3), ("UART_TX_PIN", 4),
-                          ("UART_CTS_PORT", 3), ("UART_CTS_PIN", 5),
-                          ("UART_RTS_PORT", 1), ("UART_RTS_PIN", 13)):
+                          ("UART_TX_PORT", 3), ("UART_TX_PIN", 4)):
             with self.subTest(name=name):
                 self.assertRegex(wildthing, rf"#define {name}\\s+{pin}\\b")
-        self.assertIn("supply verified wiring", wildthing)
-        self.assertIn("HCI and trace UARTs must be different", wildthing)
+        self.assertIn("{3, 5, 1, IOPINDIR_INPUT", wildthing)
+        self.assertIn("{1, 13, 1, IOPINDIR_OUTPUT", wildthing)
+        self.assertNotIn("#define UART_CTS_PORT", wildthing)
+        self.assertNotIn("#define UART_RTS_PORT", wildthing)
         self.assertIn("BOARD == UDG_NRF54LM20", source)
         self.assertIn("BOARD == WILDTHING51_NRF54LM20", source)
 
