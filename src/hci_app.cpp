@@ -65,6 +65,10 @@ static_assert(HCI_SDC_ACL_TRACK_HANDLES >=
 static HciApp_t *s_pApp;
 static UsbdCdc s_HostCdc;
 static UsbdCdc s_LogCdc;
+#if defined(HCI_NRF91_TRACE_BRIDGE) && HCI_NRF91_TRACE_BRIDGE
+static UsbdCdc s_TraceCdc;
+static const IOPinCfg_t s_TraceUartPins[] = HCI_NRF91_TRACE_UART_PINS;
+#endif
 static BtHciUsb s_HciUsb;
 
 // Same CFifo worker queue as IOsonata's USB TaktOS examples. Keep it across
@@ -84,6 +88,76 @@ static hCFifo_t s_hUsbWork;
 
 #ifdef UART_PINS
 static const IOPinCfg_t s_HciUartPins[] = UART_PINS;
+#endif
+
+static void HciAppWake(void *pContext);
+
+#if defined(HCI_NRF91_TRACE_BRIDGE) && HCI_NRF91_TRACE_BRIDGE
+/* Receive the nRF9160's 115200-baud UART0 debug output on the
+ * nRF52840's separate UART0. Never pass these bytes through HCI H:4.
+ */
+static int HciTraceUartEvent(UARTDev_t * const, UART_EVT evt,
+                             uint8_t *, int len)
+{
+    if (evt == UART_EVT_RXDATA || evt == UART_EVT_RXTIMEOUT)
+    {
+        HciAppWake(s_pApp);
+    }
+    return len;
+}
+
+static bool HciTraceBridgeStart(HciApp_t *app)
+{
+    UARTCfg_t cfg = {};
+    cfg.DevNo = HCI_NRF91_TRACE_UART_DEVNO;
+    cfg.pIOPinMap = s_TraceUartPins;
+    cfg.NbIOPins = sizeof(s_TraceUartPins) / sizeof(s_TraceUartPins[0]);
+    cfg.Rate = HCI_NRF91_TRACE_UART_RATE;
+    cfg.DataBits = 8;
+    cfg.Parity = UART_PARITY_NONE;
+    cfg.StopBits = 1;
+    cfg.FlowControl = UART_FLWCTRL_NONE;
+    cfg.bIntMode = true;
+    cfg.IntPrio = HCI_APP_UART_IRQ_PRIORITY;
+    cfg.EvtCallback = HciTraceUartEvent;
+    cfg.bFifoBlocking = false;
+    cfg.bDMAMode = true;
+    cfg.Duplex = UART_DUPLEX_FULL;
+    cfg.Mode = UART_MODE_UART;
+    cfg.RxMemSize = sizeof(app->TraceUartRxMem);
+    cfg.pRxMem = app->TraceUartRxMem;
+    cfg.TxMemSize = sizeof(app->TraceUartTxMem);
+    cfg.pTxMem = app->TraceUartTxMem;
+    app->TraceUartReady = UARTInit(&app->TraceUart, &cfg);
+    return app->TraceUartReady;
+}
+
+/* Nonblocking CDC enqueue; retain the unaccepted tail. The controller's
+ * worker polls this regularly, so USB backpressure never blocks HCI.
+ */
+static void HciTraceBridgePump(HciApp_t *app)
+{
+    if (!app->TraceUartReady || !s_TraceCdc.IsPortOpen())
+    {
+        return;
+    }
+    if (app->TracePendingOffset == app->TracePendingLen)
+    {
+        app->TracePendingOffset = 0U;
+        app->TracePendingLen = 0U;
+        const int n = UARTRx(&app->TraceUart, app->TracePending,
+                             sizeof(app->TracePending));
+        if (n <= 0) { return; }
+        app->TracePendingLen = (uint16_t)n;
+    }
+    const int n = DeviceIntrfTx(s_TraceCdc.Data(), 0U,
+              app->TracePending + app->TracePendingOffset,
+              (int)(app->TracePendingLen - app->TracePendingOffset));
+    if (n > 0)
+    {
+        app->TracePendingOffset += (uint16_t)n;
+    }
+}
 #endif
 
 static void HciAppWake(void *pContext)
@@ -302,6 +376,23 @@ static bool HciAppUsbSetup(HciApp_t *pApp, HciUsbDescriptorMode_t Mode)
         UsbDisable(0);
         return false;
     }
+
+#if defined(HCI_NRF91_TRACE_BRIDGE) && HCI_NRF91_TRACE_BRIDGE
+    /* A distinct CDC function: HciController's own trace stays on s_LogCdc. */
+    UsbdCdcCfg_t traceCfg = {};
+    traceCfg.bBlocking = false;
+    traceCfg.RxFifoMemSize = sizeof(pApp->TraceUsbRxMem);
+    traceCfg.pRxFifoMem = pApp->TraceUsbRxMem;
+    traceCfg.TxFifoMemSize = sizeof(pApp->TraceUsbTxMem);
+    traceCfg.pTxFifoMem = pApp->TraceUsbTxMem;
+    traceCfg.DevNo = 0;
+    traceCfg.EvtCB = HciAppUsbEvent;
+    if (!s_TraceCdc.Init(traceCfg))
+    {
+        UsbDisable(0);
+        return false;
+    }
+#endif
 
     pApp->UsbRunning = true;
     return true;
@@ -586,6 +677,9 @@ static void HciAppHostProcess(void *pContext)
             HciAppSetHostOpen(pApp, HciAppUsbHostIsOpen(pApp));
         }
         HciAppDrainLog(pApp);
+#if defined(HCI_NRF91_TRACE_BRIDGE) && HCI_NRF91_TRACE_BRIDGE
+        HciTraceBridgePump(pApp);
+#endif
     }
 
     HciControllerProcess(&pApp->Controller);
@@ -692,6 +786,14 @@ bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode, HciTarget_t Target)
             pApp->UsbRunning = false;
         }
     }
+
+#if defined(HCI_NRF91_TRACE_BRIDGE) && HCI_NRF91_TRACE_BRIDGE
+    if (hostReady && !HciTraceBridgeStart(pApp))
+    {
+        HciTrace("init: Thingy91 UART0 trace receiver failed\r\n");
+        hostReady = false;
+    }
+#endif
 
     if (!hostReady)
     {
@@ -809,6 +911,13 @@ void HciAppStop(HciApp_t *pApp)
     {
         DeviceIntrfDisable(pApp->pHostIntrf);
     }
+#if defined(HCI_NRF91_TRACE_BRIDGE) && HCI_NRF91_TRACE_BRIDGE
+    if (pApp->TraceUartReady)
+    {
+        UARTDisable(&pApp->TraceUart);
+        pApp->TraceUartReady = false;
+    }
+#endif
     HciAppUsbRelease(pApp);
     pApp->Target.pOps->Stop(pApp->Target.pContext);
     pApp->pHostIntrf = nullptr;
