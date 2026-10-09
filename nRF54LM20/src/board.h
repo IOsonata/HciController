@@ -11,7 +11,9 @@ must not contain DK pin numbers.
 #ifndef __BOARD_H__
 #define __BOARD_H__
 
+#ifndef BOARD
 #define BOARD 200
+#endif
 #define BOARD_NAME "Nordic nRF54LM20 DK"
 #define BOARD_MODULE_NAME "Nordic nRF54LM20A"
 
@@ -37,9 +39,10 @@ must not contain DK pin numbers.
 #define UART_PINS { \
     {1, 17, 1, IOPINDIR_INPUT, IOPINRES_NONE, IOPINTYPE_NORMAL}, \
     {1, 16, 1, IOPINDIR_OUTPUT, IOPINRES_NONE, IOPINTYPE_NORMAL}, \
-    {1, 18, 1, IOPINDIR_OUTPUT, IOPINRES_NONE, IOPINTYPE_NORMAL}, \
     {1, 19, 1, IOPINDIR_INPUT, IOPINRES_NONE, IOPINTYPE_NORMAL}, \
+    {1, 18, 1, IOPINDIR_OUTPUT, IOPINRES_NONE, IOPINTYPE_NORMAL}, \
 }
+#define NRFX_UART_INST 20
 #define UART_HW_FLOWCTRL 1
 
 #endif /* __BOARD_H__ */
