@@ -9,6 +9,7 @@ extern "C" {
 #endif
 void NVIC_SetPriority(IRQn_Type, uint32_t);
 void NVIC_EnableIRQ(IRQn_Type);
+uint32_t NVIC_GetEnableIRQ(IRQn_Type);
 void NVIC_DisableIRQ(IRQn_Type);
 #ifdef __cplusplus
 }
@@ -97,3 +98,4 @@ extern NRF_GPIO_Type *NRF_P1;
 #define POWER_RESETREAS_NFC_Msk           (1UL << 19)
 #define POWER_RESETREAS_VBUS_Msk          (1UL << 20)
 #endif
+

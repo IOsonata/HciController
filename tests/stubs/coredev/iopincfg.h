@@ -5,8 +5,10 @@
  * board and hands it to UARTInit. Nothing here configures anything.
  */
 
-#ifndef IOPINCFG_H__
-#define IOPINCFG_H__
+// Share the real header's guard: the USB integration test can include the
+// public IOsonata pin types before a stub includes this file relatively.
+#ifndef __IOPINCFG_H__
+#define __IOPINCFG_H__
 
 #include <stdint.h>
 
@@ -55,4 +57,5 @@ void IOPinConfig(int PortNo, int PinNo, int PinOp, IOPINDIR Dir,
 }
 #endif
 
-#endif /* IOPINCFG_H__ */
+#endif /* __IOPINCFG_H__ */
+

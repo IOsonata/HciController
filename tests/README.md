@@ -34,6 +34,13 @@ is not faked: the host builds include its real headers from the sibling
 compiles the real USB core, `BtHciUsb` and `UsbdCdc` against a fake controller
 port, so an IOsonata API change fails here before it fails on the target.
 
+The USB test uses the actual `hci_app.cpp` setup and worker queue. It covers
+all three USB layouts, queue saturation and retry, bounded draining, stop/start
+with a pending process event, and a log-only cable attached after startup.
+The nRF52840 test links IOsonata's real shared POWER_CLOCK dispatcher to catch
+duplicate vector ownership and checks MPSL crystal request/release and failure
+cleanup. These host tests do not establish hardware timing or enumeration.
+
 The Makefile looks for the real nrfxlib tree at the sibling path
 `$(ROOT)/../external/sdk-nrfxlib`. If nrfxlib is elsewhere, override it with an
 absolute path:
@@ -41,6 +48,16 @@ absolute path:
 ```sh
 make -C tests run NRFXLIB_DIR=/absolute/path/to/sdk-nrfxlib
 ```
+
+The default PAwR completion contract follows current nrfxlib (DRGN-29455):
+the direct response-data handler returns status immediately. Nordic exposes no
+`SDC_HCI_PAWR_SYNC_RETURN_IMMEDIATELY` feature macro. Only builds using an older
+SDK that documents a delayed completion through `sdc_hci_get()` should define
+`HCI_SDC_LEGACY_PAWR_COMPLETION=1` consistently across all translation units.
+The ordinary `hci_sdc_test` checks that successful and rejected `0x2083`
+commands return exactly one completion and allow a subsequent Reset without
+depending on vendor feature macros. The real-header critical dispatch test
+also checks the selected SDK contract.
 
 A release run must not report that the real-header SDC dispatch, critical or
 resource tests were skipped.
@@ -96,6 +113,9 @@ tests/harness/hcicontroller/
 Useful entry points are:
 
 ```sh
+# One native USB dongle: repeated reopen/reset in both HCI alternates
+python3 tests/harness/hcicontroller/usb_reopen_test.py
+
 # Basic two-dongle profile and ACL-role validation
 python3 tests/harness/hcicontroller/pair_smoke_test.py
 
@@ -129,3 +149,5 @@ available control channel.
 A feature advertised by the DUT must be exercised positively. If the harness
 cannot create the required state, the release result is incomplete/failing;
 `N/A` is reserved for capability outside the target profile.
+
+

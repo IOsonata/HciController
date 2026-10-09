@@ -53,8 +53,68 @@ static HciCmdResult_t Reset(void *, const uint8_t *, size_t, uint8_t *, size_t)
     return {HCI_STATUS_SUCCESS, HCI_CMD_RESPONSE_COMPLETE, 0U};
 }
 
+#if !HCI_SDC_LEGACY_PAWR_COMPLETION
+static HciCmdResult_t PawrResponse(void *pContext, const uint8_t *, size_t,
+                                  uint8_t *pReturn, size_t ReturnCapacity)
+{
+    assert(ReturnCapacity >= 2U);
+    pReturn[0] = 0x34U;
+    pReturn[1] = 0x02U;
+    return {*static_cast<uint8_t *>(pContext), HCI_CMD_RESPONSE_COMPLETE, 2U};
+}
+
+/* Current SDC returns status directly and queues no second completion. */
+static void TestImmediatePawrCompletion(void)
+{
+    const HciCmdEntry_t commands[] = {
+        {0x0C03U, 0U, 0U, HCI_CMD_RESPONSE_COMPLETE, Reset},
+        {0x2083U, 8U, 2U, HCI_CMD_RESPONSE_COMPLETE, PawrResponse},
+    };
+    const uint8_t statuses[] = {HCI_STATUS_SUCCESS, HCI_STATUS_COMMAND_DISALLOWED};
+    for (uint8_t status : statuses)
+    {
+        FakeSdc fake = {};
+        fake.GetResult = HCI_SDC_RETRY_ERROR;
+        HciSdcOps_t ops = {AclPut, IsoPut, Get, Process, &fake,
+                            HCI_SDC_RETRY_ERROR};
+        HciSdc_t sdc;
+        uint8_t commandEvent[80];
+        assert(HciSdcInit(&sdc, &ops, commands, 2U, &status,
+                          commandEvent, sizeof(commandEvent)));
+        const HciControllerOps_t *controller = HciSdcGetControllerOps(&sdc);
+        const uint8_t response[] = {0x83U, 0x20U, 8U,
+                                     0x34U, 0x02U, 0U, 0U, 1U, 1U, 0U, 0U};
+        assert(controller->Put(controller->pContext, HCI_H4_PACKET_COMMAND,
+                                 response, sizeof(response)));
+        uint8_t packet[32];
+        HciH4PacketType_t type;
+        size_t length;
+        assert(controller->Get(controller->pContext, &type, packet,
+                                 sizeof(packet), &length) == HCI_CONTROLLER_GET_PACKET);
+        assert(type == HCI_H4_PACKET_EVENT && length == 8U);
+        const uint8_t expected[] = {0x0EU, 6U, 1U, 0x83U, 0x20U,
+                                     status, 0x34U, 0x02U};
+        assert(memcmp(packet, expected, sizeof(expected)) == 0);
+        assert(!sdc.DelayedCommandPending);
+        /* Drain the backend turn; no duplicate completion may appear. */
+        assert(controller->Get(controller->pContext, &type, packet,
+                                 sizeof(packet), &length) == HCI_CONTROLLER_GET_EMPTY);
+        const uint8_t reset[] = {0x03U, 0x0CU, 0U};
+        assert(controller->Put(controller->pContext, HCI_H4_PACKET_COMMAND,
+                                 reset, sizeof(reset)));
+        assert(controller->Get(controller->pContext, &type, packet,
+                                 sizeof(packet), &length) == HCI_CONTROLLER_GET_PACKET);
+        assert(length == 6U && packet[3] == 0x03U && packet[4] == 0x0CU);
+    }
+    printf("[ok] PAwR completion preserves status, handle and subsequent Reset\n");
+}
+#endif
+
 int main()
 {
+#if !HCI_SDC_LEGACY_PAWR_COMPLETION
+    TestImmediatePawrCompletion();
+#endif
     static const HciCmdEntry_t commands[] = {
         {0x0C03U, 0U, 0U, HCI_CMD_RESPONSE_COMPLETE, Reset},
     };
@@ -636,3 +696,4 @@ int main()
     printf("All SDC routing tests passed.\n");
     return 0;
 }
+

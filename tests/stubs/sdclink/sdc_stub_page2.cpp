@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "hci_sdc.h"
 #include "sdc_hci.h"
 #include "sdc_hci_cmd_controller_baseband.h"
 #include "sdc_hci_cmd_le.h"
@@ -21,8 +22,7 @@ uint8_t sdc_stub_hci_cmd_le_set_periodic_adv_response_data(
     sdc_hci_cmd_le_set_periodic_adv_response_data_return_t *pReturn);
 int32_t sdc_stub_hci_get(uint8_t *pPacketOut, uint8_t *pMsgTypeOut);
 
-#if !defined(SDC_HCI_PAWR_SYNC_RETURN_IMMEDIATELY) || \
-    !SDC_HCI_PAWR_SYNC_RETURN_IMMEDIATELY
+#if HCI_SDC_LEGACY_PAWR_COMPLETION
 static bool s_PawrResponseCompletePending;
 static uint8_t s_PawrResponseStatus;
 static uint8_t s_PawrResponseReturn[
@@ -36,13 +36,12 @@ uint8_t sdc_hci_cmd_le_set_periodic_adv_response_data(
     const uint8_t status =
         sdc_stub_hci_cmd_le_set_periodic_adv_response_data(pParams, pReturn);
 
-#if !defined(SDC_HCI_PAWR_SYNC_RETURN_IMMEDIATELY) || \
-    !SDC_HCI_PAWR_SYNC_RETURN_IMMEDIATELY
+#if HCI_SDC_LEGACY_PAWR_COMPLETION
     /*
      * Older SDC revisions complete implemented 0x2083 commands later through
      * sdc_hci_get(). Unknown HCI Command is immediate because no delayed event
-     * follows it. Current SDC revisions define
-     * SDC_HCI_PAWR_SYNC_RETURN_IMMEDIATELY and must not queue this extra event.
+     * follows it. Current SDC revisions return status directly and must not
+     * queue this extra event.
      */
     if (status != 0x01U)
     {
@@ -65,8 +64,7 @@ uint8_t sdc_hci_cmd_le_set_periodic_adv_response_data(
 
 int32_t sdc_hci_get(uint8_t *pPacketOut, uint8_t *pMsgTypeOut)
 {
-#if !defined(SDC_HCI_PAWR_SYNC_RETURN_IMMEDIATELY) || \
-    !SDC_HCI_PAWR_SYNC_RETURN_IMMEDIATELY
+#if HCI_SDC_LEGACY_PAWR_COMPLETION
     if (s_PawrResponseCompletePending)
     {
         if (pPacketOut == NULL || pMsgTypeOut == NULL)
@@ -285,3 +283,4 @@ uint8_t sdc_hci_cmd_vs_dtm_command(
 
     return g_SdcStub.NextStatus;
 }
+

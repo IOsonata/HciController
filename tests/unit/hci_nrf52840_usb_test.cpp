@@ -15,6 +15,8 @@
 #include "sdc.h"
 #include "coredev/system_core_clock.h"
 #include "crypto_rng_nrf.h"
+#include "usb/usb.h"
+#include "power_clock_irq_nrf52.h"
 
 #include "hci_sdc_expected_resources.h"
 
@@ -53,6 +55,18 @@ static bool gHfclkRuns;
 static unsigned gHfclkStartAfter;
 static bool gXtalSelected = true;
 static sdc_fault_handler_t gSdcAssert;
+static bool gUsbConfigured;
+static unsigned gClockIrqs;
+static unsigned gUsbPowerIrqs;
+static bool gIrqEnabled[16];
+
+extern "C" const UsbCfg_t *UsbGetCfg(int)
+{
+    static const UsbCfg_t cfg = {};
+    return gUsbConfigured ? &cfg : nullptr;
+}
+
+extern "C" void nRFUsbPowerIrqHandler(void) { gUsbPowerIrqs++; }
 
 extern "C" const OscDesc_t *GetLowFreqOscDesc(void) { return &gLfOsc; }
 extern "C" uint32_t SystemCoreClockGet(void) { return 64000000U; }
@@ -60,8 +74,9 @@ CRYPTO_STATUS CryptoRngNrf::Random(uint8_t *p, size_t n) { memset(p, 0x5A, n); r
 CryptoRngNrf *CryptoRngNrfInstance(void) { return &gRng; }
 
 extern "C" void NVIC_SetPriority(IRQn_Type, uint32_t) {}
-extern "C" void NVIC_EnableIRQ(IRQn_Type) {}
-extern "C" void NVIC_DisableIRQ(IRQn_Type) {}
+extern "C" void NVIC_EnableIRQ(IRQn_Type Irq) { gIrqEnabled[Irq] = true; }
+extern "C" void NVIC_DisableIRQ(IRQn_Type Irq) { gIrqEnabled[Irq] = false; }
+extern "C" uint32_t NVIC_GetEnableIRQ(IRQn_Type Irq) { return gIrqEnabled[Irq]; }
 extern "C" void NVIC_ClearPendingIRQ(IRQn_Type) {}
 
 extern "C" int32_t mpsl_init(const mpsl_clock_lfclk_cfg_t *pCfg, IRQn_Type Irq, mpsl_assert_handler_t)
@@ -87,7 +102,7 @@ extern "C" void mpsl_low_priority_process(void)
 extern "C" void MPSL_IRQ_RADIO_Handler(void) {}
 extern "C" void MPSL_IRQ_RTC0_Handler(void) {}
 extern "C" void MPSL_IRQ_TIMER0_Handler(void) {}
-extern "C" void MPSL_IRQ_CLOCK_Handler(void) {}
+extern "C" void MPSL_IRQ_CLOCK_Handler(void) { gClockIrqs++; }
 
 extern "C" int32_t mpsl_clock_hfclk_request(mpsl_clock_hfclk_callback_t) { return 0; }
 extern "C" int32_t mpsl_clock_hfclk_release(void) { return 0; }
@@ -159,8 +174,6 @@ extern "C" void HciUsbPlatformIrqUnexpectedCause(uint32_t Cause);
 extern "C" void HciUsbPlatformIrqStorm(uint32_t Inten,
                                        uint32_t Cause,
                                        uint32_t Events);
-extern "C" bool UsbdXtalRequest(void);
-extern "C" void UsbdXtalRelease(void);
 
 static void ResetCounters(void)
 {
@@ -171,6 +184,9 @@ static void ResetCounters(void)
     gHfclkStartAfter = 0U;
     gXtalSelected = true;
     gSdcAssert = nullptr;
+    gUsbConfigured = false;
+    gClockIrqs = gUsbPowerIrqs = 0U;
+    memset(gIrqEnabled, 0, sizeof(gIrqEnabled));
     memset(&gPower, 0, sizeof(gPower));
     memset(&gClock, 0, sizeof(gClock));
     memset(&gUarte0, 0, sizeof(gUarte0));
@@ -184,6 +200,7 @@ static void TestUsbClockOwnership(void)
 {
     ResetCounters();
     gHfclkStartAfter = 3U;
+    gUsbConfigured = true;
 
     alignas(8) static uint8_t mem[10000];
     HciTaktOs_t runtime = {};
@@ -194,23 +211,28 @@ static void TestUsbClockOwnership(void)
     HciNrf52840GetTaktOsOps(&target, &ops);
     assert(ops.Start(ops.pContext));
 
-    assert(UsbdXtalRequest());
     assert(target.HfclkRequested);
     assert(gHfclkRequests == 1U);
-    assert(UsbdXtalRequest());
-    assert(gHfclkRequests == 1U);
-
-    UsbdXtalRelease();
+    POWER_CLOCK_IRQHandler();
+    assert(gClockIrqs == 1U && gUsbPowerIrqs == 1U);
+    HciNrf52840Stop(&target);
     assert(!target.HfclkRequested);
     assert(gHfclkReleases == 1U);
 
     gHfclkRuns = false;
     gHfclkStartAfter = 0U;
-    assert(!UsbdXtalRequest());
+    assert(!ops.Start(ops.pContext));
     assert(!target.HfclkRequested);
     assert(gHfclkRequests == 2U);
     assert(gHfclkReleases == 2U);
 
+    HciNrf52840Stop(&target);
+    assert(gHfclkReleases == 2U);
+    POWER_CLOCK_IRQHandler();
+    assert(gClockIrqs == 1U && gUsbPowerIrqs == 2U);
+    gUsbConfigured = false;
+    assert(ops.Start(ops.pContext));
+    assert(gHfclkRequests == 2U);
     HciNrf52840Stop(&target);
     printf("[ok] IOsonata USB crystal ownership is routed through MPSL\n");
 }
@@ -319,3 +341,4 @@ int main(void)
     printf("All nRF52840 target tests passed.\n");
     return 0;
 }
+

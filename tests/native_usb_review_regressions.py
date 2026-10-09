@@ -110,12 +110,15 @@ def main(argv):
     print("[ok] IOsonata main owns HCI/CDC allocation and composite descriptor assembly")
 
     target = read(os.path.join(root, "src", "hci_nrf52840.cpp"))
-    if 'extern "C" bool UsbdXtalRequest(void)' not in target or \
-            'extern "C" void UsbdXtalRelease(void)' not in target:
-        fail("IOsonata USB crystal hooks are missing")
+    if 'extern "C" void nRFClockIrqHandler(void)' not in target or \
+            'UsbGetCfg(0) != nullptr && !HciNrf52840HfclkStart(pTarget)' not in target:
+        fail("shared clock IRQ or MPSL USB clock ownership is missing")
+    if 'extern "C" void POWER_CLOCK_IRQHandler(void)' in target or \
+            'extern "C" bool UsbdXtalRequest(void)' in target:
+        fail("target still uses the obsolete USB clock integration")
     if "NRF_USBD" in target or "USBD_IRQHandler" in target:
         fail("HciController target still owns USB controller registers or IRQ")
-    print("[ok] nRF52840 target only supplies MPSL crystal ownership hooks")
+    print("[ok] nRF52840 target holds the MPSL crystal and shares the clock IRQ")
 
     project = read(os.path.join(root, "nRF52840", "ioc", ".project"))
     cproject = read(os.path.join(root, "nRF52840", "ioc", ".cproject"))
@@ -165,3 +168,4 @@ def main(argv):
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv))
+

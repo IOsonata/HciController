@@ -124,8 +124,7 @@ static void GiveControllerQueueItsTurn(const HciControllerOps_t *controller)
     }
 }
 
-#if !defined(SDC_HCI_PAWR_SYNC_RETURN_IMMEDIATELY) || \
-    !SDC_HCI_PAWR_SYNC_RETURN_IMMEDIATELY
+#if HCI_SDC_LEGACY_PAWR_COMPLETION
 /*
  * Older SDC revisions queue the PAwR response-data Command Complete. The
  * generated real-header stub normally has an empty event queue, so this test
@@ -456,8 +455,7 @@ static void TestPawrResponseCompletion(HciSdc_t *pSdc,
     HciSdcNrfxlibResetAdvCommandType();
     printf("[ok] guarded PAwR response data is rejected immediately\n");
 
-#if defined(SDC_HCI_PAWR_SYNC_RETURN_IMMEDIATELY) && \
-    SDC_HCI_PAWR_SYNC_RETURN_IMMEDIATELY
+#if !HCI_SDC_LEGACY_PAWR_COMPLETION
     /*
      * Current SDC returns the 0x2083 Command Complete from the direct command
      * call. HciController must expose that dispatcher event rather than
@@ -644,3 +642,4 @@ int main(void)
     printf("All critical SDC real-header dispatch tests passed.\n");
     return 0;
 }
+

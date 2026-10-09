@@ -79,7 +79,7 @@ def main() -> None:
     settle_at = start.find("for (uint32_t pass")
     if settle_at < 0:
         die("HciAppHostStart: cannot find USB settle loop")
-    process_at = start.find("UsbProcess(0)", settle_at)
+    process_at = start.find("HciAppUsbWorkExec()", settle_at)
     configured_at = start.find("UsbConfigured(0)", process_at)
     if process_at < 0 or configured_at < 0 or process_at > configured_at:
         die("USB enumeration must process IOsonata before testing configured")
@@ -87,8 +87,12 @@ def main() -> None:
     runtime = function_body(
         source, "static void HciAppHostProcess(void *pContext)"
     )
-    if "UsbProcess(0)" not in runtime:
-        die("steady-state USB must pump IOsonata")
+    if "HciAppUsbWorkExec()" not in runtime:
+        die("steady-state USB must drain its worker queue")
+    if "UsbProcess(0)" in source:
+        die("UsbProcess belongs to the IOsonata queued callback")
+    if "bool UsbEvtQue(" not in source or "UsbCheckStatus();" not in source:
+        die("USB needs the RTOS queue override and refused-work retry")
 
     stop = function_body(source, "void HciAppStop(HciApp_t *pApp)")
     release_at = stop.find("HciAppUsbRelease(pApp)")
@@ -101,3 +105,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

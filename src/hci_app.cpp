@@ -18,6 +18,7 @@
 
 #include "board.h"
 #include "coredev/iopincfg.h"
+#include "coredev/interrupt.h"
 #include "hci_trace.h"
 #include "hci_version.h"
 #include "sdc_hci.h"
@@ -66,6 +67,21 @@ static UsbdCdc s_HostCdc;
 static UsbdCdc s_LogCdc;
 static BtHciUsb s_HciUsb;
 
+// Same CFifo worker queue as IOsonata's USB TaktOS examples. Keep it across
+// stop/start: discarding a queued process callback would strand the core's
+// process-queued latch. Only the HCI worker executes callbacks, while USB is up.
+#define HCI_USB_WORK_COUNT 16U
+#define HCI_USB_WORK_PER_PASS 30U
+typedef struct {
+	uint32_t EvtId;
+	void *pCtx;
+	UsbEvtQueHandler_t Handler;
+} HciUsbWork_t;
+
+alignas(HciUsbWork_t) static uint8_t s_UsbWorkMem[
+	CFIFO_TOTAL_MEMSIZE(HCI_USB_WORK_COUNT, sizeof(HciUsbWork_t))];
+static hCFifo_t s_hUsbWork;
+
 #ifdef UART_PINS
 static const IOPinCfg_t s_HciUartPins[] = UART_PINS;
 #endif
@@ -83,6 +99,52 @@ static int HciAppUsbEvent(DevIntrf_t *, DEVINTRF_EVT, uint8_t *, int Len)
 {
     HciAppWake(s_pApp);
     return Len;
+}
+
+bool UsbEvtQue(uint32_t EvtId, void *pCtx, UsbEvtQueHandler_t Handler)
+{
+	if (s_hUsbWork == nullptr || Handler == nullptr)
+	{
+		return false;
+	}
+	// Both the USB interrupt and the worker produce events. Publish the
+	// complete entry before either can observe or reuse it.
+	const uint32_t state = DisableInterrupt();
+	HciUsbWork_t *p = reinterpret_cast<HciUsbWork_t *>(CFifoPut(s_hUsbWork));
+	if (p != nullptr)
+	{
+		*p = { EvtId, pCtx, Handler };
+	}
+	EnableInterrupt(state);
+	if (p == nullptr)
+	{
+		return false;
+	}
+	HciAppWake(s_pApp);
+	return true;
+}
+
+static void HciAppUsbWorkExec(void)
+{
+	for (unsigned count = HCI_USB_WORK_PER_PASS; count > 0U; count--)
+	{
+		const HciUsbWork_t *p =
+			reinterpret_cast<const HciUsbWork_t *>(CFifoPeek(s_hUsbWork));
+		if (p == nullptr)
+		{
+			// Retry the core's process event if a full queue refused it.
+			UsbCheckStatus();
+			break;
+		}
+		const HciUsbWork_t work = *p;
+		(void)CFifoGet(s_hUsbWork);
+		work.Handler(work.EvtId, work.pCtx);
+	}
+	if (CFifoPeek(s_hUsbWork) != nullptr)
+	{
+		// A bounded pass must not leave the worker asleep with work queued.
+		HciAppWake(s_pApp);
+	}
 }
 
 static int HciAppUartEvent(UARTDev_t * const,
@@ -152,6 +214,16 @@ static bool HciAppUsbSetup(HciApp_t *pApp, HciUsbDescriptorMode_t Mode)
     }
 
     pApp->UsbDescriptorMode = Mode;
+
+	if (s_hUsbWork == nullptr)
+	{
+		s_hUsbWork = CFifoInit(s_UsbWorkMem, sizeof(s_UsbWorkMem),
+			sizeof(HciUsbWork_t), true);
+		if (s_hUsbWork == nullptr)
+		{
+			return false;
+		}
+	}
 
     UsbCfg_t usbCfg = {};
     usbCfg.DevNo = 0;
@@ -362,12 +434,13 @@ static bool HciAppUsbHostIsOpen(const HciApp_t *pApp)
                               : s_HostCdc.IsPortOpen();
 }
 
-static void HciAppStartLogPort(HciApp_t *pApp)
+static void HciAppStartLogPort(HciApp_t *)
 {
     if (!UsbEnable(0))
     {
-        HciTrace("log: UsbEnable failed\r\n");
-        HciAppUsbRelease(pApp);
+        // No VBUS at boot is normal for a UART host. Keep the initialized
+        // classes and worker alive so a later cable event can connect them.
+        HciTrace("log: waiting for USB connection\r\n");
         return;
     }
 
@@ -397,7 +470,7 @@ static bool HciAppHostStart(void *pContext)
                 pApp->Runtime.Ops.ProcessMpsl(pApp->Runtime.Ops.pContext);
             }
 
-            UsbProcess(0);
+            HciAppUsbWorkExec();
 
             if (UsbConfigured(0))
             {
@@ -500,7 +573,7 @@ static void HciAppHostProcess(void *pContext)
 
     if (pApp->UsbRunning)
     {
-        UsbProcess(0);
+        HciAppUsbWorkExec();
 
         if (pApp->HostType == HCI_APP_HOST_USB)
         {
@@ -757,3 +830,4 @@ bool HciAppHostIsOpen(const HciApp_t *pApp)
 {
     return pApp != nullptr && pApp->HostOpen;
 }
+
