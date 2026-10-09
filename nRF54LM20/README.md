@@ -2,10 +2,20 @@
 
 ## Status
 
-**Port bootstrap only — not yet a bootable HCI firmware.** The current
-`src/main.cpp` and `src/hci_nrf52840.cpp` still contain nRF52840-specific
-interrupts, clock registers, board decisions, and startup code. Adding a DK
-`board.h` does not make those paths portable.
+**Port source and IOC project added; ARM build and DK validation pending.**
+The nRF54LM20 target is in `src/hci_nrf54lm20.cpp` and
+`include/hci_nrf54lm20.h`; `src/main.cpp` selects it only on nRF54LM20.
+The original nRF52840 target remains separate.
+
+Open `nRF54LM20/ioc/.project` in IOcomposer. Select `Debug` or `Release`.
+The build uses Cortex-M33, `NRF54LM20B_XXAA`, IOsonata's
+`IOsonata_nRF54LM20x` library, `TaktOS_M33`, the nrfxlib nRF54LM
+hard-float multirole SDC/MPSL archives, and the unbootloaded
+`nrf54lm20a_xxaa_application.ld` script. No S145 binary is linked.
+
+**Not yet proven runnable:** The actual ARM compile/link, map inspection,
+and nRF54LM20 DK hardware tests have not been executed in this environment.
+Do not merge this branch or use it as a release binary until those pass.
 
 This port targets Nordic nRF54LM20A (DK PCA10184) and is developed separately
 from HciController `main`. Its dependency is IOsonata
