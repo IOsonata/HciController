@@ -87,12 +87,15 @@ const AppInfo_t g_AppInfo = {
 #error "HCI_HOST_SELECT must be HCI_HOST_SELECT_AUTO, _USB or _UART"
 #endif
 
-#if BOARD == UDG_NRF52840 && HCI_HOST_SELECT == HCI_HOST_SELECT_UART
-#error "UDG_NRF52840 supports USB-H4 and USB-HCI only; UART-HCI is not supported"
+#if (BOARD == UDG_NRF52840 || \
+    (defined(NRF54LM20B_XXAA) && BOARD == UDG_NRF54LM20)) && \
+    HCI_HOST_SELECT == HCI_HOST_SELECT_UART
+#error "UDG dongle supports USB-H4 and native USB-HCI only"
 #endif
 
 #if (BOARD == THINGY91_NRF52840 || BOARD == WILDTHING51 || BOARD == WILDTHING91) && \
-    HCI_HOST_SELECT != HCI_HOST_SELECT_UART
+    HCI_HOST_SELECT != HCI_HOST_SELECT_UART && \
+    !defined(NRF54LM20B_XXAA)
 #error "This board is HCI UART-only"
 #endif
 
@@ -208,8 +211,14 @@ static HciAppMode_t HciBoardDefaultMode(void)
 static bool HciModeAllowed(HciAppMode_t Mode)
 {
 #if defined(NRF54LM20B_XXAA) || defined(NRF54LM20A_XXAA)
+#if BOARD == UDG_NRF54LM20
+    return Mode == HCI_APP_MODE_USB_H4 || Mode == HCI_APP_MODE_USB_NATIVE;
+#elif BOARD == WILDTHING51_NRF54LM20
+    return Mode == HCI_APP_MODE_UART_H4;
+#else
     return Mode == HCI_APP_MODE_UART_H4 || Mode == HCI_APP_MODE_USB_H4 ||
            Mode == HCI_APP_MODE_USB_NATIVE;
+#endif
 #elif BOARD == UDG_NRF52840
     return Mode == HCI_APP_MODE_USB_H4 || Mode == HCI_APP_MODE_USB_NATIVE;
 #elif BOARD == IBK_NRF52840
