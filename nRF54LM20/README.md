@@ -92,3 +92,31 @@ from HciController `main`. Its dependency is IOsonata
 The nRF54L MPSL requirements above are from Nordic's integration notes;
 whether the exact locally installed binary supports the LM20A **must be
 verified at link and on hardware**.
+
+## Board builds
+
+The IOcomposer project selects the MCU; the board selects physical transport
+policy through `BOARD` in `nRF54LM20/src/board.h`.
+
+| BOARD | HCI | Additional USB function | UART hardware |
+| --- | --- | --- | --- |
+| `UDG_NRF54LM20` (default, 200) | USB H:4 or native USB HCI | HciController diagnostic CDC | None |
+| `NORDIC_DK_NRF54LM20` (201) | USB by default, UART optional | HciController diagnostic CDC | DK UARTE20 when UART selected |
+| `WILDTHING51_NRF54LM20` (101) | nRF91 H:4 at 1 Mbaud with RTS/CTS | Dedicated nRF91 115200 baud UART trace CDC plus controller diagnostic CDC | Two *different* UART instances |
+
+**WildThing51 wiring prerequisite:** the nRF54LM20-side UART pins and
+peripheral instance IDs are not present in the reviewed IOsonata repository.
+The existing WildThing51 nRF52840/BLYST840 pins describe a different MCU
+and must not be copied. Until an nRF54LM20 schematic is available the build
+requires externally supplied `WILDTHING51_HCI_UART_DEVNO`,
+`WILDTHING51_HCI_{RX,TX,RTS,CTS}_{PORT,PIN}`,
+`WILDTHING51_TRACE_UART_DEVNO`, and
+`WILDTHING51_TRACE_{RX,TX}_{PORT,PIN}` defines.
+The board header emits a compile-time error when any mapping is absent or
+both UARTs use the same instance. The HCI and trace baud rates are fixed at
+1000000 and 115200 respectively; debug trace does not enter the H:4 stream.
+
+The existing `HCI_NRF91_TRACE_BRIDGE` implementation in `hci_app.cpp` owns
+the second UART and CDC class. It is enabled for WildThing51 and disabled for
+UDG and the DK. Hardware validation is still required for USB enumeration,
+the UART peripheral mappings, and sustained HCI/trace traffic.
