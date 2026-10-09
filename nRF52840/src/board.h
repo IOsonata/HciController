@@ -379,14 +379,14 @@
 #define BOARD_MODULE_NAME               "I-SYST BLYST840"
 
 /*
- * HCI is always the BLYST840 <-> nRF9151 UART. WildThing51 does connect
- * BT_RST_CTRL to BT_nRESET, so it uses the reset-coupled early receive path.
- * The schematic gives the four interconnect nets as:
+ * WildThing51 schematic: the four BTLTE nets are two UART pairs.
+ * HCI (1 Mbaud): BTLTE0 / BTLTE1, no hardware flow control.
+ * nRF91 trace (115200): BTLTE2 / BTLTE3, forwarded to USB CDC.
  *
- *     BTLTE0  nRF9151 P0.00  -> BLYST840 P0.23  (BLYST RX)
- *     BTLTE1  nRF9151 P0.01  -> BLYST840 P0.24  (BLYST TX)
- *     BTLTE2  nRF9151 P0.02  -> BLYST840 P0.21  (BLYST CTS)
- *     BTLTE3  nRF9151 P0.03  -> BLYST840 P1.04  (BLYST RTS)
+ * BLE RX on BTLTE0 = P0.23, BLE TX on BTLTE1 = P0.24.
+ * Trace RX on BTLTE2 = P0.21, trace TX on BTLTE3 = P1.04.
+ * nRF9151 firmware must configure P0.02 as trace TX and P0.03 as
+ * trace RX. No RTS/CTS lines remain on this interconnect.
  */
 #define HCI_USB_SOCKET                  1
 #define HCI_MODE_SWITCH                 0
@@ -406,17 +406,17 @@
 #define UART_RX_PIN             23
 #define UART_RX_PINOP           0
 
-#define UART_RTS_PORT           1
-#define UART_RTS_PIN            4
-#define UART_RTS_PINOP          0
+#define UART_HW_FLOWCTRL 0
+#define UART_DEVNO             0
+#define UART_RATE              1000000
 
-#define UART_CTS_PORT           0
-#define UART_CTS_PIN            21
-#define UART_CTS_PINOP          0
-
-#define UART_HW_FLOWCTRL	1
-#define UART_DEVNO			0
-#define UART_RATE			1000000
+#define HCI_NRF91_TRACE_BRIDGE 1
+#define HCI_NRF91_TRACE_UART_DEVNO 1
+#define HCI_NRF91_TRACE_UART_RATE 115200
+#define HCI_NRF91_TRACE_UART_PINS { \
+    {0, 21, 0, IOPINDIR_INPUT, IOPINRES_NONE, IOPINTYPE_NORMAL}, \
+    {1, 4, 0, IOPINDIR_OUTPUT, IOPINRES_NONE, IOPINTYPE_NORMAL}, \
+}
 
 
 #else
