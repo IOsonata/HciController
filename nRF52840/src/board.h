@@ -129,39 +129,8 @@
 #define BUTTON_PINS						UDG_NRF52840_BUT_PINS_CFG
 
 
-//=============================================================================
-// UART Pin Definitions
-//=============================================================================
-
-/*
- * Placeholders, and they were worse than that. P0.25, P1.00, P0.19 and P0.22
- * are not dongle pins at all: they are the Nordic Thingy:91 nRF52840
- * interconnect, copied here and then left. The Thingy:91 branch below has that
- * board's measured mapping.
- *
- * These pins remain board/header metadata, but HciController never selects
- * UART-HCI for UDG. main.cpp rejects a forced UART mode on this board.
- */
-#define UART_TX_PORT            0
-#define UART_TX_PIN             24
-#define UART_TX_PINOP           0
-
-#define UART_RX_PORT            0
-#define UART_RX_PIN             23
-#define UART_RX_PINOP           0
-
-#define UART_RTS_PORT           0
-#define UART_RTS_PIN            19
-#define UART_RTS_PINOP          0
-
-#define UART_CTS_PORT           0
-#define UART_CTS_PIN            22
-#define UART_CTS_PINOP          0
-
-#define UART_DEVNO			0
-
-#define UART_RATE			1000000
-
+/* UDG uses USB-H4 or native USB HCI only. No UART pins are configured. */
+#define HCI_BOARD_HAS_UART 0
 
 #elif BOARD == IBK_NRF52840
 
@@ -482,6 +451,12 @@
 // UART flow control and pin map
 //=============================================================================
 
+#ifndef HCI_BOARD_HAS_UART
+#define HCI_BOARD_HAS_UART 1
+#endif
+
+#if HCI_BOARD_HAS_UART
+
 /*
  * Built once for every board rather than copied into each branch, because the
  * two have to agree: asking the peripheral for hardware flow control without
@@ -523,6 +498,8 @@
 	{UART_TX_PORT, UART_TX_PIN, UART_TX_PINOP, IOPINDIR_OUTPUT, IOPINRES_NONE, IOPINTYPE_NORMAL},}
 
 #endif
+
+#endif /* HCI_BOARD_HAS_UART */
 
 //=============================================================================
 // Board Initialization Function
