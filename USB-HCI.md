@@ -81,8 +81,8 @@ enables USB. It holds that request through disconnect/reconnect and releases it
 at target shutdown, after USB has stopped. A cold UART-only startup takes no
 USB crystal request.
 
-This integration was checked against IOsonata `usb_hci_reset_fix` commit
-`a3334faa2e57cfd0f6c21e8631edd237cefc4903`. This includes the HCI endpoint
+This integration was checked against IOsonata `prerelease_0.13` commit
+`b515475734daef300db264dc7fef4c38ef5874a2`. This includes the HCI endpoint
 reset on repeated SET_INTERFACE, required when a native USB host reopens the
 same alternate setting. Rebuild the IOsonata nRF52840 library
 before rebuilding HciController; mixing old archives with current headers is
