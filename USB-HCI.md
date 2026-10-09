@@ -81,8 +81,10 @@ enables USB. It holds that request through disconnect/reconnect and releases it
 at target shutdown, after USB has stopped. A cold UART-only startup takes no
 USB crystal request.
 
-This integration was checked against IOsonata `main` commit
-`05e00ed094aaa0f5cb21493e5ed8dda871de7c26`. Rebuild the IOsonata nRF52840 library
+This integration was checked against IOsonata `usb_hci_reset_fix` commit
+`a3334faa2e57cfd0f6c21e8631edd237cefc4903`. This includes the HCI endpoint
+reset on repeated SET_INTERFACE, required when a native USB host reopens the
+same alternate setting. Rebuild the IOsonata nRF52840 library
 before rebuilding HciController; mixing old archives with current headers is
 not supported. Hardware enumeration, traffic and suspend/resume still require
 validation with the rebuilt firmware.
@@ -208,7 +210,15 @@ stop/start, and a diagnostic cable attached after startup. IOsonata's own USB an
 Bluetooth host tests cover the class internals, ISO service behavior, SCO packet
 assembly/segmentation and controller-port rules.
 
-Hardware acceptance remains:
+A focused one-controller check repeatedly reopens each HCI alternate and
+requires the first Reset command to complete without retries:
+
+```bash
+./.venv/bin/python3 tests/harness/hcicontroller/usb_reopen_test.py
+```
+
+Use `--usb SERIAL` to select a particular native USB controller. The default
+is 20 opens per alternate. Full two-controller hardware acceptance remains:
 
 ```bash
 ./.venv/bin/python3 tests/harness/hcicontroller/release_test.py

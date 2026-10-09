@@ -103,6 +103,9 @@ tests/harness/hcicontroller/
 Useful entry points are:
 
 ```sh
+# One native USB dongle: repeated reopen/reset in both HCI alternates
+python3 tests/harness/hcicontroller/usb_reopen_test.py
+
 # Basic two-dongle profile and ACL-role validation
 python3 tests/harness/hcicontroller/pair_smoke_test.py
 
