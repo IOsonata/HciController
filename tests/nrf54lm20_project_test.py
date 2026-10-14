@@ -107,6 +107,22 @@ class Nrf54lm20ProjectTest(unittest.TestCase):
         self.assertIn("(void)sdc_disable();", stop)
         self.assertNotIn("if (pTarget->SdcInitialized)", stop)
 
+    def test_trace_bridge_reconnect_and_counters(self):
+        app = (ROOT / "src" / "hci_app.cpp").read_text()
+        header = (ROOT / "include" / "hci_app.h").read_text()
+        for field in ("TraceRxBytes", "TraceTxBytes", "TraceDroppedBytes",
+                      "TraceUsbBackpressure", "TracePortOpen"):
+            with self.subTest(field=field):
+                self.assertIn(field, header)
+        self.assertIn("app->TraceDroppedBytes +=", app)
+        self.assertIn("app->TraceUsbBackpressure++", app)
+        self.assertIn("app->UsbRunning && s_TraceCdc.IsPortOpen()", app)
+        worker = app.split("static void HciAppHostProcess(", 1)[1].split(
+            "static bool HciAppControllerInit(", 1)[0]
+        self.assertIn("HciTraceBridgePump(pApp);", worker)
+        self.assertLess(worker.index("HciAppDrainLog(pApp);"),
+                        worker.index("HciTraceBridgePump(pApp);"))
+
     def test_target_selection_and_mpsl_separation(self):
         startup = (ROOT / "src" / "main.cpp").read_text()
         source = (ROOT / "src" / "hci_nrf54lm20.cpp").read_text()
