@@ -181,12 +181,12 @@ static void HciStop(void *pContext)
 {
     HciNrf54lm20_t *pTarget = static_cast<HciNrf54lm20_t *>(pContext);
     if (pTarget == nullptr || s_pTarget != pTarget) { return; }
-    if (pTarget->SdcInitialized)
+    if (pTarget->SdcEnabled)
     {
         (void)sdc_disable();
         pTarget->SdcEnabled = false;
-        pTarget->SdcInitialized = false;
     }
+    pTarget->SdcInitialized = false;
     if (pTarget->MpslInitialized)
     {
         mpsl_uninit();
