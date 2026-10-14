@@ -113,7 +113,9 @@ class Nrf54lm20ProjectTest(unittest.TestCase):
         bridge = app.split("static void HciTraceBridgePump(", 1)[1].split(
             "\\n#endif", 1)[0]
         self.assertIn("UARTRx(&app->TraceUart", bridge)
-        self.assertIn("DeviceIntrfTx(s_TraceCdc.Data()", bridge)
+        self.assertIn("s_TraceCdc.Tx(0U", bridge)
+        self.assertNotIn("DeviceIntrfTx(", app)
+        self.assertNotIn("DeviceIntrfDisable(", app)
         self.assertIn("app->TracePendingOffset += (uint16_t)sent", bridge)
         self.assertIn("s_TraceCdc.IsPortOpen()", bridge)
         self.assertIn("TracePendingLen", header)
