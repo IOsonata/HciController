@@ -5,7 +5,6 @@ These checks validate project references and MCU/linker selection. They do
 not substitute for an ARM compile/link or on-hardware verification.
 """
 from pathlib import Path
-import re
 import unittest
 import xml.etree.ElementTree as ET
 
@@ -47,7 +46,7 @@ class Nrf54lm20ProjectTest(unittest.TestCase):
             ".//cconfiguration/storageModule[@moduleId='org.eclipse.cdt.core.settings']")}
         self.assertEqual(configs, {"Debug", "Release"})
         content = CPROJECT.read_text()
-        for token in ("NRF54LM20B_XXAA", "cortex-m33",
+        for token in ("NRF54LM20B_XXAA", "NRFXLIB_SDC", "cortex-m33",
                       "TaktOS_M33", "ARM/cm33/ioc/",
                       "IOsonata_nRF54LM20x", "nrf54lm/hard-float",
                       "softdevice_controller_multirole",
@@ -67,7 +66,7 @@ class Nrf54lm20ProjectTest(unittest.TestCase):
         udg = board.split("#if BOARD == UDG_NRF54LM20", 1)[1].split(
             "#elif BOARD == NORDIC_DK_NRF54LM20", 1)[0]
         wildthing = board.split("#elif BOARD == WILDTHING51_NRF54LM20", 1)[1].split(
-            "#else\\n#error \"Unsupported nRF54LM20 board\"", 1)[0]
+            "#else\n#error \"Unsupported nRF54LM20 board\"", 1)[0]
         self.assertIn("#define HCI_BOARD_HAS_UART 0", udg)
         self.assertIn("#define HCI_HOST_SELECT HCI_HOST_SELECT_USB", udg)
         self.assertNotIn("#define UART_DEVNO", udg)
@@ -82,7 +81,7 @@ class Nrf54lm20ProjectTest(unittest.TestCase):
         for name, pin in (("UART_RX_PORT", 1), ("UART_RX_PIN", 14),
                           ("UART_TX_PORT", 3), ("UART_TX_PIN", 4)):
             with self.subTest(name=name):
-                self.assertRegex(wildthing, rf"#define {name}\\s+{pin}\\b")
+                self.assertRegex(wildthing, rf"#define {name}\s+{pin}\b")
         self.assertIn("{3, 5, 1, IOPINDIR_INPUT", wildthing)
         self.assertIn("{1, 13, 1, IOPINDIR_OUTPUT", wildthing)
         self.assertNotIn("#define UART_CTS_PORT", wildthing)
