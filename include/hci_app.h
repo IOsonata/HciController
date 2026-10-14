@@ -76,6 +76,11 @@ typedef struct
     uint8_t TracePending[64];
     uint16_t TracePendingLen;
     uint16_t TracePendingOffset;
+    uint32_t TraceRxBytes;
+    uint32_t TraceTxBytes;
+    uint32_t TraceDroppedBytes;
+    uint32_t TraceUsbBackpressure;
+    bool TracePortOpen;
 #endif
     DevIntrf_t *pHostIntrf;
     HciAppHost_t HostType;
