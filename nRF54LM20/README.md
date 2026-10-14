@@ -18,8 +18,7 @@ and nRF54LM20 DK hardware tests have not been executed in this environment.
 Do not merge this branch or use it as a release binary until those pass.
 
 This port targets Nordic nRF54LM20A (DK PCA10184) and is developed separately
-from HciController `main`. Its dependency is IOsonata
-`prerelease_0.13` at or after `b515475734daef300db264dc7fef4c38ef5874a2`.
+from HciController `main`. Its dependency is IOsonata `main`, reviewed at commit `49f08107af29dcdd1f8a6bae3aae16fc7b5b1843` (October 14, 2026).
 
 ## Existing dependencies to reuse
 
@@ -128,3 +127,30 @@ The existing `HCI_NRF91_TRACE_BRIDGE` implementation in `hci_app.cpp` owns
 the second UART and CDC class. It is enabled for WildThing51 and disabled for
 UDG and the DK. Hardware validation is still required for USB enumeration,
 the UART peripheral mappings, and sustained HCI/trace traffic.
+
+## IOsonata main integration baseline
+
+Verified source/API baseline:
+`IOsonata/IOsonata` `main` at
+`49f08107af29dcdd1f8a6bae3aae16fc7b5b1843`.
+
+- Match IOsonata's nRF54LM20x `Debug_SDC` and `Release_SDC`
+  configurations: define both `NRF54LM20B_XXAA` and `NRFXLIB_SDC`,
+  and link `IOsonata_nRF54LM20x`, `TaktOS_M33`, nrfxlib multirole
+  SDC, MPSL and MPSL FEM libraries for `nrf54lm/hard-float`.
+- The HCI application implements the current `UsbEvtQue` callback
+  and calls `UsbCheckStatus` when the worker queue empties. It uses
+  IOsonata's USB device stack, `BtHciUsb` and `UsbdCdc`
+  classes directly; do not copy controller drivers into HciController.
+- HCI controller target owns its own nRF54L MPSL/SDC interrupts
+  and deferred processing; IOsonata's `nrf_mpsl.cpp` is not an
+  alternate vector implementation to be linked alongside it.
+- IOsonata's `uart_nrfx.cpp` defines `DevNo=1` as UARTE20 and
+  `DevNo=2` as UARTE21 for nRF54L; WildThing51 uses these
+  separately for HCI and the nRF91 trace bridge.
+- Run `python3 -m unittest tests/nrf54lm20_project_test.py` at the
+  repository root, then build the corresponding IOsonata `Debug_SDC`
+  / `Release_SDC` library and HciController IOC `Debug` /
+  `Release`. A static configuration review is **not** an ELF link
+  or hardware test. Inspect the map for clock/vector ownership
+  and reject unresolved or duplicate symbols.
