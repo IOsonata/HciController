@@ -143,7 +143,7 @@ static void HciTraceBridgePump(HciApp_t *app)
     if (app->TracePendingOffset == app->TracePendingLen)
     {
         app->TracePendingOffset = 0U;
-        const int len = app->TraceUart.Rx(app->TracePending,
+        const int len = UARTRx(&app->TraceUart, app->TracePending,
                                            sizeof(app->TracePending));
         if (len <= 0)
         {
@@ -941,7 +941,7 @@ void HciAppStop(HciApp_t *pApp)
     {
         if (pApp->HostType == HCI_APP_HOST_UART)
         {
-            pApp->Uart.Disable();
+            UARTDisable(&pApp->Uart);
         }
         else
         {
