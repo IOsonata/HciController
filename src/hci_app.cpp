@@ -131,30 +131,64 @@ static bool HciTraceBridgeStart(HciApp_t *app)
     return app->TraceUartReady;
 }
 
-/* Nonblocking CDC enqueue; retain the unaccepted tail. The controller's
- * worker polls this regularly, so USB backpressure never blocks HCI.
- */
+/* Bounded, nonblocking forwarding with explicit disconnected-port loss count. */
 static void HciTraceBridgePump(HciApp_t *app)
 {
-    if (!app->TraceUartReady || !s_TraceCdc.IsPortOpen())
+    if (!app->TraceUartReady)
     {
         return;
     }
+
+    const bool open = app->UsbRunning && s_TraceCdc.IsPortOpen();
+    if (open != app->TracePortOpen)
+    {
+        app->TracePortOpen = open;
+        if (!open && app->TracePendingLen > app->TracePendingOffset)
+        {
+            app->TraceDroppedBytes +=
+                (uint32_t)(app->TracePendingLen - app->TracePendingOffset);
+            app->TracePendingLen = 0U;
+            app->TracePendingOffset = 0U;
+        }
+    }
+
+    if (!open)
+    {
+        uint8_t discard[64];
+        const int n = UARTRx(&app->TraceUart, discard, sizeof(discard));
+        if (n > 0)
+        {
+            app->TraceRxBytes += (uint32_t)n;
+            app->TraceDroppedBytes += (uint32_t)n;
+        }
+        return;
+    }
+
     if (app->TracePendingOffset == app->TracePendingLen)
     {
         app->TracePendingOffset = 0U;
         app->TracePendingLen = 0U;
         const int n = UARTRx(&app->TraceUart, app->TracePending,
                              sizeof(app->TracePending));
-        if (n <= 0) { return; }
+        if (n <= 0)
+        {
+            return;
+        }
+        app->TraceRxBytes += (uint32_t)n;
         app->TracePendingLen = (uint16_t)n;
     }
+
     const int n = DeviceIntrfTx(s_TraceCdc.Data(), 0U,
-              app->TracePending + app->TracePendingOffset,
-              (int)(app->TracePendingLen - app->TracePendingOffset));
+                   app->TracePending + app->TracePendingOffset,
+                   (int)(app->TracePendingLen - app->TracePendingOffset));
     if (n > 0)
     {
         app->TracePendingOffset += (uint16_t)n;
+        app->TraceTxBytes += (uint32_t)n;
+    }
+    else
+    {
+        app->TraceUsbBackpressure++;
     }
 }
 #endif
@@ -698,10 +732,11 @@ static void HciAppHostProcess(void *pContext)
             HciAppSetHostOpen(pApp, HciAppUsbHostIsOpen(pApp));
         }
         HciAppDrainLog(pApp);
-#if defined(HCI_NRF91_TRACE_BRIDGE) && HCI_NRF91_TRACE_BRIDGE
-        HciTraceBridgePump(pApp);
-#endif
     }
+
+#if defined(HCI_NRF91_TRACE_BRIDGE) && HCI_NRF91_TRACE_BRIDGE
+    HciTraceBridgePump(pApp);
+#endif
 
     HciControllerProcess(&pApp->Controller);
     HciAppResyncOnIdle(pApp);
