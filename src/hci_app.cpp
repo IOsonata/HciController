@@ -143,8 +143,8 @@ static void HciTraceBridgePump(HciApp_t *app)
     if (app->TracePendingOffset == app->TracePendingLen)
     {
         app->TracePendingOffset = 0U;
-        const int len = UARTRx(&app->TraceUart, app->TracePending,
-                                sizeof(app->TracePending));
+        const int len = app->TraceUart.Rx(app->TracePending,
+                                           sizeof(app->TracePending));
         if (len <= 0)
         {
             app->TracePendingLen = 0U;
@@ -153,9 +153,9 @@ static void HciTraceBridgePump(HciApp_t *app)
         app->TracePendingLen = (uint16_t)len;
     }
 
-    const int sent = DeviceIntrfTx(s_TraceCdc.Data(), 0U,
-                        app->TracePending + app->TracePendingOffset,
-                        app->TracePendingLen - app->TracePendingOffset);
+    const int sent = s_TraceCdc.Tx(0U,
+                                   app->TracePending + app->TracePendingOffset,
+                                   app->TracePendingLen - app->TracePendingOffset);
     if (sent > 0)
     {
         app->TracePendingOffset += (uint16_t)sent;
@@ -939,7 +939,14 @@ void HciAppStop(HciApp_t *pApp)
 
     if (!pApp->UsbHciNative && pApp->pHostIntrf != nullptr)
     {
-        DeviceIntrfDisable(pApp->pHostIntrf);
+        if (pApp->HostType == HCI_APP_HOST_UART)
+        {
+            pApp->Uart.Disable();
+        }
+        else
+        {
+            s_HostCdc.Disable();
+        }
     }
     HciAppUartRelease(pApp);
     HciAppUsbRelease(pApp);
