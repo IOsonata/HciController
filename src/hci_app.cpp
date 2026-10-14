@@ -131,64 +131,34 @@ static bool HciTraceBridgeStart(HciApp_t *app)
     return app->TraceUartReady;
 }
 
-/* Bounded, nonblocking forwarding with explicit disconnected-port loss count. */
+/* UART RX -> USB CDC TX. Keep an unsent tail when CDC is busy. */
 static void HciTraceBridgePump(HciApp_t *app)
 {
-    if (!app->TraceUartReady)
+    if (!app->TraceUartReady || !app->UsbRunning ||
+        !s_TraceCdc.IsPortOpen())
     {
-        return;
-    }
-
-    const bool open = app->UsbRunning && s_TraceCdc.IsPortOpen();
-    if (open != app->TracePortOpen)
-    {
-        app->TracePortOpen = open;
-        if (!open && app->TracePendingLen > app->TracePendingOffset)
-        {
-            app->TraceDroppedBytes +=
-                (uint32_t)(app->TracePendingLen - app->TracePendingOffset);
-            app->TracePendingLen = 0U;
-            app->TracePendingOffset = 0U;
-        }
-    }
-
-    if (!open)
-    {
-        uint8_t discard[64];
-        const int n = UARTRx(&app->TraceUart, discard, sizeof(discard));
-        if (n > 0)
-        {
-            app->TraceRxBytes += (uint32_t)n;
-            app->TraceDroppedBytes += (uint32_t)n;
-        }
         return;
     }
 
     if (app->TracePendingOffset == app->TracePendingLen)
     {
         app->TracePendingOffset = 0U;
-        app->TracePendingLen = 0U;
-        const int n = UARTRx(&app->TraceUart, app->TracePending,
-                             sizeof(app->TracePending));
-        if (n <= 0)
+        const int len = UARTRx(&app->TraceUart, app->TracePending,
+                                sizeof(app->TracePending));
+        if (len <= 0)
         {
+            app->TracePendingLen = 0U;
             return;
         }
-        app->TraceRxBytes += (uint32_t)n;
-        app->TracePendingLen = (uint16_t)n;
+        app->TracePendingLen = (uint16_t)len;
     }
 
-    const int n = DeviceIntrfTx(s_TraceCdc.Data(), 0U,
-                   app->TracePending + app->TracePendingOffset,
-                   (int)(app->TracePendingLen - app->TracePendingOffset));
-    if (n > 0)
+    const int sent = DeviceIntrfTx(s_TraceCdc.Data(), 0U,
+                        app->TracePending + app->TracePendingOffset,
+                        app->TracePendingLen - app->TracePendingOffset);
+    if (sent > 0)
     {
-        app->TracePendingOffset += (uint16_t)n;
-        app->TraceTxBytes += (uint32_t)n;
-    }
-    else
-    {
-        app->TraceUsbBackpressure++;
+        app->TracePendingOffset += (uint16_t)sent;
     }
 }
 #endif
