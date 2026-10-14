@@ -22,15 +22,7 @@ class Nrf52840IntegrationTest(unittest.TestCase):
                          {"Debug", "Release", "Release_MBR", "Release_SD"})
         for cfg in configs:
             with self.subTest(config=cfg.get("name")):
-                parent = cfg.getparent() if hasattr(cfg, "getparent") else None
-                # ElementTree has no parent links: locate containing config.
-                data = (IOC / ".cproject").read_text()
-                start = data.find("<cconfiguration", 0)
-                blocks = data.split("<cconfiguration")[1:]
-                matched = [b for b in blocks if
-                           f'name="{cfg.get("name")}"' in b.split("</cconfiguration>")[0]]
-                self.assertEqual(len(matched), 1)
-                text = matched[0].split("</cconfiguration>")[0]
+                text = ET.tostring(cfg, encoding="unicode")
                 self.assertEqual(text.count('value="NRFXLIB_SDC"'), 2)
                 self.assertEqual(text.count('value="NRF52840_XXAA"'), 2)
                 self.assertIn("IOsonata_nRF52840", text)
