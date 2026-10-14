@@ -317,7 +317,11 @@ check-cis-cleanup:
 	@echo "[TEST] hci_cis_cleanup_test.py"
 	@$(PYTHON) $(THIS_DIR)/harness/hcicontroller/hci_cis_cleanup_test.py
 
-run: all check-project check-boards check-usb-desc check-usb-runtime \
+check-target-integrations:
+	@$(PYTHON) -m unittest discover -s $(THIS_DIR) -p '*integration_test.py'
+	@$(PYTHON) -m unittest discover -s $(THIS_DIR) -p 'nrf54lm20_project_test.py'
+
+run: all check-target-integrations check-project check-boards check-usb-desc check-usb-runtime \
      check-commands check-sdc-symbols check-smp check-events check-cis-cleanup
 	@set -e; for t in $(TARGETS); do \
 	  echo "[TEST] $$(basename $$t)"; $$t; done
