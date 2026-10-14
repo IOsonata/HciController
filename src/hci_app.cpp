@@ -397,6 +397,28 @@ static bool HciAppUsbSetup(HciApp_t *pApp, HciUsbDescriptorMode_t Mode)
     return true;
 }
 
+/* Roll back transport peripherals when a later initialization stage fails.
+ * This is also used by Stop after its worker has left the runtime.
+ */
+static void HciAppUartRelease(HciApp_t *pApp)
+{
+#if defined(HCI_NRF91_TRACE_BRIDGE) && HCI_NRF91_TRACE_BRIDGE
+    if (pApp->TraceUartReady)
+    {
+        UARTDisable(&pApp->TraceUart);
+        pApp->TraceUartReady = false;
+    }
+    pApp->TracePendingLen = 0U;
+    pApp->TracePendingOffset = 0U;
+#endif
+    if (pApp->HostType == HCI_APP_HOST_UART &&
+        pApp->pHostIntrf == &pApp->Uart.DevIntrf)
+    {
+        UARTDisable(&pApp->Uart);
+        pApp->pHostIntrf = nullptr;
+    }
+}
+
 static void HciAppUsbRelease(HciApp_t *pApp)
 {
     if (pApp == nullptr || !pApp->UsbRunning)
@@ -787,7 +809,7 @@ bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode, HciTarget_t Target)
     }
 
 #if defined(HCI_NRF91_TRACE_BRIDGE) && HCI_NRF91_TRACE_BRIDGE
-    if (hostReady && !HciTraceBridgeStart(pApp))
+    if (hostReady && pApp->UsbRunning && !HciTraceBridgeStart(pApp))
     {
         HciTrace("init: Thingy91 UART0 trace receiver failed\r\n");
         hostReady = false;
@@ -796,6 +818,7 @@ bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode, HciTarget_t Target)
 
     if (!hostReady)
     {
+        HciAppUartRelease(pApp);
         HciTrace("init: host interface failed type=%u\r\n", (unsigned)hostType);
         pApp->LastError = -2;
         HciAppUsbRelease(pApp);
@@ -809,6 +832,7 @@ bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode, HciTarget_t Target)
         HciTrace("init: controller transport failed host=%s\r\n",
                  HciAppHostName(pApp));
         pApp->LastError = -3;
+        HciAppUartRelease(pApp);
         HciAppUsbRelease(pApp);
         s_pApp = nullptr;
         return false;
@@ -834,6 +858,7 @@ bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode, HciTarget_t Target)
     {
         HciTrace("init: target Init failed\r\n");
         pApp->LastError = -4;
+        HciAppUartRelease(pApp);
         HciAppUsbRelease(pApp);
         s_pApp = nullptr;
         return false;
@@ -857,6 +882,7 @@ bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode, HciTarget_t Target)
     {
         HciTrace("init: HciTaktOsInit failed\r\n");
         pApp->LastError = -5;
+        HciAppUartRelease(pApp);
         HciAppUsbRelease(pApp);
         s_pApp = nullptr;
         return false;
@@ -910,13 +936,7 @@ void HciAppStop(HciApp_t *pApp)
     {
         DeviceIntrfDisable(pApp->pHostIntrf);
     }
-#if defined(HCI_NRF91_TRACE_BRIDGE) && HCI_NRF91_TRACE_BRIDGE
-    if (pApp->TraceUartReady)
-    {
-        UARTDisable(&pApp->TraceUart);
-        pApp->TraceUartReady = false;
-    }
-#endif
+    HciAppUartRelease(pApp);
     HciAppUsbRelease(pApp);
     pApp->Target.pOps->Stop(pApp->Target.pContext);
     pApp->pHostIntrf = nullptr;
