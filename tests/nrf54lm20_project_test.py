@@ -89,6 +89,24 @@ class Nrf54lm20ProjectTest(unittest.TestCase):
         self.assertIn("BOARD == UDG_NRF54LM20", source)
         self.assertIn("BOARD == WILDTHING51_NRF54LM20", source)
 
+    def test_startup_failure_rollback_and_trace_bridge(self):
+        app = (ROOT / "src" / "hci_app.cpp").read_text()
+        self.assertIn("static void HciAppUartRelease(", app)
+        self.assertIn("hostReady && pApp->UsbRunning &&", app)
+        init = app.split("bool HciAppInitMode(", 1)[1].split(
+            "bool HciAppInit(", 1)[0]
+        self.assertGreaterEqual(init.count("HciAppUartRelease(pApp);"), 4)
+        stop = app.split("void HciAppStop(", 1)[1]
+        self.assertIn("HciAppUartRelease(pApp);", stop)
+
+    def test_nrf54_sdc_partial_startup_cleanup(self):
+        target = (ROOT / "src" / "hci_nrf54lm20.cpp").read_text()
+        stop = target.split("static void HciStop(", 1)[1].split(
+            "static bool HciStart(", 1)[0]
+        self.assertIn("if (pTarget->SdcEnabled)", stop)
+        self.assertIn("(void)sdc_disable();", stop)
+        self.assertNotIn("if (pTarget->SdcInitialized)", stop)
+
     def test_target_selection_and_mpsl_separation(self):
         startup = (ROOT / "src" / "main.cpp").read_text()
         source = (ROOT / "src" / "hci_nrf54lm20.cpp").read_text()
