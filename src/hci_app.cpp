@@ -62,9 +62,11 @@ static_assert(HCI_SDC_ACL_TRACK_HANDLES >=
 #endif
 
 static HciApp_t *s_pApp;
+static UART s_HciUart;
 static UsbdCdc s_HostCdc;
 static UsbdCdc s_LogCdc;
 #if defined(HCI_NRF91_TRACE_BRIDGE) && HCI_NRF91_TRACE_BRIDGE
+static UART s_TraceUart;
 static UsbdCdc s_TraceCdc;
 static const IOPinCfg_t s_TraceUartPins[] = HCI_NRF91_TRACE_UART_PINS;
 #endif
@@ -127,7 +129,7 @@ static bool HciTraceBridgeStart(HciApp_t *app)
     cfg.pRxMem = app->TraceUartRxMem;
     cfg.TxMemSize = sizeof(app->TraceUartTxMem);
     cfg.pTxMem = app->TraceUartTxMem;
-    app->TraceUartReady = UARTInit(&app->TraceUart, &cfg);
+    app->TraceUartReady = s_TraceUart.Init(cfg);
     return app->TraceUartReady;
 }
 
@@ -143,7 +145,7 @@ static void HciTraceBridgePump(HciApp_t *app)
     if (app->TracePendingOffset == app->TracePendingLen)
     {
         app->TracePendingOffset = 0U;
-        const int len = UARTRx(&app->TraceUart, app->TracePending,
+        const int len = s_TraceUart.Rx( app->TracePending,
                                            sizeof(app->TracePending));
         if (len <= 0)
         {
@@ -409,16 +411,16 @@ static void HciAppUartRelease(HciApp_t *pApp)
 #if defined(HCI_NRF91_TRACE_BRIDGE) && HCI_NRF91_TRACE_BRIDGE
     if (pApp->TraceUartReady)
     {
-        UARTDisable(&pApp->TraceUart);
+        s_TraceUart.Disable();
         pApp->TraceUartReady = false;
     }
     pApp->TracePendingLen = 0U;
     pApp->TracePendingOffset = 0U;
 #endif
     if (pApp->HostType == HCI_APP_HOST_UART &&
-        pApp->pHostIntrf == &pApp->Uart.DevIntrf)
+        pApp->pHostIntrf == static_cast<DevIntrf_t *>(s_HciUart))
     {
-        UARTDisable(&pApp->Uart);
+        s_HciUart.Disable();
         pApp->pHostIntrf = nullptr;
     }
 }
@@ -465,13 +467,13 @@ static bool HciAppInitUart(HciApp_t *pApp)
     cfg.Duplex = UART_DUPLEX_FULL;
     cfg.Mode = UART_MODE_UART;
 
-    if (!UARTInit(&pApp->Uart, &cfg))
+    if (!s_HciUart.Init(cfg))
     {
         return false;
     }
 
     HciTargetUartTrace(&pApp->Target, HCI_APP_UART_DEVICE);
-    pApp->pHostIntrf = &pApp->Uart.DevIntrf;
+    pApp->pHostIntrf = static_cast<DevIntrf_t *>(s_HciUart);
     return true;
 #else
     (void)pApp;
@@ -762,7 +764,7 @@ bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode, HciTarget_t Target)
         Mode == HCI_APP_MODE_UART_H4 &&
         s_pApp == pApp &&
         pApp->HostType == HCI_APP_HOST_UART &&
-        pApp->pHostIntrf == &pApp->Uart.DevIntrf;
+        pApp->pHostIntrf == static_cast<DevIntrf_t *>(s_HciUart);
 
     if (pApp == nullptr || (s_pApp != nullptr && !earlyUart))
     {
@@ -941,7 +943,7 @@ void HciAppStop(HciApp_t *pApp)
     {
         if (pApp->HostType == HCI_APP_HOST_UART)
         {
-            UARTDisable(&pApp->Uart);
+            s_HciUart.Disable();
         }
         else
         {
