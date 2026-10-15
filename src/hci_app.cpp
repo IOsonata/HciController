@@ -145,7 +145,7 @@ static void HciTraceBridgePump(HciApp_t *app)
     if (app->TracePendingOffset == app->TracePendingLen)
     {
         app->TracePendingOffset = 0U;
-        const int len = s_TraceUart.Rx( app->TracePending,
+        const int len = s_TraceUart.Rx(app->TracePending,
                                            sizeof(app->TracePending));
         if (len <= 0)
         {
