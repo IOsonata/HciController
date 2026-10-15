@@ -69,9 +69,7 @@ typedef struct
      * CDC DeviceIntrf when USB is running. It is never mixed with the HCI stream.
      */
 
-    UARTDev_t Uart;
 #if defined(HCI_NRF91_TRACE_BRIDGE) && HCI_NRF91_TRACE_BRIDGE
-    UARTDev_t TraceUart;
     bool TraceUartReady;
     uint8_t TracePending[64];
     uint16_t TracePendingLen;
