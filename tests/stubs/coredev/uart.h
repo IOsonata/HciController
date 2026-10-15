@@ -142,4 +142,18 @@ void UARTSetCtrlLineState(UARTDev_t *const pDev, uint32_t LineState);
 }
 #endif
 
+#ifdef __cplusplus
+/* Host-test approximation of IOsonata's public UART C++ interface. */
+class UART {
+public:
+    UART() : vDevData{} {}
+    bool Init(const UARTCfg_t &cfg) { return UARTInit(&vDevData, &cfg); }
+    operator DevIntrf_t *() { return &vDevData.DevIntrf; }
+    int Rx(uint8_t *, int) { return 0; }
+    void Disable() {}
+private:
+    UARTDev_t vDevData;
+};
+#endif
+
 #endif /* UART_H__ */
