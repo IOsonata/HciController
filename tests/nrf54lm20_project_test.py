@@ -46,7 +46,7 @@ class Nrf54lm20ProjectTest(unittest.TestCase):
             ".//cconfiguration/storageModule[@moduleId='org.eclipse.cdt.core.settings']")}
         self.assertEqual(configs, {"Debug", "Release"})
         content = CPROJECT.read_text()
-        for token in ("NRF54LM20B_XXAA", "NRFXLIB_SDC", "cortex-m33",
+        for token in ("NRF54LM20B_XXAA", "NRF_APPLICATION", "NRFXLIB_SDC", "cortex-m33",
                       "TaktOS_M33", "ARM/cm33/ioc/",
                       "IOsonata_nRF54LM20x", "nrf54lm/hard-float",
                       "softdevice_controller_multirole",
@@ -59,6 +59,20 @@ class Nrf54lm20ProjectTest(unittest.TestCase):
                           "Release_MBR"):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, content)
+
+    def test_application_processor_selected_in_all_compilers(self):
+        root = ET.parse(CPROJECT).getroot()
+        configs = root.findall(".//cconfiguration")
+        self.assertEqual(len(configs), 2)
+        for config in configs:
+            defines = config.findall(
+                ".//option[@valueType='definedSymbols']/listOptionValue"
+            )
+            selected = [item.get("value") for item in defines]
+            with self.subTest(config=config.get("id")):
+                self.assertEqual(selected.count("NRF_APPLICATION"), 2)
+                self.assertEqual(selected.count("NRF54LM20B_XXAA"), 2)
+                self.assertEqual(selected.count("NRFXLIB_SDC"), 2)
 
     def test_board_policy_usb_dongle_vs_dual_uart(self):
         board = (PORT / "src" / "board.h").read_text()
