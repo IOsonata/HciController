@@ -112,7 +112,12 @@ class Nrf54lm20ProjectTest(unittest.TestCase):
         header = (ROOT / "include" / "hci_app.h").read_text()
         bridge = app.split("static void HciTraceBridgePump(", 1)[1].split(
             "\\n#endif", 1)[0]
-        self.assertIn("UARTRx(&app->TraceUart", bridge)
+        self.assertIn("s_TraceUart.Rx(", bridge)
+        self.assertIn("s_HciUart.Init(cfg)", app)
+        self.assertIn("static UART s_HciUart;", app)
+        self.assertIn("static UART s_TraceUart;", app)
+        self.assertNotIn("UARTDev_t Uart;", header)
+        self.assertNotIn("UARTDev_t TraceUart;", header)
         self.assertIn("s_TraceCdc.Tx(0U", bridge)
         self.assertNotIn("DeviceIntrfTx(", app)
         self.assertNotIn("DeviceIntrfDisable(", app)
