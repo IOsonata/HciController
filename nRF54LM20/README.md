@@ -119,7 +119,7 @@ policy through `BOARD` in `nRF54LM20/src/board.h`.
 | --- | --- | --- | --- |
 | `UDG_NRF54LM20` (default, 200) | USB H:4 or native USB HCI | HciController diagnostic CDC | None |
 | `NORDIC_DK_NRF54LM20` (201) | USB by default, UART optional | HciController diagnostic CDC | DK UARTE20 when UART selected |
-| `WILDTHING51_NRF54LM20` (101) | nRF91 H:4 at 1 Mbaud with RTS/CTS | Dedicated nRF91 115200 baud UART trace CDC plus controller diagnostic CDC | Two *different* UART instances |
+| `WILDTHING51_NRF54LM20` (101) | nRF91 H:4 at 1 Mbaud without RTS/CTS | Dedicated nRF91 115200 baud UART trace CDC plus controller diagnostic CDC | Two *different* UART instances |
 
 **WildThing51 shared BLE footprint:** the supplied schematic (BLE sheet,
 page 3) labels the module `BLYST840/LM20`. The four shared BTLTE nets
