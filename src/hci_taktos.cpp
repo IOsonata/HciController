@@ -31,10 +31,9 @@ static bool HciTaktOsIsInIsr(void)
 }
 
 /*
- * The thread side of the pending word. A critical section is right here and
- * not in HciTaktOsWake: this runs on the thread, where masking briefly is
- * ordinary, and masking is what makes the read and the clear one operation
- * against the interrupt that sets bits.
+ * Atomically take and clear pending events on the worker thread. The
+ * critical section prevents an interrupt from updating the pending word
+ * between the read and clear.
  */
 static uint32_t HciTaktOsTakeEvents(HciTaktOs_t *pRuntime)
 {
