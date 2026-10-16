@@ -37,13 +37,11 @@
  *
  * tests/sdc_symbols.py verifies that required SDC symbols are available.
  *
- * Notes on groups of commands below whose behaviour is not obvious from the
- * table, kept here rather than repeated at each row.
+ * Command groups requiring additional implementation notes:
  *
  * Vol 4 Part E 7.8.74, LE Read Transmit Power, is the minimum and maximum
- * transmit power the controller supports across its PHYs. Nothing to do with
- * LE Power Control, which an earlier comment here claimed, and it needs no
- * sdc_support_ call.
+ * transmit power supported across PHYs. It is independent of LE Power
+ * Control and requires no additional sdc_support_ call.
  *
  * Read Remote Version Information, Vol 4 Part E 7.1.23, and the Authenticated
  * Payload Timeout pair, 7.3.93 and 7.3.94, are mandatory for an LE controller
