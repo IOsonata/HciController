@@ -74,6 +74,9 @@ typedef struct
     uint8_t TracePending[64];
     uint16_t TracePendingLen;
     uint16_t TracePendingOffset;
+    uint8_t TraceInputPending[64];
+    uint16_t TraceInputLen;
+    uint16_t TraceInputOffset;
 #endif
     DevIntrf_t *pHostIntrf;
     HciAppHost_t HostType;
