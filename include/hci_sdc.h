@@ -64,7 +64,8 @@ typedef int32_t (*HciSdcDataPut_t)(void *pContext, const uint8_t *pPacket);
 typedef int32_t (*HciSdcGet_t)(void *pContext, uint8_t *pPacket, uint8_t *pType);
 typedef void (*HciSdcProcess_t)(void *pContext);
 
-typedef struct {
+typedef struct
+{
     HciSdcDataPut_t AclPut;
     HciSdcDataPut_t IsoPut;
     HciSdcGet_t Get;
@@ -144,7 +145,8 @@ typedef struct {
 #define HCI_SDC_ENFORCE_ACL_CREDITS 0
 #endif
 
-typedef struct {
+typedef struct
+{
     HciCmdDispatch_t Commands;
 
     /*
