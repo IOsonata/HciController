@@ -4,7 +4,7 @@
 @brief	HciController firmware entry point and board runtime selection.
 
 		Initializes board status, persistent transport mode selection, TaktOS,
-		the nRF52840 target, HCI application runtime, mode-switch handling,
+		the selected MCU target, HCI application runtime, mode-switch handling,
 		and the firmware worker threads.
 
 @author	Nguyen Hoan Hoang
