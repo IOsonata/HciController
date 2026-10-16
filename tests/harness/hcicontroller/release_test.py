@@ -311,7 +311,7 @@ def main():
     print("Dongle A: %s" % spec_a)
     print("Dongle B: %s" % spec_b)
 
-    book = ResultBook("HciController nRF52840 + SDC HEAD release validation")
+    book = ResultBook("HciController cross-platform release validation")
 
     if args.only_pawr:
         with_pair(
