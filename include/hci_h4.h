@@ -23,7 +23,8 @@
 extern "C" {
 #endif
 
-typedef enum {
+typedef enum
+{
     HCI_H4_PACKET_NONE    = 0x00,
     HCI_H4_PACKET_COMMAND = 0x01,
     HCI_H4_PACKET_ACL     = 0x02,
@@ -41,7 +42,8 @@ typedef bool (*HciH4PacketHandler_t)(void *pContext,
                                      const uint8_t *pPacket,
                                      size_t PacketLen);
 
-typedef enum {
+typedef enum
+{
     HCI_H4_PARSE_TYPE = 0,
     HCI_H4_PARSE_HEADER,
     HCI_H4_PARSE_PAYLOAD,
@@ -49,7 +51,8 @@ typedef enum {
     HCI_H4_PARSE_DROP,
 } HciH4ParseState_t;
 
-typedef struct {
+typedef struct
+{
     uint8_t *pPacket;
     size_t PacketCapacity;
     size_t PacketLen;
