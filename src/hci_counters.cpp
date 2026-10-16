@@ -28,9 +28,9 @@ extern "C" __attribute__((weak)) int32_t HciSdcResourcesRequired(void)
 }
 
 /*
- * Platform diagnostics are optional for the same reason. The nRF52840 native
- * USB DCD supplies the strong definition; portable/unit-test builds retain the
- * zeroes already present in the counter array.
+ * Platform-specific USB diagnostics are optional. A target USB driver may
+ * provide the strong definition; portable/unit-test builds retain zeroes
+ * when no platform counter provider is linked.
  */
 extern "C" __attribute__((weak))
 void HciUsbPlatformReadCounters(uint32_t *pValues, size_t Count)
