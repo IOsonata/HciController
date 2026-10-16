@@ -77,10 +77,11 @@ static BtHciUsb s_HciUsb;
 // process-queued latch. Only the HCI worker executes callbacks, while USB is up.
 #define HCI_USB_WORK_COUNT 16U
 #define HCI_USB_WORK_PER_PASS 30U
-typedef struct {
-	uint32_t EvtId;
-	void *pCtx;
-	UsbEvtQueHandler_t Handler;
+typedef struct
+{
+    uint32_t EvtId;
+    void *pCtx;
+    UsbEvtQueHandler_t Handler;
 } HciUsbWork_t;
 
 alignas(HciUsbWork_t) static uint8_t s_UsbWorkMem[
@@ -94,8 +95,8 @@ static const IOPinCfg_t s_HciUartPins[] = UART_PINS;
 static void HciAppWake(void *pContext);
 
 #if defined(HCI_NRF91_TRACE_BRIDGE) && HCI_NRF91_TRACE_BRIDGE
-/* Receive the nRF9160's 115200-baud UART0 debug output on the
- * nRF52840's separate UART0. Never pass these bytes through HCI H:4.
+/* Receive nRF91 diagnostic UART output on the board-selected
+ * trace UART. Never pass these bytes through HCI H:4.
  */
 static int HciTraceUartEvent(UARTDev_t * const, UART_EVT evt,
                              uint8_t *, int len)
