@@ -1,4 +1,10 @@
-/** nRF54LM20A/B HciController target. MPL-2.0 (c) 2026 I-SYST inc. */
+/**-------------------------------------------------------------------------
+@file hci_nrf54lm20.h
+
+@brief nRF54LM20 SDC/MPSL HCI controller target interface.
+
+@license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
+----------------------------------------------------------------------------*/
 #ifndef HCI_NRF54LM20_H
 #define HCI_NRF54LM20_H
 #include <stddef.h>
@@ -8,7 +14,8 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-typedef struct {
+typedef struct
+{
     HciTaktOs_t *pRuntime;
     uint8_t *pSdcMem;
     size_t SdcMemCapacity;
