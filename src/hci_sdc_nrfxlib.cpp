@@ -2806,11 +2806,7 @@ bool HciSdcNrfxlibInit(HciSdc_t *pSdc,
         -NRF_EAGAIN,
     };
 
-    /*
-     * The command context is the counter readout's view of the stack. Every
-     * other handler in the table ignores it and talks to SDC through file
-     * scope entry points.
-     */
+    /* The counter readout uses the command context; other handlers access SDC directly. */
     if (!HciSdcInit(pSdc,
                     &ops,
                     s_HciSdcCommands,
@@ -2822,26 +2818,15 @@ bool HciSdcNrfxlibInit(HciSdc_t *pSdc,
         return false;
     }
 
-    /*
-     * A fresh controller has used neither advertising command set, and the
-     * guard is what keeps it that way until a host picks one.
-     */
+    /* Reset legacy/extended advertising command-family selection. */
     HciSdcNrfxlibResetAdvCommandType();
     pSdc->Commands.Guard = HciSdcAdvCommandGuard;
 
     return true;
 }
 
-/*
- * Say the controller is ready with a No Operation Command Complete.
- *
- * Whether a board needs this is a board fact, and this file cannot see board.h,
- * so the caller decides. It used to be a macro tested here, which meant the
- * only board that sets it got an image with the call compiled out and nothing
- * to say so.
- *
- * Call it after init and before the runtime thread starts, which is where the
- * dispatcher is empty and no command can have arrived.
+/* Queue an optional startup No Operation Command Complete event.
+ * The board-specific caller decides whether it is required, before HCI processing starts.
  */
 void HciSdcNrfxlibQueueStartupNop(HciSdc_t *pSdc)
 {
