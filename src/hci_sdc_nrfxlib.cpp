@@ -29,10 +29,8 @@
 #include "sdc_hci_vs.h"
 
 /*
- * This firmware links libsoftdevice_controller_multirole and only that. An HCI
- * controller exposes the whole controller to its host and the host chooses
- * roles at run time over HCI, so there is no build in which it is central only
- * or peripheral only, and no library variant to select between. Every
+ * This firmware uses the multirole SoftDevice Controller archive.
+ * Central and peripheral roles are selected at runtime through HCI. Every
  * sdc_hci_cmd_ function the table below calls is present in that archive, so
  * the rows are unconditional.
  *
@@ -68,8 +66,7 @@
  *
  * Channel survey, power control, sleep clock accuracy, subrating, the extended
  * feature set and every periodic advertising role need a matching
- * sdc_support_ call before sdc_cfg_set. Those are made in hci_nrf52840.cpp,
- * and the pool they need is computed in hci_nrf52840.h. A row here with no
+ * sdc_support_ call before sdc_cfg_set. Those are configured by the shared SDC resource setup. A row here with no
  * support call there dispatches and is refused by SDC with a status.
  *
  * VS LLPM Mode Set and VS Connection Update belong together. LLPM permits
@@ -83,6 +80,15 @@
  * LE Set Host Channel Classification pairs with the channel survey: the survey
  * says which channels are busy, this says which to avoid.
  */
+
+typedef enum
+{
+    HCI_SDC_ADV_CMD_NONE = 0,
+    HCI_SDC_ADV_CMD_LEGACY,
+    HCI_SDC_ADV_CMD_EXTENDED,
+} HciSdcAdvCmdType_t;
+
+static HciSdcAdvCmdType_t s_AdvCmdTypeSinceReset = HCI_SDC_ADV_CMD_NONE;
 
 static HciCmdResult_t HciSdcComplete(uint8_t Status, size_t ReturnLen)
 {
@@ -2725,14 +2731,6 @@ static int32_t HciSdcNrfxlibGet(void *, uint8_t *pPacket, uint8_t *pType)
  * is an extended command. LE Read Advertising Physical Channel Tx Power is
  * the same shape and is a legacy one.
  */
-typedef enum {
-    HCI_SDC_ADV_CMD_NONE = 0,
-    HCI_SDC_ADV_CMD_LEGACY,
-    HCI_SDC_ADV_CMD_EXTENDED,
-} HciSdcAdvCmdType_t;
-
-static HciSdcAdvCmdType_t s_AdvCmdTypeSinceReset = HCI_SDC_ADV_CMD_NONE;
-
 static HciSdcAdvCmdType_t HciSdcAdvCommandType(uint16_t Opcode)
 {
     switch (Opcode)
