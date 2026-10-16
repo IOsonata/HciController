@@ -61,6 +61,15 @@ static_assert(HCI_SDC_ACL_TRACK_HANDLES >=
 #define HCI_APP_USB_POLL_MS 5U
 #endif
 
+#define HCI_USB_WORK_COUNT 16U
+#define HCI_USB_WORK_PER_PASS 30U
+typedef struct
+{
+    uint32_t EvtId;
+    void *pCtx;
+    UsbEvtQueHandler_t Handler;
+} HciUsbWork_t;
+
 static HciApp_t *s_pApp;
 static UART s_HciUart;
 static UsbdCdc s_HostCdc;
@@ -75,15 +84,6 @@ static BtHciUsb s_HciUsb;
 // Same CFifo worker queue as IOsonata's USB TaktOS examples. Keep it across
 // stop/start: discarding a queued process callback would strand the core's
 // process-queued latch. Only the HCI worker executes callbacks, while USB is up.
-#define HCI_USB_WORK_COUNT 16U
-#define HCI_USB_WORK_PER_PASS 30U
-typedef struct
-{
-    uint32_t EvtId;
-    void *pCtx;
-    UsbEvtQueHandler_t Handler;
-} HciUsbWork_t;
-
 alignas(HciUsbWork_t) static uint8_t s_UsbWorkMem[
 	CFIFO_TOTAL_MEMSIZE(HCI_USB_WORK_COUNT, sizeof(HciUsbWork_t))];
 static hCFifo_t s_hUsbWork;
