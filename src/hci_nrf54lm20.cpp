@@ -46,7 +46,10 @@ static void HciRadioAssert(uint32_t reason)
     }
     __DSB();
     NVIC_SystemReset();
-    for (;;) { __WFE(); }
+    for (;;)
+    {
+        __WFE();
+    }
 }
 static void HciMpslAssert(const char *file, uint32_t line)
 {
@@ -65,12 +68,18 @@ static void HciRandPoll(uint8_t *pBuffer, uint8_t Length)
     CryptoRngNrf *rng = CryptoRngNrfInstance();
     while (rng == nullptr)
     {
-        if (s_pTarget != nullptr) { s_pTarget->RandRetryCount++; }
+        if (s_pTarget != nullptr)
+        {
+            s_pTarget->RandRetryCount++;
+        }
         rng = CryptoRngNrfInstance();
     }
     while (rng->Random(pBuffer, Length) != CRYPTO_STATUS_OK)
     {
-        if (s_pTarget != nullptr) { s_pTarget->RandRetryCount++; }
+        if (s_pTarget != nullptr)
+        {
+            s_pTarget->RandRetryCount++;
+        }
     }
 }
 static bool HciRandSourceReady(HciNrf54lm20_t *pTarget)
@@ -286,10 +295,22 @@ extern "C" void SWI00_IRQHandler(void)
         HciTaktOsWake(s_pTarget->pRuntime, HCI_TAKTOS_EVENT_MPSL);
     }
 }
-extern "C" void RADIO_0_IRQHandler(void) { MPSL_IRQ_RADIO_Handler(); }
-extern "C" void GRTC_3_IRQHandler(void) { MPSL_IRQ_RTC0_Handler(); }
-extern "C" void TIMER10_IRQHandler(void) { MPSL_IRQ_TIMER0_Handler(); }
-extern "C" void CLOCK_POWER_IRQHandler(void) { MPSL_IRQ_CLOCK_Handler(); }
+extern "C" void RADIO_0_IRQHandler(void)
+{
+    MPSL_IRQ_RADIO_Handler();
+}
+extern "C" void GRTC_3_IRQHandler(void)
+{
+    MPSL_IRQ_RTC0_Handler();
+}
+extern "C" void TIMER10_IRQHandler(void)
+{
+    MPSL_IRQ_TIMER0_Handler();
+}
+extern "C" void CLOCK_POWER_IRQHandler(void)
+{
+    MPSL_IRQ_CLOCK_Handler();
+}
 
 /* nRF54L MPSL low-latency window callbacks. */
 #if NRF_POWER_HAS_CONST_LATENCY
@@ -297,16 +318,24 @@ static volatile uint32_t s_ConstLatRefs;
 static void HciConstLatAcquire(void)
 {
     if (s_ConstLatRefs++ == 0U)
+    {
         nrf_power_task_trigger(NRF_POWER, NRF_POWER_TASK_CONSTLAT);
+    }
 }
 static void HciConstLatRelease(void)
 {
     if (s_ConstLatRefs > 0U && --s_ConstLatRefs == 0U)
+    {
         nrf_power_task_trigger(NRF_POWER, NRF_POWER_TASK_LOWPWR);
+    }
 }
 #else
-static void HciConstLatAcquire(void) {}
-static void HciConstLatRelease(void) {}
+static void HciConstLatAcquire(void)
+{
+}
+static void HciConstLatRelease(void)
+{
+}
 #endif
 extern "C" void mpsl_low_latency_acquire_callback(void)
 { HciConstLatAcquire(); }
