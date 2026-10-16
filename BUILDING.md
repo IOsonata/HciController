@@ -105,11 +105,13 @@ UDG-nRF52840 passed the heterogeneous two-controller native USB release
 suite (66/66 checks, including 10,000 bidirectional ACL and 1,000
 bidirectional ISO stress iterations). Both devices additionally passed
 100 native USB reopen/Reset cycles in each HCI alternate setting.
+For long-running macOS tests, `caffeinate` prevents normal idle sleep while
+Python is running. It does not eliminate all USB or RF timing failures.
 See [nRF54LM20/README.md](nRF54LM20/README.md) for scope and remaining
 board-specific validation. This does not validate WildThing51 UART H:4.
 
 ```sh
-./.venv/bin/python3 tests/harness/hcicontroller/release_test.py --transport usb
+caffeinate -dimsu ./.venv/bin/python3 tests/harness/hcicontroller/release_test.py --transport usb
 ./.venv/bin/python3 tests/harness/hcicontroller/usb_reopen_test.py --usb <DK_USB_SERIAL> --count 100
 ```
 
