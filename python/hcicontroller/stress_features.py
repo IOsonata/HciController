@@ -309,6 +309,32 @@ def run_stress_phase(book, label, central_port, peripheral_port,
             % (label, count, (count + ISO_EVERY - 1) // ISO_EVERY),
         )
     except (HciError, HciGone) as err:
+        # Collect transport/controller evidence before cleanup resets the link.
+        # Do not replace the original failure if a diagnostic query fails.
+        diagnostics = []
+        for name, hci, before in (
+            ("central", central, locals().get("central_before")),
+            ("peripheral", peripheral, locals().get("peripheral_before")),
+        ):
+            if hci is None or before is None:
+                continue
+            try:
+                after = counter_snapshot(hci)
+                if after is None:
+                    diagnostics.append("%s counters unavailable" % name)
+                    continue
+                changes = []
+                for index, counter_name in ERROR_COUNTERS.items():
+                    delta = counter_delta(before, after, index)
+                    if delta not in (None, 0):
+                        changes.append("%s=%d" % (counter_name, delta))
+                diagnostics.append("%s error deltas: %s" % (
+                    name, ", ".join(changes) if changes else "none"))
+            except (HciError, HciGone) as diagnostic_err:
+                diagnostics.append("%s counters: %s" %
+                                   (name, diagnostic_err))
+        for diagnostic in diagnostics:
+            print("Stress failure diagnostic:", diagnostic, flush=True)
         book.failed("Stress", "concurrent ACL/ISO/event traffic", str(err))
     finally:
         if central is not None and peripheral is not None:
