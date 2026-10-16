@@ -47,7 +47,7 @@ typedef struct
     HciH4PacketType_t RxSelect;
     HciH4PacketType_t TxSelect;
 
-    /* Legacy callback mode retained for existing users/tests. */
+    /* Callback-oriented packet delivery mode. */
     HciH4PacketHandler_t Handler;
     void *pHandlerContext;
 
@@ -78,7 +78,8 @@ typedef struct
     uint32_t SuspectClearCount;
     uint32_t FlushedOctetCount;
 
-    struct {
+    struct
+    {
         uint8_t Type;
         uint8_t Head[2];
         bool Suspect;
@@ -89,7 +90,7 @@ typedef struct
     uint8_t FirstRxLen;
 } HciIntrfTransport_t;
 
-/* Existing callback-oriented H:4 transport API. */
+/* Callback-oriented H:4 transport API. */
 bool HciIntrfTransportInit(HciIntrfTransport_t *pTransport,
                            DevIntrf_t *pIntrf,
                            uint8_t *pHciRxPacket,
