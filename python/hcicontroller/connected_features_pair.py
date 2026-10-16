@@ -44,9 +44,12 @@ PHY_OPTION_CODED_S8 = 0x0002
 
 
 def wait_acl_marker(hci, expected_handle, expected_cid, expected_payload,
-                    timeout=5.0):
+                    timeout=5.0, diagnostics=None):
     """Wait for an L2CAP marker while reassembling HCI ACL fragments."""
     deferred = []
+    observed = {"acl": 0, "other_handle": 0, "malformed": 0,
+                "other_marker": 0, "unmatched_fragment": 0}
+    recent = []
     partial = None
     deadline = time.time() + timeout
 
@@ -65,6 +68,10 @@ def wait_acl_marker(hci, expected_handle, expected_cid, expected_payload,
             if cid == expected_cid and payload == expected_payload:
                 return True
 
+        observed["other_marker"] += 1
+        if len(recent) < 8:
+            recent.append("cid=0x%04X payload=%s" %
+                          (cid, payload[:12].hex()))
         deferred.extend(raw_packets)
         return False
 
@@ -74,7 +81,12 @@ def wait_acl_marker(hci, expected_handle, expected_cid, expected_payload,
             continue
 
         kind, _, body = packet
-        if kind != H4_ACL or len(body) < 4:
+        if kind != H4_ACL:
+            deferred.append(packet)
+            continue
+        observed["acl"] += 1
+        if len(body) < 4:
+            observed["malformed"] += 1
             deferred.append(packet)
             continue
 
@@ -84,6 +96,11 @@ def wait_acl_marker(hci, expected_handle, expected_cid, expected_payload,
         fragment = body[4:4 + packet_len]
 
         if handle != expected_handle or packet_len != len(body) - 4:
+            observed["other_handle" if handle != expected_handle else
+                     "malformed"] += 1
+            if len(recent) < 8:
+                recent.append("handle=0x%04X pb=%u len=%u actual=%u" %
+                              (handle, pb, packet_len, len(body) - 4))
             deferred.append(packet)
             continue
 
@@ -114,8 +131,22 @@ def wait_acl_marker(hci, expected_handle, expected_cid, expected_payload,
                 return True
             continue
 
+        observed["unmatched_fragment"] += 1
+        if len(recent) < 8:
+            recent.append("unmatched pb=%u len=%u" % (pb, packet_len))
         deferred.append(packet)
 
+    if diagnostics is not None:
+        diagnostics.append("ACL packets=%u other_handle=%u malformed=%u "
+                           "other_marker=%u unmatched_fragment=%u "
+                           "pending=%u partial=%s recent=%s" %
+                           (observed["acl"], observed["other_handle"],
+                            observed["malformed"], observed["other_marker"],
+                            observed["unmatched_fragment"], len(hci.pending),
+                            ("%u/%u bytes" %
+                             (len(partial["data"]), partial["expected_total"]))
+                            if partial is not None else "none",
+                            "; ".join(recent) if recent else "none"))
     if partial is not None:
         deferred.extend(partial["packets"])
     _base._restore(hci, deferred)
