@@ -31,7 +31,8 @@ extern "C" {
 #define HCI_INTRF_PKT_MARKS 24U
 #define HCI_INTRF_FIRST_RX_SIZE 64U
 
-typedef struct {
+typedef struct
+{
     HciH4Parser_t Parser;
 
     /* Underlying byte-stream DeviceIntrf (UART, CDC, etc.). */
