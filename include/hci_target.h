@@ -26,20 +26,10 @@ extern "C" {
 #endif
 
 /*
- * What the application needs from a part, and nothing else.
- *
- * Everything here is hardware that differs between parts: the low frequency
- * clock and how MPSL is told about it, the errata, and the interrupt wiring.
- * USB device control belongs to IOsonata. What the SoftDevice Controller is
- * configured to do is not in this interface, because it does not vary. That
- * lives in hci_sdc_resources.h and every port calls the same code.
- *
- * The application held an HciNrf52840_t directly before this existed, which
- * meant the whole stack above the radio named one part in nine places for no
- * reason. Adding a second part meant editing all of them.
- *
- * A port publishes one HciTarget_t. It owns its own instance, because a board
- * has one radio and there is nothing to allocate.
+ * Target-specific lifecycle and diagnostic operations.
+ * Hardware initialization, MPSL integration, and interrupt ownership belong
+ * to the target implementation. SDC feature configuration is shared.
+ * Each target implementation owns the state referenced by HciTarget_t.
  */
 typedef struct
 {
@@ -51,35 +41,19 @@ typedef struct
     void (*GetTaktOsOps)(void *pContext, HciTaktOsOps_t *pOps);
 
     /*
-     * Report what the UART hardware says about the host link, for the
-     * instance the board put the host on.
-     *
-     * Same division as UsbTrace: the application knows when a report is worth
-     * making, the port knows what there is to say. What there is to say here
-     * is whether the peripheral is enabled, which pins it actually ended up
-     * on, what the error source holds, and whether the peer is asserting the
-     * clear to send line. A link that moves no octets in either direction
-     * looks identical from above whether the peer is silent, the framing is
-     * wrong, or nothing ever told the peer it could send, and only the
-     * hardware can tell those apart.
-     *
-     * Optional; a port with no UART leaves it null.
+     * Optional UART host-link diagnostics: peripheral state, pin mapping,
+     * error status, and hardware flow-control signals.
      */
     void (*UartTrace)(const void *pContext, uint8_t DevNo);
 
     void (*Stop)(void *pContext);
 
-    /*
-     * The two SoftDevice Controller pool figures once Init has run: the octets
-     * the controller asked for, and the octets it was given. Both zero from a
-     * port that does not track them, which is not the same as a controller
-     * that wanted no memory.
-     */
+    /* Report required and allocated SDC memory in bytes when available. */
     void (*GetSdcMem)(const void *pContext,
                       uint32_t *pRequired,
                       uint32_t *pCapacity);
 
-    /* Whatever the port last failed with, for the application to report. */
+    /* Return the most recent target error. */
     int32_t (*LastError)(const void *pContext);
 } HciTargetOps_t;
 
