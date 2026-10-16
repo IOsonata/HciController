@@ -74,6 +74,25 @@ class Nrf54lm20ProjectTest(unittest.TestCase):
                 self.assertEqual(selected.count("NRF54LM20B_XXAA"), 2)
                 self.assertEqual(selected.count("NRFXLIB_SDC"), 2)
 
+    def test_debug_release_linker_scripts_match(self):
+        root = ET.parse(CPROJECT).getroot()
+        expected = (
+            "${system_property:iosonata_loc}/IOsonata/ARM/Nordic/"
+            "nRF54/ldscript/nrf54lm20a_xxaa_application.ld"
+        )
+        configs = root.findall(".//cconfiguration")
+        self.assertEqual(len(configs), 2)
+        for config in configs:
+            options = config.findall(".//option[@valueType='stringList']")
+            scripts = [
+                item.get("value", "").strip('"')
+                for option in options
+                if option.get("name") == "Script files (-T)"
+                for item in option.findall("listOptionValue")
+            ]
+            with self.subTest(config=config.get("id")):
+                self.assertEqual(scripts, [expected, expected])
+
     def test_board_policy_usb_dongle_vs_dual_uart(self):
         board = (PORT / "src" / "board.h").read_text()
         source = (ROOT / "src" / "main.cpp").read_text()
