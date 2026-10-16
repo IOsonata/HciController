@@ -49,8 +49,8 @@ extern "C" {
  *   10..  exact received payload
  *
  * With N payload octets the complete Command Complete Event is 16+N octets.
- * Sweeping N=0..240 therefore exercises every Event-IN length from 16 through
- * 256 octets, including every nRF52840 16-byte interrupt-IN boundary.
+ * Sweeping N=0..240 exercises every Event-IN length from 16 through
+ * 256 octets, including USB endpoint packet boundaries.
  */
 #define HCI_CONTROLLER_LOOPBACK_OPCODE             0xFFF1U
 #define HCI_CONTROLLER_LOOPBACK_REQUEST_HEADER_LEN 3U
