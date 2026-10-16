@@ -820,7 +820,7 @@ bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode, HciTarget_t Target)
 #if defined(HCI_NRF91_TRACE_BRIDGE) && HCI_NRF91_TRACE_BRIDGE
     if (hostReady && pApp->UsbRunning && !HciTraceBridgeStart(pApp))
     {
-        HciTrace("init: Thingy91 UART0 trace receiver failed\r\n");
+        HciTrace("init: nRF91 trace UART initialization failed\r\n");
         hostReady = false;
     }
 #endif
