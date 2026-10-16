@@ -98,31 +98,49 @@ def _wait_stress_acl_marker(hci, expected_handle, expected_cid,
 
 
 def _wait_completed(hci, expected_handle, timeout=3.0):
+    """Wait for credits on one handle without losing another handle's report."""
     deferred = []
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        packet = hci.read_packet(min(0.2, max(0.0, deadline - time.time())))
-        if packet is None:
-            continue
-        kind, code, body = packet
-        if kind == H4_EVENT and code == EVT_NUM_COMPLETED_PACKETS and body:
-            count = body[0]
-            for i in range(count):
-                at = 1 + (4 * i)
-                if len(body) < at + 4:
-                    break
-                handle, done = struct.unpack("<HH", body[at:at + 4])
-                if (handle & 0x0FFF) == expected_handle and done:
-                    _base._restore(hci, deferred)
-                    return
-            continue
-        if kind == H4_ISO:
-            continue
-        deferred.append(packet)
-    _base._restore(hci, deferred)
-    raise HciError("no Number Of Completed Packets for handle 0x%04X"
-                   % expected_handle)
+    deadline = time.monotonic() + timeout
+    target = expected_handle & 0x0FFF
+    try:
+        while time.monotonic() < deadline:
+            packet = hci.read_packet(
+                min(0.2, max(0.0, deadline - time.monotonic())))
+            if packet is None:
+                continue
 
+            kind, code, body = packet
+            if kind == H4_EVENT and code == EVT_NUM_COMPLETED_PACKETS and body:
+                num_handles = body[0]
+                if len(body) != 1 + 4 * num_handles:
+                    deferred.append(packet)
+                    continue
+
+                other = []
+                completed = False
+                for i in range(num_handles):
+                    at = 1 + 4 * i
+                    handle, done = struct.unpack_from("<HH", body, at)
+                    if (handle & 0x0FFF) == target:
+                        completed = completed or bool(done)
+                    else:
+                        other.append(body[at:at + 4])
+
+                if other:
+                    # Preserve unrelated handle completions, including a
+                    # combined ACL/CIS completion event.
+                    deferred.append(
+                        (kind, code, bytes([len(other)]) + b"".join(other)))
+                if completed:
+                    return
+                continue
+
+            if kind != H4_ISO:
+                deferred.append(packet)
+        raise HciError(
+            "no Number Of Completed Packets for handle 0x%04X" % target)
+    finally:
+        _base._restore(hci, deferred)
 
 def _check_counter_deltas(before, after, label):
     if before is None or after is None:
