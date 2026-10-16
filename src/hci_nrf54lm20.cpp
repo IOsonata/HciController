@@ -32,6 +32,7 @@
 #ifndef HCI_NRF54LM20_MPSL_LOW_PRIORITY
 #define HCI_NRF54LM20_MPSL_LOW_PRIORITY (MPSL_HIGH_IRQ_PRIORITY + 4U)
 #endif
+static HciNrf54lm20_t s_Target;
 static HciNrf54lm20_t *s_pTarget;
 
 #if NRF_POWER_HAS_CONST_LATENCY
@@ -311,7 +312,6 @@ static int32_t HciLastError(const void *pContext)
 static const HciTargetOps_t s_TargetOps = {
     HciInit, HciGetTaktOsOps, nullptr, HciStop, HciGetSdcMem, HciLastError
 };
-static HciNrf54lm20_t s_Target;
 HciTarget_t HciNrf54lm20Target(void)
 {
     HciTarget_t t = { &s_TargetOps, &s_Target };
