@@ -664,23 +664,11 @@ static HciCmdResult_t HciSdcCmdLeSetScanEnable(void *,
     }
 
 /*
- * Variable length commands carry a trailing array. The SDC types are packed
- * and byte aligned, so the packet is handed over directly rather than copied
- * into a fixed local.
- *
- * The fixed part alone is not enough to bound the read. The length of the
- * trailing array is carried in a field inside the fixed part, and the SDC call
- * trusts it. That field has to be checked against the parameter length the
- * host actually sent, or a short packet with a large count makes SDC read past
- * the end of the receive buffer. That buffer is reused for every packet and is
- * not cleared between them, so what lies past the end is the previous packet.
- *
- * Three shapes of count field appear in the commands used here, one macro
- * each. All three compute the number of bytes the array needs and require
- * ParamLen to match exactly before the packet is handed over. Exactly, not at
- * least: Vol 4 Part E 5.4.1 fixes Parameter_Total_Length, so trailing bytes
- * beyond what the count declares mean the host and the controller disagree
- * about the packet, and guessing which one is right is worse than refusing.
+ * Variable-length commands contain a trailing array in a packed SDC type.
+ * Validate the declared element count against the received parameter length
+ * before passing the buffer to SDC. All three count formats require an exact
+ * length match (Core Vol 4 Part E 5.4.1), preventing out-of-bounds reads
+ * from short packets and rejecting undeclared trailing data.
  */
 
 /* The count field is a byte count, as in Vol 4 Part E 7.8.54. */
@@ -1337,18 +1325,10 @@ HCI_SDC_CMD_NR(HciSdcCmdLeReadTransmitPower,
                sdc_hci_cmd_le_read_transmit_power_return_t)
 
 /*
- * Direct test mode.
- *
- * v1 is 1M and nothing else, so a board that advertises 2M and coded PHY can
- * only be RF tested on its slowest one. v2 adds the PHY, v3 adds the constant
- * tone extension, v4 adds transmit power.
- *
- * v3 and v4 carry an antenna switching pattern for direction finding, which
- * needs the DFE that nRF52840 does not have. They are still worth carrying:
- * the commands are the ones a modern test host sends, a switching pattern
- * length of zero is a normal request on any part, and a part that cannot do
- * the rest answers with a status rather than Unknown HCI Command, which tells
- * the host something it can act on.
+ * Direct test mode: v1 uses LE 1M PHY; v2 selects the PHY; v3 supports
+ * constant tone extension; v4 adds transmit power control.
+ * Antenna switching requires supported direction-finding hardware.
+ * A zero-length switching pattern does not require antenna switching.
  */
 HCI_SDC_CMD_P(HciSdcCmdLeReceiverTest, sdc_hci_cmd_le_receiver_test_v1,
               sdc_hci_cmd_le_receiver_test_v1_t, HciSdcComplete)
@@ -1372,16 +1352,9 @@ HCI_SDC_CMD_VB(HciSdcCmdLeTransmitterTestV3, sdc_hci_cmd_le_transmitter_test_v3,
                switching_pattern_length, HciSdcComplete)
 
 /*
- * v4 is the one shape none of the macros fit. Vol 4 Part E 7.8.128 puts
- * TX_Power_Level after the antenna identifiers, so the trailing array is not
- * the end of the packet and the length is the fixed head plus the switching
- * pattern plus one, not plus the switching pattern. The SDC type names that
- * whole tail antenna_ids_and_remaining_parameters rather than pretending it is
- * an array of identifiers, which is the same admission in the header.
- *
- * Checking it here rather than trusting the count matters for the usual
- * reason: the receive buffer is reused and not cleared, so a short packet with
- * a large count makes SDC read the previous one.
+ * Transmitter Test v4 places TX_Power_Level after the antenna identifiers
+ * (Core Vol 4 Part E 7.8.128). Validate the fixed header, switching pattern,
+ * and trailing power parameter before passing the packet to SDC.
  */
 static HciCmdResult_t HciSdcCmdLeTransmitterTestV4(void *,
                                                    const uint8_t *pParams,
@@ -1557,37 +1530,14 @@ HCI_SDC_CMD_VP(HciSdcCmdLeExtCreateConnV2, sdc_hci_cmd_le_ext_create_conn_v2,
     {Opcode, (uint16_t)(ParamLen), 0U, HCI_CMD_RESPONSE_STATUS, Name}
 
 /*
- * Isochronous channels, connected and broadcast.
+ * Connected and broadcast isochronous command support depends on the
+ * underlying controller capabilities. On nRF52, sdk-nrfxlib documents
+ * ISO encryption support for nRF52820 and nRF52833, not nRF52840.
+ * ISO encryption capability must not be inferred from command dispatch.
  *
- * Every command below is dispatched on this part. Isochronous transport and
- * isochronous link layer encryption are separate questions, and the second
- * one has a part specific answer: sdk-nrfxlib README.rst says nRF52820 and
- * nRF52833 are the nRF52 Series devices that encrypt and decrypt
- * isochronous packets, which leaves nRF52840 out.
- *
- * The reason is one register. CCM authenticates the PDU header octet, and
- * which bits of it are authenticated differs between an ACL data PDU and an
- * isochronous one. nRF52833 and nRF52820 have CCM.HEADERMASK, described in
- * their reference manuals as the header (S0) mask, and nRF52840 does not:
- * its CCM applies the fixed ACL mask. This is not a shortage of ciphers on
- * the part, which has a CryptoCell the other two lack. It is the radio CCM
- * accelerator being one register short of the isochronous header layout.
- *
- * So the commands, the scheduling and the data path are all here, and what
- * the controller answers to an encrypted request has not been measured on
- * this part. The test table asks for unencrypted groups.
- *
- * The four test commands are the ones worth having on an instrument. They
- * measure an isochronous link with no codec anywhere, which is exactly what
- * is wanted when the question is whether the radio and the scheduling work
- * rather than whether the audio sounds right.
- */
-/*
- * The isochronous half of the buffer report. A host cannot flow control
- * isochronous data without it: version 1 reports only the ACL packet length
- * and count, and says nothing about how many isochronous packets the
- * controller will hold. Adding the streams without this would give a host
- * every command it needs to set one up and no way to feed it.
+ * LE Read Buffer Size v2 reports ACL and ISO buffer capacities; v1 provides
+ * ACL capacities only. The v2 ACL count must update the same flow-control
+ * limit used by the v1 command.
  */
 static HciCmdResult_t HciSdcCmdLeReadBufferSizeV2(void *pContext,
                                                   const uint8_t *,
