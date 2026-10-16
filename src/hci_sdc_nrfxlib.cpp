@@ -29,22 +29,13 @@
 #include "sdc_hci_vs.h"
 
 /*
- * This firmware uses the multirole SoftDevice Controller archive.
- * Central and peripheral roles are selected at runtime through HCI. Every
- * sdc_hci_cmd_ function the table below calls is present in that archive, so
- * the rows are unconditional.
+ * The command table targets the multirole SoftDevice Controller library.
+ * Central and peripheral roles are selected through HCI.
  *
- * One command is not there to be called. LE Read Supported States reports the
- * legacy advertising state combinations, and the multirole library does not
- * define sdc_hci_cmd_le_read_supported_states at all. It has no row and no bit
- * in the supported commands bitmap, so a host is told plainly that it is
- * absent and gets Unknown HCI Command if it asks anyway. That is the correct
- * answer rather than a gap: this controller advertises through the extended
- * commands, and Vol 4 Part E 7.8.27 is about the legacy ones.
+ * LE Read Supported States is not provided by the multirole library.
+ * Do not advertise or dispatch the unsupported command.
  *
- * tests/sdc_symbols.py checks the archive against every SDC function this
- * table calls, so an nrfxlib release that drops one is a named failure rather
- * than a link error with no context.
+ * tests/sdc_symbols.py verifies that required SDC symbols are available.
  *
  * Notes on groups of commands below whose behaviour is not obvious from the
  * table, kept here rather than repeated at each row.
@@ -64,10 +55,9 @@
  * and 0x18 for the latter. Those arrive from sdc_hci_get like any other event
  * and the bridge forwards them unchanged, so nothing here is taught about them.
  *
- * Channel survey, power control, sleep clock accuracy, subrating, the extended
- * feature set and every periodic advertising role need a matching
- * sdc_support_ call before sdc_cfg_set. Those are configured by the shared SDC resource setup. A row here with no
- * support call there dispatches and is refused by SDC with a status.
+ * Channel survey, power control, sleep clock accuracy, subrating, extended
+ * features, and periodic advertising require matching sdc_support_ calls
+ * before sdc_cfg_set. The shared SDC resource setup enables these features.
  *
  * VS LLPM Mode Set and VS Connection Update belong together. LLPM permits
  * connection intervals of 1 to 7 ms, and the standard LE Connection Update
@@ -2715,21 +2705,13 @@ static int32_t HciSdcNrfxlibGet(void *, uint8_t *pPacket, uint8_t *pType)
  * other, never both, and whichever it uses first makes the other Command
  * Disallowed until the controller is reset.
  *
- * The SoftDevice Controller does not enforce this. sdk-nrf does, one layer
- * above it, in subsys/bluetooth/controller/hci_internal.c, which is the layer
- * this file replaces. Without it a host that mixes the two sets is not
- * refused; it is handed to the controller and gets whatever the controller
- * makes of the request, which was an unexplained Invalid HCI Command
- * Parameters on an enable twenty commands after the command that caused it,
- * and silence from everything in between. That cost eight hardware runs to
- * find and it is the wrong answer besides: the specification asks for
- * Command Disallowed and asks for it on the offending command.
+ * The SDC command interface does not enforce the advertising command-family
+ * restriction. Enforce Command Disallowed before dispatching a command from
+ * the other family.
  *
- * The two lists are hci_internal.c's, read from it rather than reasoned out,
- * because which set a command belongs to is not always obvious. LE Read
- * Maximum Advertising Data Length reads a number and changes nothing, and it
- * is an extended command. LE Read Advertising Physical Channel Tx Power is
- * the same shape and is a legacy one.
+ * Command-family classification follows sdk-nrf hci_internal.c. Read Maximum
+ * Advertising Data Length is extended; Read Advertising Physical Channel
+ * Tx Power is legacy.
  */
 static HciSdcAdvCmdType_t HciSdcAdvCommandType(uint16_t Opcode)
 {
