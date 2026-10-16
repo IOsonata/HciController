@@ -166,14 +166,25 @@ static bool HciSdcInit(HciNrf54lm20_t *pTarget)
         return false;
     }
     pTarget->SdcInitialized = true;
-    if (!HciRandSourceReady(pTarget)) { return false; }
+    if (!HciRandSourceReady(pTarget))
+    {
+        return false;
+    }
 
     sdc_rand_source_t randomSource = { HciRandPoll };
     result = sdc_rand_source_register(&randomSource);
-    if (result != 0) { pTarget->LastError = result; return false; }
+    if (result != 0)
+    {
+        pTarget->LastError = result;
+        return false;
+    }
 
     result = HciSdcResourcesApply();
-    if (result < 0) { pTarget->LastError = result; return false; }
+    if (result < 0)
+    {
+        pTarget->LastError = result;
+        return false;
+    }
     pTarget->RequiredSdcMem = result;
     if ((size_t)result > pTarget->SdcMemCapacity ||
         (((uintptr_t)pTarget->pSdcMem & 7U) != 0U))
@@ -182,14 +193,21 @@ static bool HciSdcInit(HciNrf54lm20_t *pTarget)
         return false;
     }
     result = sdc_enable(HciSdcCallback, pTarget->pSdcMem);
-    if (result != 0) { pTarget->LastError = result; return false; }
+    if (result != 0)
+    {
+        pTarget->LastError = result;
+        return false;
+    }
     pTarget->SdcEnabled = true;
     return true;
 }
 static void HciStop(void *pContext)
 {
     HciNrf54lm20_t *pTarget = static_cast<HciNrf54lm20_t *>(pContext);
-    if (pTarget == nullptr || s_pTarget != pTarget) { return; }
+    if (pTarget == nullptr || s_pTarget != pTarget)
+    {
+        return;
+    }
     if (pTarget->SdcEnabled)
     {
         (void)sdc_disable();
@@ -211,7 +229,10 @@ static void HciStop(void *pContext)
 static bool HciStart(void *pContext)
 {
     HciNrf54lm20_t *pTarget = static_cast<HciNrf54lm20_t *>(pContext);
-    if (pTarget == nullptr || s_pTarget != nullptr) { return false; }
+    if (pTarget == nullptr || s_pTarget != nullptr)
+    {
+        return false;
+    }
     s_pTarget = pTarget;
     if (!HciMpslInit(pTarget) || !HciSdcInit(pTarget))
     {
@@ -230,7 +251,10 @@ static void HciFault(void *pContext, int error)
     if (pTarget != nullptr)
     {
         pTarget->FaultCount++;
-        if (pTarget->LastError == 0) { pTarget->LastError = error; }
+        if (pTarget->LastError == 0)
+        {
+            pTarget->LastError = error;
+        }
     }
 }
 static bool HciInit(void *pContext, HciTaktOs_t *pRuntime,
@@ -250,7 +274,10 @@ static bool HciInit(void *pContext, HciTaktOs_t *pRuntime,
 }
 static void HciGetTaktOsOps(void *pContext, HciTaktOsOps_t *pOps)
 {
-    if (pOps == nullptr) { return; }
+    if (pOps == nullptr)
+    {
+        return;
+    }
     pOps->Start = HciStart;
     pOps->ProcessMpsl = HciProcessMpsl;
     pOps->Fault = HciFault;
@@ -338,10 +365,18 @@ static void HciConstLatRelease(void)
 }
 #endif
 extern "C" void mpsl_low_latency_acquire_callback(void)
-{ HciConstLatAcquire(); }
+{
+    HciConstLatAcquire();
+}
 extern "C" void mpsl_low_latency_release_callback(void)
-{ HciConstLatRelease(); }
+{
+    HciConstLatRelease();
+}
 extern "C" void mpsl_constlat_request_callback(void)
-{ HciConstLatAcquire(); }
+{
+    HciConstLatAcquire();
+}
 extern "C" void mpsl_lowpower_request_callback(void)
-{ HciConstLatRelease(); }
+{
+    HciConstLatRelease();
+}
