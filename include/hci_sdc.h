@@ -113,28 +113,14 @@ typedef struct
 #define HCI_SDC_EVENT_DISCONNECTION_COMPLETE 0x05U
 
 /*
- * Hold the host to the buffer count the controller advertised in LE Read
- * Buffer Size.
+ * Optional ACL transmit-credit enforcement (Core Vol 4 Part E 4.1.1).
+ * A packet accepted beyond the advertised controller buffer count may not
+ * generate a corresponding Number Of Completed Packets event.
  *
- * Measured on an nRF52840 with the SoftDevice Controller: send one packet more
- * than the advertised count and sdc_hci_data_put answers 0 for it, the packet
- * never goes out, and no Number Of Completed Packets event ever names it. The
- * packet and the host's buffer both vanish. Four buffers, five packets, four
- * transmitted, every error code zero.
- *
- * Vol 4 Part E 4.1.1 puts the obligation on the host not to exceed what it was
- * told, so the controller is within its rights. But losing the credit as well
- * as the packet means a host that slips once loses that buffer for the life of
- * the connection. Refusing here loses the same packet and hands the buffer
- * back, and counts it, which a host can at least see.
- *
- * The guard used to be on by default. That is unsafe without an internal,
- * unmasked link-termination signal: the bookkeeping removes a link when it
- * observes Disconnection Complete on the HCI event stream, and the Host is
- * allowed to mask that event. A masked disconnection can therefore leave a
- * stale outstanding count attached to a handle that is later reused. Keep the
- * guard available for controlled tests, but leave it off until link lifetime
- * comes from an unmaskable controller indication.
+ * Disabled by default: link accounting currently depends on observing
+ * Disconnection Complete, which the Host may mask. A reused connection handle
+ * could otherwise inherit stale outstanding-credit state. Enable only for
+ * controlled tests until an unmaskable link-termination indication is used.
  */
 #ifndef HCI_SDC_ENFORCE_ACL_CREDITS
 #define HCI_SDC_ENFORCE_ACL_CREDITS 0
