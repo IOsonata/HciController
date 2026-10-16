@@ -81,11 +81,12 @@ static const IOPinCfg_t s_TraceUartPins[] = HCI_NRF91_TRACE_UART_PINS;
 #endif
 static BtHciUsb s_HciUsb;
 
-// Same CFifo worker queue as IOsonata's USB TaktOS examples. Keep it across
-// stop/start: discarding a queued process callback would strand the core's
-// process-queued latch. Only the HCI worker executes callbacks, while USB is up.
+/* Preserve queued USB work across stop/start to avoid losing callbacks
+ * while the USB process-queued flag remains set. The HCI worker executes
+ * these callbacks.
+ */
 alignas(HciUsbWork_t) static uint8_t s_UsbWorkMem[
-	CFIFO_TOTAL_MEMSIZE(HCI_USB_WORK_COUNT, sizeof(HciUsbWork_t))];
+    CFIFO_TOTAL_MEMSIZE(HCI_USB_WORK_COUNT, sizeof(HciUsbWork_t))];
 static hCFifo_t s_hUsbWork;
 
 #ifdef UART_PINS
