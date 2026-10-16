@@ -91,23 +91,9 @@ static HciCmdResult_t HciSdcStatus(uint8_t Status, size_t)
 }
 
 /*
- * Nothing on success, Command Complete on failure.
- *
- * Vol 4 Part E 7.3.40 asks for exactly that shape for Host Number Of Completed
- * Packets: "Normally, no event is generated... However, if the command
- * contains one or more invalid parameters, the Controller shall return an
- * HCI_Command_Complete event containing the error code Invalid HCI Command
- * Parameters". It is the only command here that answers nothing when it works,
- * which is why the reply has to be chosen from the status rather than fixed by
- * the table row.
- *
- * The same section says the normal command flow control is not used for it, so
- * emitting no event costs the host no credit it was expecting back.
- *
- * Nothing calls it at the moment. Host Number Of Completed Packets was its one
- * caller and that row is gone with the rest of controller to host flow
- * control, so this is kept rather than deleted: it is the awkward half of that
- * command and would have to be worked out again to bring the row back.
+ * Host Number Of Completed Packets has no response on success and returns
+ * Command Complete on invalid parameters (Core Vol 4 Part E 7.3.40).
+ * This helper is retained for possible future command support.
  */
 __attribute__((unused))
 static HciCmdResult_t HciSdcSilentOnSuccess(uint8_t Status, size_t)
@@ -1251,23 +1237,8 @@ HCI_SDC_CMD_PR(HciSdcCmdWriteAuthPayloadTimeout,
                sdc_hci_cmd_cb_write_authenticated_payload_timeout_return_t)
 
 /*
- * Controller to host flow control.
- *
- * Without it the controller has no way to know the host is behind. It sends
- * what it has and a host that cannot keep up loses events and data rather than
- * slowing the controller down. That matters here more than it would elsewhere,
- * because the host on the other end of this is a script over a serial port,
- * and EventBackpressureCount exists because it already happens.
- *
- * The host turns it on, says how many buffers it has, and hands them back as
- * it empties them. Vol 4 Part E 7.3.38 to 7.3.40.
- */
-/*
- * The three handlers are gone with the rows that called them. The controller
- * answers Host Buffer Size with 0x11 and there is no way to change that from
- * here, so wrapping it only produced a refusal with extra steps. Restoring
- * them is three lines and a bitmap bit each, once a controller answers the
- * command.
+ * Controller-to-host flow control (Core Vol 4 Part E 7.3.38-7.3.40) is
+ * not exposed: the underlying SDC rejects Host Buffer Size.
  */
 
 /* Link control. */
@@ -1357,16 +1328,8 @@ HCI_SDC_CMD_PR(HciSdcCmdLeLtkNegativeReply,
                sdc_hci_cmd_le_long_term_key_request_negative_reply_return_t)
 
 /*
- * Capability. The SoftDevice Controller headers declare the whole HCI API,
- * but a given library variant only contains the commands it was built with,
- * so these two are opt in. Check what the library actually defines with
- *
- *   arm-none-eabi-nm --defined-only libsoftdevice_controller_multirole.a \
- *       | grep sdc_hci_cmd_le_
- *
- * and set the macro when the symbol is present. Read Supported States reports
- * legacy advertising states and is absent from a build that only enables the
- * extended advertiser. Read Transmit Power belongs to LE Power Control.
+ * SDC command availability depends on the linked library variant.
+ * Only commands exported by the multirole archive are dispatched.
  */
 
 HCI_SDC_CMD_NR(HciSdcCmdLeReadTransmitPower,
@@ -1479,19 +1442,15 @@ static HciCmdResult_t HciSdcCmdVsTransmitterCarrierTest(void *,
     return HciSdcComplete(sdc_hci_cmd_vs_dtm_command(&cmd, retBuf, &retLen), 0U);
 }
 
-/*
- * Status parameters. Vol 4 Part E 7.5.4, the RSSI of the last packet received
- * on a connection. One command, and the thing every link quality script
- * reaches for first.
+/* Read RSSI of the most recently received connection packet
+ * (Core Vol 4 Part E 7.5.4).
  */
 HCI_SDC_CMD_PR(HciSdcCmdReadRssi, sdc_hci_cmd_sp_read_rssi,
                sdc_hci_cmd_sp_read_rssi_t, sdc_hci_cmd_sp_read_rssi_return_t)
 
 /*
- * Vol 4 Part E 7.8.115. How a host declares which optional features it
- * supports, and what the controller checks before it will negotiate
- * subrating or a CIS. Zephyr sends it during initialisation, so without it a
- * host log shows an unexplained Unknown HCI Command.
+ * LE Set Host Feature declares supported optional Host features
+ * (Core Vol 4 Part E 7.8.115).
  */
 HCI_SDC_CMD_P(HciSdcCmdLeSetHostFeature, sdc_hci_cmd_le_set_host_feature,
               sdc_hci_cmd_le_set_host_feature_t, HciSdcComplete)
