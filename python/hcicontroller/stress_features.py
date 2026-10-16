@@ -85,14 +85,23 @@ def _discard_pending_iso(hci):
 def _wait_stress_acl_marker(hci, expected_handle, expected_cid,
                             expected_payload, timeout=3.0):
     """Wait for one ACL marker without carrying CIS output into the next wait."""
+    diagnostics = []
     try:
-        return wait_acl_marker(
+        matched = wait_acl_marker(
             hci,
             expected_handle,
             expected_cid,
             expected_payload,
             timeout=timeout,
+            diagnostics=diagnostics,
         )
+        if not matched:
+            print("Stress ACL marker timeout: handle=0x%04X cid=0x%04X "
+                  "payload=%s %s" %
+                  (expected_handle, expected_cid, expected_payload.hex(),
+                   diagnostics[0] if diagnostics else "no diagnostics"),
+                  flush=True)
+        return matched
     finally:
         _discard_pending_iso(hci)
 
