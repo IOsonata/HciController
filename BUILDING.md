@@ -85,6 +85,31 @@ Board selection and build configuration are separate. The board selects the pin
 map and legal HCI transports. The build configuration selects optimization and
 flash/linker layout.
 
+## nRF54LM20A DK (validated native USB HCI)
+
+Open `HciController/nRF54LM20/ioc` in IOcomposer, using the matching
+IOsonata nRF54LM20x SDC library (`Debug_SDC` or `Release_SDC`).
+The HciController project has `Debug` and `Release` configurations.
+For the **Nordic DK**, explicitly set
+`BOARD=NORDIC_DK_NRF54LM20`; otherwise the nRF54LM20 board header
+defaults to `UDG_NRF54LM20`. Keep `NRF54LM20B_XXAA`,
+`NRF_APPLICATION`, and `NRFXLIB_SDC` defined in both the C and
+C++ compiler options. The project uses
+`nrf54lm20a_xxaa_application.ld` (no S145 stack).
+
+Hardware validation performed on October 16, 2026: a DK and a
+UDG-nRF52840 passed the heterogeneous two-controller native USB release
+suite (66/66 checks, including 10,000 bidirectional ACL and 1,000
+bidirectional ISO stress iterations). Both devices additionally passed
+100 native USB reopen/Reset cycles in each HCI alternate setting.
+See [nRF54LM20/README.md](nRF54LM20/README.md) for scope and remaining
+board-specific validation. This does not validate WildThing51 UART H:4.
+
+```sh
+./.venv/bin/python3 tests/harness/hcicontroller/release_test.py --transport usb
+./.venv/bin/python3 tests/harness/hcicontroller/usb_reopen_test.py --usb <DK_USB_SERIAL> --count 100
+```
+
 ## 4. Build configurations
 
 The nRF52840 project provides these configurations:
