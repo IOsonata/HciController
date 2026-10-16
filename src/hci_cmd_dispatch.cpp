@@ -54,9 +54,8 @@ bool HciCmdDispatchKnows(const HciCmdDispatch_t *pDispatch,
 
     /*
      * A variable length command declares no length, so only the opcode can be
-     * checked for those. Everything else has to agree, which is what makes
-     * this worth asking at all: an opcode that exists by accident is unlikely
-     * to arrive with the right number of octets behind it as well.
+     * checked for those. Fixed-length commands must also match the declared
+     * parameter length.
      */
     return pEntry->ParamLen == HCI_CMD_VARIABLE_PARAM_LEN ||
            pEntry->ParamLen == ParamLen;
