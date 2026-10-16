@@ -149,20 +149,45 @@ static void HciTraceBridgePump(HciApp_t *app)
         app->TracePendingOffset = 0U;
         const int len = s_TraceUart.Rx(app->TracePending,
                                            sizeof(app->TracePending));
-        if (len <= 0)
+        if (len > 0)
+        {
+            app->TracePendingLen = (uint16_t)len;
+        }
+        else
         {
             app->TracePendingLen = 0U;
-            return;
         }
-        app->TracePendingLen = (uint16_t)len;
     }
 
-    const int sent = s_TraceCdc.Tx(0U,
-                                   app->TracePending + app->TracePendingOffset,
-                                   app->TracePendingLen - app->TracePendingOffset);
-    if (sent > 0)
+    if (app->TracePendingOffset < app->TracePendingLen)
     {
-        app->TracePendingOffset += (uint16_t)sent;
+        const int sent = s_TraceCdc.Tx(
+            0U, app->TracePending + app->TracePendingOffset,
+            app->TracePendingLen - app->TracePendingOffset);
+        if (sent > 0)
+        {
+            app->TracePendingOffset += (uint16_t)sent;
+        }
+    }
+
+    /* CDC RX -> UART TX. Retain the unsent tail under UART backpressure. */
+    if (app->TraceInputOffset == app->TraceInputLen)
+    {
+        app->TraceInputOffset = 0U;
+        const int len = s_TraceCdc.Rx(
+            0U, app->TraceInputPending, sizeof(app->TraceInputPending));
+        app->TraceInputLen = len > 0 ? (uint16_t)len : 0U;
+    }
+
+    if (app->TraceInputOffset < app->TraceInputLen)
+    {
+        const int sent = s_TraceUart.Tx(
+            app->TraceInputPending + app->TraceInputOffset,
+            app->TraceInputLen - app->TraceInputOffset);
+        if (sent > 0)
+        {
+            app->TraceInputOffset += (uint16_t)sent;
+        }
     }
 }
 #endif
@@ -418,6 +443,8 @@ static void HciAppUartRelease(HciApp_t *pApp)
     }
     pApp->TracePendingLen = 0U;
     pApp->TracePendingOffset = 0U;
+    pApp->TraceInputLen = 0U;
+    pApp->TraceInputOffset = 0U;
 #endif
     if (pApp->HostType == HCI_APP_HOST_UART &&
         pApp->pHostIntrf == static_cast<DevIntrf_t *>(s_HciUart))
