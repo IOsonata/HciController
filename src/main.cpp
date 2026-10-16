@@ -99,6 +99,22 @@ const AppInfo_t g_AppInfo = {
 #error "This board is HCI UART-only"
 #endif
 
+#if HCI_MODE_SWITCH
+#define HCI_MODE_NVM_MAGIC          0x4843494DU /* HCIM */
+#define HCI_MODE_NVM_VERSION        1U
+#define HCI_MODE_NVM_REGION         0
+
+typedef struct
+{
+    uint32_t Magic;
+    uint32_t Version;
+    uint32_t Board;
+    uint32_t Mode;
+    uint32_t Check;
+} HciModeRecord_t;
+
+#endif
+
 static HciApp_t s_HciApp;
 static HciAppMode_t s_HciMode;
 
@@ -230,19 +246,6 @@ static bool HciModeAllowed(HciAppMode_t Mode)
 }
 
 #if HCI_MODE_SWITCH
-
-#define HCI_MODE_NVM_MAGIC          0x4843494DU /* HCIM */
-#define HCI_MODE_NVM_VERSION        1U
-#define HCI_MODE_NVM_REGION         0
-
-typedef struct
-{
-    uint32_t Magic;
-    uint32_t Version;
-    uint32_t Board;
-    uint32_t Mode;
-    uint32_t Check;
-} HciModeRecord_t;
 
 static uint32_t HciModeRecordCheck(const HciModeRecord_t *pRecord)
 {
