@@ -2,23 +2,39 @@
 
 ## Status
 
-**Port source and IOC project added; ARM build and DK validation pending.**
-The nRF54LM20 target is in `src/hci_nrf54lm20.cpp` and
-`include/hci_nrf54lm20.h`; `src/main.cpp` selects it only on nRF54LM20.
-The original nRF52840 target remains separate.
+**Nordic nRF54LM20A DK native USB HCI: hardware validated (October 16, 2026).**
+The target implementation is in `src/hci_nrf54lm20.cpp` and
+`include/hci_nrf54lm20.h`; the nRF52840 target remains separate.
 
-Open `nRF54LM20/ioc/.project` in IOcomposer. Select `Debug` or `Release`.
-The build uses Cortex-M33, `NRF54LM20B_XXAA`, IOsonata's
-`IOsonata_nRF54LM20x` library, `TaktOS_M33`, the nrfxlib nRF54LM
-hard-float multirole SDC/MPSL archives, and the unbootloaded
-`nrf54lm20a_xxaa_application.ld` script. No S145 binary is linked.
+A Nordic nRF54LM20A DK and a UDG-nRF52840 completed the full
+cross-platform native USB release suite: **66 PASS, 0 FAIL, 0 INCOMPLETE**.
+The suite covered HCI commands, both ACL roles, DLE, 1M/2M/Coded PHY,
+power control, Core 6.0/6.2 procedures, PAST, PAwR, CIS/BIS,
+recovery, and **10,000 bidirectional ACL plus 1,000 bidirectional
+ISO stress iterations**. Both boards also passed **100 reopen/Reset
+cycles in each USB HCI alternate**, 200 per board.
+These results are evidence for this tested DK configuration, not for
+an untested board or a pair of nRF54LM20 units. The recurring ISO
+sequence-gap reports did not prevent successful SDU validation.
 
-**Not yet proven runnable:** The actual ARM compile/link, map inspection,
-and nRF54LM20 DK hardware tests have not been executed in this environment.
-Do not merge this branch or use it as a release binary until those pass.
+Open `nRF54LM20/ioc/.project` in IOcomposer; select `Debug` or
+`Release`. The target uses Cortex-M33, `NRF54LM20B_XXAA`,
+`NRF_APPLICATION`, `NRFXLIB_SDC`, IOsonata's
+`IOsonata_nRF54LM20x`, `TaktOS_M33`, nrfxlib nRF54LM
+hard-float multirole SDC/MPSL, and
+`nrf54lm20a_xxaa_application.ld`. No S145 binary is linked.
+**Board selection is separate from build configuration**:
+`board.h` defaults to `UDG_NRF54LM20`, so a DK image must
+explicitly define `BOARD=NORDIC_DK_NRF54LM20` in the build.
 
-This port targets Nordic nRF54LM20A (DK PCA10184) and is developed separately
-from HciController `main`. Its dependency is IOsonata `main`, reviewed at commit `49f08107af29dcdd1f8a6bae3aae16fc7b5b1843` (October 14, 2026).
+**Not yet hardware validated:** UDG-NRF54LM20, WildThing51
+nRF54LM20 UART H:4 / USB CDC trace bridge, and any other board
+variant. A clean Release build and final map inspection should be
+recorded independently before packaging a release image.
+
+The dependency is IOsonata `main`; the source/API baseline reviewed
+during porting was `49f08107af29dcdd1f8a6bae3aae16fc7b5b1843`
+(October 14, 2026).
 
 ## Existing dependencies to reuse
 
@@ -135,7 +151,7 @@ Verified source/API baseline:
 `49f08107af29dcdd1f8a6bae3aae16fc7b5b1843`.
 
 - Match IOsonata's nRF54LM20x `Debug_SDC` and `Release_SDC`
-  configurations: define both `NRF54LM20B_XXAA` and `NRFXLIB_SDC`,
+  configurations: define `NRF54LM20B_XXAA`, `NRF_APPLICATION`, and `NRFXLIB_SDC`,
   and link `IOsonata_nRF54LM20x`, `TaktOS_M33`, nrfxlib multirole
   SDC, MPSL and MPSL FEM libraries for `nrf54lm/hard-float`.
 - The HCI application implements the current `UsbEvtQue` callback
