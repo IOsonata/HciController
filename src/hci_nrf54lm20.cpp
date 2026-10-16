@@ -34,6 +34,10 @@
 #endif
 static HciNrf54lm20_t *s_pTarget;
 
+#if NRF_POWER_HAS_CONST_LATENCY
+static volatile uint32_t s_ConstLatRefs;
+#endif
+
 /* Called from a time-critical fault context: never perform blocking
  * UART/USB tracing or allocate before resetting the controller.
  */
@@ -341,7 +345,7 @@ extern "C" void CLOCK_POWER_IRQHandler(void)
 
 /* nRF54L MPSL low-latency window callbacks. */
 #if NRF_POWER_HAS_CONST_LATENCY
-static volatile uint32_t s_ConstLatRefs;
+
 static void HciConstLatAcquire(void)
 {
     if (s_ConstLatRefs++ == 0U)
