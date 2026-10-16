@@ -18,11 +18,14 @@ an untested board or a pair of nRF54LM20 units. The recurring ISO
 sequence-gap reports did not prevent successful SDU validation.
 
 Open `nRF54LM20/ioc/.project` in IOcomposer; select `Debug` or
-`Release`. The target uses Cortex-M33, `NRF54LM20B_XXAA`,
+`Release`. HciController is SDC-only: no `_SDC` configuration suffix
+and no alternative SoftDevice build. Additional MBR/DFU configurations
+are deferred until the DFU strategy and memory layout are defined.
+The target uses Cortex-M33, `NRF54LM20B_XXAA`,
 `NRF_APPLICATION`, `NRFXLIB_SDC`, IOsonata's
 `IOsonata_nRF54LM20x`, `TaktOS_M33`, nrfxlib nRF54LM
 hard-float multirole SDC/MPSL, and
-`nrf54lm20a_xxaa_application.ld`. No S145 binary is linked.
+`nrf54lm20a_xxaa_application.ld`. No separate SoftDevice firmware is linked.
 **Board selection is separate from build configuration**:
 `board.h` defaults to `UDG_NRF54LM20`, so a DK image must
 explicitly define `BOARD=NORDIC_DK_NRF54LM20` in the build.
@@ -45,10 +48,9 @@ during porting was `49f08107af29dcdd1f8a6bae3aae16fc7b5b1843`
   worker through `UsbEvtQue`.
 - IOsonata's existing nRF54LM20x TaktOS and USB examples as build-project
   references, rather than nRF52840 peripheral instances.
-- IOsonata's `nrf54lm20a_xxaa_application.ld` or an expressly selected
-  S145 layout. These are *different* runtime contracts; use the application
-  script for an nrfxlib SDC/MPSL runtime, and use an S145 script only with a
-  compatible Nordic S145 runtime.
+- IOsonata's `nrf54lm20a_xxaa_application.ld` for the current SDC/MPSL
+  application. Do not introduce a separate SoftDevice configuration.
+  Any future MBR/DFU layout requires its own design and validation.
 
 ## Target integration requirements
 
@@ -150,8 +152,8 @@ Verified source/API baseline:
 `IOsonata/IOsonata` `main` at
 `49f08107af29dcdd1f8a6bae3aae16fc7b5b1843`.
 
-- Match IOsonata's nRF54LM20x `Debug_SDC` and `Release_SDC`
-  configurations: define `NRF54LM20B_XXAA`, `NRF_APPLICATION`, and `NRFXLIB_SDC`,
+- Build the IOsonata nRF54LM20x library with SDC support and define
+  `NRF54LM20B_XXAA`, `NRF_APPLICATION`, and `NRFXLIB_SDC`,
   and link `IOsonata_nRF54LM20x`, `TaktOS_M33`, nrfxlib multirole
   SDC, MPSL and MPSL FEM libraries for `nrf54lm/hard-float`.
 - The HCI application implements the current `UsbEvtQue` callback
@@ -165,8 +167,7 @@ Verified source/API baseline:
   `DevNo=2` as UARTE21 for nRF54L; WildThing51 uses these
   separately for HCI and the nRF91 trace bridge.
 - Run `python3 -m unittest tests/nrf54lm20_project_test.py` at the
-  repository root, then build the corresponding IOsonata `Debug_SDC`
-  / `Release_SDC` library and HciController IOC `Debug` /
-  `Release`. A static configuration review is **not** an ELF link
+  repository root, then build the IOsonata library with SDC support
+  and the HciController IOC `Debug` / `Release` configuration. A static configuration review is **not** an ELF link
   or hardware test. Inspect the map for clock/vector ownership
   and reject unresolved or duplicate symbols.
