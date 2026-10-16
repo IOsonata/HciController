@@ -52,11 +52,9 @@ extern "C" {
 #define HCI_SDC_COMPAT_OPCODE_LE_READ_SUPPORTED_STATES 0x201CU
 
 /*
- * The supplemental dispatcher also carries LE Read Minimum Supported
- * Connection Interval in the Core 6.2 profile. Its largest legal return is a
- * two-octet header plus 41 six-octet interval groups, and Command Complete adds
- * six octets in front. Keep the buffer large enough for that full 254-octet
- * event rather than the fourteen octets the old compatibility-only path used.
+ * The Core 6.2 LE Read Minimum Supported Connection Interval command may
+ * return 41 six-byte interval groups. Reserve 254 bytes for the complete
+ * event, including its headers.
  */
 #define HCI_SDC_COMPAT_EVENT_SIZE                      254U
 
@@ -75,11 +73,8 @@ typedef struct
 } HciSdcOps_t;
 
 /*
- * Links whose outstanding ACL packets are tracked at once. This has to be at
- * least the number of connections the controller is configured for, because a
- * link the table has no room for is not counted, and what is not counted
- * cannot be enforced or handed back. The shipping profile is 16 peripheral
- * plus 2 central links, so all 18 handles have a slot.
+ * Number of simultaneously tracked ACL connection handles. The default
+ * supports the configured 16 peripheral and 2 central connections.
  */
 #ifndef HCI_SDC_ACL_TRACK_HANDLES
 #define HCI_SDC_ACL_TRACK_HANDLES 18U
