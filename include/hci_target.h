@@ -41,7 +41,8 @@ extern "C" {
  * A port publishes one HciTarget_t. It owns its own instance, because a board
  * has one radio and there is nothing to allocate.
  */
-typedef struct {
+typedef struct
+{
     bool (*Init)(void *pContext,
                  HciTaktOs_t *pRuntime,
                  uint8_t *pSdcMem,
@@ -82,7 +83,8 @@ typedef struct {
     int32_t (*LastError)(const void *pContext);
 } HciTargetOps_t;
 
-typedef struct {
+typedef struct
+{
     const HciTargetOps_t *pOps;
     void *pContext;
 } HciTarget_t;
