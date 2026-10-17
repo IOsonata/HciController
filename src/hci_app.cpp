@@ -74,10 +74,10 @@ static HciApp_t *s_pApp;
 static UART s_HciUart;
 static UsbdCdc s_HostCdc;
 static UsbdCdc s_LogCdc;
-#if defined(HCI_NRF91_UART_BRIDGE) && HCI_NRF91_UART_BRIDGE
+#if defined(HCI_UART_BRIDGE) && HCI_UART_BRIDGE
 static UART s_BridgeUart;
 static UsbdCdc s_BridgeCdc;
-static const IOPinCfg_t s_BridgeUartPins[] = HCI_NRF91_BRIDGE_UART_PINS;
+static const IOPinCfg_t s_BridgeUartPins[] = HCI_BRIDGE_UART_PINS;
 #endif
 static BtHciUsb s_HciUsb;
 
@@ -95,7 +95,7 @@ static const IOPinCfg_t s_HciUartPins[] = UART_PINS;
 
 static void HciAppWake(void *pContext);
 
-#if defined(HCI_NRF91_UART_BRIDGE) && HCI_NRF91_UART_BRIDGE
+#if defined(HCI_UART_BRIDGE) && HCI_UART_BRIDGE
 /* Receive nRF91 diagnostic UART output on the board-selected
  * bridge UART. Never pass these bytes through HCI H:4.
  */
@@ -112,10 +112,10 @@ static int HciBridgeUartEvent(UARTDev_t * const, UART_EVT evt,
 static bool HciUartBridgeStart(HciApp_t *app)
 {
     UARTCfg_t cfg = {};
-    cfg.DevNo = HCI_NRF91_BRIDGE_UART_DEVNO;
+    cfg.DevNo = HCI_BRIDGE_UART_DEVNO;
     cfg.pIOPinMap = s_BridgeUartPins;
     cfg.NbIOPins = sizeof(s_BridgeUartPins) / sizeof(s_BridgeUartPins[0]);
-    cfg.Rate = HCI_NRF91_BRIDGE_UART_RATE;
+    cfg.Rate = HCI_BRIDGE_UART_RATE;
     cfg.DataBits = 8;
     cfg.Parity = UART_PARITY_NONE;
     cfg.StopBits = 1;
@@ -409,7 +409,7 @@ static bool HciAppUsbSetup(HciApp_t *pApp, HciUsbDescriptorMode_t Mode)
         return false;
     }
 
-#if defined(HCI_NRF91_UART_BRIDGE) && HCI_NRF91_UART_BRIDGE
+#if defined(HCI_UART_BRIDGE) && HCI_UART_BRIDGE
     /* A distinct CDC function: HciController's own trace stays on s_LogCdc. */
     UsbdCdcCfg_t bridgeCfg = {};
     bridgeCfg.bBlocking = false;
@@ -435,7 +435,7 @@ static bool HciAppUsbSetup(HciApp_t *pApp, HciUsbDescriptorMode_t Mode)
  */
 static void HciAppUartRelease(HciApp_t *pApp)
 {
-#if defined(HCI_NRF91_UART_BRIDGE) && HCI_NRF91_UART_BRIDGE
+#if defined(HCI_UART_BRIDGE) && HCI_UART_BRIDGE
     if (pApp->BridgeUartReady)
     {
         s_BridgeUart.Disable();
@@ -752,7 +752,7 @@ static void HciAppHostProcess(void *pContext)
         HciAppDrainLog(pApp);
     }
 
-#if defined(HCI_NRF91_UART_BRIDGE) && HCI_NRF91_UART_BRIDGE
+#if defined(HCI_UART_BRIDGE) && HCI_UART_BRIDGE
     HciUartBridgePump(pApp);
 #endif
 
@@ -861,7 +861,7 @@ bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode, HciTarget_t Target)
         }
     }
 
-#if defined(HCI_NRF91_UART_BRIDGE) && HCI_NRF91_UART_BRIDGE
+#if defined(HCI_UART_BRIDGE) && HCI_UART_BRIDGE
     if (hostReady && pApp->UsbRunning && !HciUartBridgeStart(pApp))
     {
         HciTrace("init: nRF91 bridge UART initialization failed\r\n");
