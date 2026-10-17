@@ -701,28 +701,9 @@ static void HciAppResyncOnIdle(HciApp_t *pApp)
     }
 }
 
-/*
- * The diagnostic CDC port is output-only. Discard any host OUT data so its
- * blocking RX FIFO cannot fill permanently and stall the USB endpoint.
- * Bound each worker pass to leave time for controller and radio processing.
- */
-static void HciAppDiscardLogInput(void)
-{
-    uint8_t data[64];
-
-    for (unsigned pass = 0U; pass < 16U; pass++)
-    {
-        if (s_LogCdc.Rx(0U, data, sizeof(data)) <= 0)
-        {
-            break;
-        }
-    }
-}
-
 static void HciAppDrainLog(HciApp_t *pApp)
 {
     HciAppLogPortOpened(pApp);
-    HciAppDiscardLogInput();
     if (pApp->LogPortOpen)
     {
         (void)HciTraceFlush();
