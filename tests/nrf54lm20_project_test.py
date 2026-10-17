@@ -161,6 +161,10 @@ class Nrf54lm20ProjectTest(unittest.TestCase):
         self.assertIn("s_BridgeCdc.Rx(", bridge)
         self.assertIn("s_BridgeCdc.LineCoding()", bridge)
         self.assertIn("s_BridgeUart.Rate(pLine->dwDTERate)", bridge)
+        self.assertLess(bridge.index("s_BridgeUart.Rate(pLine->dwDTERate)"),
+                        bridge.index("s_BridgeCdc.Rx("))
+        self.assertIn("if (actual != 0U)", bridge)
+        self.assertIn("app->BridgeBaudRate = pLine->dwDTERate;", bridge)
         self.assertIn("BridgeBaudRate", header)
         self.assertIn("s_BridgeUart.Tx(", bridge)
         self.assertIn("app->BridgeInputPending + app->BridgeInputOffset", bridge)
