@@ -2,6 +2,7 @@
 """Pin ownership and data-path invariants of the IOsonata Bluetooth HCI USB transport."""
 
 import os
+import re
 import sys
 
 
@@ -150,11 +151,16 @@ def main(argv):
     print("[ok] target consumes IOsonata main HCI, ISO, allocator and descriptor core")
 
     main_cpp = read(os.path.join(root, "src", "main.cpp"))
-    udg_guard = ("BOARD == UDG_NRF52840 && "
-                 "HCI_HOST_SELECT == HCI_HOST_SELECT_UART")
-    if udg_guard not in main_cpp:
-        fail("UDG forced-UART build is not blocked while pins are placeholders")
-    print("[ok] UDG forced UART stays blocked until pin map validation")
+    # The preprocessor guard includes both UDG MCU families and wraps lines.
+    # Match its two required conditions independent of formatting.
+    udg_guard = re.search(
+        r"#if\s*\(BOARD\s*==\s*UDG_NRF52840\s*\|\|"
+        r".*?HCI_HOST_SELECT\s*==\s*HCI_HOST_SELECT_UART"
+        r'\s*#error\s*"UDG dongle supports USB-H4 and native USB-HCI only"',
+        main_cpp, re.DOTALL)
+    if udg_guard is None:
+        fail("UDG forced-UART builds must be rejected")
+    print("[ok] UDG forced UART is blocked on both MCU families")
 
     dispatch = read(os.path.join(root, "src", "hci_cmd_dispatch.cpp"))
     handler = dispatch.find("HciCmdResult_t result = pEntry->Handler")

@@ -99,7 +99,11 @@ TARGETS += $(HCI_TRACE_TARGET)
 #
 # Linking hci_app would need MPSL, the USB controller and an HCI controller,
 # which is a target's job; compiling it catches structure and API drift.
-COMPILE_SRC := $(filter-out $(SRC)/hci_sdc_nrfxlib.cpp,$(wildcard $(SRC)/hci_*.cpp))
+# This host harness supplies nRF52840 peripheral stubs. The nRF54LM20 target
+# uses different CMSIS peripherals and MPSL interrupts and must instead be
+# compiled by its real nRF54LM20 firmware project.
+COMPILE_SRC := $(filter-out $(SRC)/hci_sdc_nrfxlib.cpp \
+                           $(SRC)/hci_nrf54lm20.cpp,$(wildcard $(SRC)/hci_*.cpp))
 
 OBJECTS := $(patsubst $(SRC)/%.cpp,$(BUILD_DIR)/trace/%.o,$(COMPILE_SRC)) \
            $(BUILD_DIR)/notrace/hci_app.o \
@@ -317,7 +321,11 @@ check-cis-cleanup:
 	@echo "[TEST] hci_cis_cleanup_test.py"
 	@$(PYTHON) $(THIS_DIR)/harness/hcicontroller/hci_cis_cleanup_test.py
 
-run: all check-project check-boards check-usb-desc check-usb-runtime \
+check-target-integrations:
+	@$(PYTHON) -m unittest discover -s $(THIS_DIR) -p '*integration_test.py'
+	@$(PYTHON) -m unittest discover -s $(THIS_DIR) -p 'nrf54lm20_project_test.py'
+
+run: all check-target-integrations check-project check-boards check-usb-desc check-usb-runtime \
      check-commands check-sdc-symbols check-smp check-events check-cis-cleanup
 	@set -e; for t in $(TARGETS); do \
 	  echo "[TEST] $$(basename $$t)"; $$t; done

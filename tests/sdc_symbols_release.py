@@ -130,6 +130,12 @@ OPTIONAL_OR_ALTERNATIVE = {
     # Vendor extension: appends the advertising channel index after RSSI in
     # standard LE Advertising Report events, which changes the Core event
     # layout a generic host parses. Not enabled.
+    # Decision-Based Advertising Filtering is optional. This product profile
+    # does not enable advertiser/scanner decision filtering or allocate scanner
+    # decision-instruction storage. Do not claim its HCI commands merely
+    # because the newer SDC library exports them.
+    "sdc_support_decision_adv",
+    "sdc_support_decision_scan",
     "sdc_support_chan_idx_in_adv_report",
     # Board/platform integrations, not Bluetooth HCI feature capability.
     "sdc_support_mpsl_coex",
@@ -268,12 +274,24 @@ def main():
     known = REQUIRED_SUPPORT | NRF52840_EXCLUDED | OPTIONAL_OR_ALTERNATIVE
     unknown = sorted(declared - known)
     impossible = sorted(used & NRF52840_EXCLUDED)
+    # Decision-Based Advertising Filtering is deliberately outside this
+    # release profile; reject accidental enablement, not just unknown APIs.
+    disabled_decision = {
+        "sdc_support_decision_adv",
+        "sdc_support_decision_scan",
+    }
+    unexpectedly_enabled = sorted(used & disabled_decision)
     required_not_declared = sorted(REQUIRED_SUPPORT - declared)
     required_not_used = sorted(REQUIRED_SUPPORT - used)
 
     print()
     print("SDC support API audit: %d declared, %d called by release 1"
           % (len(declared), len(used)))
+
+    if unexpectedly_enabled:
+        print("\\nDecision filtering enabled without a release-profile update:")
+        for name in unexpectedly_enabled:
+            print("  INVALID  %s" % name)
 
     if impossible:
         print("\nHardware-excluded nRF52840 capabilities are being enabled:")
@@ -296,7 +314,8 @@ def main():
             print("  NEW      %s" % name)
         print("Classify each new API before accepting the new HEAD as a release baseline.")
 
-    if impossible or required_not_declared or required_not_used or unknown:
+    if (impossible or unexpectedly_enabled or required_not_declared or
+            required_not_used or unknown):
         return 1
 
     print("Every required nRF52840 SDC support capability is present and enabled.")

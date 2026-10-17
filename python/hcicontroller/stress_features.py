@@ -85,44 +85,71 @@ def _discard_pending_iso(hci):
 def _wait_stress_acl_marker(hci, expected_handle, expected_cid,
                             expected_payload, timeout=3.0):
     """Wait for one ACL marker without carrying CIS output into the next wait."""
+    diagnostics = []
     try:
-        return wait_acl_marker(
+        matched = wait_acl_marker(
             hci,
             expected_handle,
             expected_cid,
             expected_payload,
             timeout=timeout,
+            diagnostics=diagnostics,
         )
+        if not matched:
+            print("Stress ACL marker timeout: handle=0x%04X cid=0x%04X "
+                  "payload=%s %s" %
+                  (expected_handle, expected_cid, expected_payload.hex(),
+                   diagnostics[0] if diagnostics else "no diagnostics"),
+                  flush=True)
+        return matched
     finally:
         _discard_pending_iso(hci)
 
 
 def _wait_completed(hci, expected_handle, timeout=3.0):
+    """Wait for credits on one handle without losing another handle's report."""
     deferred = []
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        packet = hci.read_packet(min(0.2, max(0.0, deadline - time.time())))
-        if packet is None:
-            continue
-        kind, code, body = packet
-        if kind == H4_EVENT and code == EVT_NUM_COMPLETED_PACKETS and body:
-            count = body[0]
-            for i in range(count):
-                at = 1 + (4 * i)
-                if len(body) < at + 4:
-                    break
-                handle, done = struct.unpack("<HH", body[at:at + 4])
-                if (handle & 0x0FFF) == expected_handle and done:
-                    _base._restore(hci, deferred)
-                    return
-            continue
-        if kind == H4_ISO:
-            continue
-        deferred.append(packet)
-    _base._restore(hci, deferred)
-    raise HciError("no Number Of Completed Packets for handle 0x%04X"
-                   % expected_handle)
+    deadline = time.monotonic() + timeout
+    target = expected_handle & 0x0FFF
+    try:
+        while time.monotonic() < deadline:
+            packet = hci.read_packet(
+                min(0.2, max(0.0, deadline - time.monotonic())))
+            if packet is None:
+                continue
 
+            kind, code, body = packet
+            if kind == H4_EVENT and code == EVT_NUM_COMPLETED_PACKETS and body:
+                num_handles = body[0]
+                if len(body) != 1 + 4 * num_handles:
+                    deferred.append(packet)
+                    continue
+
+                other = []
+                completed = False
+                for i in range(num_handles):
+                    at = 1 + 4 * i
+                    handle, done = struct.unpack_from("<HH", body, at)
+                    if (handle & 0x0FFF) == target:
+                        completed = completed or bool(done)
+                    else:
+                        other.append(body[at:at + 4])
+
+                if other:
+                    # Preserve unrelated handle completions, including a
+                    # combined ACL/CIS completion event.
+                    deferred.append(
+                        (kind, code, bytes([len(other)]) + b"".join(other)))
+                if completed:
+                    return
+                continue
+
+            if kind != H4_ISO:
+                deferred.append(packet)
+        raise HciError(
+            "no Number Of Completed Packets for handle 0x%04X" % target)
+    finally:
+        _base._restore(hci, deferred)
 
 def _check_counter_deltas(before, after, label):
     if before is None or after is None:
@@ -309,6 +336,32 @@ def run_stress_phase(book, label, central_port, peripheral_port,
             % (label, count, (count + ISO_EVERY - 1) // ISO_EVERY),
         )
     except (HciError, HciGone) as err:
+        # Collect transport/controller evidence before cleanup resets the link.
+        # Do not replace the original failure if a diagnostic query fails.
+        diagnostics = []
+        for name, hci, before in (
+            ("central", central, locals().get("central_before")),
+            ("peripheral", peripheral, locals().get("peripheral_before")),
+        ):
+            if hci is None or before is None:
+                continue
+            try:
+                after = counter_snapshot(hci)
+                if after is None:
+                    diagnostics.append("%s counters unavailable" % name)
+                    continue
+                changes = []
+                for index, counter_name in ERROR_COUNTERS.items():
+                    delta = counter_delta(before, after, index)
+                    if delta not in (None, 0):
+                        changes.append("%s=%d" % (counter_name, delta))
+                diagnostics.append("%s error deltas: %s" % (
+                    name, ", ".join(changes) if changes else "none"))
+            except (HciError, HciGone) as diagnostic_err:
+                diagnostics.append("%s counters: %s" %
+                                   (name, diagnostic_err))
+        for diagnostic in diagnostics:
+            print("Stress failure diagnostic:", diagnostic, flush=True)
         book.failed("Stress", "concurrent ACL/ISO/event traffic", str(err))
     finally:
         if central is not None and peripheral is not None:

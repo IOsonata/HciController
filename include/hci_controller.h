@@ -49,8 +49,8 @@ extern "C" {
  *   10..  exact received payload
  *
  * With N payload octets the complete Command Complete Event is 16+N octets.
- * Sweeping N=0..240 therefore exercises every Event-IN length from 16 through
- * 256 octets, including every nRF52840 16-byte interrupt-IN boundary.
+ * Sweeping N=0..240 exercises every Event-IN length from 16 through
+ * 256 octets, including USB endpoint packet boundaries.
  */
 #define HCI_CONTROLLER_LOOPBACK_OPCODE             0xFFF1U
 #define HCI_CONTROLLER_LOOPBACK_REQUEST_HEADER_LEN 3U
@@ -78,7 +78,8 @@ extern "C" {
  */
 #define HCI_CONTROLLER_USB_TX_VALIDATION_OPCODE 0xFFF2U
 
-typedef enum {
+typedef enum
+{
     HCI_CONTROLLER_GET_ERROR  = -1,
     HCI_CONTROLLER_GET_EMPTY  = 0,
     HCI_CONTROLLER_GET_PACKET = 1,
@@ -96,14 +97,16 @@ typedef HciControllerGetResult_t (*HciControllerGet_t)(void *pContext,
                                                         size_t *pPacketLen);
 typedef void (*HciControllerProcess_t)(void *pContext);
 
-typedef struct {
+typedef struct
+{
     HciControllerPut_t Put;
     HciControllerGet_t Get;
     HciControllerProcess_t Process;
     void *pContext;
 } HciControllerOps_t;
 
-typedef struct {
+typedef struct
+{
     /*
      * Packet-facing host interface used by the controller in every mode.
      * DevAddr is HciH4PacketType_t and pData contains only the HCI packet.

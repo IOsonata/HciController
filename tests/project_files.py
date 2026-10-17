@@ -63,29 +63,47 @@ def main(argv):
         print("HciController root not found, pass it as an argument")
         return 1
 
-    project = os.path.join(root, "nRF52840", "ioc", ".project")
-    if not os.path.isfile(project):
-        print("no %s, nothing to check" % project)
-        return 0
-
     disk = on_disk(root)
-    listed = in_project(project)
+    target_specific = {
+        "nRF52840": {
+            "include/hci_nrf54lm20.h",
+            "src/hci_nrf54lm20.cpp",
+        },
+        "nRF54LM20": {
+            "include/hci_nrf52840.h",
+            "src/hci_nrf52840.cpp",
+        },
+    }
 
-    missing = sorted(disk - listed)
-    stale = sorted(listed - disk)
+    errors = 0
+    for target, excluded in target_specific.items():
+        project = os.path.join(root, target, "ioc", ".project")
+        if not os.path.isfile(project):
+            print("[!!] %s project file is missing" % target)
+            errors += 1
+            continue
 
-    for name in missing:
-        print("[!!] %-40s in the tree, not in the Eclipse project" % name)
-    for name in stale:
-        print("[!!] %-40s in the Eclipse project, not in the tree" % name)
+        expected = disk - excluded
+        listed = in_project(project)
+        missing = sorted(expected - listed)
+        stale = sorted(listed - expected)
 
-    if missing or stale:
-        print("\n%d file(s) disagree. A source missing from the project is "
-              "not compiled, and the target build fails at link time naming "
-              "a symbol rather than a file." % (len(missing) + len(stale)))
+        for name in missing:
+            print("[!!] %s: %-40s in the tree, not in the Eclipse project" %
+                  (target, name))
+        for name in stale:
+            print("[!!] %s: %-40s in the Eclipse project, not in the tree" %
+                  (target, name))
+
+        errors += len(missing) + len(stale)
+        if not missing and not stale:
+            print("[ok] %s project lists all %d applicable sources and headers." %
+                  (target, len(expected)))
+
+    if errors:
+        print("\\n%d Eclipse project file mismatch(es)." % errors)
         return 1
 
-    print("[ok] Eclipse project lists all %d sources and headers." % len(disk))
     return 0
 
 

@@ -85,6 +85,36 @@ Board selection and build configuration are separate. The board selects the pin
 map and legal HCI transports. The build configuration selects optimization and
 flash/linker layout.
 
+## nRF54LM20A DK (validated native USB HCI)
+
+Open `HciController/nRF54LM20/ioc` in IOcomposer and use the
+matching IOsonata nRF54LM20x library built with SDC support.
+HciController uses SDC exclusively and provides only `Debug` and
+`Release` configurations; neither configuration name takes an `_SDC`
+suffix. A separate SoftDevice build is not supported.
+For the **Nordic DK**, explicitly set
+`BOARD=NORDIC_DK_NRF54LM20`; otherwise the nRF54LM20 board header
+defaults to `UDG_NRF54LM20`. Keep `NRF54LM20B_XXAA`,
+`NRF_APPLICATION`, and `NRFXLIB_SDC` defined in both the C and
+C++ compiler options. The project uses
+`nrf54lm20a_xxaa_application.ld`. Additional MBR/DFU configurations
+may be introduced later, once the DFU approach and memory layout are defined.
+
+Hardware validation performed on October 16, 2026: a DK and a
+UDG-nRF52840 passed the heterogeneous two-controller native USB release
+suite (66/66 checks, including 10,000 bidirectional ACL and 1,000
+bidirectional ISO stress iterations). Both devices additionally passed
+100 native USB reopen/Reset cycles in each HCI alternate setting.
+For long-running macOS tests, `caffeinate` prevents normal idle sleep while
+Python is running. It does not eliminate all USB or RF timing failures.
+See [nRF54LM20/README.md](nRF54LM20/README.md) for scope and remaining
+board-specific validation. This does not validate WildThing51 UART H:4.
+
+```sh
+caffeinate -dimsu ./.venv/bin/python3 tests/harness/hcicontroller/release_test.py --transport usb
+./.venv/bin/python3 tests/harness/hcicontroller/usb_reopen_test.py --usb <DK_USB_SERIAL> --count 100
+```
+
 ## 4. Build configurations
 
 The nRF52840 project provides these configurations:

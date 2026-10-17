@@ -15,6 +15,10 @@
 #ifndef UART_H__
 #define UART_H__
 
+/* The USB integration test uses the real IOsonata UART API. When that
+ * header has already been included, avoid defining a second UART API. */
+#ifndef __UART_H__
+
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -141,5 +145,21 @@ void UARTSetCtrlLineState(UARTDev_t *const pDev, uint32_t LineState);
 #ifdef __cplusplus
 }
 #endif
+
+#ifdef __cplusplus
+/* Host-test approximation of IOsonata's public UART C++ interface. */
+class UART {
+public:
+    UART() : vDevData{} {}
+    bool Init(const UARTCfg_t &cfg) { return UARTInit(&vDevData, &cfg); }
+    operator DevIntrf_t *() { return &vDevData.DevIntrf; }
+    int Rx(uint8_t *, int) { return 0; }
+    void Disable() {}
+private:
+    UARTDev_t vDevData;
+};
+#endif
+
+#endif /* !__UART_H__ */
 
 #endif /* UART_H__ */

@@ -52,11 +52,9 @@ extern "C" {
 #define HCI_SDC_COMPAT_OPCODE_LE_READ_SUPPORTED_STATES 0x201CU
 
 /*
- * The supplemental dispatcher also carries LE Read Minimum Supported
- * Connection Interval in the Core 6.2 profile. Its largest legal return is a
- * two-octet header plus 41 six-octet interval groups, and Command Complete adds
- * six octets in front. Keep the buffer large enough for that full 254-octet
- * event rather than the fourteen octets the old compatibility-only path used.
+ * The Core 6.2 LE Read Minimum Supported Connection Interval command may
+ * return 41 six-byte interval groups. Reserve 254 bytes for the complete
+ * event, including its headers.
  */
 #define HCI_SDC_COMPAT_EVENT_SIZE                      254U
 
@@ -64,7 +62,8 @@ typedef int32_t (*HciSdcDataPut_t)(void *pContext, const uint8_t *pPacket);
 typedef int32_t (*HciSdcGet_t)(void *pContext, uint8_t *pPacket, uint8_t *pType);
 typedef void (*HciSdcProcess_t)(void *pContext);
 
-typedef struct {
+typedef struct
+{
     HciSdcDataPut_t AclPut;
     HciSdcDataPut_t IsoPut;
     HciSdcGet_t Get;
@@ -74,11 +73,8 @@ typedef struct {
 } HciSdcOps_t;
 
 /*
- * Links whose outstanding ACL packets are tracked at once. This has to be at
- * least the number of connections the controller is configured for, because a
- * link the table has no room for is not counted, and what is not counted
- * cannot be enforced or handed back. The shipping profile is 16 peripheral
- * plus 2 central links, so all 18 handles have a slot.
+ * Number of simultaneously tracked ACL connection handles. The default
+ * supports the configured 16 peripheral and 2 central connections.
  */
 #ifndef HCI_SDC_ACL_TRACK_HANDLES
 #define HCI_SDC_ACL_TRACK_HANDLES 18U
@@ -117,34 +113,21 @@ typedef struct {
 #define HCI_SDC_EVENT_DISCONNECTION_COMPLETE 0x05U
 
 /*
- * Hold the host to the buffer count the controller advertised in LE Read
- * Buffer Size.
+ * Optional ACL transmit-credit enforcement (Core Vol 4 Part E 4.1.1).
+ * A packet accepted beyond the advertised controller buffer count may not
+ * generate a corresponding Number Of Completed Packets event.
  *
- * Measured on an nRF52840 with the SoftDevice Controller: send one packet more
- * than the advertised count and sdc_hci_data_put answers 0 for it, the packet
- * never goes out, and no Number Of Completed Packets event ever names it. The
- * packet and the host's buffer both vanish. Four buffers, five packets, four
- * transmitted, every error code zero.
- *
- * Vol 4 Part E 4.1.1 puts the obligation on the host not to exceed what it was
- * told, so the controller is within its rights. But losing the credit as well
- * as the packet means a host that slips once loses that buffer for the life of
- * the connection. Refusing here loses the same packet and hands the buffer
- * back, and counts it, which a host can at least see.
- *
- * The guard used to be on by default. That is unsafe without an internal,
- * unmasked link-termination signal: the bookkeeping removes a link when it
- * observes Disconnection Complete on the HCI event stream, and the Host is
- * allowed to mask that event. A masked disconnection can therefore leave a
- * stale outstanding count attached to a handle that is later reused. Keep the
- * guard available for controlled tests, but leave it off until link lifetime
- * comes from an unmaskable controller indication.
+ * Disabled by default: link accounting currently depends on observing
+ * Disconnection Complete, which the Host may mask. A reused connection handle
+ * could otherwise inherit stale outstanding-credit state. Enable only for
+ * controlled tests until an unmaskable link-termination indication is used.
  */
 #ifndef HCI_SDC_ENFORCE_ACL_CREDITS
 #define HCI_SDC_ENFORCE_ACL_CREDITS 0
 #endif
 
-typedef struct {
+typedef struct
+{
     HciCmdDispatch_t Commands;
 
     /*

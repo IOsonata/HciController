@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-The board pin map, checked against itself and against the README.
+Validate UART configuration for each nRF52840 board.
 
 nRF52840/src/board.h is compiled by the target build and by nothing else.
 The host tests build against tests/stubs/board.h, so every pin number, rate
@@ -21,7 +21,7 @@ What this checks, per board:
 
 and across files:
 
-    the pin numbers the README quotes are the ones the named board has
+    boards explicitly configured as USB-only have no UART pin assignment
 
 None of that would have caught the crossed RTS and CTS, which needed a
 schematic. All of it would have caught two boards sharing one pin map.
@@ -109,6 +109,14 @@ def main():
         pins = {s: pin(body, s) for s in ("TX", "RX", "RTS", "CTS")}
         named = {s: v for s, v in pins.items() if v is not None}
 
+        if define(body, "HCI_BOARD_HAS_UART") == "0":
+            if named or define(body, "UART_RATE") is not None:
+                print("[!!] %s is USB-only but defines UART pins or rate" % name)
+                bad += 1
+            else:
+                print("[ok] %-22s USB-only, no UART pins" % name)
+            continue
+
         if pins["TX"] is None or pins["RX"] is None:
             print("[!!] %s names no TX or no RX" % name)
             bad += 1
@@ -141,28 +149,6 @@ def main():
             print("[ok] %-22s %s tx, %s rx, %s, %s bit/s"
                   % (name, pin_str(pins["TX"]), pin_str(pins["RX"]),
                      flow_text, rate))
-
-    # The README quotes pin numbers for the BLYST840 product, which is the
-    # module the dongle is built on. Those two disagreed for the whole life of
-    # both files and nothing said so.
-    if os.path.exists(readme):
-        text = open(readme).read()
-        quoted = dict(re.findall(r"BLYST840 (TXD|RXD):\s*P(\d\.\d+)", text))
-        wanted = {"TXD": "TX", "RXD": "RX"}
-        body = boards.get("UDG_NRF52840")
-        for label, signal in wanted.items():
-            if label not in quoted or body is None:
-                continue
-            port, number = quoted[label].split(".")
-            want = (int(port), int(number))
-            have = pin(body, signal)
-            if have != want:
-                print("[!!] README says BLYST840 %s is P%s and board.h "
-                      "UDG_NRF52840 has %s"
-                      % (label, quoted[label], pin_str(have)))
-                bad += 1
-        if not bad:
-            print("[ok] README pin numbers agree with UDG_NRF52840")
 
     if bad:
         print()

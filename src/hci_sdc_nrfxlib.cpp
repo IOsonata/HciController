@@ -29,32 +29,19 @@
 #include "sdc_hci_vs.h"
 
 /*
- * This firmware links libsoftdevice_controller_multirole and only that. An HCI
- * controller exposes the whole controller to its host and the host chooses
- * roles at run time over HCI, so there is no build in which it is central only
- * or peripheral only, and no library variant to select between. Every
- * sdc_hci_cmd_ function the table below calls is present in that archive, so
- * the rows are unconditional.
+ * The command table targets the multirole SoftDevice Controller library.
+ * Central and peripheral roles are selected through HCI.
  *
- * One command is not there to be called. LE Read Supported States reports the
- * legacy advertising state combinations, and the multirole library does not
- * define sdc_hci_cmd_le_read_supported_states at all. It has no row and no bit
- * in the supported commands bitmap, so a host is told plainly that it is
- * absent and gets Unknown HCI Command if it asks anyway. That is the correct
- * answer rather than a gap: this controller advertises through the extended
- * commands, and Vol 4 Part E 7.8.27 is about the legacy ones.
+ * The multirole library does not expose LE Read Supported States directly.
+ * The generic HCI layer implements the compatible command response.
  *
- * tests/sdc_symbols.py checks the archive against every SDC function this
- * table calls, so an nrfxlib release that drops one is a named failure rather
- * than a link error with no context.
+ * tests/sdc_symbols.py verifies that required SDC symbols are available.
  *
- * Notes on groups of commands below whose behaviour is not obvious from the
- * table, kept here rather than repeated at each row.
+ * Command groups requiring additional implementation notes:
  *
  * Vol 4 Part E 7.8.74, LE Read Transmit Power, is the minimum and maximum
- * transmit power the controller supports across its PHYs. Nothing to do with
- * LE Power Control, which an earlier comment here claimed, and it needs no
- * sdc_support_ call.
+ * transmit power supported across PHYs. It is independent of LE Power
+ * Control and requires no additional sdc_support_ call.
  *
  * Read Remote Version Information, Vol 4 Part E 7.1.23, and the Authenticated
  * Payload Timeout pair, 7.3.93 and 7.3.94, are mandatory for an LE controller
@@ -64,13 +51,11 @@
  * advertising reports all come back as events rather than command returns:
  * vendor subevents 0x80 to 0x82 for the former, LE meta subevents 0x0E to 0x10
  * and 0x18 for the latter. Those arrive from sdc_hci_get like any other event
- * and the bridge forwards them unchanged, so nothing here is taught about them.
+ * and the transport forwards them without additional command processing.
  *
- * Channel survey, power control, sleep clock accuracy, subrating, the extended
- * feature set and every periodic advertising role need a matching
- * sdc_support_ call before sdc_cfg_set. Those are made in hci_nrf52840.cpp,
- * and the pool they need is computed in hci_nrf52840.h. A row here with no
- * support call there dispatches and is refused by SDC with a status.
+ * Channel survey, power control, sleep clock accuracy, subrating, extended
+ * features, and periodic advertising require matching sdc_support_ calls
+ * before sdc_cfg_set. The shared SDC resource setup enables these features.
  *
  * VS LLPM Mode Set and VS Connection Update belong together. LLPM permits
  * connection intervals of 1 to 7 ms, and the standard LE Connection Update
@@ -83,6 +68,15 @@
  * LE Set Host Channel Classification pairs with the channel survey: the survey
  * says which channels are busy, this says which to avoid.
  */
+
+typedef enum
+{
+    HCI_SDC_ADV_CMD_NONE = 0,
+    HCI_SDC_ADV_CMD_LEGACY,
+    HCI_SDC_ADV_CMD_EXTENDED,
+} HciSdcAdvCmdType_t;
+
+static HciSdcAdvCmdType_t s_AdvCmdTypeSinceReset = HCI_SDC_ADV_CMD_NONE;
 
 static HciCmdResult_t HciSdcComplete(uint8_t Status, size_t ReturnLen)
 {
@@ -97,23 +91,9 @@ static HciCmdResult_t HciSdcStatus(uint8_t Status, size_t)
 }
 
 /*
- * Nothing on success, Command Complete on failure.
- *
- * Vol 4 Part E 7.3.40 asks for exactly that shape for Host Number Of Completed
- * Packets: "Normally, no event is generated... However, if the command
- * contains one or more invalid parameters, the Controller shall return an
- * HCI_Command_Complete event containing the error code Invalid HCI Command
- * Parameters". It is the only command here that answers nothing when it works,
- * which is why the reply has to be chosen from the status rather than fixed by
- * the table row.
- *
- * The same section says the normal command flow control is not used for it, so
- * emitting no event costs the host no credit it was expecting back.
- *
- * Nothing calls it at the moment. Host Number Of Completed Packets was its one
- * caller and that row is gone with the rest of controller to host flow
- * control, so this is kept rather than deleted: it is the awkward half of that
- * command and would have to be worked out again to bring the row back.
+ * Host Number Of Completed Packets has no response on success and returns
+ * Command Complete on invalid parameters (Core Vol 4 Part E 7.3.40).
+ * This helper is retained for possible future command support.
  */
 __attribute__((unused))
 static HciCmdResult_t HciSdcSilentOnSuccess(uint8_t Status, size_t)
@@ -684,23 +664,11 @@ static HciCmdResult_t HciSdcCmdLeSetScanEnable(void *,
     }
 
 /*
- * Variable length commands carry a trailing array. The SDC types are packed
- * and byte aligned, so the packet is handed over directly rather than copied
- * into a fixed local.
- *
- * The fixed part alone is not enough to bound the read. The length of the
- * trailing array is carried in a field inside the fixed part, and the SDC call
- * trusts it. That field has to be checked against the parameter length the
- * host actually sent, or a short packet with a large count makes SDC read past
- * the end of the receive buffer. That buffer is reused for every packet and is
- * not cleared between them, so what lies past the end is the previous packet.
- *
- * Three shapes of count field appear in the commands used here, one macro
- * each. All three compute the number of bytes the array needs and require
- * ParamLen to match exactly before the packet is handed over. Exactly, not at
- * least: Vol 4 Part E 5.4.1 fixes Parameter_Total_Length, so trailing bytes
- * beyond what the count declares mean the host and the controller disagree
- * about the packet, and guessing which one is right is worse than refusing.
+ * Variable-length commands contain a trailing array in a packed SDC type.
+ * Validate the declared element count against the received parameter length
+ * before passing the buffer to SDC. All three count formats require an exact
+ * length match (Core Vol 4 Part E 5.4.1), preventing out-of-bounds reads
+ * from short packets and rejecting undeclared trailing data.
  */
 
 /* The count field is a byte count, as in Vol 4 Part E 7.8.54. */
@@ -1257,23 +1225,8 @@ HCI_SDC_CMD_PR(HciSdcCmdWriteAuthPayloadTimeout,
                sdc_hci_cmd_cb_write_authenticated_payload_timeout_return_t)
 
 /*
- * Controller to host flow control.
- *
- * Without it the controller has no way to know the host is behind. It sends
- * what it has and a host that cannot keep up loses events and data rather than
- * slowing the controller down. That matters here more than it would elsewhere,
- * because the host on the other end of this is a script over a serial port,
- * and EventBackpressureCount exists because it already happens.
- *
- * The host turns it on, says how many buffers it has, and hands them back as
- * it empties them. Vol 4 Part E 7.3.38 to 7.3.40.
- */
-/*
- * The three handlers are gone with the rows that called them. The controller
- * answers Host Buffer Size with 0x11 and there is no way to change that from
- * here, so wrapping it only produced a refusal with extra steps. Restoring
- * them is three lines and a bitmap bit each, once a controller answers the
- * command.
+ * Controller-to-host flow control (Core Vol 4 Part E 7.3.38-7.3.40) is
+ * not exposed: the underlying SDC rejects Host Buffer Size.
  */
 
 /* Link control. */
@@ -1363,16 +1316,8 @@ HCI_SDC_CMD_PR(HciSdcCmdLeLtkNegativeReply,
                sdc_hci_cmd_le_long_term_key_request_negative_reply_return_t)
 
 /*
- * Capability. The SoftDevice Controller headers declare the whole HCI API,
- * but a given library variant only contains the commands it was built with,
- * so these two are opt in. Check what the library actually defines with
- *
- *   arm-none-eabi-nm --defined-only libsoftdevice_controller_multirole.a \
- *       | grep sdc_hci_cmd_le_
- *
- * and set the macro when the symbol is present. Read Supported States reports
- * legacy advertising states and is absent from a build that only enables the
- * extended advertiser. Read Transmit Power belongs to LE Power Control.
+ * SDC command availability depends on the linked library variant.
+ * Only commands exported by the multirole archive are dispatched.
  */
 
 HCI_SDC_CMD_NR(HciSdcCmdLeReadTransmitPower,
@@ -1380,18 +1325,10 @@ HCI_SDC_CMD_NR(HciSdcCmdLeReadTransmitPower,
                sdc_hci_cmd_le_read_transmit_power_return_t)
 
 /*
- * Direct test mode.
- *
- * v1 is 1M and nothing else, so a board that advertises 2M and coded PHY can
- * only be RF tested on its slowest one. v2 adds the PHY, v3 adds the constant
- * tone extension, v4 adds transmit power.
- *
- * v3 and v4 carry an antenna switching pattern for direction finding, which
- * needs the DFE that nRF52840 does not have. They are still worth carrying:
- * the commands are the ones a modern test host sends, a switching pattern
- * length of zero is a normal request on any part, and a part that cannot do
- * the rest answers with a status rather than Unknown HCI Command, which tells
- * the host something it can act on.
+ * Direct test mode: v1 uses LE 1M PHY; v2 selects the PHY; v3 supports
+ * constant tone extension; v4 adds transmit power control.
+ * Antenna switching requires supported direction-finding hardware.
+ * A zero-length switching pattern does not require antenna switching.
  */
 HCI_SDC_CMD_P(HciSdcCmdLeReceiverTest, sdc_hci_cmd_le_receiver_test_v1,
               sdc_hci_cmd_le_receiver_test_v1_t, HciSdcComplete)
@@ -1415,16 +1352,9 @@ HCI_SDC_CMD_VB(HciSdcCmdLeTransmitterTestV3, sdc_hci_cmd_le_transmitter_test_v3,
                switching_pattern_length, HciSdcComplete)
 
 /*
- * v4 is the one shape none of the macros fit. Vol 4 Part E 7.8.128 puts
- * TX_Power_Level after the antenna identifiers, so the trailing array is not
- * the end of the packet and the length is the fixed head plus the switching
- * pattern plus one, not plus the switching pattern. The SDC type names that
- * whole tail antenna_ids_and_remaining_parameters rather than pretending it is
- * an array of identifiers, which is the same admission in the header.
- *
- * Checking it here rather than trusting the count matters for the usual
- * reason: the receive buffer is reused and not cleared, so a short packet with
- * a large count makes SDC read the previous one.
+ * Transmitter Test v4 places TX_Power_Level after the antenna identifiers
+ * (Core Vol 4 Part E 7.8.128). Validate the fixed header, switching pattern,
+ * and trailing power parameter before passing the packet to SDC.
  */
 static HciCmdResult_t HciSdcCmdLeTransmitterTestV4(void *,
                                                    const uint8_t *pParams,
@@ -1485,19 +1415,15 @@ static HciCmdResult_t HciSdcCmdVsTransmitterCarrierTest(void *,
     return HciSdcComplete(sdc_hci_cmd_vs_dtm_command(&cmd, retBuf, &retLen), 0U);
 }
 
-/*
- * Status parameters. Vol 4 Part E 7.5.4, the RSSI of the last packet received
- * on a connection. One command, and the thing every link quality script
- * reaches for first.
+/* Read RSSI of the most recently received connection packet
+ * (Core Vol 4 Part E 7.5.4).
  */
 HCI_SDC_CMD_PR(HciSdcCmdReadRssi, sdc_hci_cmd_sp_read_rssi,
                sdc_hci_cmd_sp_read_rssi_t, sdc_hci_cmd_sp_read_rssi_return_t)
 
 /*
- * Vol 4 Part E 7.8.115. How a host declares which optional features it
- * supports, and what the controller checks before it will negotiate
- * subrating or a CIS. Zephyr sends it during initialisation, so without it a
- * host log shows an unexplained Unknown HCI Command.
+ * LE Set Host Feature declares supported optional Host features
+ * (Core Vol 4 Part E 7.8.115).
  */
 HCI_SDC_CMD_P(HciSdcCmdLeSetHostFeature, sdc_hci_cmd_le_set_host_feature,
               sdc_hci_cmd_le_set_host_feature_t, HciSdcComplete)
@@ -1604,37 +1530,14 @@ HCI_SDC_CMD_VP(HciSdcCmdLeExtCreateConnV2, sdc_hci_cmd_le_ext_create_conn_v2,
     {Opcode, (uint16_t)(ParamLen), 0U, HCI_CMD_RESPONSE_STATUS, Name}
 
 /*
- * Isochronous channels, connected and broadcast.
+ * Connected and broadcast isochronous command support depends on the
+ * underlying controller capabilities. On nRF52, sdk-nrfxlib documents
+ * ISO encryption support for nRF52820 and nRF52833, not nRF52840.
+ * ISO encryption capability must not be inferred from command dispatch.
  *
- * Every command below is dispatched on this part. Isochronous transport and
- * isochronous link layer encryption are separate questions, and the second
- * one has a part specific answer: sdk-nrfxlib README.rst says nRF52820 and
- * nRF52833 are the nRF52 Series devices that encrypt and decrypt
- * isochronous packets, which leaves nRF52840 out.
- *
- * The reason is one register. CCM authenticates the PDU header octet, and
- * which bits of it are authenticated differs between an ACL data PDU and an
- * isochronous one. nRF52833 and nRF52820 have CCM.HEADERMASK, described in
- * their reference manuals as the header (S0) mask, and nRF52840 does not:
- * its CCM applies the fixed ACL mask. This is not a shortage of ciphers on
- * the part, which has a CryptoCell the other two lack. It is the radio CCM
- * accelerator being one register short of the isochronous header layout.
- *
- * So the commands, the scheduling and the data path are all here, and what
- * the controller answers to an encrypted request has not been measured on
- * this part. The test table asks for unencrypted groups.
- *
- * The four test commands are the ones worth having on an instrument. They
- * measure an isochronous link with no codec anywhere, which is exactly what
- * is wanted when the question is whether the radio and the scheduling work
- * rather than whether the audio sounds right.
- */
-/*
- * The isochronous half of the buffer report. A host cannot flow control
- * isochronous data without it: version 1 reports only the ACL packet length
- * and count, and says nothing about how many isochronous packets the
- * controller will hold. Adding the streams without this would give a host
- * every command it needs to set one up and no way to feed it.
+ * LE Read Buffer Size v2 reports ACL and ISO buffer capacities; v1 provides
+ * ACL capacities only. The v2 ACL count must update the same flow-control
+ * limit used by the v1 command.
  */
 static HciCmdResult_t HciSdcCmdLeReadBufferSizeV2(void *pContext,
                                                   const uint8_t *,
@@ -2709,30 +2612,14 @@ static int32_t HciSdcNrfxlibGet(void *, uint8_t *pPacket, uint8_t *pType)
  * other, never both, and whichever it uses first makes the other Command
  * Disallowed until the controller is reset.
  *
- * The SoftDevice Controller does not enforce this. sdk-nrf does, one layer
- * above it, in subsys/bluetooth/controller/hci_internal.c, which is the layer
- * this file replaces. Without it a host that mixes the two sets is not
- * refused; it is handed to the controller and gets whatever the controller
- * makes of the request, which was an unexplained Invalid HCI Command
- * Parameters on an enable twenty commands after the command that caused it,
- * and silence from everything in between. That cost eight hardware runs to
- * find and it is the wrong answer besides: the specification asks for
- * Command Disallowed and asks for it on the offending command.
+ * The SDC command interface does not enforce the advertising command-family
+ * restriction. Enforce Command Disallowed before dispatching a command from
+ * the other family.
  *
- * The two lists are hci_internal.c's, read from it rather than reasoned out,
- * because which set a command belongs to is not always obvious. LE Read
- * Maximum Advertising Data Length reads a number and changes nothing, and it
- * is an extended command. LE Read Advertising Physical Channel Tx Power is
- * the same shape and is a legacy one.
+ * Command-family classification follows sdk-nrf hci_internal.c. Read Maximum
+ * Advertising Data Length is extended; Read Advertising Physical Channel
+ * Tx Power is legacy.
  */
-typedef enum {
-    HCI_SDC_ADV_CMD_NONE = 0,
-    HCI_SDC_ADV_CMD_LEGACY,
-    HCI_SDC_ADV_CMD_EXTENDED,
-} HciSdcAdvCmdType_t;
-
-static HciSdcAdvCmdType_t s_AdvCmdTypeSinceReset = HCI_SDC_ADV_CMD_NONE;
-
 static HciSdcAdvCmdType_t HciSdcAdvCommandType(uint16_t Opcode)
 {
     switch (Opcode)
@@ -2826,11 +2713,7 @@ bool HciSdcNrfxlibInit(HciSdc_t *pSdc,
         -NRF_EAGAIN,
     };
 
-    /*
-     * The command context is the counter readout's view of the stack. Every
-     * other handler in the table ignores it and talks to SDC through file
-     * scope entry points.
-     */
+    /* The counter readout uses the command context; other handlers access SDC directly. */
     if (!HciSdcInit(pSdc,
                     &ops,
                     s_HciSdcCommands,
@@ -2842,26 +2725,15 @@ bool HciSdcNrfxlibInit(HciSdc_t *pSdc,
         return false;
     }
 
-    /*
-     * A fresh controller has used neither advertising command set, and the
-     * guard is what keeps it that way until a host picks one.
-     */
+    /* Reset legacy/extended advertising command-family selection. */
     HciSdcNrfxlibResetAdvCommandType();
     pSdc->Commands.Guard = HciSdcAdvCommandGuard;
 
     return true;
 }
 
-/*
- * Say the controller is ready with a No Operation Command Complete.
- *
- * Whether a board needs this is a board fact, and this file cannot see board.h,
- * so the caller decides. It used to be a macro tested here, which meant the
- * only board that sets it got an image with the call compiled out and nothing
- * to say so.
- *
- * Call it after init and before the runtime thread starts, which is where the
- * dispatcher is empty and no command can have arrived.
+/* Queue an optional startup No Operation Command Complete event.
+ * The board-specific caller decides whether it is required, before HCI processing starts.
  */
 void HciSdcNrfxlibQueueStartupNop(HciSdc_t *pSdc)
 {

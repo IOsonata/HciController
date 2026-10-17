@@ -12,11 +12,10 @@
 @license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
 ----------------------------------------------------------------------------*/
 
+#include "board.h"
 #include "hci_app.h"
 
 #include <string.h>
-
-#include "board.h"
 #include "coredev/iopincfg.h"
 #include "coredev/interrupt.h"
 #include "hci_trace.h"
@@ -62,28 +61,135 @@ static_assert(HCI_SDC_ACL_TRACK_HANDLES >=
 #define HCI_APP_USB_POLL_MS 5U
 #endif
 
-static HciApp_t *s_pApp;
-static UsbdCdc s_HostCdc;
-static UsbdCdc s_LogCdc;
-static BtHciUsb s_HciUsb;
-
-// Same CFifo worker queue as IOsonata's USB TaktOS examples. Keep it across
-// stop/start: discarding a queued process callback would strand the core's
-// process-queued latch. Only the HCI worker executes callbacks, while USB is up.
 #define HCI_USB_WORK_COUNT 16U
 #define HCI_USB_WORK_PER_PASS 30U
-typedef struct {
-	uint32_t EvtId;
-	void *pCtx;
-	UsbEvtQueHandler_t Handler;
+typedef struct
+{
+    uint32_t EvtId;
+    void *pCtx;
+    UsbEvtQueHandler_t Handler;
 } HciUsbWork_t;
 
+static HciApp_t *s_pApp;
+static UART s_HciUart;
+static UsbdCdc s_HostCdc;
+static UsbdCdc s_LogCdc;
+#if defined(HCI_NRF91_TRACE_BRIDGE) && HCI_NRF91_TRACE_BRIDGE
+static UART s_TraceUart;
+static UsbdCdc s_TraceCdc;
+static const IOPinCfg_t s_TraceUartPins[] = HCI_NRF91_TRACE_UART_PINS;
+#endif
+static BtHciUsb s_HciUsb;
+
+/* Preserve queued USB work across stop/start to avoid losing callbacks
+ * while the USB process-queued flag remains set. The HCI worker executes
+ * these callbacks.
+ */
 alignas(HciUsbWork_t) static uint8_t s_UsbWorkMem[
-	CFIFO_TOTAL_MEMSIZE(HCI_USB_WORK_COUNT, sizeof(HciUsbWork_t))];
+    CFIFO_TOTAL_MEMSIZE(HCI_USB_WORK_COUNT, sizeof(HciUsbWork_t))];
 static hCFifo_t s_hUsbWork;
 
 #ifdef UART_PINS
 static const IOPinCfg_t s_HciUartPins[] = UART_PINS;
+#endif
+
+static void HciAppWake(void *pContext);
+
+#if defined(HCI_NRF91_TRACE_BRIDGE) && HCI_NRF91_TRACE_BRIDGE
+/* Receive nRF91 diagnostic UART output on the board-selected
+ * trace UART. Never pass these bytes through HCI H:4.
+ */
+static int HciTraceUartEvent(UARTDev_t * const, UART_EVT evt,
+                             uint8_t *, int len)
+{
+    if (evt == UART_EVT_RXDATA || evt == UART_EVT_RXTIMEOUT)
+    {
+        HciAppWake(s_pApp);
+    }
+    return len;
+}
+
+static bool HciTraceBridgeStart(HciApp_t *app)
+{
+    UARTCfg_t cfg = {};
+    cfg.DevNo = HCI_NRF91_TRACE_UART_DEVNO;
+    cfg.pIOPinMap = s_TraceUartPins;
+    cfg.NbIOPins = sizeof(s_TraceUartPins) / sizeof(s_TraceUartPins[0]);
+    cfg.Rate = HCI_NRF91_TRACE_UART_RATE;
+    cfg.DataBits = 8;
+    cfg.Parity = UART_PARITY_NONE;
+    cfg.StopBits = 1;
+    cfg.FlowControl = UART_FLWCTRL_NONE;
+    cfg.bIntMode = true;
+    cfg.IntPrio = HCI_APP_UART_IRQ_PRIORITY;
+    cfg.EvtCallback = HciTraceUartEvent;
+    cfg.bFifoBlocking = false;
+    cfg.bDMAMode = true;
+    cfg.Duplex = UART_DUPLEX_FULL;
+    cfg.Mode = UART_MODE_UART;
+    cfg.RxMemSize = sizeof(app->TraceUartRxMem);
+    cfg.pRxMem = app->TraceUartRxMem;
+    cfg.TxMemSize = sizeof(app->TraceUartTxMem);
+    cfg.pTxMem = app->TraceUartTxMem;
+    app->TraceUartReady = s_TraceUart.Init(cfg);
+    return app->TraceUartReady;
+}
+
+/* UART RX -> USB CDC TX. Keep an unsent tail when CDC is busy. */
+static void HciTraceBridgePump(HciApp_t *app)
+{
+    if (!app->TraceUartReady || !app->UsbRunning ||
+        !s_TraceCdc.IsPortOpen())
+    {
+        return;
+    }
+
+    if (app->TracePendingOffset == app->TracePendingLen)
+    {
+        app->TracePendingOffset = 0U;
+        const int len = s_TraceUart.Rx(app->TracePending,
+                                           sizeof(app->TracePending));
+        if (len > 0)
+        {
+            app->TracePendingLen = (uint16_t)len;
+        }
+        else
+        {
+            app->TracePendingLen = 0U;
+        }
+    }
+
+    if (app->TracePendingOffset < app->TracePendingLen)
+    {
+        const int sent = s_TraceCdc.Tx(
+            0U, app->TracePending + app->TracePendingOffset,
+            app->TracePendingLen - app->TracePendingOffset);
+        if (sent > 0)
+        {
+            app->TracePendingOffset += (uint16_t)sent;
+        }
+    }
+
+    /* CDC RX -> UART TX. Retain the unsent tail under UART backpressure. */
+    if (app->TraceInputOffset == app->TraceInputLen)
+    {
+        app->TraceInputOffset = 0U;
+        const int len = s_TraceCdc.Rx(
+            0U, app->TraceInputPending, sizeof(app->TraceInputPending));
+        app->TraceInputLen = len > 0 ? (uint16_t)len : 0U;
+    }
+
+    if (app->TraceInputOffset < app->TraceInputLen)
+    {
+        const int sent = s_TraceUart.Tx(
+            app->TraceInputPending + app->TraceInputOffset,
+            app->TraceInputLen - app->TraceInputOffset);
+        if (sent > 0)
+        {
+            app->TraceInputOffset += (uint16_t)sent;
+        }
+    }
+}
 #endif
 
 static void HciAppWake(void *pContext)
@@ -103,48 +209,48 @@ static int HciAppUsbEvent(DevIntrf_t *, DEVINTRF_EVT, uint8_t *, int Len)
 
 bool UsbEvtQue(uint32_t EvtId, void *pCtx, UsbEvtQueHandler_t Handler)
 {
-	if (s_hUsbWork == nullptr || Handler == nullptr)
-	{
-		return false;
-	}
-	// Both the USB interrupt and the worker produce events. Publish the
-	// complete entry before either can observe or reuse it.
-	const uint32_t state = DisableInterrupt();
-	HciUsbWork_t *p = reinterpret_cast<HciUsbWork_t *>(CFifoPut(s_hUsbWork));
-	if (p != nullptr)
-	{
-		*p = { EvtId, pCtx, Handler };
-	}
-	EnableInterrupt(state);
-	if (p == nullptr)
-	{
-		return false;
-	}
-	HciAppWake(s_pApp);
-	return true;
+    if (s_hUsbWork == nullptr || Handler == nullptr)
+    {
+        return false;
+    }
+    // Both the USB interrupt and the worker produce events. Publish the
+    // complete entry before either can observe or reuse it.
+    const uint32_t state = DisableInterrupt();
+    HciUsbWork_t *p = reinterpret_cast<HciUsbWork_t *>(CFifoPut(s_hUsbWork));
+    if (p != nullptr)
+    {
+        *p = { EvtId, pCtx, Handler };
+    }
+    EnableInterrupt(state);
+    if (p == nullptr)
+    {
+        return false;
+    }
+    HciAppWake(s_pApp);
+    return true;
 }
 
 static void HciAppUsbWorkExec(void)
 {
-	for (unsigned count = HCI_USB_WORK_PER_PASS; count > 0U; count--)
-	{
-		const HciUsbWork_t *p =
-			reinterpret_cast<const HciUsbWork_t *>(CFifoPeek(s_hUsbWork));
-		if (p == nullptr)
-		{
-			// Retry the core's process event if a full queue refused it.
-			UsbCheckStatus();
-			break;
-		}
-		const HciUsbWork_t work = *p;
-		(void)CFifoGet(s_hUsbWork);
-		work.Handler(work.EvtId, work.pCtx);
-	}
-	if (CFifoPeek(s_hUsbWork) != nullptr)
-	{
-		// A bounded pass must not leave the worker asleep with work queued.
-		HciAppWake(s_pApp);
-	}
+    for (unsigned count = HCI_USB_WORK_PER_PASS; count > 0U; count--)
+    {
+        const HciUsbWork_t *p =
+            reinterpret_cast<const HciUsbWork_t *>(CFifoPeek(s_hUsbWork));
+        if (p == nullptr)
+        {
+            // Retry the core's process event if a full queue refused it.
+            UsbCheckStatus();
+            break;
+        }
+        const HciUsbWork_t work = *p;
+        (void)CFifoGet(s_hUsbWork);
+        work.Handler(work.EvtId, work.pCtx);
+    }
+    if (CFifoPeek(s_hUsbWork) != nullptr)
+    {
+        // A bounded pass must not leave the worker asleep with work queued.
+        HciAppWake(s_pApp);
+    }
 }
 
 static int HciAppUartEvent(UARTDev_t * const,
@@ -215,15 +321,15 @@ static bool HciAppUsbSetup(HciApp_t *pApp, HciUsbDescriptorMode_t Mode)
 
     pApp->UsbDescriptorMode = Mode;
 
-	if (s_hUsbWork == nullptr)
-	{
-		s_hUsbWork = CFifoInit(s_UsbWorkMem, sizeof(s_UsbWorkMem),
-			sizeof(HciUsbWork_t), true);
-		if (s_hUsbWork == nullptr)
-		{
-			return false;
-		}
-	}
+    if (s_hUsbWork == nullptr)
+    {
+        s_hUsbWork = CFifoInit(s_UsbWorkMem, sizeof(s_UsbWorkMem),
+            sizeof(HciUsbWork_t), true);
+        if (s_hUsbWork == nullptr)
+        {
+            return false;
+        }
+    }
 
     UsbCfg_t usbCfg = {};
     usbCfg.DevNo = 0;
@@ -303,8 +409,49 @@ static bool HciAppUsbSetup(HciApp_t *pApp, HciUsbDescriptorMode_t Mode)
         return false;
     }
 
+#if defined(HCI_NRF91_TRACE_BRIDGE) && HCI_NRF91_TRACE_BRIDGE
+    /* A distinct CDC function: HciController's own trace stays on s_LogCdc. */
+    UsbdCdcCfg_t traceCfg = {};
+    traceCfg.bBlocking = false;
+    traceCfg.RxFifoMemSize = sizeof(pApp->TraceUsbRxMem);
+    traceCfg.pRxFifoMem = pApp->TraceUsbRxMem;
+    traceCfg.TxFifoMemSize = sizeof(pApp->TraceUsbTxMem);
+    traceCfg.pTxFifoMem = pApp->TraceUsbTxMem;
+    traceCfg.DevNo = 0;
+    traceCfg.EvtCB = HciAppUsbEvent;
+    if (!s_TraceCdc.Init(traceCfg))
+    {
+        UsbDisable(0);
+        return false;
+    }
+#endif
+
     pApp->UsbRunning = true;
     return true;
+}
+
+/* Roll back transport peripherals when a later initialization stage fails.
+ * This is also used by Stop after its worker has left the runtime.
+ */
+static void HciAppUartRelease(HciApp_t *pApp)
+{
+#if defined(HCI_NRF91_TRACE_BRIDGE) && HCI_NRF91_TRACE_BRIDGE
+    if (pApp->TraceUartReady)
+    {
+        s_TraceUart.Disable();
+        pApp->TraceUartReady = false;
+    }
+    pApp->TracePendingLen = 0U;
+    pApp->TracePendingOffset = 0U;
+    pApp->TraceInputLen = 0U;
+    pApp->TraceInputOffset = 0U;
+#endif
+    if (pApp->HostType == HCI_APP_HOST_UART &&
+        pApp->pHostIntrf == static_cast<DevIntrf_t *>(s_HciUart))
+    {
+        s_HciUart.Disable();
+        pApp->pHostIntrf = nullptr;
+    }
 }
 
 static void HciAppUsbRelease(HciApp_t *pApp)
@@ -349,13 +496,13 @@ static bool HciAppInitUart(HciApp_t *pApp)
     cfg.Duplex = UART_DUPLEX_FULL;
     cfg.Mode = UART_MODE_UART;
 
-    if (!UARTInit(&pApp->Uart, &cfg))
+    if (!s_HciUart.Init(cfg))
     {
         return false;
     }
 
     HciTargetUartTrace(&pApp->Target, HCI_APP_UART_DEVICE);
-    pApp->pHostIntrf = &pApp->Uart.DevIntrf;
+    pApp->pHostIntrf = static_cast<DevIntrf_t *>(s_HciUart);
     return true;
 #else
     (void)pApp;
@@ -588,6 +735,10 @@ static void HciAppHostProcess(void *pContext)
         HciAppDrainLog(pApp);
     }
 
+#if defined(HCI_NRF91_TRACE_BRIDGE) && HCI_NRF91_TRACE_BRIDGE
+    HciTraceBridgePump(pApp);
+#endif
+
     HciControllerProcess(&pApp->Controller);
     HciAppResyncOnIdle(pApp);
 }
@@ -642,7 +793,7 @@ bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode, HciTarget_t Target)
         Mode == HCI_APP_MODE_UART_H4 &&
         s_pApp == pApp &&
         pApp->HostType == HCI_APP_HOST_UART &&
-        pApp->pHostIntrf == &pApp->Uart.DevIntrf;
+        pApp->pHostIntrf == static_cast<DevIntrf_t *>(s_HciUart);
 
     if (pApp == nullptr || (s_pApp != nullptr && !earlyUart))
     {
@@ -693,8 +844,17 @@ bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode, HciTarget_t Target)
         }
     }
 
+#if defined(HCI_NRF91_TRACE_BRIDGE) && HCI_NRF91_TRACE_BRIDGE
+    if (hostReady && pApp->UsbRunning && !HciTraceBridgeStart(pApp))
+    {
+        HciTrace("init: nRF91 trace UART initialization failed\r\n");
+        hostReady = false;
+    }
+#endif
+
     if (!hostReady)
     {
+        HciAppUartRelease(pApp);
         HciTrace("init: host interface failed type=%u\r\n", (unsigned)hostType);
         pApp->LastError = -2;
         HciAppUsbRelease(pApp);
@@ -708,6 +868,7 @@ bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode, HciTarget_t Target)
         HciTrace("init: controller transport failed host=%s\r\n",
                  HciAppHostName(pApp));
         pApp->LastError = -3;
+        HciAppUartRelease(pApp);
         HciAppUsbRelease(pApp);
         s_pApp = nullptr;
         return false;
@@ -733,6 +894,7 @@ bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode, HciTarget_t Target)
     {
         HciTrace("init: target Init failed\r\n");
         pApp->LastError = -4;
+        HciAppUartRelease(pApp);
         HciAppUsbRelease(pApp);
         s_pApp = nullptr;
         return false;
@@ -756,6 +918,7 @@ bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode, HciTarget_t Target)
     {
         HciTrace("init: HciTaktOsInit failed\r\n");
         pApp->LastError = -5;
+        HciAppUartRelease(pApp);
         HciAppUsbRelease(pApp);
         s_pApp = nullptr;
         return false;
@@ -807,8 +970,16 @@ void HciAppStop(HciApp_t *pApp)
 
     if (!pApp->UsbHciNative && pApp->pHostIntrf != nullptr)
     {
-        DeviceIntrfDisable(pApp->pHostIntrf);
+        if (pApp->HostType == HCI_APP_HOST_UART)
+        {
+            s_HciUart.Disable();
+        }
+        else
+        {
+            s_HostCdc.Disable();
+        }
     }
+    HciAppUartRelease(pApp);
     HciAppUsbRelease(pApp);
     pApp->Target.pOps->Stop(pApp->Target.pContext);
     pApp->pHostIntrf = nullptr;

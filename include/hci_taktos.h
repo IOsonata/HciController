@@ -33,14 +33,16 @@ typedef bool (*HciTaktOsStart_t)(void *pContext);
 typedef void (*HciTaktOsProcess_t)(void *pContext);
 typedef void (*HciTaktOsFault_t)(void *pContext, int Error);
 
-typedef struct {
+typedef struct
+{
     HciTaktOsStart_t Start;
     HciTaktOsProcess_t ProcessMpsl;
     HciTaktOsFault_t Fault;
     void *pContext;
 } HciTaktOsOps_t;
 
-typedef struct {
+typedef struct
+{
     HciTaktOsStart_t Start;
     HciTaktOsProcess_t Process;
     void *pContext;
@@ -54,7 +56,8 @@ typedef struct {
     uint32_t PollIntervalMs;
 } HciTaktOsHostOps_t;
 
-typedef struct {
+typedef struct
+{
     TaktOSSem_t WakeSem;
     /* Given by the runtime thread as it leaves, so a stop can wait for it. */
     TaktOSSem_t StoppedSem;

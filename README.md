@@ -1,9 +1,9 @@
 # HciController
 
-HciController is an open-source Bluetooth LE HCI controller firmware for the
-nRF52840. It is built with IOsonata and TaktOS, using IOsonata's native USB
-device stack and Nordic Semiconductor's nrfxlib SoftDevice Controller (SDC)
-and MPSL for the radio.
+HciController is open-source Bluetooth LE HCI controller firmware for the
+nRF52840 and nRF54LM20. It uses IOsonata and TaktOS, IOsonata's native USB
+device stack, and Nordic Semiconductor's nrfxlib SoftDevice Controller (SDC)
+and MPSL for radio operation.
 
 Release 1 is version **1.0.0** (`FIRMWARE_VERSION 0x0100`) and targets the
 nRF52840/current SDC capability profile reported by the firmware as Bluetooth

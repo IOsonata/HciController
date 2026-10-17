@@ -20,9 +20,8 @@
 #include "hci_trace.h"
 
 /*
- * Every sdc_support_ call the dispatch table needs, and the sdc_cfg_set
- * sequence that sizes the controller. None of it touches a peripheral, a
- * clock or an erratum, so it is the same on any part nrfxlib supports.
+ * Configure supported SDC features and the controller memory requirements.
+ * This sequence is independent of target peripheral initialization.
  *
  * The order matters in three places and sdk-nrfxlib says so:
  *
@@ -33,10 +32,8 @@
  */
 
 /*
- * A periodic advertiser needs an advertising set to carry it, and one with
- * responses needs another, so the two periodic counts together cannot exceed
- * the advertising sets. sdc_cfg_set refuses that with an error naming neither
- * number, so it is caught at build time instead.
+ * Periodic advertising configurations must not exceed the available
+ * advertising sets. Validate the counts at compile time.
  */
 static_assert((HCI_SDC_PERIODIC_ADV_COUNT + HCI_SDC_PERIODIC_ADV_RSP_COUNT) <=
                   HCI_SDC_ADV_SET_COUNT,
@@ -45,9 +42,8 @@ static_assert((HCI_SDC_PERIODIC_ADV_COUNT + HCI_SDC_PERIODIC_ADV_RSP_COUNT) <=
 static int32_t s_Required;
 
 /*
- * hci_counters.cpp carries a weak zero-valued fallback with this name so its
- * portable host tests do not have to link nrfxlib. Firmware links this strong
- * definition and therefore reports the final sdc_cfg_set value at read time.
+ * Provide the SDC resource requirement for diagnostic counters. Portable
+ * unit tests use the weak fallback defined in hci_counters.cpp.
  */
 extern "C" int32_t HciSdcResourcesRequired(void)
 {
@@ -59,11 +55,7 @@ static bool HciSdcCfgSet(uint8_t Type, const sdc_cfg_t *pCfg)
     int32_t required = sdc_cfg_set(SDC_DEFAULT_RESOURCE_CFG_TAG, Type, pCfg);
 
     /*
-     * Only the ones that failed. There are twenty three of these and the
-     * running total each one returns is worth reading exactly when the pool
-     * comes up short, which the summary below already reports. Printed every
-     * time, they were seven hundred octets of a two thousand octet log ring,
-     * and the ring was dropping the start of the boot to hold them.
+     * Report failed resource configurations only, to conserve trace space.
      */
     if (required < 0)
     {
