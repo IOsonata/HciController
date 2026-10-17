@@ -154,9 +154,9 @@ def main(argv):
     # The preprocessor guard includes both UDG MCU families and wraps lines.
     # Match its two required conditions independent of formatting.
     udg_guard = re.search(
-        r"#if\\s*\\(BOARD\\s*==\\s*UDG_NRF52840\\s*\\|\\|"
-        r".*?HCI_HOST_SELECT\\s*==\\s*HCI_HOST_SELECT_UART"
-        r"\\s*#error\\s*\\\"UDG dongle supports USB-H4 and native USB-HCI only\\\"",
+        r"#if\s*\(BOARD\s*==\s*UDG_NRF52840\s*\|\|"
+        r".*?HCI_HOST_SELECT\s*==\s*HCI_HOST_SELECT_UART"
+        r'\s*#error\s*"UDG dongle supports USB-H4 and native USB-HCI only"',
         main_cpp, re.DOTALL)
     if udg_guard is None:
         fail("UDG forced-UART builds must be rejected")
