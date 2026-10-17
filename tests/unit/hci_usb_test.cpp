@@ -39,6 +39,26 @@ extern "C" void HciTaktOsWake(HciTaktOs_t *, uint32_t)
 }
 
 extern "C" {
+bool UARTInit(UARTDev_t * const pDev, const UARTCfg_t *pCfg)
+{
+    if (pDev == nullptr || pCfg == nullptr)
+    {
+        return false;
+    }
+
+    pDev->Rate = pCfg->Rate;
+    pDev->EvtCallback = pCfg->EvtCallback;
+    return true;
+}
+
+void UARTSetCtrlLineState(UARTDev_t * const pDev, uint32_t LineState)
+{
+    if (pDev != nullptr)
+    {
+        pDev->LineState = LineState;
+    }
+}
+
 void AppWait(void) {}
 bool UsbCtrlrInit(int DevNo, const UsbCtrlrCfg_t *pCfg)
 {
