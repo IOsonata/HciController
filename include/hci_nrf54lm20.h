@@ -1,7 +1,10 @@
 /**-------------------------------------------------------------------------
-@file hci_nrf54lm20.h
+@file	hci_nrf54lm20.h
 
-@brief nRF54LM20 SDC/MPSL HCI controller target interface.
+@brief	nRF54LM20 SDC/MPSL HCI controller target interface.
+
+@author	Nguyen Hoan Hoang
+@date	October 2026
 
 @license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
 ----------------------------------------------------------------------------*/
