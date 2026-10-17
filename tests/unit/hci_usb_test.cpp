@@ -3,7 +3,17 @@
 
 /* This integration test builds the real IOsonata USB interfaces, so it
  * must use the real UART API rather than the standalone host UART stub. */
+/* IOsonata UART's two-argument Rx/Tx overloads intentionally hide the
+ * DeviceIntrf three-argument methods. Scope the Clang diagnostic to this
+ * vendor API header; leave -Werror enabled for the test code. */
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Woverloaded-virtual"
+#endif
 #include "coredev/uart.h"
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
 #include "hci_usb.h"
 #include "usb/usbd_cdc.h"
 
