@@ -132,6 +132,7 @@ static bool HciUartBridgeStart(HciApp_t *app)
     cfg.TxMemSize = sizeof(app->BridgeUartTxMem);
     cfg.pTxMem = app->BridgeUartTxMem;
     app->BridgeUartReady = s_BridgeUart.Init(cfg);
+    app->BridgeBaudRate = app->BridgeUartReady ? cfg.Rate : 0U;
     return app->BridgeUartReady;
 }
 
@@ -142,6 +143,20 @@ static void HciUartBridgePump(HciApp_t *app)
         !s_BridgeCdc.IsPortOpen())
     {
         return;
+    }
+
+    /* USB CDC line coding is accepted by IOsonata. Apply host-selected
+     * baud rate to the separate bridge UART, never to the HCI UART.
+     */
+    const UsbCdcLineCoding_t *pLine = s_BridgeCdc.LineCoding();
+    if (pLine != nullptr && pLine->dwDTERate > 0U &&
+        pLine->dwDTERate != app->BridgeBaudRate)
+    {
+        const uint32_t actual = s_BridgeUart.Rate(pLine->dwDTERate);
+        if (actual != 0U)
+        {
+            app->BridgeBaudRate = pLine->dwDTERate;
+        }
     }
 
     if (app->BridgePendingOffset == app->BridgePendingLen)
@@ -440,6 +455,7 @@ static void HciAppUartRelease(HciApp_t *pApp)
     {
         s_BridgeUart.Disable();
         pApp->BridgeUartReady = false;
+        pApp->BridgeBaudRate = 0U;
     }
     pApp->BridgePendingLen = 0U;
     pApp->BridgePendingOffset = 0U;
