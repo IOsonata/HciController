@@ -136,13 +136,13 @@ are used as **two independent UART TX/RX pairs**; RTS/CTS is not used:
 The HCI UART runs at **1000000 baud** without hardware flow control. The
 independent nRF91 bridge UART runs at **115200 baud** and is bridged to a
 dedicated USB CDC interface. The nRF54LM20 configuration uses IOsonata
-`UART_DEVNO=1` (UARTE20) for HCI and `HCI_NRF91_BRIDGE_UART_DEVNO=2`
+`UART_DEVNO=1` (UARTE20) for HCI and `HCI_BRIDGE_UART_DEVNO=2`
 (UARTE21) for the UART bridge; verify the peripheral-to-pin routing during
 the target build and hardware test. The nRF91 firmware must also select
 two UARTs over these nets rather than use BTLTE2/BTLTE3 as flow-control
 signals.
 
-The existing `HCI_NRF91_UART_BRIDGE` implementation in `hci_app.cpp` owns
+The existing `HCI_UART_BRIDGE` implementation in `hci_app.cpp` owns
 the second UART and CDC class. It is enabled for WildThing51 and disabled for
 UDG and the DK. Hardware validation is still required for USB enumeration,
 the UART peripheral mappings, and sustained HCI/trace traffic.
