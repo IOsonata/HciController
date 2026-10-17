@@ -144,7 +144,7 @@ The log is never an HCI transport in native mode. CDC assignment is:
 ```text
 native Bluetooth USB HCI   Bluetooth function + CDC 0 log
 USB CDC/H:4                CDC 0 HCI H:4 + CDC 1 log
-UART H:4 / log-only USB    CDC 0 log
+UART H:4 / log-only USB    CDC 0 log (optional CDC 1 UART bridge)
 ```
 
 `HciTrace` writes into a RAM ring that the runtime drains to the log port. The
@@ -280,7 +280,7 @@ The measured RTS/CTS assignment on the nRF52840 differs from the sdk-nrf pinctrl
 labels. `board.h` documents the measurement and must not be changed from the
 pinctrl labels without another hardware measurement.
 
-The host side should use:
+Thingy:91 also exposes a separate USB CDC UART bridge to the nRF9160\nconsole UART. The bridge forwards data bidirectionally and follows CDC\nterminal baud-rate changes using the physical bridge UART's rate API.\nIt does not change the HCI UART baud rate. Its CDC and UART FIFOs are\nindependent of the controller diagnostic log and HCI transport. The\ncontroller diagnostic CDC retains its early-boot log buffering.\n\nThe host side should use:
 
 ```text
 CONFIG_BT_WAIT_NOP=y
