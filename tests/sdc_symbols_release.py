@@ -274,12 +274,24 @@ def main():
     known = REQUIRED_SUPPORT | NRF52840_EXCLUDED | OPTIONAL_OR_ALTERNATIVE
     unknown = sorted(declared - known)
     impossible = sorted(used & NRF52840_EXCLUDED)
+    # Decision-Based Advertising Filtering is deliberately outside this
+    # release profile; reject accidental enablement, not just unknown APIs.
+    disabled_decision = {
+        "sdc_support_decision_adv",
+        "sdc_support_decision_scan",
+    }
+    unexpectedly_enabled = sorted(used & disabled_decision)
     required_not_declared = sorted(REQUIRED_SUPPORT - declared)
     required_not_used = sorted(REQUIRED_SUPPORT - used)
 
     print()
     print("SDC support API audit: %d declared, %d called by release 1"
           % (len(declared), len(used)))
+
+    if unexpectedly_enabled:
+        print("\\nDecision filtering enabled without a release-profile update:")
+        for name in unexpectedly_enabled:
+            print("  INVALID  %s" % name)
 
     if impossible:
         print("\nHardware-excluded nRF52840 capabilities are being enabled:")
@@ -302,7 +314,8 @@ def main():
             print("  NEW      %s" % name)
         print("Classify each new API before accepting the new HEAD as a release baseline.")
 
-    if impossible or required_not_declared or required_not_used or unknown:
+    if (impossible or unexpectedly_enabled or required_not_declared or
+            required_not_used or unknown):
         return 1
 
     print("Every required nRF52840 SDC support capability is present and enabled.")
