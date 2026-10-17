@@ -88,11 +88,23 @@ def main():
 
     thingy = boards.get("THINGY91_NRF52840", "")
     wild91 = boards.get("WILDTHING91", "")
+    # Both boards use the same HCI data pins and UART settings, but their
+    # RTS/CTS assignments are intentionally distinct in board.h. Do not
+    # substitute one board's handshake wiring for the other's.
     for macro in ("UART_TX_PORT", "UART_TX_PIN", "UART_RX_PORT", "UART_RX_PIN",
-                  "UART_RTS_PORT", "UART_RTS_PIN", "UART_CTS_PORT", "UART_CTS_PIN",
                   "UART_RATE", "UART_HW_FLOWCTRL"):
         check(define(thingy, macro) == define(wild91, macro),
               "WildThing91 shares Thingy91 %s" % macro, failures)
+
+    for name, body, rts, cts in (
+            ("Thingy91", thingy, ("0", "22"), ("0", "19")),
+            ("WildThing91", wild91, ("0", "19"), ("0", "22"))):
+        actual_rts = (define(body, "UART_RTS_PORT"),
+                      define(body, "UART_RTS_PIN"))
+        actual_cts = (define(body, "UART_CTS_PORT"),
+                      define(body, "UART_CTS_PIN"))
+        check(actual_rts == rts and actual_cts == cts,
+              "%s RTS/CTS board-specific mapping" % name, failures)
 
     check("HCI_APP_MODE_UART_H4" in app_h and
           "HCI_APP_MODE_USB_H4" in app_h and
