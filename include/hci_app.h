@@ -119,16 +119,17 @@ typedef struct
     uint8_t CommandEvent[HCI_APP_COMMAND_EVENT_SIZE];
     uint64_t SdcMem[(HCI_SDC_MEM_SIZE + 7U) / 8U];
 
-    alignas(4) uint8_t UartRxFifoMem[HCI_APP_FIFO_MEM_SIZE];
+    /* UART H:4 and USB HCI are exclusive host modes. These FIFO buffers
+     * are reused by whichever host transport is active. The diagnostic
+     * CDC and optional nRF91 trace bridge retain independent storage. */
+    alignas(4) uint8_t HostRxFifoMem[HCI_APP_FIFO_MEM_SIZE];
+    alignas(4) uint8_t HostTxFifoMem[HCI_APP_FIFO_MEM_SIZE];
 #if defined(HCI_NRF91_TRACE_BRIDGE) && HCI_NRF91_TRACE_BRIDGE
     alignas(4) uint8_t TraceUartRxMem[HCI_APP_FIFO_MEM_SIZE];
     alignas(4) uint8_t TraceUartTxMem[HCI_APP_FIFO_MEM_SIZE];
     alignas(4) uint8_t TraceUsbRxMem[HCI_APP_FIFO_MEM_SIZE];
     alignas(4) uint8_t TraceUsbTxMem[HCI_APP_FIFO_MEM_SIZE];
 #endif
-    alignas(4) uint8_t UartTxFifoMem[HCI_APP_FIFO_MEM_SIZE];
-    alignas(4) uint8_t UsbRxFifoMem[HCI_APP_FIFO_MEM_SIZE];
-    alignas(4) uint8_t UsbTxFifoMem[HCI_APP_FIFO_MEM_SIZE];
     alignas(4) uint8_t LogRxFifoMem[HCI_APP_FIFO_MEM_SIZE];
     alignas(4) uint8_t LogTxFifoMem[HCI_APP_FIFO_MEM_SIZE];
 
