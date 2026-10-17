@@ -37,6 +37,10 @@ extern "C" {
 #define HCI_APP_COMMAND_EVENT_SIZE  260U
 #define HCI_APP_FIFO_DATA_SIZE      4096U
 #define HCI_APP_FIFO_MEM_SIZE       CFIFO_MEMSIZE(HCI_APP_FIFO_DATA_SIZE)
+/* Diagnostic CDC input is consumed without processing. Keep two USB RX
+ * packet slots; its TX log retention uses the original full FIFO. */
+#define HCI_APP_LOG_RX_MEM_SIZE      \
+    USB_INTRF_RXMEM_SIZE(2U, USBD_CDC_TRANS_WORDS * sizeof(uint32_t))
 
 typedef enum
 {
@@ -130,7 +134,7 @@ typedef struct
     alignas(4) uint8_t TraceUsbRxMem[HCI_APP_FIFO_MEM_SIZE];
     alignas(4) uint8_t TraceUsbTxMem[HCI_APP_FIFO_MEM_SIZE];
 #endif
-    alignas(4) uint8_t LogRxFifoMem[HCI_APP_FIFO_MEM_SIZE];
+    alignas(4) uint8_t LogRxFifoMem[HCI_APP_LOG_RX_MEM_SIZE];
     alignas(4) uint8_t LogTxFifoMem[HCI_APP_FIFO_MEM_SIZE];
 
     int LastError;
