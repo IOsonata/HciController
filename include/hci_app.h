@@ -73,7 +73,7 @@ typedef struct
      * CDC DeviceIntrf when USB is running. It is never mixed with the HCI stream.
      */
 
-#if defined(HCI_NRF91_UART_BRIDGE) && HCI_NRF91_UART_BRIDGE
+#if defined(HCI_UART_BRIDGE) && HCI_UART_BRIDGE
     bool BridgeUartReady;
     uint8_t BridgePending[64];
     uint16_t BridgePendingLen;
@@ -128,7 +128,7 @@ typedef struct
      * CDC and optional nRF91 UART bridge retain independent storage. */
     alignas(4) uint8_t HostRxFifoMem[HCI_APP_FIFO_MEM_SIZE];
     alignas(4) uint8_t HostTxFifoMem[HCI_APP_FIFO_MEM_SIZE];
-#if defined(HCI_NRF91_UART_BRIDGE) && HCI_NRF91_UART_BRIDGE
+#if defined(HCI_UART_BRIDGE) && HCI_UART_BRIDGE
     alignas(4) uint8_t BridgeUartRxMem[HCI_APP_FIFO_MEM_SIZE];
     alignas(4) uint8_t BridgeUartTxMem[HCI_APP_FIFO_MEM_SIZE];
     alignas(4) uint8_t BridgeUsbRxMem[HCI_APP_FIFO_MEM_SIZE];
