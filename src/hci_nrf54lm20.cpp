@@ -1,6 +1,11 @@
 /**-------------------------------------------------------------------------
-@file hci_nrf54lm20.cpp
-@brief nRF54LM20 MPSL/SDC target for HciController.
+@file	hci_nrf54lm20.cpp
+
+@brief	nRF54LM20 MPSL/SDC target for HciController.
+
+@author	Nguyen Hoan Hoang
+@date	October 2026
+
 @license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
 ----------------------------------------------------------------------------*/
 #include "hci_nrf54lm20.h"
