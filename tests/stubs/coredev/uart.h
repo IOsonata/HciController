@@ -15,6 +15,10 @@
 #ifndef UART_H__
 #define UART_H__
 
+/* The USB integration test uses the real IOsonata UART API. When that
+ * header has already been included, avoid defining a second UART API. */
+#ifndef __UART_H__
+
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -155,5 +159,7 @@ private:
     UARTDev_t vDevData;
 };
 #endif
+
+#endif /* !__UART_H__ */
 
 #endif /* UART_H__ */
