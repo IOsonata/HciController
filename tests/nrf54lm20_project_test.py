@@ -158,6 +158,14 @@ class Nrf54lm20ProjectTest(unittest.TestCase):
         self.assertIn("s_TraceCdc.IsPortOpen()", bridge)
         self.assertIn("TracePendingLen", header)
         self.assertNotIn("TraceDroppedBytes", header)
+        self.assertIn("s_TraceCdc.Rx(", bridge)
+        self.assertIn("s_TraceUart.Tx(", bridge)
+        self.assertIn("app->TraceInputPending + app->TraceInputOffset", bridge)
+        self.assertIn("app->TraceInputOffset += (uint16_t)sent", bridge)
+        self.assertIn("app->TraceInputOffset == app->TraceInputLen", bridge)
+        self.assertIn("TraceInputPending[64]", header)
+        self.assertIn("TraceInputLen", header)
+        self.assertIn("TraceInputOffset", header)
 
     def test_target_selection_and_mpsl_separation(self):
         startup = (ROOT / "src" / "main.cpp").read_text()
