@@ -75,6 +75,7 @@ typedef struct
 
 #if defined(HCI_UART_BRIDGE) && HCI_UART_BRIDGE
     bool BridgeUartReady;
+    uint32_t BridgeBaudRate;
     uint8_t BridgePending[64];
     uint16_t BridgePendingLen;
     uint16_t BridgePendingOffset;
