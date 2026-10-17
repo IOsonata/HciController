@@ -73,14 +73,14 @@ typedef struct
      * CDC DeviceIntrf when USB is running. It is never mixed with the HCI stream.
      */
 
-#if defined(HCI_NRF91_TRACE_BRIDGE) && HCI_NRF91_TRACE_BRIDGE
-    bool TraceUartReady;
-    uint8_t TracePending[64];
-    uint16_t TracePendingLen;
-    uint16_t TracePendingOffset;
-    uint8_t TraceInputPending[64];
-    uint16_t TraceInputLen;
-    uint16_t TraceInputOffset;
+#if defined(HCI_NRF91_UART_BRIDGE) && HCI_NRF91_UART_BRIDGE
+    bool BridgeUartReady;
+    uint8_t BridgePending[64];
+    uint16_t BridgePendingLen;
+    uint16_t BridgePendingOffset;
+    uint8_t BridgeInputPending[64];
+    uint16_t BridgeInputLen;
+    uint16_t BridgeInputOffset;
 #endif
     DevIntrf_t *pHostIntrf;
     HciAppHost_t HostType;
@@ -125,14 +125,14 @@ typedef struct
 
     /* UART H:4 and USB HCI are exclusive host modes. These FIFO buffers
      * are reused by whichever host transport is active. The diagnostic
-     * CDC and optional nRF91 trace bridge retain independent storage. */
+     * CDC and optional nRF91 UART bridge retain independent storage. */
     alignas(4) uint8_t HostRxFifoMem[HCI_APP_FIFO_MEM_SIZE];
     alignas(4) uint8_t HostTxFifoMem[HCI_APP_FIFO_MEM_SIZE];
-#if defined(HCI_NRF91_TRACE_BRIDGE) && HCI_NRF91_TRACE_BRIDGE
-    alignas(4) uint8_t TraceUartRxMem[HCI_APP_FIFO_MEM_SIZE];
-    alignas(4) uint8_t TraceUartTxMem[HCI_APP_FIFO_MEM_SIZE];
-    alignas(4) uint8_t TraceUsbRxMem[HCI_APP_FIFO_MEM_SIZE];
-    alignas(4) uint8_t TraceUsbTxMem[HCI_APP_FIFO_MEM_SIZE];
+#if defined(HCI_NRF91_UART_BRIDGE) && HCI_NRF91_UART_BRIDGE
+    alignas(4) uint8_t BridgeUartRxMem[HCI_APP_FIFO_MEM_SIZE];
+    alignas(4) uint8_t BridgeUartTxMem[HCI_APP_FIFO_MEM_SIZE];
+    alignas(4) uint8_t BridgeUsbRxMem[HCI_APP_FIFO_MEM_SIZE];
+    alignas(4) uint8_t BridgeUsbTxMem[HCI_APP_FIFO_MEM_SIZE];
 #endif
     alignas(4) uint8_t LogRxFifoMem[HCI_APP_LOG_RX_MEM_SIZE];
     alignas(4) uint8_t LogTxFifoMem[HCI_APP_FIFO_MEM_SIZE];
