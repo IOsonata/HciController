@@ -32,8 +32,8 @@
  * The command table targets the multirole SoftDevice Controller library.
  * Central and peripheral roles are selected through HCI.
  *
- * LE Read Supported States is not provided by the multirole library.
- * Do not advertise or dispatch the unsupported command.
+ * The multirole library does not expose LE Read Supported States directly.
+ * The generic HCI layer implements the compatible command response.
  *
  * tests/sdc_symbols.py verifies that required SDC symbols are available.
  *
@@ -51,7 +51,7 @@
  * advertising reports all come back as events rather than command returns:
  * vendor subevents 0x80 to 0x82 for the former, LE meta subevents 0x0E to 0x10
  * and 0x18 for the latter. Those arrive from sdc_hci_get like any other event
- * and the bridge forwards them unchanged, so nothing here is taught about them.
+ * and the transport forwards them without additional command processing.
  *
  * Channel survey, power control, sleep clock accuracy, subrating, extended
  * features, and periodic advertising require matching sdc_support_ calls
