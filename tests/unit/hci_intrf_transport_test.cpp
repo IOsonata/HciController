@@ -662,6 +662,50 @@ static void TestBackpressure(void)
     printf("[ok] rejected packet is retried rather than dropped\n");
 }
 
+/*
+ * The H:4 packet adapter may hand its parser storage directly to the
+ * controller, avoiding a second full-packet copy. A separate caller buffer
+ * must still receive the identical bytes.
+ */
+static void TestPacketAdapterAliasedReceive(void)
+{
+    const uint8_t wire[] = {
+        0x02U, 0x40U, 0x00U, 0x04U, 0x00U,
+        0xAAU, 0xBBU, 0xCCU, 0xDDU,
+    };
+    const uint8_t payload[] = {
+        0x40U, 0x00U, 0x04U, 0x00U,
+        0xAAU, 0xBBU, 0xCCU, 0xDDU,
+    };
+
+    for (unsigned aliased = 0U; aliased < 2U; aliased++)
+    {
+        ResetIntrf();
+
+        HciIntrfTransport_t transport;
+        uint8_t packet[64] = {};
+        uint8_t separate[64] = {};
+        assert(HciIntrfTransportInitPacket(&transport, &gIntrf.Base,
+                                           packet, sizeof(packet)));
+        HciIntrfTransportOpen(&transport);
+        FeedRx(wire, sizeof(wire));
+        HciIntrfTransportProcess(&transport);
+
+        DevIntrf_t *pDev = HciIntrfTransportGetDeviceIntrf(&transport);
+        assert(pDev != nullptr);
+        assert(pDev->StartRx(pDev, HCI_H4_PACKET_ACL));
+
+        uint8_t *pOutput = aliased != 0U ? packet : separate;
+        const int received = pDev->RxData(pDev, pOutput, sizeof(packet));
+        assert(received == (int)sizeof(payload));
+        assert(memcmp(pOutput, payload, sizeof(payload)) == 0);
+        assert(transport.RxPacketCount == 1U);
+        assert(!HciH4ParserDeliveryPending(&transport.Parser));
+    }
+
+    printf("[ok] aliased and separate packet RX buffers preserve ACL data\\n");
+}
+
 /* Send prefixes the H:4 indicator and drains across short writes. */
 static void TestSendDrains(void)
 {
@@ -805,6 +849,7 @@ int main(void)
     TestOpenDiscardsWhatArrivedTooEarly();
     TestSplitReads();
     TestBackpressure();
+    TestPacketAdapterAliasedReceive();
     TestSendDrains();
     TestSendOversize();
     TestClosedPort();
