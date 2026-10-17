@@ -365,10 +365,10 @@ static bool HciAppUsbSetup(HciApp_t *pApp, HciUsbDescriptorMode_t Mode)
         // LE-only SDC: no SCO data path, so no synchronous alternates.
         hciCfg.bSco = false;
         hciCfg.bBulkSerialization = true;
-        hciCfg.RxFifoMemSize = sizeof(pApp->UsbRxFifoMem);
-        hciCfg.pRxFifoMem = pApp->UsbRxFifoMem;
-        hciCfg.TxFifoMemSize = sizeof(pApp->UsbTxFifoMem);
-        hciCfg.pTxFifoMem = pApp->UsbTxFifoMem;
+        hciCfg.RxFifoMemSize = sizeof(pApp->HostRxFifoMem);
+        hciCfg.pRxFifoMem = pApp->HostRxFifoMem;
+        hciCfg.TxFifoMemSize = sizeof(pApp->HostTxFifoMem);
+        hciCfg.pTxFifoMem = pApp->HostTxFifoMem;
         hciCfg.DevNo = 0;
         hciCfg.InterfaceString = HCI_USB_STRING_FUNCTION;
         hciCfg.EvtCB = HciAppUsbEvent;
@@ -382,10 +382,10 @@ static bool HciAppUsbSetup(HciApp_t *pApp, HciUsbDescriptorMode_t Mode)
     {
         UsbdCdcCfg_t hostCfg = {};
         hostCfg.bBlocking = true;
-        hostCfg.RxFifoMemSize = sizeof(pApp->UsbRxFifoMem);
-        hostCfg.pRxFifoMem = pApp->UsbRxFifoMem;
-        hostCfg.TxFifoMemSize = sizeof(pApp->UsbTxFifoMem);
-        hostCfg.pTxFifoMem = pApp->UsbTxFifoMem;
+        hostCfg.RxFifoMemSize = sizeof(pApp->HostRxFifoMem);
+        hostCfg.pRxFifoMem = pApp->HostRxFifoMem;
+        hostCfg.TxFifoMemSize = sizeof(pApp->HostTxFifoMem);
+        hostCfg.pTxFifoMem = pApp->HostTxFifoMem;
         hostCfg.DevNo = 0;
         hostCfg.EvtCB = HciAppUsbEvent;
         if (!s_HostCdc.Init(hostCfg))
@@ -488,10 +488,10 @@ static bool HciAppInitUart(HciApp_t *pApp)
     cfg.IntPrio = HCI_APP_UART_IRQ_PRIORITY;
     cfg.EvtCallback = HciAppUartEvent;
     cfg.bFifoBlocking = true;
-    cfg.RxMemSize = sizeof(pApp->UartRxFifoMem);
-    cfg.pRxMem = pApp->UartRxFifoMem;
-    cfg.TxMemSize = sizeof(pApp->UartTxFifoMem);
-    cfg.pTxMem = pApp->UartTxFifoMem;
+    cfg.RxMemSize = sizeof(pApp->HostRxFifoMem);
+    cfg.pRxMem = pApp->HostRxFifoMem;
+    cfg.TxMemSize = sizeof(pApp->HostTxFifoMem);
+    cfg.pTxMem = pApp->HostTxFifoMem;
     cfg.bDMAMode = true;
     cfg.Duplex = UART_DUPLEX_FULL;
     cfg.Mode = UART_MODE_UART;
