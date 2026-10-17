@@ -50,12 +50,12 @@ class Nrf52840IntegrationTest(unittest.TestCase):
             '\n#else\n#error "No pins defined.', 1)[0]
         self.assertIn("#define HCI_BOARD_HAS_UART 0", udg)
         self.assertNotIn("#define UART_PINS", udg)
-        self.assertIn("#define HCI_NRF91_TRACE_BRIDGE 1", thingy)
-        self.assertIn("#define HCI_NRF91_TRACE_UART_RATE THINGY91_DEBUG_UART_RATE", thingy)
+        self.assertIn("#define HCI_UART_BRIDGE 1", thingy)
+        self.assertIn("#define HCI_BRIDGE_UART_RATE THINGY91_DEBUG_UART_RATE", thingy)
         self.assertRegex(thingy, r"#define THINGY91_DEBUG_UART_RATE\s+115200\b")
         self.assertIn("#define UART_HW_FLOWCTRL 0", wildthing)
-        self.assertIn("#define HCI_NRF91_TRACE_BRIDGE 1", wildthing)
-        self.assertIn("#define HCI_NRF91_TRACE_UART_DEVNO 1", wildthing)
+        self.assertIn("#define HCI_UART_BRIDGE 1", wildthing)
+        self.assertIn("#define HCI_BRIDGE_UART_DEVNO 1", wildthing)
         self.assertIn("#define UART_RATE", wildthing)
 
 
