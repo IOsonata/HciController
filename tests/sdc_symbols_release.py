@@ -130,6 +130,12 @@ OPTIONAL_OR_ALTERNATIVE = {
     # Vendor extension: appends the advertising channel index after RSSI in
     # standard LE Advertising Report events, which changes the Core event
     # layout a generic host parses. Not enabled.
+    # Decision-Based Advertising Filtering is optional. This product profile
+    # does not enable advertiser/scanner decision filtering or allocate scanner
+    # decision-instruction storage. Do not claim its HCI commands merely
+    # because the newer SDC library exports them.
+    "sdc_support_decision_adv",
+    "sdc_support_decision_scan",
     "sdc_support_chan_idx_in_adv_report",
     # Board/platform integrations, not Bluetooth HCI feature capability.
     "sdc_support_mpsl_coex",
