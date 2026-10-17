@@ -1,6 +1,11 @@
 /**-------------------------------------------------------------------------
-@file board.h
-@brief nRF54LM20 HciController board/transport policy.
+@file	board.h
+
+@brief	nRF54LM20 HciController board and transport configuration.
+
+@author	Nguyen Hoan Hoang
+@date	October 2026
+
 @license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
 ----------------------------------------------------------------------------*/
 #ifndef __BOARD_H__
