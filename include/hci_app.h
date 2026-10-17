@@ -37,6 +37,9 @@ extern "C" {
 #define HCI_APP_COMMAND_EVENT_SIZE  260U
 #define HCI_APP_FIFO_DATA_SIZE      4096U
 #define HCI_APP_FIFO_MEM_SIZE       CFIFO_MEMSIZE(HCI_APP_FIFO_DATA_SIZE)
+/* Diagnostic CDC OUT has no consumer. Retain one high-speed USB packet
+ * (512 bytes plus framing) without reserving a full host transport FIFO. */
+#define HCI_APP_LOG_RX_FIFO_MEM_SIZE CFIFO_MEMSIZE(1024U)
 
 typedef enum
 {
@@ -130,7 +133,7 @@ typedef struct
     alignas(4) uint8_t TraceUsbRxMem[HCI_APP_FIFO_MEM_SIZE];
     alignas(4) uint8_t TraceUsbTxMem[HCI_APP_FIFO_MEM_SIZE];
 #endif
-    alignas(4) uint8_t LogRxFifoMem[HCI_APP_FIFO_MEM_SIZE];
+    alignas(4) uint8_t LogRxFifoMem[HCI_APP_LOG_RX_FIFO_MEM_SIZE];
     alignas(4) uint8_t LogTxFifoMem[HCI_APP_FIFO_MEM_SIZE];
 
     int LastError;
