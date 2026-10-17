@@ -15,13 +15,12 @@ IOC = ROOT / "nRF52840" / "ioc"
 class Nrf52840IntegrationTest(unittest.TestCase):
     def test_sdc_build_configurations_match_iosonata_main(self):
         project = ET.parse(IOC / ".cproject").getroot()
-        configs = project.findall(
-            ".//cconfiguration/storageModule[@moduleId='org.eclipse.cdt.core.settings']"
-        )
-        self.assertEqual({c.get("name") for c in configs},
+        configs = project.findall(".//cconfiguration")
+        self.assertEqual({c.find("./storageModule[@moduleId='org.eclipse.cdt.core.settings']").get("name")
+                          for c in configs},
                          {"Debug", "Release", "Release_MBR", "Release_SD"})
         for cfg in configs:
-            with self.subTest(config=cfg.get("name")):
+            with self.subTest(config=cfg.find("./storageModule[@moduleId='org.eclipse.cdt.core.settings']").get("name")):
                 text = ET.tostring(cfg, encoding="unicode")
                 self.assertEqual(text.count('value="NRFXLIB_SDC"'), 2)
                 self.assertEqual(text.count('value="NRF52840_XXAA"'), 2)
@@ -52,7 +51,8 @@ class Nrf52840IntegrationTest(unittest.TestCase):
         self.assertIn("#define HCI_BOARD_HAS_UART 0", udg)
         self.assertNotIn("#define UART_PINS", udg)
         self.assertIn("#define HCI_NRF91_TRACE_BRIDGE 1", thingy)
-        self.assertIn("#define HCI_NRF91_TRACE_UART_RATE 115200", thingy)
+        self.assertIn("#define HCI_NRF91_TRACE_UART_RATE THINGY91_DEBUG_UART_RATE", thingy)
+        self.assertRegex(thingy, r"#define THINGY91_DEBUG_UART_RATE\\s+115200\\b")
         self.assertIn("#define UART_HW_FLOWCTRL 0", wildthing)
         self.assertIn("#define HCI_NRF91_TRACE_BRIDGE 1", wildthing)
         self.assertIn("#define HCI_NRF91_TRACE_UART_DEVNO 1", wildthing)
