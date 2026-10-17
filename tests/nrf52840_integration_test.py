@@ -52,7 +52,7 @@ class Nrf52840IntegrationTest(unittest.TestCase):
         self.assertNotIn("#define UART_PINS", udg)
         self.assertIn("#define HCI_NRF91_TRACE_BRIDGE 1", thingy)
         self.assertIn("#define HCI_NRF91_TRACE_UART_RATE THINGY91_DEBUG_UART_RATE", thingy)
-        self.assertRegex(thingy, r"#define THINGY91_DEBUG_UART_RATE\\s+115200\\b")
+        self.assertRegex(thingy, r"#define THINGY91_DEBUG_UART_RATE\s+115200\b")
         self.assertIn("#define UART_HW_FLOWCTRL 0", wildthing)
         self.assertIn("#define HCI_NRF91_TRACE_BRIDGE 1", wildthing)
         self.assertIn("#define HCI_NRF91_TRACE_UART_DEVNO 1", wildthing)
