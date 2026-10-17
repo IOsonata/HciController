@@ -209,48 +209,48 @@ static int HciAppUsbEvent(DevIntrf_t *, DEVINTRF_EVT, uint8_t *, int Len)
 
 bool UsbEvtQue(uint32_t EvtId, void *pCtx, UsbEvtQueHandler_t Handler)
 {
-	if (s_hUsbWork == nullptr || Handler == nullptr)
-	{
-		return false;
-	}
-	// Both the USB interrupt and the worker produce events. Publish the
-	// complete entry before either can observe or reuse it.
-	const uint32_t state = DisableInterrupt();
-	HciUsbWork_t *p = reinterpret_cast<HciUsbWork_t *>(CFifoPut(s_hUsbWork));
-	if (p != nullptr)
-	{
-		*p = { EvtId, pCtx, Handler };
-	}
-	EnableInterrupt(state);
-	if (p == nullptr)
-	{
-		return false;
-	}
-	HciAppWake(s_pApp);
-	return true;
+    if (s_hUsbWork == nullptr || Handler == nullptr)
+    {
+        return false;
+    }
+    // Both the USB interrupt and the worker produce events. Publish the
+    // complete entry before either can observe or reuse it.
+    const uint32_t state = DisableInterrupt();
+    HciUsbWork_t *p = reinterpret_cast<HciUsbWork_t *>(CFifoPut(s_hUsbWork));
+    if (p != nullptr)
+    {
+        *p = { EvtId, pCtx, Handler };
+    }
+    EnableInterrupt(state);
+    if (p == nullptr)
+    {
+        return false;
+    }
+    HciAppWake(s_pApp);
+    return true;
 }
 
 static void HciAppUsbWorkExec(void)
 {
-	for (unsigned count = HCI_USB_WORK_PER_PASS; count > 0U; count--)
-	{
-		const HciUsbWork_t *p =
-			reinterpret_cast<const HciUsbWork_t *>(CFifoPeek(s_hUsbWork));
-		if (p == nullptr)
-		{
-			// Retry the core's process event if a full queue refused it.
-			UsbCheckStatus();
-			break;
-		}
-		const HciUsbWork_t work = *p;
-		(void)CFifoGet(s_hUsbWork);
-		work.Handler(work.EvtId, work.pCtx);
-	}
-	if (CFifoPeek(s_hUsbWork) != nullptr)
-	{
-		// A bounded pass must not leave the worker asleep with work queued.
-		HciAppWake(s_pApp);
-	}
+    for (unsigned count = HCI_USB_WORK_PER_PASS; count > 0U; count--)
+    {
+        const HciUsbWork_t *p =
+            reinterpret_cast<const HciUsbWork_t *>(CFifoPeek(s_hUsbWork));
+        if (p == nullptr)
+        {
+            // Retry the core's process event if a full queue refused it.
+            UsbCheckStatus();
+            break;
+        }
+        const HciUsbWork_t work = *p;
+        (void)CFifoGet(s_hUsbWork);
+        work.Handler(work.EvtId, work.pCtx);
+    }
+    if (CFifoPeek(s_hUsbWork) != nullptr)
+    {
+        // A bounded pass must not leave the worker asleep with work queued.
+        HciAppWake(s_pApp);
+    }
 }
 
 static int HciAppUartEvent(UARTDev_t * const,
@@ -321,15 +321,15 @@ static bool HciAppUsbSetup(HciApp_t *pApp, HciUsbDescriptorMode_t Mode)
 
     pApp->UsbDescriptorMode = Mode;
 
-	if (s_hUsbWork == nullptr)
-	{
-		s_hUsbWork = CFifoInit(s_UsbWorkMem, sizeof(s_UsbWorkMem),
-			sizeof(HciUsbWork_t), true);
-		if (s_hUsbWork == nullptr)
-		{
-			return false;
-		}
-	}
+    if (s_hUsbWork == nullptr)
+    {
+        s_hUsbWork = CFifoInit(s_UsbWorkMem, sizeof(s_UsbWorkMem),
+            sizeof(HciUsbWork_t), true);
+        if (s_hUsbWork == nullptr)
+        {
+            return false;
+        }
+    }
 
     UsbCfg_t usbCfg = {};
     usbCfg.DevNo = 0;
