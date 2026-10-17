@@ -106,9 +106,10 @@ during porting was `49f08107af29dcdd1f8a6bae3aae16fc7b5b1843`
 - Nordic SoftDevice Controller distribution:
   https://github.com/nrfconnect/sdk-nrfxlib/blob/main/softdevice_controller/README.rst
 
-The nRF54L MPSL requirements above are from Nordic's integration notes;
-whether the exact locally installed binary supports the LM20A **must be
-verified at link and on hardware**.
+The nRF54L MPSL requirements above are from Nordic's integration notes.
+The October 16, 2026 DK release-suite results demonstrate operation with the
+tested MPSL/SDC binaries. Other nrfxlib revisions and board configurations
+require their own link and hardware validation.
 
 ## Board builds
 
