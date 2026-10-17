@@ -701,9 +701,26 @@ static void HciAppResyncOnIdle(HciApp_t *pApp)
     }
 }
 
+/* Consume diagnostic CDC OUT bytes without interpreting them. This prevents
+ * the standard blocking RX FIFO from remaining full under host traffic.
+ */
+static void HciAppDiscardLogInput(void)
+{
+    uint8_t data[64];
+
+    for (unsigned pass = 0U; pass < 16U; pass++)
+    {
+        if (s_LogCdc.Rx(0U, data, sizeof(data)) <= 0)
+        {
+            break;
+        }
+    }
+}
+
 static void HciAppDrainLog(HciApp_t *pApp)
 {
     HciAppLogPortOpened(pApp);
+    HciAppDiscardLogInput();
     if (pApp->LogPortOpen)
     {
         (void)HciTraceFlush();
