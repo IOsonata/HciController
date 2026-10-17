@@ -99,7 +99,11 @@ TARGETS += $(HCI_TRACE_TARGET)
 #
 # Linking hci_app would need MPSL, the USB controller and an HCI controller,
 # which is a target's job; compiling it catches structure and API drift.
-COMPILE_SRC := $(filter-out $(SRC)/hci_sdc_nrfxlib.cpp,$(wildcard $(SRC)/hci_*.cpp))
+# This host harness supplies nRF52840 peripheral stubs. The nRF54LM20 target
+# uses different CMSIS peripherals and MPSL interrupts and must instead be
+# compiled by its real nRF54LM20 firmware project.
+COMPILE_SRC := $(filter-out $(SRC)/hci_sdc_nrfxlib.cpp \
+                           $(SRC)/hci_nrf54lm20.cpp,$(wildcard $(SRC)/hci_*.cpp))
 
 OBJECTS := $(patsubst $(SRC)/%.cpp,$(BUILD_DIR)/trace/%.o,$(COMPILE_SRC)) \
            $(BUILD_DIR)/notrace/hci_app.o \
