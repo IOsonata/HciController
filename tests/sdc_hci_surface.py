@@ -29,6 +29,14 @@ from sdc_symbols_release import (
 # the command. Keep each exclusion tied to its actual configuration or hardware
 # limitation so a future nrfxlib update can re-evaluate it.
 HCI_CLASSIFIED_NOT_ROUTED = {
+    # Decision-Based Advertising Filtering is opt-in through
+    # sdc_support_decision_adv()/sdc_support_decision_scan(). The release
+    # profile does not enable these features or provision the scanner decision
+    # instruction pool, so the associated HCI commands are not exposed.
+    "sdc_hci_cmd_le_set_decision_data":
+        "decision-based advertising filtering is not enabled by this release",
+    "sdc_hci_cmd_le_set_decision_instructions":
+        "decision-based scan filtering and its instruction pool are not enabled by this release",
     # Nordic exposes these only with LE Flushable ACL Data support. That feature
     # is experimental and this release intentionally does not call
     # sdc_support_flushable_acl_data(), so the commands are not advertised.
