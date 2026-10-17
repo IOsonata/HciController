@@ -703,7 +703,7 @@ static void TestPacketAdapterAliasedReceive(void)
         assert(!HciH4ParserDeliveryPending(&transport.Parser));
     }
 
-    printf("[ok] aliased and separate packet RX buffers preserve ACL data\\n");
+    printf("[ok] aliased and separate packet RX buffers preserve ACL data\n");
 }
 
 /* Send prefixes the H:4 indicator and drains across short writes. */
