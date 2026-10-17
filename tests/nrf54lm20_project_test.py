@@ -144,14 +144,14 @@ class Nrf54lm20ProjectTest(unittest.TestCase):
         app = (ROOT / "src" / "hci_app.cpp").read_text()
         header = (ROOT / "include" / "hci_app.h").read_text()
         bridge = app.split("static void HciTraceBridgePump(", 1)[1].split(
-            "\\n#endif", 1)[0]
+            "\n#endif", 1)[0]
         self.assertIn("s_TraceUart.Rx(", bridge)
         self.assertIn("s_HciUart.Init(cfg)", app)
         self.assertIn("static UART s_HciUart;", app)
         self.assertIn("static UART s_TraceUart;", app)
         self.assertNotIn("UARTDev_t Uart;", header)
         self.assertNotIn("UARTDev_t TraceUart;", header)
-        self.assertIn("s_TraceCdc.Tx(0U", bridge)
+        self.assertRegex(bridge, r"s_TraceCdc\.Tx\(\s*0U\s*,")
         self.assertNotIn("DeviceIntrfTx(", app)
         self.assertNotIn("DeviceIntrfDisable(", app)
         self.assertIn("app->TracePendingOffset += (uint16_t)sent", bridge)
