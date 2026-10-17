@@ -74,10 +74,10 @@ static HciApp_t *s_pApp;
 static UART s_HciUart;
 static UsbdCdc s_HostCdc;
 static UsbdCdc s_LogCdc;
-#if defined(HCI_NRF91_TRACE_BRIDGE) && HCI_NRF91_TRACE_BRIDGE
-static UART s_TraceUart;
-static UsbdCdc s_TraceCdc;
-static const IOPinCfg_t s_TraceUartPins[] = HCI_NRF91_TRACE_UART_PINS;
+#if defined(HCI_UART_BRIDGE) && HCI_UART_BRIDGE
+static UART s_BridgeUart;
+static UsbdCdc s_BridgeCdc;
+static const IOPinCfg_t s_BridgeUartPins[] = HCI_BRIDGE_UART_PINS;
 #endif
 static BtHciUsb s_HciUsb;
 
@@ -95,11 +95,11 @@ static const IOPinCfg_t s_HciUartPins[] = UART_PINS;
 
 static void HciAppWake(void *pContext);
 
-#if defined(HCI_NRF91_TRACE_BRIDGE) && HCI_NRF91_TRACE_BRIDGE
+#if defined(HCI_UART_BRIDGE) && HCI_UART_BRIDGE
 /* Receive nRF91 diagnostic UART output on the board-selected
- * trace UART. Never pass these bytes through HCI H:4.
+ * bridge UART. Never pass these bytes through HCI H:4.
  */
-static int HciTraceUartEvent(UARTDev_t * const, UART_EVT evt,
+static int HciBridgeUartEvent(UARTDev_t * const, UART_EVT evt,
                              uint8_t *, int len)
 {
     if (evt == UART_EVT_RXDATA || evt == UART_EVT_RXTIMEOUT)
@@ -109,84 +109,99 @@ static int HciTraceUartEvent(UARTDev_t * const, UART_EVT evt,
     return len;
 }
 
-static bool HciTraceBridgeStart(HciApp_t *app)
+static bool HciUartBridgeStart(HciApp_t *app)
 {
     UARTCfg_t cfg = {};
-    cfg.DevNo = HCI_NRF91_TRACE_UART_DEVNO;
-    cfg.pIOPinMap = s_TraceUartPins;
-    cfg.NbIOPins = sizeof(s_TraceUartPins) / sizeof(s_TraceUartPins[0]);
-    cfg.Rate = HCI_NRF91_TRACE_UART_RATE;
+    cfg.DevNo = HCI_BRIDGE_UART_DEVNO;
+    cfg.pIOPinMap = s_BridgeUartPins;
+    cfg.NbIOPins = sizeof(s_BridgeUartPins) / sizeof(s_BridgeUartPins[0]);
+    cfg.Rate = HCI_BRIDGE_UART_RATE;
     cfg.DataBits = 8;
     cfg.Parity = UART_PARITY_NONE;
     cfg.StopBits = 1;
     cfg.FlowControl = UART_FLWCTRL_NONE;
     cfg.bIntMode = true;
     cfg.IntPrio = HCI_APP_UART_IRQ_PRIORITY;
-    cfg.EvtCallback = HciTraceUartEvent;
+    cfg.EvtCallback = HciBridgeUartEvent;
     cfg.bFifoBlocking = false;
     cfg.bDMAMode = true;
     cfg.Duplex = UART_DUPLEX_FULL;
     cfg.Mode = UART_MODE_UART;
-    cfg.RxMemSize = sizeof(app->TraceUartRxMem);
-    cfg.pRxMem = app->TraceUartRxMem;
-    cfg.TxMemSize = sizeof(app->TraceUartTxMem);
-    cfg.pTxMem = app->TraceUartTxMem;
-    app->TraceUartReady = s_TraceUart.Init(cfg);
-    return app->TraceUartReady;
+    cfg.RxMemSize = sizeof(app->BridgeUartRxMem);
+    cfg.pRxMem = app->BridgeUartRxMem;
+    cfg.TxMemSize = sizeof(app->BridgeUartTxMem);
+    cfg.pTxMem = app->BridgeUartTxMem;
+    app->BridgeUartReady = s_BridgeUart.Init(cfg);
+    app->BridgeBaudRate = app->BridgeUartReady ? cfg.Rate : 0U;
+    return app->BridgeUartReady;
 }
 
 /* UART RX -> USB CDC TX. Keep an unsent tail when CDC is busy. */
-static void HciTraceBridgePump(HciApp_t *app)
+static void HciUartBridgePump(HciApp_t *app)
 {
-    if (!app->TraceUartReady || !app->UsbRunning ||
-        !s_TraceCdc.IsPortOpen())
+    if (!app->BridgeUartReady || !app->UsbRunning ||
+        !s_BridgeCdc.IsPortOpen())
     {
         return;
     }
 
-    if (app->TracePendingOffset == app->TracePendingLen)
+    /* USB CDC line coding is accepted by IOsonata. Apply host-selected
+     * baud rate to the separate bridge UART, never to the HCI UART.
+     */
+    const UsbCdcLineCoding_t *pLine = s_BridgeCdc.LineCoding();
+    if (pLine != nullptr && pLine->dwDTERate > 0U &&
+        pLine->dwDTERate != app->BridgeBaudRate)
     {
-        app->TracePendingOffset = 0U;
-        const int len = s_TraceUart.Rx(app->TracePending,
-                                           sizeof(app->TracePending));
-        if (len > 0)
+        const uint32_t actual = s_BridgeUart.Rate(pLine->dwDTERate);
+        if (actual != 0U)
         {
-            app->TracePendingLen = (uint16_t)len;
-        }
-        else
-        {
-            app->TracePendingLen = 0U;
+            app->BridgeBaudRate = pLine->dwDTERate;
         }
     }
 
-    if (app->TracePendingOffset < app->TracePendingLen)
+    if (app->BridgePendingOffset == app->BridgePendingLen)
     {
-        const int sent = s_TraceCdc.Tx(
-            0U, app->TracePending + app->TracePendingOffset,
-            app->TracePendingLen - app->TracePendingOffset);
+        app->BridgePendingOffset = 0U;
+        const int len = s_BridgeUart.Rx(app->BridgePending,
+                                           sizeof(app->BridgePending));
+        if (len > 0)
+        {
+            app->BridgePendingLen = (uint16_t)len;
+        }
+        else
+        {
+            app->BridgePendingLen = 0U;
+        }
+    }
+
+    if (app->BridgePendingOffset < app->BridgePendingLen)
+    {
+        const int sent = s_BridgeCdc.Tx(
+            0U, app->BridgePending + app->BridgePendingOffset,
+            app->BridgePendingLen - app->BridgePendingOffset);
         if (sent > 0)
         {
-            app->TracePendingOffset += (uint16_t)sent;
+            app->BridgePendingOffset += (uint16_t)sent;
         }
     }
 
     /* CDC RX -> UART TX. Retain the unsent tail under UART backpressure. */
-    if (app->TraceInputOffset == app->TraceInputLen)
+    if (app->BridgeInputOffset == app->BridgeInputLen)
     {
-        app->TraceInputOffset = 0U;
-        const int len = s_TraceCdc.Rx(
-            0U, app->TraceInputPending, sizeof(app->TraceInputPending));
-        app->TraceInputLen = len > 0 ? (uint16_t)len : 0U;
+        app->BridgeInputOffset = 0U;
+        const int len = s_BridgeCdc.Rx(
+            0U, app->BridgeInputPending, sizeof(app->BridgeInputPending));
+        app->BridgeInputLen = len > 0 ? (uint16_t)len : 0U;
     }
 
-    if (app->TraceInputOffset < app->TraceInputLen)
+    if (app->BridgeInputOffset < app->BridgeInputLen)
     {
-        const int sent = s_TraceUart.Tx(
-            app->TraceInputPending + app->TraceInputOffset,
-            app->TraceInputLen - app->TraceInputOffset);
+        const int sent = s_BridgeUart.Tx(
+            app->BridgeInputPending + app->BridgeInputOffset,
+            app->BridgeInputLen - app->BridgeInputOffset);
         if (sent > 0)
         {
-            app->TraceInputOffset += (uint16_t)sent;
+            app->BridgeInputOffset += (uint16_t)sent;
         }
     }
 }
@@ -365,10 +380,10 @@ static bool HciAppUsbSetup(HciApp_t *pApp, HciUsbDescriptorMode_t Mode)
         // LE-only SDC: no SCO data path, so no synchronous alternates.
         hciCfg.bSco = false;
         hciCfg.bBulkSerialization = true;
-        hciCfg.RxFifoMemSize = sizeof(pApp->UsbRxFifoMem);
-        hciCfg.pRxFifoMem = pApp->UsbRxFifoMem;
-        hciCfg.TxFifoMemSize = sizeof(pApp->UsbTxFifoMem);
-        hciCfg.pTxFifoMem = pApp->UsbTxFifoMem;
+        hciCfg.RxFifoMemSize = sizeof(pApp->HostRxFifoMem);
+        hciCfg.pRxFifoMem = pApp->HostRxFifoMem;
+        hciCfg.TxFifoMemSize = sizeof(pApp->HostTxFifoMem);
+        hciCfg.pTxFifoMem = pApp->HostTxFifoMem;
         hciCfg.DevNo = 0;
         hciCfg.InterfaceString = HCI_USB_STRING_FUNCTION;
         hciCfg.EvtCB = HciAppUsbEvent;
@@ -382,10 +397,10 @@ static bool HciAppUsbSetup(HciApp_t *pApp, HciUsbDescriptorMode_t Mode)
     {
         UsbdCdcCfg_t hostCfg = {};
         hostCfg.bBlocking = true;
-        hostCfg.RxFifoMemSize = sizeof(pApp->UsbRxFifoMem);
-        hostCfg.pRxFifoMem = pApp->UsbRxFifoMem;
-        hostCfg.TxFifoMemSize = sizeof(pApp->UsbTxFifoMem);
-        hostCfg.pTxFifoMem = pApp->UsbTxFifoMem;
+        hostCfg.RxFifoMemSize = sizeof(pApp->HostRxFifoMem);
+        hostCfg.pRxFifoMem = pApp->HostRxFifoMem;
+        hostCfg.TxFifoMemSize = sizeof(pApp->HostTxFifoMem);
+        hostCfg.pTxFifoMem = pApp->HostTxFifoMem;
         hostCfg.DevNo = 0;
         hostCfg.EvtCB = HciAppUsbEvent;
         if (!s_HostCdc.Init(hostCfg))
@@ -409,17 +424,17 @@ static bool HciAppUsbSetup(HciApp_t *pApp, HciUsbDescriptorMode_t Mode)
         return false;
     }
 
-#if defined(HCI_NRF91_TRACE_BRIDGE) && HCI_NRF91_TRACE_BRIDGE
+#if defined(HCI_UART_BRIDGE) && HCI_UART_BRIDGE
     /* A distinct CDC function: HciController's own trace stays on s_LogCdc. */
-    UsbdCdcCfg_t traceCfg = {};
-    traceCfg.bBlocking = false;
-    traceCfg.RxFifoMemSize = sizeof(pApp->TraceUsbRxMem);
-    traceCfg.pRxFifoMem = pApp->TraceUsbRxMem;
-    traceCfg.TxFifoMemSize = sizeof(pApp->TraceUsbTxMem);
-    traceCfg.pTxFifoMem = pApp->TraceUsbTxMem;
-    traceCfg.DevNo = 0;
-    traceCfg.EvtCB = HciAppUsbEvent;
-    if (!s_TraceCdc.Init(traceCfg))
+    UsbdCdcCfg_t bridgeCfg = {};
+    bridgeCfg.bBlocking = false;
+    bridgeCfg.RxFifoMemSize = sizeof(pApp->BridgeUsbRxMem);
+    bridgeCfg.pRxFifoMem = pApp->BridgeUsbRxMem;
+    bridgeCfg.TxFifoMemSize = sizeof(pApp->BridgeUsbTxMem);
+    bridgeCfg.pTxFifoMem = pApp->BridgeUsbTxMem;
+    bridgeCfg.DevNo = 0;
+    bridgeCfg.EvtCB = HciAppUsbEvent;
+    if (!s_BridgeCdc.Init(bridgeCfg))
     {
         UsbDisable(0);
         return false;
@@ -435,16 +450,17 @@ static bool HciAppUsbSetup(HciApp_t *pApp, HciUsbDescriptorMode_t Mode)
  */
 static void HciAppUartRelease(HciApp_t *pApp)
 {
-#if defined(HCI_NRF91_TRACE_BRIDGE) && HCI_NRF91_TRACE_BRIDGE
-    if (pApp->TraceUartReady)
+#if defined(HCI_UART_BRIDGE) && HCI_UART_BRIDGE
+    if (pApp->BridgeUartReady)
     {
-        s_TraceUart.Disable();
-        pApp->TraceUartReady = false;
+        s_BridgeUart.Disable();
+        pApp->BridgeUartReady = false;
+        pApp->BridgeBaudRate = 0U;
     }
-    pApp->TracePendingLen = 0U;
-    pApp->TracePendingOffset = 0U;
-    pApp->TraceInputLen = 0U;
-    pApp->TraceInputOffset = 0U;
+    pApp->BridgePendingLen = 0U;
+    pApp->BridgePendingOffset = 0U;
+    pApp->BridgeInputLen = 0U;
+    pApp->BridgeInputOffset = 0U;
 #endif
     if (pApp->HostType == HCI_APP_HOST_UART &&
         pApp->pHostIntrf == static_cast<DevIntrf_t *>(s_HciUart))
@@ -488,10 +504,10 @@ static bool HciAppInitUart(HciApp_t *pApp)
     cfg.IntPrio = HCI_APP_UART_IRQ_PRIORITY;
     cfg.EvtCallback = HciAppUartEvent;
     cfg.bFifoBlocking = true;
-    cfg.RxMemSize = sizeof(pApp->UartRxFifoMem);
-    cfg.pRxMem = pApp->UartRxFifoMem;
-    cfg.TxMemSize = sizeof(pApp->UartTxFifoMem);
-    cfg.pTxMem = pApp->UartTxFifoMem;
+    cfg.RxMemSize = sizeof(pApp->HostRxFifoMem);
+    cfg.pRxMem = pApp->HostRxFifoMem;
+    cfg.TxMemSize = sizeof(pApp->HostTxFifoMem);
+    cfg.pTxMem = pApp->HostTxFifoMem;
     cfg.bDMAMode = true;
     cfg.Duplex = UART_DUPLEX_FULL;
     cfg.Mode = UART_MODE_UART;
@@ -701,9 +717,26 @@ static void HciAppResyncOnIdle(HciApp_t *pApp)
     }
 }
 
+/* Consume diagnostic CDC OUT bytes without interpreting them. This prevents
+ * the standard blocking RX FIFO from remaining full under host traffic.
+ */
+static void HciAppDiscardLogInput(void)
+{
+    uint8_t data[64];
+
+    for (unsigned pass = 0U; pass < 16U; pass++)
+    {
+        if (s_LogCdc.Rx(0U, data, sizeof(data)) <= 0)
+        {
+            break;
+        }
+    }
+}
+
 static void HciAppDrainLog(HciApp_t *pApp)
 {
     HciAppLogPortOpened(pApp);
+    HciAppDiscardLogInput();
     if (pApp->LogPortOpen)
     {
         (void)HciTraceFlush();
@@ -735,8 +768,8 @@ static void HciAppHostProcess(void *pContext)
         HciAppDrainLog(pApp);
     }
 
-#if defined(HCI_NRF91_TRACE_BRIDGE) && HCI_NRF91_TRACE_BRIDGE
-    HciTraceBridgePump(pApp);
+#if defined(HCI_UART_BRIDGE) && HCI_UART_BRIDGE
+    HciUartBridgePump(pApp);
 #endif
 
     HciControllerProcess(&pApp->Controller);
@@ -844,10 +877,10 @@ bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode, HciTarget_t Target)
         }
     }
 
-#if defined(HCI_NRF91_TRACE_BRIDGE) && HCI_NRF91_TRACE_BRIDGE
-    if (hostReady && pApp->UsbRunning && !HciTraceBridgeStart(pApp))
+#if defined(HCI_UART_BRIDGE) && HCI_UART_BRIDGE
+    if (hostReady && pApp->UsbRunning && !HciUartBridgeStart(pApp))
     {
-        HciTrace("init: nRF91 trace UART initialization failed\r\n");
+        HciTrace("init: nRF91 bridge UART initialization failed\r\n");
         hostReady = false;
     }
 #endif

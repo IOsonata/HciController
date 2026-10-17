@@ -89,6 +89,18 @@ def main() -> None:
     )
     if "HciAppUsbWorkExec()" not in runtime:
         die("steady-state USB must drain its worker queue")
+    discard = function_body(source, "static void HciAppDiscardLogInput(void)")
+    if "s_LogCdc.Rx(" not in discard:
+        die("diagnostic CDC RX data must be read and ignored")
+    if "pass < 16U" not in discard or "sizeof(data)" not in discard:
+        die("diagnostic CDC RX reads must remain bounded")
+
+    drain = function_body(source, "static void HciAppDrainLog(HciApp_t *pApp)")
+    if "HciAppDiscardLogInput()" not in drain:
+        die("diagnostic CDC RX must be consumed during USB processing")
+    if "HciTraceFlush()" not in drain:
+        die("diagnostic CDC TX logging must continue to flush")
+
     if "UsbProcess(0)" in source:
         die("UsbProcess belongs to the IOsonata queued callback")
     if "bool UsbEvtQue(" not in source or "UsbCheckStatus();" not in source:

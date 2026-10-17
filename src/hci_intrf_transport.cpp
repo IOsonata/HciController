@@ -549,7 +549,13 @@ static int HciIntrfPacketRxData(DevIntrf_t * const pDevIntrf,
     const size_t PacketLen = pTransport->Parser.PacketLen;
     const bool suspect = HciIntrfTransportSuspect(pTransport);
 
-    memmove(pBuffer, pTransport->Parser.pPacket, PacketLen);
+    /* HciController uses the same storage for H:4 parsing and retries.
+     * Preserve the generic adapter's separate-buffer support, but avoid
+     * copying a complete ACL/ISO packet onto itself in the common path. */
+    if (pBuffer != pTransport->Parser.pPacket)
+    {
+        memmove(pBuffer, pTransport->Parser.pPacket, PacketLen);
+    }
     HciIntrfTransportRecordPacket(pTransport,
                                   Type,
                                   pTransport->Parser.pPacket,

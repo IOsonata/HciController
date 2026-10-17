@@ -37,6 +37,10 @@ extern "C" {
 #define HCI_APP_COMMAND_EVENT_SIZE  260U
 #define HCI_APP_FIFO_DATA_SIZE      4096U
 #define HCI_APP_FIFO_MEM_SIZE       CFIFO_MEMSIZE(HCI_APP_FIFO_DATA_SIZE)
+/* Diagnostic CDC input is consumed without processing. Keep two USB RX
+ * packet slots; its TX log retention uses the original full FIFO. */
+#define HCI_APP_LOG_RX_MEM_SIZE      \
+    USB_INTRF_RXMEM_SIZE(2U, USBD_CDC_TRANS_WORDS * sizeof(uint32_t))
 
 typedef enum
 {
@@ -69,14 +73,15 @@ typedef struct
      * CDC DeviceIntrf when USB is running. It is never mixed with the HCI stream.
      */
 
-#if defined(HCI_NRF91_TRACE_BRIDGE) && HCI_NRF91_TRACE_BRIDGE
-    bool TraceUartReady;
-    uint8_t TracePending[64];
-    uint16_t TracePendingLen;
-    uint16_t TracePendingOffset;
-    uint8_t TraceInputPending[64];
-    uint16_t TraceInputLen;
-    uint16_t TraceInputOffset;
+#if defined(HCI_UART_BRIDGE) && HCI_UART_BRIDGE
+    bool BridgeUartReady;
+    uint32_t BridgeBaudRate;
+    uint8_t BridgePending[64];
+    uint16_t BridgePendingLen;
+    uint16_t BridgePendingOffset;
+    uint8_t BridgeInputPending[64];
+    uint16_t BridgeInputLen;
+    uint16_t BridgeInputOffset;
 #endif
     DevIntrf_t *pHostIntrf;
     HciAppHost_t HostType;
@@ -119,17 +124,18 @@ typedef struct
     uint8_t CommandEvent[HCI_APP_COMMAND_EVENT_SIZE];
     uint64_t SdcMem[(HCI_SDC_MEM_SIZE + 7U) / 8U];
 
-    alignas(4) uint8_t UartRxFifoMem[HCI_APP_FIFO_MEM_SIZE];
-#if defined(HCI_NRF91_TRACE_BRIDGE) && HCI_NRF91_TRACE_BRIDGE
-    alignas(4) uint8_t TraceUartRxMem[HCI_APP_FIFO_MEM_SIZE];
-    alignas(4) uint8_t TraceUartTxMem[HCI_APP_FIFO_MEM_SIZE];
-    alignas(4) uint8_t TraceUsbRxMem[HCI_APP_FIFO_MEM_SIZE];
-    alignas(4) uint8_t TraceUsbTxMem[HCI_APP_FIFO_MEM_SIZE];
+    /* UART H:4 and USB HCI are exclusive host modes. These FIFO buffers
+     * are reused by whichever host transport is active. The diagnostic
+     * CDC and optional nRF91 UART bridge retain independent storage. */
+    alignas(4) uint8_t HostRxFifoMem[HCI_APP_FIFO_MEM_SIZE];
+    alignas(4) uint8_t HostTxFifoMem[HCI_APP_FIFO_MEM_SIZE];
+#if defined(HCI_UART_BRIDGE) && HCI_UART_BRIDGE
+    alignas(4) uint8_t BridgeUartRxMem[HCI_APP_FIFO_MEM_SIZE];
+    alignas(4) uint8_t BridgeUartTxMem[HCI_APP_FIFO_MEM_SIZE];
+    alignas(4) uint8_t BridgeUsbRxMem[HCI_APP_FIFO_MEM_SIZE];
+    alignas(4) uint8_t BridgeUsbTxMem[HCI_APP_FIFO_MEM_SIZE];
 #endif
-    alignas(4) uint8_t UartTxFifoMem[HCI_APP_FIFO_MEM_SIZE];
-    alignas(4) uint8_t UsbRxFifoMem[HCI_APP_FIFO_MEM_SIZE];
-    alignas(4) uint8_t UsbTxFifoMem[HCI_APP_FIFO_MEM_SIZE];
-    alignas(4) uint8_t LogRxFifoMem[HCI_APP_FIFO_MEM_SIZE];
+    alignas(4) uint8_t LogRxFifoMem[HCI_APP_LOG_RX_MEM_SIZE];
     alignas(4) uint8_t LogTxFifoMem[HCI_APP_FIFO_MEM_SIZE];
 
     int LastError;

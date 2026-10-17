@@ -103,14 +103,14 @@ class Nrf54lm20ProjectTest(unittest.TestCase):
         self.assertIn("#define HCI_BOARD_HAS_UART 0", udg)
         self.assertIn("#define HCI_HOST_SELECT HCI_HOST_SELECT_USB", udg)
         self.assertNotIn("#define UART_DEVNO", udg)
-        self.assertNotIn("HCI_NRF91_TRACE_BRIDGE", udg)
+        self.assertNotIn("HCI_UART_BRIDGE", udg)
         self.assertIn("#define HCI_HOST_SELECT HCI_HOST_SELECT_UART", wildthing)
-        self.assertIn("#define HCI_NRF91_TRACE_BRIDGE 1", wildthing)
+        self.assertIn("#define HCI_UART_BRIDGE 1", wildthing)
         self.assertIn("#define UART_RATE 1000000", wildthing)
-        self.assertIn("#define HCI_NRF91_TRACE_UART_RATE 115200", wildthing)
+        self.assertIn("#define HCI_BRIDGE_UART_RATE 115200", wildthing)
         self.assertIn("#define UART_HW_FLOWCTRL 0", wildthing)
         self.assertIn("#define UART_DEVNO 1", wildthing)
-        self.assertIn("#define HCI_NRF91_TRACE_UART_DEVNO 2", wildthing)
+        self.assertIn("#define HCI_BRIDGE_UART_DEVNO 2", wildthing)
         for name, pin in (("UART_RX_PORT", 1), ("UART_RX_PIN", 14),
                           ("UART_TX_PORT", 3), ("UART_TX_PIN", 4)):
             with self.subTest(name=name):
@@ -122,7 +122,7 @@ class Nrf54lm20ProjectTest(unittest.TestCase):
         self.assertIn("BOARD == UDG_NRF54LM20", source)
         self.assertIn("BOARD == WILDTHING51_NRF54LM20", source)
 
-    def test_startup_failure_rollback_and_trace_bridge(self):
+    def test_startup_failure_rollback_and_uart_bridge(self):
         app = (ROOT / "src" / "hci_app.cpp").read_text()
         self.assertIn("static void HciAppUartRelease(", app)
         self.assertIn("hostReady && pApp->UsbRunning &&", app)
@@ -140,32 +140,39 @@ class Nrf54lm20ProjectTest(unittest.TestCase):
         self.assertIn("(void)sdc_disable();", stop)
         self.assertNotIn("if (pTarget->SdcInitialized)", stop)
 
-    def test_trace_bridge_simple_forwarding(self):
+    def test_uart_bridge_simple_forwarding(self):
         app = (ROOT / "src" / "hci_app.cpp").read_text()
         header = (ROOT / "include" / "hci_app.h").read_text()
-        bridge = app.split("static void HciTraceBridgePump(", 1)[1].split(
+        bridge = app.split("static void HciUartBridgePump(", 1)[1].split(
             "\n#endif", 1)[0]
-        self.assertIn("s_TraceUart.Rx(", bridge)
+        self.assertIn("s_BridgeUart.Rx(", bridge)
         self.assertIn("s_HciUart.Init(cfg)", app)
         self.assertIn("static UART s_HciUart;", app)
-        self.assertIn("static UART s_TraceUart;", app)
+        self.assertIn("static UART s_BridgeUart;", app)
         self.assertNotIn("UARTDev_t Uart;", header)
-        self.assertNotIn("UARTDev_t TraceUart;", header)
-        self.assertRegex(bridge, r"s_TraceCdc\.Tx\(\s*0U\s*,")
+        self.assertNotIn("UARTDev_t BridgeUart;", header)
+        self.assertRegex(bridge, r"s_BridgeCdc\.Tx\(\s*0U\s*,")
         self.assertNotIn("DeviceIntrfTx(", app)
         self.assertNotIn("DeviceIntrfDisable(", app)
-        self.assertIn("app->TracePendingOffset += (uint16_t)sent", bridge)
-        self.assertIn("s_TraceCdc.IsPortOpen()", bridge)
-        self.assertIn("TracePendingLen", header)
+        self.assertIn("app->BridgePendingOffset += (uint16_t)sent", bridge)
+        self.assertIn("s_BridgeCdc.IsPortOpen()", bridge)
+        self.assertIn("BridgePendingLen", header)
         self.assertNotIn("TraceDroppedBytes", header)
-        self.assertIn("s_TraceCdc.Rx(", bridge)
-        self.assertIn("s_TraceUart.Tx(", bridge)
-        self.assertIn("app->TraceInputPending + app->TraceInputOffset", bridge)
-        self.assertIn("app->TraceInputOffset += (uint16_t)sent", bridge)
-        self.assertIn("app->TraceInputOffset == app->TraceInputLen", bridge)
-        self.assertIn("TraceInputPending[64]", header)
-        self.assertIn("TraceInputLen", header)
-        self.assertIn("TraceInputOffset", header)
+        self.assertIn("s_BridgeCdc.Rx(", bridge)
+        self.assertIn("s_BridgeCdc.LineCoding()", bridge)
+        self.assertIn("s_BridgeUart.Rate(pLine->dwDTERate)", bridge)
+        self.assertLess(bridge.index("s_BridgeUart.Rate(pLine->dwDTERate)"),
+                        bridge.index("s_BridgeCdc.Rx("))
+        self.assertIn("if (actual != 0U)", bridge)
+        self.assertIn("app->BridgeBaudRate = pLine->dwDTERate;", bridge)
+        self.assertIn("BridgeBaudRate", header)
+        self.assertIn("s_BridgeUart.Tx(", bridge)
+        self.assertIn("app->BridgeInputPending + app->BridgeInputOffset", bridge)
+        self.assertIn("app->BridgeInputOffset += (uint16_t)sent", bridge)
+        self.assertIn("app->BridgeInputOffset == app->BridgeInputLen", bridge)
+        self.assertIn("BridgeInputPending[64]", header)
+        self.assertIn("BridgeInputLen", header)
+        self.assertIn("BridgeInputOffset", header)
 
     def test_target_selection_and_mpsl_separation(self):
         startup = (ROOT / "src" / "main.cpp").read_text()

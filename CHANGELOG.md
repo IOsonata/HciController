@@ -4,6 +4,15 @@
 
 ### Host transports
 
+- Reduced static RAM by sharing the mutually exclusive HCI host UART and USB
+  transport FIFOs. The diagnostic CDC transmit buffering remains independent;
+  diagnostic input is consumed and discarded.
+- Added an independent bidirectional USB CDC-to-UART bridge on supported
+  companion-modem boards. Host-selected CDC baud rates are applied immediately
+  to the bridge UART without resetting the HCI UART or waiting for FIFO drain.
+- Removed forced floating-point printf linkage from nRF52840 and nRF54LM20
+  optimized build configurations.
+
 - Native Bluetooth USB HCI is now IOsonata's `BtHciUsb` class on the IOsonata
   USB device core. TinyUSB and the HciController USB transport class are
   removed; HciController keeps only VID/PID policy and the serial string.
