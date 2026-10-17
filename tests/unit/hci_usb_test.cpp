@@ -1,6 +1,9 @@
 /* Native Bluetooth HCI composite topology over IOsonata main USB core.
  * LE-only controller: no SCO alternates. */
 
+/* This integration test builds the real IOsonata USB interfaces, so it
+ * must use the real UART API rather than the standalone host UART stub. */
+#include "coredev/uart.h"
 #include "hci_usb.h"
 #include "usb/usbd_cdc.h"
 
