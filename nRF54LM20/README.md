@@ -31,7 +31,7 @@ hard-float multirole SDC/MPSL, and
 explicitly define `BOARD=NORDIC_DK_NRF54LM20` in the build.
 
 **Not yet hardware validated:** UDG-NRF54LM20, WildThing51
-nRF54LM20 UART H:4 / USB CDC trace bridge, and any other board
+nRF54LM20 UART H:4 / USB CDC UART bridge, and any other board
 variant. A clean Release build and final map inspection should be
 recorded independently before packaging a release image.
 
@@ -120,7 +120,7 @@ policy through `BOARD` in `nRF54LM20/src/board.h`.
 | --- | --- | --- | --- |
 | `UDG_NRF54LM20` (default, 200) | USB H:4 or native USB HCI | HciController diagnostic CDC | None |
 | `NORDIC_DK_NRF54LM20` (201) | USB by default, UART optional | HciController diagnostic CDC | DK UARTE20 when UART selected |
-| `WILDTHING51_NRF54LM20` (101) | nRF91 H:4 at 1 Mbaud without RTS/CTS | Dedicated nRF91 115200 baud UART trace CDC plus controller diagnostic CDC | Two *different* UART instances |
+| `WILDTHING51_NRF54LM20` (101) | nRF91 H:4 at 1 Mbaud without RTS/CTS | Dedicated nRF91 115200 baud UART bridge CDC plus controller diagnostic CDC | Two *different* UART instances |
 
 **WildThing51 shared BLE footprint:** the supplied schematic (BLE sheet,
 page 3) labels the module `BLYST840/LM20`. The four shared BTLTE nets
@@ -134,15 +134,15 @@ are used as **two independent UART TX/RX pairs**; RTS/CTS is not used:
 | Trace: BLE TX → nRF91 RX | P0.03 | P1.04 | P1.13 |
 
 The HCI UART runs at **1000000 baud** without hardware flow control. The
-independent nRF91 trace UART runs at **115200 baud** and is bridged to a
+independent nRF91 bridge UART runs at **115200 baud** and is bridged to a
 dedicated USB CDC interface. The nRF54LM20 configuration uses IOsonata
-`UART_DEVNO=1` (UARTE20) for HCI and `HCI_NRF91_TRACE_UART_DEVNO=2`
-(UARTE21) for the trace bridge; verify the peripheral-to-pin routing during
+`UART_DEVNO=1` (UARTE20) for HCI and `HCI_NRF91_BRIDGE_UART_DEVNO=2`
+(UARTE21) for the UART bridge; verify the peripheral-to-pin routing during
 the target build and hardware test. The nRF91 firmware must also select
 two UARTs over these nets rather than use BTLTE2/BTLTE3 as flow-control
 signals.
 
-The existing `HCI_NRF91_TRACE_BRIDGE` implementation in `hci_app.cpp` owns
+The existing `HCI_NRF91_UART_BRIDGE` implementation in `hci_app.cpp` owns
 the second UART and CDC class. It is enabled for WildThing51 and disabled for
 UDG and the DK. Hardware validation is still required for USB enumeration,
 the UART peripheral mappings, and sustained HCI/trace traffic.
@@ -166,7 +166,7 @@ Verified source/API baseline:
   alternate vector implementation to be linked alongside it.
 - IOsonata's `uart_nrfx.cpp` defines `DevNo=1` as UARTE20 and
   `DevNo=2` as UARTE21 for nRF54L; WildThing51 uses these
-  separately for HCI and the nRF91 trace bridge.
+  separately for HCI and the nRF91 UART bridge.
 - Run `python3 -m unittest tests/nrf54lm20_project_test.py` at the
   repository root, then build the IOsonata library with SDC support
   and the HciController IOC `Debug` / `Release` configuration. A static configuration review is **not** an ELF link
