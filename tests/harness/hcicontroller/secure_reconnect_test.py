@@ -356,6 +356,7 @@ def concurrent_traffic(link, args):
     encryption request arrives. None of the responses is waited for.
     """
     handle = link.handle
+    mark = len(link.events)
     if args.phy2m:
         link.clock.say("LE Set PHY, 2M both ways")
         link.hci.command(0x2032, struct.pack("<HBBBH", handle, 0, 0x02, 0x02,
@@ -371,6 +372,24 @@ def concurrent_traffic(link, args):
                                                0x2800))
         link.clock.say("tx ATT Exchange MTU and Read By Group Type, "
                        "not waiting for the answers")
+    if args.settle and (args.phy2m or args.dle):
+        # Let the procedures finish before encryption is started, so it
+        # begins on a link that already runs at the new PHY and packet size.
+        want = set()
+        if args.dle:
+            want.add(0x07)          # LE Data Length Change
+        if args.phy2m:
+            want.add(0x0C)          # LE PHY Update Complete
+        deadline = time.monotonic() + 3.0
+        seen = set()
+        while time.monotonic() < deadline and seen != want:
+            link.poll(0.05)
+            for _, code, body in link.events[mark:]:
+                if code == EVT_LE_META and body and body[0] in want:
+                    seen.add(body[0])
+        link.clock.say("settled: %s" % (
+            "data length and PHY done" if seen == want else
+            "timed out, saw %s" % sorted(seen)))
 
 
 # ---------------------------------------------------------------------------
@@ -747,6 +766,9 @@ def main():
     p.add_argument("--dle", action="store_true",
                    help="ask for data length 251 just before starting "
                         "encryption")
+    p.add_argument("--settle", action="store_true",
+                   help="with --phy2m and/or --dle, wait for those procedures "
+                        "to finish before starting encryption")
     p.add_argument("--att-during", action="store_true",
                    help="send ATT discovery requests just before starting "
                         "encryption, without waiting for the answers")
