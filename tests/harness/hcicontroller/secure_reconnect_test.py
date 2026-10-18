@@ -423,19 +423,59 @@ def pair(link, args, own, own_type, peer, peer_type):
     return smp.ltk
 
 
+def collect_keys(link, seconds):
+    """
+    Read the key distribution that follows encryption on the pairing
+    connection: Encryption Information (LTK), Central Identification (EDIV,
+    Rand), Identity Information (IRK), Identity Address Information. A central
+    that asked for EncKey and gets these stores them and uses them on the next
+    connection instead of the key f5 derived.
+    """
+    keys = {}
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline and link.disconnect is None:
+        item = link.poll(0.05)
+        if item is None:
+            continue
+        cid, pdu = item
+        if cid != S.CID_SMP or not pdu:
+            link.clock.say("rx cid 0x%04X %s" % (cid, pdu.hex()))
+            continue
+        name = S.SMP_NAMES.get(pdu[0], "0x%02X" % pdu[0])
+        link.clock.say("rx %s %s" % (name, pdu[1:].hex()))
+        if pdu[0] == S.SMP_ENCRYPTION_INFO and len(pdu) == 17:
+            keys["ltk"] = pdu[1:17]
+        elif pdu[0] == S.SMP_CENTRAL_IDENTIFICATION and len(pdu) == 11:
+            keys["ediv"] = struct.unpack("<H", pdu[1:3])[0]
+            keys["rand"] = pdu[3:11]
+        elif pdu[0] == S.SMP_IDENTITY_INFO and len(pdu) == 17:
+            keys["irk"] = pdu[1:17]
+    if keys:
+        link.clock.say("distributed keys: " + ", ".join(
+            "%s %s" % (k, v if isinstance(v, int) else v.hex())
+            for k, v in keys.items()))
+    else:
+        link.clock.say("no keys distributed")
+    return keys
+
+
 def load_bond(path):
     with open(path) as handle:
         raw = json.load(handle)
     return {"ltk": bytes.fromhex(raw["ltk"]),
             "own": bytes.fromhex(raw["own"]), "own_type": raw["own_type"],
-            "peer": bytes.fromhex(raw["peer"]), "peer_type": raw["peer_type"]}
+            "peer": bytes.fromhex(raw["peer"]), "peer_type": raw["peer_type"],
+            "dist": {k: (v if isinstance(v, int) else bytes.fromhex(v))
+                     for k, v in raw.get("dist", {}).items()}}
 
 
-def save_bond(path, ltk, own, own_type, peer, peer_type):
+def save_bond(path, ltk, own, own_type, peer, peer_type, dist=None):
     with open(path, "w") as handle:
         json.dump({"ltk": ltk.hex(), "own": own.hex(), "own_type": own_type,
-                   "peer": peer.hex(), "peer_type": peer_type}, handle,
-                  indent=2)
+                   "peer": peer.hex(), "peer_type": peer_type,
+                   "dist": {k: (v if isinstance(v, int) else v.hex())
+                            for k, v in (dist or {}).items()}},
+                  handle, indent=2)
 
 
 def params_of(args):
@@ -487,6 +527,7 @@ def run(args):
             hci.command(T.OP_LE_SET_RANDOM_ADDRESS, own)
 
         ltk = bond["ltk"] if bond else None
+        dist = bond["dist"] if bond else {}
         cycle = 0
         if ltk is None:
             handle = connect(link, peer, peer_type, own_type,
@@ -498,13 +539,16 @@ def run(args):
             if ltk is None:
                 disconnect(link)
                 return 1
-            if args.bond_file:
-                save_bond(args.bond_file, ltk, own, own_type, peer, peer_type)
-                clock.say("bond written to %s" % args.bond_file)
-
             clock.say("LE Enable Encryption on the new link")
             start_encryption(link, ltk)
             outcome = wait_encryption(link, args.enc_timeout)
+            dist = {}
+            if outcome == "encrypted" and (args.resp_keys or args.init_keys):
+                dist = collect_keys(link, args.keys_wait)
+            if args.bond_file:
+                save_bond(args.bond_file, ltk, own, own_type, peer, peer_type,
+                          dist)
+                clock.say("bond written to %s" % args.bond_file)
             ok = outcome == "encrypted" and att_probe(link)
             clock.say("pairing connection: %s%s" % (
                 outcome, ", ATT answered" if ok else ""))
@@ -548,14 +592,24 @@ def run(args):
                 continue
 
             use = bytearray(ltk)
+            rand_use = bytes.fromhex(args.rand)[::-1] if args.rand \
+                else bytes(8)
+            ediv_use = args.ediv
+            if args.use_distributed:
+                if "ltk" not in dist:
+                    clock.say("--use-distributed, but no key was "
+                              "distributed; using the derived key")
+                else:
+                    use = bytearray(dist["ltk"])
+                    rand_use = dist.get("rand", bytes(8))
+                    ediv_use = dist.get("ediv", 0)
+                    clock.say("using the distributed LTK, rand and EDIV")
             if args.corrupt_ltk:
                 use[0] ^= 0x01
                 clock.say("LTK corrupted on purpose (negative control)")
             concurrent_traffic(link, args)
             t_start = clock.ms()
-            start_encryption(link, bytes(use),
-                             bytes.fromhex(args.rand)[::-1] if args.rand
-                             else bytes(8), args.ediv)
+            start_encryption(link, bytes(use), rand_use, ediv_use)
             outcome = wait_encryption(link, args.enc_timeout)
             t_end = clock.ms()
 
@@ -667,6 +721,12 @@ def main():
     p.add_argument("--key-size", type=int, default=16)
     p.add_argument("--init-keys", type=lambda v: int(v, 0), default=0)
     p.add_argument("--resp-keys", type=lambda v: int(v, 0), default=0)
+    p.add_argument("--use-distributed", action="store_true",
+                   help="reconnect with the LTK, Rand and EDIV the peripheral "
+                        "distributed (needs --resp-keys 0x01 or 0x03), like a "
+                        "central that stores what it was sent")
+    p.add_argument("--keys-wait", type=float, default=2.0,
+                   help="seconds to read key distribution after encryption")
     p.add_argument("--auto-accept", action="store_true",
                    help="do not wait for Enter at the numeric comparison")
 
