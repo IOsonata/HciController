@@ -151,7 +151,7 @@ endif
 
 .PHONY: all run clean check-root check-project check-boards \
         check-usb-desc check-usb-runtime check-commands check-sdc-symbols \
-        check-smp check-events check-cis-cleanup print-config
+        check-smp check-smp-lesc check-events check-cis-cleanup print-config
 
 PYTHON ?= python3
 
@@ -295,6 +295,14 @@ check-smp:
 	@echo "[TEST] smp_vectors.py"
 	@$(PYTHON) $(THIS_DIR)/smp_vectors.py
 
+check-smp-lesc:
+	@command -v $(PYTHON) >/dev/null 2>&1 || { \
+	  echo "[TEST] smp_lesc_vectors.py skipped, no $(PYTHON)"; exit 0; }
+	@$(PYTHON) -c "import cryptography" >/dev/null 2>&1 || { \
+	  echo "[TEST] smp_lesc_vectors.py skipped, no cryptography package"; exit 0; }
+	@echo "[TEST] smp_lesc_vectors.py"
+	@$(PYTHON) $(THIS_DIR)/smp_lesc_vectors.py
+
 # The real board.h is compiled by the target build and by nothing else, so
 # every pin number in it has only ever been checked by an ARM build for one
 # board. That is how the dongle came to hold another board's pin map.
@@ -326,7 +334,7 @@ check-target-integrations:
 	@$(PYTHON) -m unittest discover -s $(THIS_DIR) -p 'nrf54lm20_project_test.py'
 
 run: all check-target-integrations check-project check-boards check-usb-desc check-usb-runtime \
-     check-commands check-sdc-symbols check-smp check-events check-cis-cleanup
+     check-commands check-sdc-symbols check-smp check-smp-lesc check-events check-cis-cleanup
 	@set -e; for t in $(TARGETS); do \
 	  echo "[TEST] $$(basename $$t)"; $$t; done
 	@echo
