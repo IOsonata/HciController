@@ -455,3 +455,214 @@ class SmpCentral:
             return
         self.log("dhkey check verified, pairing complete")
         self.state = COMPLETE
+
+
+# States of the responder
+(R_IDLE, R_WAIT_PUBLIC_KEY, R_WAIT_RANDOM, R_WAIT_USER_OR_CHECK, R_COMPLETE,
+ R_FAILED) = range(6)
+
+
+class SmpResponder:
+    """
+    Responder of an LE Secure Connections pairing, no I/O of its own, the
+    mirror of SmpCentral. The peripheral side of a test uses it so the central
+    under test (a phone, nRF Connect) is observed from the other end: what its
+    Pairing Request asks for, which keys it distributes, and what Rand and EDIV
+    it presents when it starts encryption.
+
+    send(payload)   called with each SMP PDU to transmit
+    log(text)       optional, one line per step
+    """
+
+    def __init__(self, send, local_address, local_type, peer_address,
+                 peer_type, io_cap=IO_DISPLAY_YES_NO,
+                 auth_req=AUTH_BONDING | AUTH_MITM | AUTH_SC, key_size=16,
+                 accept_init_keys=0x03, resp_keys=0x00, log=None,
+                 rng=os.urandom, keypair=None):
+        self.send = send
+        self.log = log or (lambda text: None)
+        self.rng = rng
+        self.local_address = bytes(local_address)
+        self.local_type = local_type
+        self.peer_address = bytes(peer_address)
+        self.peer_type = peer_type
+        self.io_cap = io_cap
+        self.auth_req = auth_req
+        self.key_size = key_size
+        self.accept_init_keys = accept_init_keys
+        self.resp_keys = resp_keys
+        self.keypair = keypair or KeyPair()
+
+        self.state = R_IDLE
+        self.method = None
+        self.failure = None
+        self.peer_failure = None
+        self.numeric_value = None
+        self.ltk = None
+        self.mac_key = None
+        self.dhkey = None
+        self.preq = None
+        self.pres = None
+        self.na = None
+        self.nb = self.rng(16)
+        self.peer_x = None
+        self.peer_y = None
+        self.user_accepted = None
+        self.ea = None
+        self.init_keys = 0
+        self.request = {}        # what the central asked for, for the log
+
+    @property
+    def done(self):
+        return self.state in (R_COMPLETE, R_FAILED)
+
+    @property
+    def ok(self):
+        return self.state == R_COMPLETE
+
+    def _a1(self):      # the initiator is the peer here
+        return address_form(self.peer_address, self.peer_type)
+
+    def _a2(self):
+        return address_form(self.local_address, self.local_type)
+
+    def _fail(self, text, reason=None):
+        self.failure = text
+        self.state = R_FAILED
+        self.log("pairing failed: %s" % text)
+        if reason is not None:
+            self.send(bytes((SMP_PAIRING_FAILED, reason)))
+
+    def _emit(self, pdu):
+        self.log("tx %s" % SMP_NAMES.get(pdu[0], "0x%02X" % pdu[0]))
+        self.send(bytes(pdu))
+
+    def feed(self, pdu):
+        if self.done or not pdu:
+            return
+        code = pdu[0]
+        self.log("rx %s%s" % (SMP_NAMES.get(code, "0x%02X" % code),
+                              " " + pdu[1:].hex() if len(pdu) > 1 else ""))
+        if code == SMP_PAIRING_FAILED:
+            self.peer_failure = pdu[1] if len(pdu) > 1 else None
+            self._fail("central sent Pairing Failed, %s" % FAILED_NAMES.get(
+                self.peer_failure, "reason 0x%02X" % (self.peer_failure or 0)))
+            return
+        handler = {
+            SMP_PAIRING_REQUEST: self._on_request,
+            SMP_PAIRING_PUBLIC_KEY: self._on_public_key,
+            SMP_PAIRING_RANDOM: self._on_random,
+            SMP_PAIRING_DHKEY_CHECK: self._on_dhkey_check,
+        }.get(code)
+        if handler is None:
+            self.log("ignored in state %d" % self.state)
+            return
+        try:
+            handler(pdu)
+        except PairingError as err:
+            self._fail(str(err), 0x0A)
+
+    def _on_request(self, pdu):
+        if self.state != R_IDLE:
+            raise PairingError("unexpected Pairing Request")
+        if len(pdu) != 7:
+            raise PairingError("Pairing Request is %d octets" % len(pdu))
+        self.preq = bytes(pdu)
+        io, oob, auth, size, init, resp = pdu[1:7]
+        self.request = {"io_cap": io, "oob": oob, "auth_req": auth,
+                        "key_size": size, "init_keys": init, "resp_keys": resp}
+        self.log("central asks: io cap %d, oob %d, auth 0x%02X (bond %d, "
+                 "mitm %d, sc %d, keypress %d, ct2 %d), key size %d, keys "
+                 "init 0x%02X resp 0x%02X" % (
+                     io, oob, auth, auth & 1, (auth >> 2) & 1, (auth >> 3) & 1,
+                     (auth >> 4) & 1, (auth >> 5) & 1, size, init, resp))
+        if not (auth & AUTH_SC and self.auth_req & AUTH_SC):
+            self._fail("the central did not ask for Secure Connections, so "
+                       "this is legacy pairing, which this responder does "
+                       "not do", 0x05)
+            return
+        if io > 4:
+            self._fail("io capability out of range", 0x0A)
+            return
+        mitm = bool(auth & AUTH_MITM or self.auth_req & AUTH_MITM)
+        self.method = _SC_METHOD[io][self.io_cap] if mitm \
+            else METHOD_JUST_WORKS
+        self.log("method: %s" % self.method)
+        if self.method == METHOD_PASSKEY:
+            self._fail("Passkey Entry is not implemented here", 0x05)
+            return
+        self.init_keys = init & self.accept_init_keys
+        resp_keys = resp & self.resp_keys
+        self.pres = bytes((SMP_PAIRING_RESPONSE, self.io_cap, 0x00,
+                           self.auth_req, min(self.key_size, 16),
+                           self.init_keys, resp_keys))
+        self.state = R_WAIT_PUBLIC_KEY
+        self._emit(self.pres)
+
+    def _on_public_key(self, pdu):
+        if self.state != R_WAIT_PUBLIC_KEY:
+            raise PairingError("unexpected Pairing Public Key")
+        if len(pdu) != 65:
+            raise PairingError("Pairing Public Key is %d octets" % len(pdu))
+        self.peer_x = bytes(pdu[1:33])
+        self.peer_y = bytes(pdu[33:65])
+        try:
+            self.dhkey = self.keypair.shared_secret(self.peer_x, self.peer_y)
+        except ValueError:
+            raise PairingError("central public key is not on the curve")
+        self._emit(bytes((SMP_PAIRING_PUBLIC_KEY,)) + self.keypair.x +
+                   self.keypair.y)
+        confirm = f4(self.keypair.x, self.peer_x, self.nb, bytes(1))
+        self.state = R_WAIT_RANDOM
+        self._emit(bytes((SMP_PAIRING_CONFIRM,)) + confirm)
+
+    def _on_random(self, pdu):
+        if self.state != R_WAIT_RANDOM:
+            raise PairingError("unexpected Pairing Random")
+        if len(pdu) != 17:
+            raise PairingError("Pairing Random is %d octets" % len(pdu))
+        self.na = bytes(pdu[1:17])
+        self._emit(bytes((SMP_PAIRING_RANDOM,)) + self.nb)
+        self.mac_key, self.ltk = f5(self.dhkey, self.na, self.nb,
+                                    self._a1(), self._a2())
+        self.log("ltk %s" % self.ltk.hex())
+        self.state = R_WAIT_USER_OR_CHECK
+        if self.method == METHOD_NUMERIC:
+            self.numeric_value = g2(self.peer_x, self.keypair.x,
+                                    self.na, self.nb)
+            self.log("numeric value %06d" % self.numeric_value)
+        else:
+            self.user_accepted = True
+
+    def user_confirm(self, accepted):
+        if self.state != R_WAIT_USER_OR_CHECK:
+            raise PairingError("no comparison is waiting")
+        self.user_accepted = accepted
+        if not accepted:
+            self._fail("numeric comparison rejected here", 0x0C)
+            return
+        self._finish()
+
+    def _on_dhkey_check(self, pdu):
+        if self.state != R_WAIT_USER_OR_CHECK:
+            raise PairingError("unexpected Pairing DHKey Check")
+        if len(pdu) != 17:
+            raise PairingError("Pairing DHKey Check is %d octets" % len(pdu))
+        self.ea = bytes(pdu[1:17])
+        self._finish()
+
+    def _finish(self):
+        # The check is answered only once the user has accepted and the
+        # central's value has arrived, in whichever order those happen.
+        if self.ea is None or not self.user_accepted:
+            return
+        expected = f6(self.mac_key, self.na, self.nb, bytes(16),
+                      self.preq[1:4], self._a1(), self._a2())
+        if expected != self.ea:
+            self._fail("the central's DHKey Check does not match", 0x0B)
+            return
+        eb = f6(self.mac_key, self.nb, self.na, bytes(16), self.pres[1:4],
+                self._a2(), self._a1())
+        self._emit(bytes((SMP_PAIRING_DHKEY_CHECK,)) + eb)
+        self.log("dhkey check verified, pairing complete")
+        self.state = R_COMPLETE

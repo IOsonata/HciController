@@ -136,6 +136,35 @@ def pairing_run(io_cap, expect_method):
         check("both sides hold one LTK", central.ltk, peer.ltk)
 
 
+def responder_run(io_cap, expect_method):
+    """SmpCentral against SmpResponder, the pair the two hardware tests use."""
+    central_addr = bytes.fromhex("1b6889fc71f8")
+    peer_addr = bytes.fromhex("665544332211")
+    to_resp, to_cent = [], []
+    cent = S.SmpCentral(to_resp.append, central_addr, 1, peer_addr, 0,
+                        io_cap=io_cap)
+    resp = S.SmpResponder(to_cent.append, peer_addr, 0, central_addr, 1,
+                          io_cap=io_cap)
+    cent.start()
+    for _ in range(60):
+        while to_resp:
+            resp.feed(to_resp.pop(0))
+        while to_cent:
+            cent.feed(to_cent.pop(0))
+        if cent.state == S.WAIT_USER:
+            check("responder: same number", cent.numeric_value,
+                  resp.numeric_value)
+            cent.user_confirm(True)
+        if resp.state == S.R_WAIT_USER_OR_CHECK and \
+                resp.user_accepted is None and resp.numeric_value is not None:
+            resp.user_confirm(True)
+        if cent.done and resp.done:
+            break
+    check("responder: method %s" % expect_method, resp.method, expect_method)
+    check("responder: both complete", (cent.ok, resp.ok), (True, True))
+    check("responder: one LTK", cent.ltk, resp.ltk)
+
+
 def refusals():
     central_addr = bytes.fromhex("1b6889fc71f8")
     peer_addr = bytes.fromhex("112233445566")
@@ -178,6 +207,8 @@ def main():
     spec_vectors()
     pairing_run(S.IO_DISPLAY_YES_NO, S.METHOD_NUMERIC)
     pairing_run(S.IO_NO_INPUT_NO_OUTPUT, S.METHOD_JUST_WORKS)
+    responder_run(S.IO_DISPLAY_YES_NO, S.METHOD_NUMERIC)
+    responder_run(S.IO_NO_INPUT_NO_OUTPUT, S.METHOD_JUST_WORKS)
     refusals()
     print()
     print("%s" % ("all checks passed" if not failures
