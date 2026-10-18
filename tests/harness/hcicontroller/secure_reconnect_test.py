@@ -112,6 +112,7 @@ class Link:
         self.verbose = verbose
         self.handle = None
         self.reasm = {}
+        self.att_seen = 0        # ATT PDUs received on this connection
         self.queue = []          # (cid, payload) completed, in order
         self.events = []         # (time ms, code, body) in order
         self.disconnect = None   # (time ms, status, handle, reason)
@@ -196,15 +197,21 @@ class Link:
     def poll(self, timeout=0.1):
         """Read one packet. Returns an (cid, payload) pair if one completed."""
         if self.queue:
-            return self.queue.pop(0)
+            return self._hand_out()
         packet = self.hci.read_packet(timeout)
         if packet is not None:
             kind, _, body = packet
             if kind == H4_ACL:
                 self._take_acl(body)
         if self.queue:
-            return self.queue.pop(0)
+            return self._hand_out()
         return None
+
+    def _hand_out(self):
+        item = self.queue.pop(0)
+        if item[0] == T.CID_ATT:
+            self.att_seen += 1
+        return item
 
 
 # ---------------------------------------------------------------------------
@@ -213,6 +220,7 @@ def connect(link, peer, peer_type, own_type, timeout):
     clock = link.clock
     link.disconnect = None
     link.encryption = None
+    link.att_seen = 0
     link.reasm = {}
     link.queue = []
 
@@ -305,10 +313,24 @@ def wait_encryption(link, timeout):
     return "silent"
 
 
-def att_probe(link, seconds=2.0):
-    """An ATT request over the (encrypted) link. True when a response comes."""
-    link.send_l2cap(T.CID_ATT, struct.pack("<BH", T.ATT_EXCHANGE_MTU_REQ, 247))
-    link.clock.say("tx ATT Exchange MTU Request")
+def att_probe(link, seconds=2.0, mtu=True):
+    """
+    An ATT request over the (encrypted) link. True when a response comes.
+    With mtu False no request is sent: discovery went out before encryption
+    and its answers are what is counted.
+    """
+    if mtu:
+        link.send_l2cap(T.CID_ATT,
+                        struct.pack("<BH", T.ATT_EXCHANGE_MTU_REQ, 247))
+        link.clock.say("tx ATT Exchange MTU Request")
+        want = T.ATT_EXCHANGE_MTU_RSP
+    else:
+        # The requests went out before encryption started; their answers are
+        # the evidence, and some may have arrived already.
+        if link.att_seen:
+            link.clock.say("ATT answered, %d PDUs" % link.att_seen)
+            return True
+        want = 0x11
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         if link.disconnect is not None:
@@ -317,12 +339,37 @@ def att_probe(link, seconds=2.0):
         if item is None:
             continue
         cid, pdu = item
-        if cid == T.CID_ATT and pdu and pdu[0] == T.ATT_EXCHANGE_MTU_RSP:
-            link.clock.say("rx ATT Exchange MTU Response, mtu %d" %
-                           struct.unpack("<H", pdu[1:3])[0])
+        if cid == T.CID_ATT and pdu and pdu[0] in (want, 0x01):
+            link.clock.say("rx ATT response 0x%02X %s" % (pdu[0],
+                                                          pdu[1:9].hex()))
             return True
         link.clock.say("rx cid 0x%04X %s" % (cid, pdu.hex()))
     return False
+
+
+def concurrent_traffic(link, args):
+    """
+    What a phone or nRF Connect does the moment it connects: start ATT
+    discovery, ask for 2M and a longer data length, all while encryption is
+    being started. The other link layer procedures are in flight when the
+    encryption request arrives. None of the responses is waited for.
+    """
+    handle = link.handle
+    if args.phy2m:
+        link.clock.say("LE Set PHY, 2M both ways")
+        link.hci.command(0x2032, struct.pack("<HBBBH", handle, 0, 0x02, 0x02,
+                                             0), allow_fail=True)
+    if args.dle:
+        link.clock.say("LE Set Data Length 251 / 2120")
+        link.hci.command(0x2022, struct.pack("<HHH", handle, 251, 2120),
+                         allow_fail=True)
+    if args.att_during:
+        link.send_l2cap(T.CID_ATT,
+                        struct.pack("<BH", T.ATT_EXCHANGE_MTU_REQ, 247))
+        link.send_l2cap(T.CID_ATT, struct.pack("<BHHH", 0x10, 1, 0xFFFF,
+                                               0x2800))
+        link.clock.say("tx ATT Exchange MTU and Read By Group Type, "
+                       "not waiting for the answers")
 
 
 # ---------------------------------------------------------------------------
@@ -495,6 +542,7 @@ def run(args):
             if args.corrupt_ltk:
                 use[0] ^= 0x01
                 clock.say("LTK corrupted on purpose (negative control)")
+            concurrent_traffic(link, args)
             t_start = clock.ms()
             start_encryption(link, bytes(use))
             outcome = wait_encryption(link, args.enc_timeout)
@@ -502,7 +550,7 @@ def run(args):
 
             ok = False
             if outcome == "encrypted":
-                ok = att_probe(link)
+                ok = att_probe(link, mtu=not args.att_during)
                 detail = "encrypted in %.1f ms%s" % (
                     t_end - t_start, ", ATT answered" if ok
                     else ", ATT NOT answered")
@@ -575,6 +623,14 @@ def main():
                         "Request (default) or as soon as connected")
     p.add_argument("--start-delay", type=int, default=0, metavar="MS",
                    help="with --start immediate, wait this long first")
+    p.add_argument("--phy2m", action="store_true",
+                   help="ask for 2M PHY just before starting encryption")
+    p.add_argument("--dle", action="store_true",
+                   help="ask for data length 251 just before starting "
+                        "encryption")
+    p.add_argument("--att-during", action="store_true",
+                   help="send ATT discovery requests just before starting "
+                        "encryption, without waiting for the answers")
     p.add_argument("--corrupt-ltk", action="store_true",
                    help="negative control: flip one bit of the reconnect key")
 
