@@ -553,7 +553,9 @@ def run(args):
                 clock.say("LTK corrupted on purpose (negative control)")
             concurrent_traffic(link, args)
             t_start = clock.ms()
-            start_encryption(link, bytes(use))
+            start_encryption(link, bytes(use),
+                             bytes.fromhex(args.rand)[::-1] if args.rand
+                             else bytes(8), args.ediv)
             outcome = wait_encryption(link, args.enc_timeout)
             t_end = clock.ms()
 
@@ -648,6 +650,12 @@ def main():
     p.add_argument("--att-during", action="store_true",
                    help="send ATT discovery requests just before starting "
                         "encryption, without waiting for the answers")
+    p.add_argument("--rand", metavar="HEX16",
+                   help="Rand sent with LE Enable Encryption on reconnect, 16 "
+                        "hex digits as written, default 0 (Secure Connections)")
+    p.add_argument("--ediv", type=lambda v: int(v, 0), default=0,
+                   help="EDIV sent with LE Enable Encryption on reconnect, "
+                        "default 0")
     p.add_argument("--corrupt-ltk", action="store_true",
                    help="negative control: flip one bit of the reconnect key")
 
