@@ -420,10 +420,10 @@ def pair(link, args, own, own_type, peer, peer_type):
 
     clock.say("pairing complete, method %s, LTK %s" % (smp.method,
                                                         smp.ltk.hex()))
-    return smp.ltk
+    return smp
 
 
-def collect_keys(link, seconds):
+def collect_keys(link, seconds, expect=None):
     """
     Read the key distribution that follows encryption on the pairing
     connection: Encryption Information (LTK), Central Identification (EDIV,
@@ -432,12 +432,20 @@ def collect_keys(link, seconds):
     connection instead of the key f5 derived.
     """
     keys = {}
+    got = 0
+    if expect == 0:
+        link.clock.say("no keys distributed by the peripheral")
+        return keys
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline and link.disconnect is None:
+        if expect is not None and got >= expect:
+            break
         item = link.poll(0.05)
         if item is None:
             continue
         cid, pdu = item
+        if cid == S.CID_SMP:
+            got += 1
         if cid != S.CID_SMP or not pdu:
             link.clock.say("rx cid 0x%04X %s" % (cid, pdu.hex()))
             continue
@@ -457,6 +465,43 @@ def collect_keys(link, seconds):
     else:
         link.clock.say("no keys distributed")
     return keys
+
+
+def send_keys(link, init_keys, own, own_type):
+    """
+    Distribute our keys as a central does when the Pairing Response agreed to
+    them. The values are random: a Secure Connections peripheral must ignore
+    the LTK, and what is observed is whether it does.
+    """
+    clock = link.clock
+    if init_keys & 0x01:
+        link.send_l2cap(S.CID_SMP, bytes((S.SMP_ENCRYPTION_INFO,)) +
+                        os.urandom(16))
+        link.send_l2cap(S.CID_SMP, bytes((S.SMP_CENTRAL_IDENTIFICATION,)) +
+                        os.urandom(10))
+        clock.say("tx Encryption Information and Central Identification")
+    if init_keys & 0x02:
+        link.send_l2cap(S.CID_SMP, bytes((S.SMP_IDENTITY_INFO,)) +
+                        os.urandom(16))
+        link.send_l2cap(S.CID_SMP, bytes((S.SMP_IDENTITY_ADDRESS_INFO,
+                                          own_type)) + own)
+        clock.say("tx Identity Information and Identity Address Information")
+    if init_keys & 0x04:
+        link.send_l2cap(S.CID_SMP, bytes((S.SMP_SIGNING_INFO,)) +
+                        os.urandom(16))
+        clock.say("tx Signing Information")
+
+
+def exchange_keys(link, pres, args, own, own_type):
+    """Key distribution as the Pairing Response negotiated it."""
+    init, resp = pres[5], pres[6]
+    link.clock.say("negotiated key distribution: init 0x%02X resp 0x%02X" %
+                   (init, resp))
+    expect = (2 if resp & 0x01 else 0) + (2 if resp & 0x02 else 0) + \
+        (1 if resp & 0x04 else 0)
+    dist = collect_keys(link, args.keys_wait, expect)
+    send_keys(link, init, own, own_type)
+    return dist
 
 
 def load_bond(path):
@@ -535,16 +580,17 @@ def run(args):
                              args.latency)
             if handle is None:
                 return 1
-            ltk = pair(link, args, own, own_type, peer, peer_type)
-            if ltk is None:
+            smp = pair(link, args, own, own_type, peer, peer_type)
+            if smp is None:
                 disconnect(link)
                 return 1
+            ltk = smp.ltk
             clock.say("LE Enable Encryption on the new link")
             start_encryption(link, ltk)
             outcome = wait_encryption(link, args.enc_timeout)
             dist = {}
-            if outcome == "encrypted" and (args.resp_keys or args.init_keys):
-                dist = collect_keys(link, args.keys_wait)
+            if outcome == "encrypted":
+                dist = exchange_keys(link, smp.pres, args, own, own_type)
             if args.bond_file:
                 save_bond(args.bond_file, ltk, own, own_type, peer, peer_type,
                           dist)
