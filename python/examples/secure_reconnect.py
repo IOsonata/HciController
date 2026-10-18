@@ -25,17 +25,17 @@ central does after Secure Connections pairing. The result is one of:
 Examples
 
   # pair, disconnect, reconnect twice, DUT address known
-  secure_reconnect_test.py --address F8:71:FC:89:68:1B --random --cycles 2
+  secure_reconnect.py --address F8:71:FC:89:68:1B --random --cycles 2
 
   # after resetting the DUT, reconnect with the bond kept in a file
-  secure_reconnect_test.py --address ... --bond-file wba.json --reconnect-only
+  secure_reconnect.py --address ... --bond-file wba.json --reconnect-only
 
   # negative control: a wrong key must be refused, and shows what a refusal
   # looks like from this side
-  secure_reconnect_test.py --address ... --corrupt-ltk
+  secure_reconnect.py --address ... --corrupt-ltk
 
   # do not wait for the peripheral's Security Request
-  secure_reconnect_test.py --address ... --start immediate
+  secure_reconnect.py --address ... --start immediate
 
 @license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
 """
@@ -47,7 +47,11 @@ import struct
 import sys
 import time
 
-import _bootstrap  # noqa: F401
+# Run from a checkout without installing the package.
+try:
+    import hcicontroller  # noqa: F401
+except ImportError:
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 from hcicontroller import Hci, SelectionError, TransportSpec, discover
 from hcicontroller import hci_ble_test as T
 from hcicontroller.hci_events import (

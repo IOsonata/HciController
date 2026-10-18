@@ -2,7 +2,7 @@
 """
 The dongle as a secure peripheral, to watch what a central really does.
 
-secure_reconnect_test.py makes the dongle the central and proves a peripheral
+secure_reconnect.py makes the dongle the central and proves a peripheral
 under test. This is the reverse: the dongle advertises as a bondable
 peripheral with LE Secure Connections, and nRF Connect, a phone or any other
 central connects to it. Everything the central sends is logged with a
@@ -22,7 +22,7 @@ Typical session: start this, connect from nRF Connect, pair and accept the
 number, disconnect, connect again, disconnect, connect a third time. The run
 ends after --connections disconnects (default 3) and prints one line for each.
 
-  secure_peripheral_test.py --name BleSecurityPy --connections 3
+  secure_peripheral.py --name BleSecurityPy --connections 3
 
 Options worth knowing:
   --refuse-nonzero   refuse the key request when Rand or EDIV is not zero,
@@ -41,7 +41,11 @@ import struct
 import sys
 import time
 
-import _bootstrap  # noqa: F401
+# Run from a checkout without installing the package.
+try:
+    import hcicontroller  # noqa: F401
+except ImportError:
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 from hcicontroller import Hci, SelectionError, TransportSpec, discover
 from hcicontroller import hci_ble_test as T
 from hcicontroller.hci_events import (
@@ -49,7 +53,7 @@ from hcicontroller.hci_events import (
     parse_connection)
 from hcicontroller import smp_central as S
 
-from secure_reconnect_test import Clock, Link, reason_text
+from secure_reconnect import Clock, Link, reason_text
 
 OP_LE_LTK_REPLY = 0x201A
 OP_LE_LTK_NEGATIVE_REPLY = 0x201B

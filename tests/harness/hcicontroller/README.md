@@ -17,10 +17,6 @@ release_test.py         full release-strict feature/compliance run
 probe_test.py           broad HCI command/radio probe
 cis_pair_test.py        focused two-controller CIS/ISO over H:4
 cis_usb_pair_test.py    retained for controllers with Bulk Serialization
-secure_reconnect_test.py  dongle as central: LESC pairing, then secure reconnects,
-                        with every HCI event timestamped (see the file header)
-secure_peripheral_test.py dongle as a bondable LESC peripheral: logs what a central
-                        (nRF Connect, a phone) asks for and presents on reconnect
 ```
 
 The two radios are symmetric. Tests explicitly assign Central/Peripheral,

@@ -99,6 +99,28 @@ python3 python/examples/controller_info.py --usb SERIAL_NUMBER
 python3 python/examples/controller_info.py --port /dev/cu.usbmodem14201
 ```
 
+`examples/secure_reconnect.py` makes the dongle an LE Secure Connections
+central. It pairs with a bondable peripheral (numeric comparison, you confirm
+the number on both sides), then disconnects and reconnects the given number of
+times, encrypting each time with the derived key. Every HCI event is
+timestamped, and the options change the pairing flags, connection interval,
+PHY and data length updates and the order of events, so a failing reconnect can
+be narrowed down. `--corrupt-ltk` presents a wrong key on purpose.
+
+`examples/secure_peripheral.py` is the reverse: the dongle advertises as a
+bondable LESC peripheral and logs what a central, such as nRF Connect Desktop
+or a phone, asks for in its Pairing Request and presents on each reconnect.
+`--accept-keys` and `--resp-keys` set the key distribution bits of the Pairing
+Response.
+
+Both need the `cryptography` package (`pip install cryptography`) and run from
+a checkout without installing the package.
+
+```sh
+python3 python/examples/secure_reconnect.py --address 00:80:E1:2C:19:DC --cycles 3
+python3 python/examples/secure_peripheral.py --name BleSecurityPy --connections 3
+```
+
 ## Library organization
 
 The package contains both low-level and procedure-level helpers:
