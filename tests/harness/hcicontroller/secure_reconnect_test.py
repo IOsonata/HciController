@@ -215,7 +215,8 @@ class Link:
 
 
 # ---------------------------------------------------------------------------
-def connect(link, peer, peer_type, own_type, timeout):
+def connect(link, peer, peer_type, own_type, timeout, interval=(0x18, 0x28),
+            latency=0):
     hci = link.hci
     clock = link.clock
     link.disconnect = None
@@ -226,8 +227,8 @@ def connect(link, peer, peer_type, own_type, timeout):
 
     params = struct.pack("<HH", 0x0060, 0x0030)
     params += bytes([0x00, peer_type]) + peer + bytes([own_type])
-    params += struct.pack("<HH", 0x0018, 0x0028)      # interval 30 to 50 ms
-    params += struct.pack("<HH", 0, 400)              # latency, timeout 4 s
+    params += struct.pack("<HH", interval[0], interval[1])
+    params += struct.pack("<HH", latency, 400)        # supervision 4 s
     params += struct.pack("<HH", 0, 0)
     clock.say("LE Create Connection to %s" % T.addr_str(peer))
     hci.command(T.OP_LE_CREATE_CONNECTION, params)
@@ -437,6 +438,12 @@ def save_bond(path, ltk, own, own_type, peer, peer_type):
                   indent=2)
 
 
+def params_of(args):
+    low = args.interval_min
+    high = max(args.interval_max, low)
+    return low, high
+
+
 def run(args):
     try:
         if args.port:
@@ -483,7 +490,8 @@ def run(args):
         cycle = 0
         if ltk is None:
             handle = connect(link, peer, peer_type, own_type,
-                             args.connect_timeout)
+                             args.connect_timeout, params_of(args),
+                             args.latency)
             if handle is None:
                 return 1
             ltk = pair(link, args, own, own_type, peer, peer_type)
@@ -512,7 +520,8 @@ def run(args):
             print()
             clock.say("---- reconnect %d of %d ----" % (cycle, args.cycles))
             handle = connect(link, peer, peer_type, own_type,
-                             args.connect_timeout)
+                             args.connect_timeout, params_of(args),
+                             args.latency)
             if handle is None:
                 results.append(("reconnect %d" % cycle, "no connection",
                                 False))
@@ -623,6 +632,14 @@ def main():
                         "Request (default) or as soon as connected")
     p.add_argument("--start-delay", type=int, default=0, metavar="MS",
                    help="with --start immediate, wait this long first")
+    p.add_argument("--interval-min", type=int, default=0x18, metavar="UNITS",
+                   help="connection interval minimum in 1.25 ms units "
+                        "(default 24 = 30 ms; 6 = 7.5 ms)")
+    p.add_argument("--interval-max", type=int, default=0x28, metavar="UNITS",
+                   help="connection interval maximum in 1.25 ms units "
+                        "(default 40 = 50 ms)")
+    p.add_argument("--latency", type=int, default=0,
+                   help="peripheral latency (default 0)")
     p.add_argument("--phy2m", action="store_true",
                    help="ask for 2M PHY just before starting encryption")
     p.add_argument("--dle", action="store_true",
