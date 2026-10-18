@@ -28,9 +28,15 @@ vectors in tests/smp_lesc_vectors.py and against Bumble.
 
 import os
 
-from cryptography.hazmat.primitives import cmac
-from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.hazmat.primitives.ciphers import algorithms
+try:
+    from cryptography.hazmat.primitives import cmac
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.ciphers import algorithms
+except ImportError as err:
+    raise ImportError(
+        "smp_central needs the cryptography package for P-256 and AES-CMAC. "
+        "Install it with: python3 -m pip install cryptography, or reinstall "
+        "the library with: python3 -m pip install -e ./python") from err
 
 CID_SMP = 0x0006
 
