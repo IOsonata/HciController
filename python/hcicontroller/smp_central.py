@@ -430,19 +430,17 @@ class SmpCentral:
             return
         self._send_dhkey_check()
 
-    def _io_cap_bytes(self, auth_req, io_cap):
-        # AuthReq, OOB, IO capability, the field order of f6.
-        return bytes((auth_req, 0x00, io_cap))
-
     def _send_dhkey_check(self):
-        ea = f6(self.mac_key, self.na, self.nb, bytes(16),
-                self._io_cap_bytes(self.auth_req, self.io_cap),
+        # The IOcap input of f6 is octets 1 to 3 of the Pairing Request for
+        # the initiator and of the Pairing Response for the responder, in the
+        # order they have on the wire: IO capability, OOB flag, AuthReq.
+        io_a = self.preq[1:4]
+        io_b = self.pres[1:4]
+        ea = f6(self.mac_key, self.na, self.nb, bytes(16), io_a,
                 self._a1(), self._a2())
         # Where the peer's value is checked: the initiator's check goes
         # first, the responder's comes back after it.
-        self.dhkey_check = f6(self.mac_key, self.nb, self.na, bytes(16),
-                              self._io_cap_bytes(self.peer_auth_req,
-                                                 self.peer_io_cap),
+        self.dhkey_check = f6(self.mac_key, self.nb, self.na, bytes(16), io_b,
                               self._a2(), self._a1())
         self.state = WAIT_DHKEY_CHECK
         self._emit(bytes((SMP_PAIRING_DHKEY_CHECK,)) + ea)

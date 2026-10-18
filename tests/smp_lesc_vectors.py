@@ -81,8 +81,9 @@ class Responder:
             self.preq = bytes(pdu)
             self.peer_io = pdu[1]
             self.peer_auth = pdu[3]
-            self.send(bytes((S.SMP_PAIRING_RESPONSE, self.io_cap, 0,
-                             self.auth_req, 16, 0, 0)))
+            self.pres = bytes((S.SMP_PAIRING_RESPONSE, self.io_cap, 0,
+                               self.auth_req, 16, 0, 0))
+            self.send(self.pres)
         elif code == S.SMP_PAIRING_PUBLIC_KEY:
             self.pka_x, self.pka_y = bytes(pdu[1:33]), bytes(pdu[33:65])
             self.send(bytes((S.SMP_PAIRING_PUBLIC_KEY,)) + self.keys.x +
@@ -100,14 +101,12 @@ class Responder:
             self.value = S.g2(self.pka_x, self.keys.x, self.na, self.nb)
         elif code == S.SMP_PAIRING_DHKEY_CHECK:
             ea = S.f6(self.mac, self.na, self.nb, bytes(16),
-                      bytes((self.peer_auth, 0, self.peer_io)),
-                      self.a1, self.a2)
+                      self.preq[1:4], self.a1, self.a2)
             if ea != bytes(pdu[1:17]):
                 self.send(bytes((S.SMP_PAIRING_FAILED, 0x0B)))
                 return
             eb = S.f6(self.mac, self.nb, self.na, bytes(16),
-                      bytes((self.auth_req, 0, self.io_cap)),
-                      self.a2, self.a1)
+                      self.pres[1:4], self.a2, self.a1)
             self.send(bytes((S.SMP_PAIRING_DHKEY_CHECK,)) + eb)
 
 
@@ -118,6 +117,7 @@ def pairing_run(io_cap, expect_method):
     central = S.SmpCentral(to_peer.append, central_addr, 1, peer_addr, 0,
                            io_cap=io_cap)
     peer = Responder(to_central.append, peer_addr, 0, io_cap, 0x0D)
+    central.auth_req = 0x0D
 
     central.start()
     for _ in range(40):
