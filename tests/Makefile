@@ -89,6 +89,20 @@ HCI_TRACE_SOURCES := $(UNIT)/hci_trace_test.cpp \
                      $(CFIFO_OBJ)
 TARGETS += $(HCI_TRACE_TARGET)
 
+# HciController with an IpcIntrf host, over the real IOsonata IpcIntrf and
+# CFifo and a synchronous IPC port. The mirrored CFifo under tests/iosonata is
+# not used here: the rings need the current CFifo.
+IPC_TARGET := $(BUILD_DIR)/hci_controller_ipc_test
+IPC_SOURCES := $(UNIT)/hci_controller_ipc_test.cpp \
+               $(SRC)/hci_controller.cpp \
+               $(SRC)/hci_intrf_transport.cpp \
+               $(SRC)/hci_h4.cpp \
+               $(IOSONATA_ROOT)/src/ipc/ipc_intrf.cpp \
+               $(IOSONATA_ROOT)/src/device_intrf.cpp \
+               $(STUBS)/hci_trace_stub.cpp \
+               $(BUILD_DIR)/ipc/cfifo.o
+TARGETS += $(IPC_TARGET)
+
 # Compiled but not linked, and not run.
 #
 # Two gaps this closes. hci_app.cpp is the largest source here and no test
@@ -107,7 +121,8 @@ COMPILE_SRC := $(filter-out $(SRC)/hci_sdc_nrfxlib.cpp \
 
 OBJECTS := $(patsubst $(SRC)/%.cpp,$(BUILD_DIR)/trace/%.o,$(COMPILE_SRC)) \
            $(BUILD_DIR)/notrace/hci_app.o \
-           $(BUILD_DIR)/logport/hci_app.o
+           $(BUILD_DIR)/logport/hci_app.o \
+           $(BUILD_DIR)/ipchost/hci_app.o
 
 # The dispatch test compiles the real command table against the real
 # SoftDevice Controller headers, with only the SDC entry points stubbed. It is
@@ -190,6 +205,18 @@ $(HCI_TRACE_TARGET): $(HCI_TRACE_SOURCES) $(HEADERS) | check-root
 	  $(MOCK_DEFINES) -DHCI_TRACE=0 $(CXXFLAGS) \
 	  $(filter %.cpp %.o,$^) -o $@
 
+$(BUILD_DIR)/ipc/cfifo.o: $(IOSONATA_ROOT)/src/cfifo.c $(IOSONATA_ROOT)/include/cfifo.h \
+                          | check-root
+	@mkdir -p $(dir $@)
+	$(CC) -I$(IOSONATA_ROOT)/include $(CFLAGS) -c $< -o $@
+
+$(IPC_TARGET): $(IPC_SOURCES) $(HEADERS) $(IOSONATA_ROOT)/include/ipc/ipc_intrf.h \
+               | check-root
+	@mkdir -p $(dir $@)
+	$(CXX) -I$(IOSONATA_ROOT)/include -I$(ROOT)/include -I$(STUBS)/nrfficr \
+	  $(MOCK_DEFINES) -DHCI_TRACE=0 $(CXXFLAGS) \
+	  $(filter %.cpp %.o,$^) -o $@
+
 $(BUILD_DIR)/iosonata/%.o: $(IOSONATA)/%.c $(wildcard $(IOSONATA)/*.h) \
                            | check-root
 	@mkdir -p $(dir $@)
@@ -211,6 +238,16 @@ $(BUILD_DIR)/notrace/%.o: $(SRC)/%.cpp $(HEADERS) | check-root
 $(BUILD_DIR)/logport/%.o: $(SRC)/%.cpp $(HEADERS) | check-root
 	@mkdir -p $(dir $@)
 	$(CXX) $(MOCK_INCLUDES) $(MOCK_DEFINES) -DHCI_TRACE=1 -DHCI_USB_SOCKET=1 \
+	  $(CXXFLAGS) -c $< -o $@
+
+# The same file again as a part with no USB and no UART whose host is another
+# core, which is how the nRF5340 network core builds it. Nothing else compiles
+# the IPC host path or the build without the USB classes.
+$(BUILD_DIR)/ipchost/%.o: $(SRC)/%.cpp $(HEADERS) | check-root
+	@mkdir -p $(dir $@)
+	$(CXX) $(MOCK_INCLUDES) $(MOCK_DEFINES) -DHCI_TRACE=1 \
+	  -DHCI_APP_HAS_USB=0 -DHCI_APP_HAS_UART=0 -DHCI_APP_HAS_IPC=1 \
+	  -DHCI_IPC_MEM_ADDR=0x20070000UL -DHCI_IPC_MEM_SIZE=0x10000UL \
 	  $(CXXFLAGS) -c $< -o $@
 
 ifneq ($(strip $(SDC_INCLUDE)),)

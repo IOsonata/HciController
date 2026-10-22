@@ -62,9 +62,12 @@ extern "C" {
  * and two simultaneous central-role links. That is eighteen connection
  * contexts in the controller; it is not an eight-plus-eight split.
  */
+#ifndef HCI_SDC_PERIPHERAL_COUNT
 #define HCI_SDC_PERIPHERAL_COUNT 16U
+#endif
+#ifndef HCI_SDC_CENTRAL_COUNT
 #define HCI_SDC_CENTRAL_COUNT     2U
-
+#endif
 /*
  * The payload the controller advertises in LE Read Buffer Size, and how many
  * buffers it keeps. 251 is the data length extension maximum, and a host that
@@ -72,18 +75,22 @@ extern "C" {
  * throughput at a ninth of what the radio does.
  */
 #define HCI_SDC_ACL_PACKET_SIZE  251U
+#ifndef HCI_SDC_ACL_PACKET_COUNT
 #define HCI_SDC_ACL_PACKET_COUNT 4U
-
+#endif
 /*
  * Advertising sets. Three, because a periodic advertiser needs one of its own
  * and a periodic advertiser with responses needs another, leaving one for
  * ordinary extended advertising.
  */
+#ifndef HCI_SDC_ADV_SET_COUNT
 #define HCI_SDC_ADV_SET_COUNT    3U
+#endif
 #define HCI_SDC_MAX_ADV_DATA     255U
 
+#ifndef HCI_SDC_SCAN_BUFFER_COUNT
 #define HCI_SDC_SCAN_BUFFER_COUNT 4U
-
+#endif
 /* Filter accept list entries. The SoftDevice Controller default is eight. */
 #define HCI_SDC_FAL_SIZE 8U
 
@@ -110,9 +117,15 @@ extern "C" {
  * The syncs are the expensive part, 1786 each with responses enabled, and the
  * first numbers to bring down if the pool has to shrink.
  */
+#ifndef HCI_SDC_PERIODIC_ADV_COUNT
 #define HCI_SDC_PERIODIC_ADV_COUNT         1U
+#endif
+#ifndef HCI_SDC_PERIODIC_SYNC_COUNT
 #define HCI_SDC_PERIODIC_SYNC_COUNT        2U
+#endif
+#ifndef HCI_SDC_PERIODIC_SYNC_BUFFER_COUNT
 #define HCI_SDC_PERIODIC_SYNC_BUFFER_COUNT 4U
+#endif
 #define HCI_SDC_PERIODIC_ADV_LIST_SIZE     8U
 
 /*
@@ -132,7 +145,9 @@ extern "C" {
  * usual question is what answered rather than what did not. Correct PAwR
  * operation must not depend on those extra failure events being generated.
  */
+#ifndef HCI_SDC_PERIODIC_ADV_RSP_COUNT
 #define HCI_SDC_PERIODIC_ADV_RSP_COUNT      1U
+#endif
 #define HCI_SDC_PERIODIC_ADV_RSP_TX_BUFFERS 3U
 #define HCI_SDC_PERIODIC_ADV_RSP_RX_BUFFERS 2U
 #define HCI_SDC_PERIODIC_ADV_RSP_MAX_TX_DATA                             \
@@ -189,12 +204,21 @@ extern "C" {
  * since a public broadcast is unencrypted by design. Unencrypted connected
  * streams are the ones with something still to establish on hardware.
  */
+#ifndef HCI_SDC_CIG_COUNT
 #define HCI_SDC_CIG_COUNT           2U
+#endif
+#ifndef HCI_SDC_CIS_COUNT
 #define HCI_SDC_CIS_COUNT           4U
+#endif
+#ifndef HCI_SDC_BIG_COUNT
 #define HCI_SDC_BIG_COUNT           2U
+#endif
+#ifndef HCI_SDC_BIS_SOURCE_COUNT
 #define HCI_SDC_BIS_SOURCE_COUNT    2U
+#endif
+#ifndef HCI_SDC_BIS_SINK_COUNT
 #define HCI_SDC_BIS_SINK_COUNT      2U
-
+#endif
 /*
  * The service data unit sizes decide how large a buffer the application has
  * to hand sdc_hci_get. Vol 4 Part E allows an isochronous packet of 4095
@@ -204,9 +228,12 @@ extern "C" {
  */
 #define HCI_SDC_ISO_TX_SDU_SIZE     247U
 #define HCI_SDC_ISO_RX_SDU_SIZE     251U
+#ifndef HCI_SDC_ISO_TX_SDU_COUNT
 #define HCI_SDC_ISO_TX_SDU_COUNT    4U
+#endif
+#ifndef HCI_SDC_ISO_RX_SDU_COUNT
 #define HCI_SDC_ISO_RX_SDU_COUNT    4U
-
+#endif
 /*
  * The controller's own ceiling, from sdk-nrfxlib limitations.rst, DRGN-25316:
  * sending and receiving isochronous units larger than 1255 octets is not

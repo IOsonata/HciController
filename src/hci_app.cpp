@@ -22,6 +22,10 @@
 #include "hci_version.h"
 #include "sdc_hci.h"
 
+#if HCI_APP_HAS_IPC
+#include "ipc/ipc_intrf.h"
+#endif
+
 static_assert(HCI_APP_PACKET_SIZE + 1U <= HCI_INTRF_TX_STREAM_SIZE,
               "controller packet plus indicator must fit the transport stream");
 static_assert(HCI_APP_PACKET_SIZE >= HCI_MSG_BUFFER_MAX_SIZE,
@@ -71,7 +75,28 @@ typedef struct
 } HciUsbWork_t;
 
 static HciApp_t *s_pApp;
+
+#if HCI_APP_HAS_UART
 static UART s_HciUart;
+static DevIntrf_t *HciAppUartIntrf(void)
+{
+    return static_cast<DevIntrf_t *>(s_HciUart);
+}
+static void HciAppUartDisable(void)
+{
+    s_HciUart.Disable();
+}
+#else
+static DevIntrf_t *HciAppUartIntrf(void)
+{
+    return nullptr;
+}
+static void HciAppUartDisable(void)
+{
+}
+#endif
+
+#if HCI_APP_HAS_USB
 static UsbdCdc s_HostCdc;
 static UsbdCdc s_LogCdc;
 #if defined(HCI_UART_BRIDGE) && HCI_UART_BRIDGE
@@ -88,8 +113,9 @@ static BtHciUsb s_HciUsb;
 alignas(HciUsbWork_t) static uint8_t s_UsbWorkMem[
     CFIFO_TOTAL_MEMSIZE(HCI_USB_WORK_COUNT, sizeof(HciUsbWork_t))];
 static hCFifo_t s_hUsbWork;
+#endif
 
-#ifdef UART_PINS
+#if HCI_APP_HAS_UART && defined(UART_PINS)
 static const IOPinCfg_t s_HciUartPins[] = UART_PINS;
 #endif
 
@@ -216,6 +242,7 @@ static void HciAppWake(void *pContext)
     }
 }
 
+#if HCI_APP_HAS_USB
 static int HciAppUsbEvent(DevIntrf_t *, DEVINTRF_EVT, uint8_t *, int Len)
 {
     HciAppWake(s_pApp);
@@ -267,7 +294,13 @@ static void HciAppUsbWorkExec(void)
         HciAppWake(s_pApp);
     }
 }
+#else
+static void HciAppUsbWorkExec(void)
+{
+}
+#endif
 
+#if HCI_APP_HAS_UART
 static int HciAppUartEvent(UARTDev_t * const,
                            UART_EVT EvtId,
                            uint8_t *,
@@ -280,6 +313,94 @@ static int HciAppUartEvent(UARTDev_t * const,
     }
     return BufferLen;
 }
+#endif
+
+#if HCI_APP_HAS_IPC
+/*
+ * The host is on another core, reached through an IpcIntrf. HciController is
+ * the service provider, so it is the IPC owner: it partitions and formats the
+ * shared memory block and the host core attaches to what it finds there. The
+ * rings are byte streams carrying H:4, so the same HciIntrfTransport that
+ * serves the UART serves this link.
+ */
+#ifndef HCI_IPC_MEM_ADDR
+#error "board.h must define HCI_IPC_MEM_ADDR, the shared memory block address"
+#endif
+#ifndef HCI_IPC_MEM_SIZE
+#error "board.h must define HCI_IPC_MEM_SIZE, the shared memory block size"
+#endif
+#ifndef HCI_IPC_RING_BYTES
+#define HCI_IPC_RING_BYTES        2048U
+#endif
+#ifndef HCI_IPC_TX_CHAN
+#define HCI_IPC_TX_CHAN           0
+#endif
+#ifndef HCI_IPC_RX_CHAN
+#define HCI_IPC_RX_CHAN           1
+#endif
+#ifndef HCI_IPC_IRQ_PRIORITY
+#define HCI_IPC_IRQ_PRIORITY      6
+#endif
+
+static_assert(IPC_INTRF_MEMSIZE(HCI_IPC_RING_BYTES, 0U, HCI_IPC_RING_BYTES, 0U) <=
+              HCI_IPC_MEM_SIZE,
+              "the IPC rings do not fit the shared memory block");
+
+static IpcIntrf s_HciIpc;
+
+/* RX data and TX room are the two reasons to run the host side again. */
+static int HciAppIpcEvent(DevIntrf_t *, DEVINTRF_EVT, uint8_t *, int Len)
+{
+    HciAppWake(s_pApp);
+    return Len;
+}
+
+static bool HciAppInitIpc(HciApp_t *pApp)
+{
+    IpcIntrfCfg_t cfg = {};
+
+    cfg.pMemBlk = reinterpret_cast<uint8_t *>(HCI_IPC_MEM_ADDR);
+    cfg.MemSize = HCI_IPC_MEM_SIZE;
+    cfg.bOwner = true;
+    cfg.TxNbBlk = HCI_IPC_RING_BYTES;   /* controller to host */
+    cfg.TxBlkSize = 0U;
+    cfg.RxNbBlk = HCI_IPC_RING_BYTES;   /* host to controller */
+    cfg.RxBlkSize = 0U;
+    cfg.TxChan = HCI_IPC_TX_CHAN;
+    cfg.RxChan = HCI_IPC_RX_CHAN;
+    cfg.IntPrio = HCI_IPC_IRQ_PRIORITY;
+    cfg.EvtCB = HciAppIpcEvent;
+
+    if (!s_HciIpc.Init(cfg))
+    {
+        return false;
+    }
+
+    /* An empty read ends the polling loop at once. */
+    s_HciIpc.Data()->MaxRetry = 1;
+    pApp->pHostIntrf = s_HciIpc.Data();
+    return true;
+}
+
+static void HciAppIpcRelease(HciApp_t *pApp)
+{
+    if (pApp->HostType == HCI_APP_HOST_IPC &&
+        pApp->pHostIntrf == s_HciIpc.Data())
+    {
+        s_HciIpc.Disable();
+        pApp->pHostIntrf = nullptr;
+    }
+}
+#else
+static bool HciAppInitIpc(HciApp_t *)
+{
+    return false;
+}
+
+static void HciAppIpcRelease(HciApp_t *)
+{
+}
+#endif
 
 #ifndef HCI_USB_SOCKET
 #define HCI_USB_SOCKET 0
@@ -311,6 +432,11 @@ static bool HciAppResolveMode(HciAppMode_t Mode,
             *pUsbMode = HCI_USB_DESCRIPTOR_NATIVE_HCI;
             return true;
 
+        case HCI_APP_MODE_IPC_H4:
+            *pHostType = HCI_APP_HOST_IPC;
+            *pUsbMode = HCI_USB_DESCRIPTOR_LOG_ONLY;
+            return true;
+
         default:
             return false;
     }
@@ -323,9 +449,15 @@ static const char *HciAppHostName(const HciApp_t *pApp)
         return "uart";
     }
 
+    if (pApp->HostType == HCI_APP_HOST_IPC)
+    {
+        return "ipc";
+    }
+
     return pApp->UsbHciNative ? "usb-native" : "usb-h4";
 }
 
+#if HCI_APP_HAS_USB
 static bool HciAppUsbSetup(HciApp_t *pApp, HciUsbDescriptorMode_t Mode)
 {
     if (Mode < HCI_USB_DESCRIPTOR_LOG_ONLY ||
@@ -444,6 +576,12 @@ static bool HciAppUsbSetup(HciApp_t *pApp, HciUsbDescriptorMode_t Mode)
     pApp->UsbRunning = true;
     return true;
 }
+#else
+static bool HciAppUsbSetup(HciApp_t *, HciUsbDescriptorMode_t)
+{
+    return false;
+}
+#endif
 
 /* Roll back transport peripherals when a later initialization stage fails.
  * This is also used by Stop after its worker has left the runtime.
@@ -463,13 +601,17 @@ static void HciAppUartRelease(HciApp_t *pApp)
     pApp->BridgeInputOffset = 0U;
 #endif
     if (pApp->HostType == HCI_APP_HOST_UART &&
-        pApp->pHostIntrf == static_cast<DevIntrf_t *>(s_HciUart))
+        pApp->pHostIntrf == HciAppUartIntrf())
     {
-        s_HciUart.Disable();
+        HciAppUartDisable();
         pApp->pHostIntrf = nullptr;
     }
+
+    /* Same roll back points serve the IPC host. */
+    HciAppIpcRelease(pApp);
 }
 
+#if HCI_APP_HAS_USB
 static void HciAppUsbRelease(HciApp_t *pApp)
 {
     if (pApp == nullptr || !pApp->UsbRunning)
@@ -481,6 +623,11 @@ static void HciAppUsbRelease(HciApp_t *pApp)
     UsbDisable(0);
     pApp->UsbRunning = false;
 }
+#else
+static void HciAppUsbRelease(HciApp_t *)
+{
+}
+#endif
 
 #ifndef UART_FLOWCTRL
 #define HCI_APP_UART_FLOWCTRL UART_FLWCTRL_NONE
@@ -490,7 +637,7 @@ static void HciAppUsbRelease(HciApp_t *pApp)
 
 static bool HciAppInitUart(HciApp_t *pApp)
 {
-#ifdef UART_PINS
+#if HCI_APP_HAS_UART && defined(UART_PINS)
     UARTCfg_t cfg = {};
     cfg.DevNo = HCI_APP_UART_DEVICE;
     cfg.pIOPinMap = s_HciUartPins;
@@ -518,7 +665,7 @@ static bool HciAppInitUart(HciApp_t *pApp)
     }
 
     HciTargetUartTrace(&pApp->Target, HCI_APP_UART_DEVICE);
-    pApp->pHostIntrf = static_cast<DevIntrf_t *>(s_HciUart);
+    pApp->pHostIntrf = HciAppUartIntrf();
     return true;
 #else
     (void)pApp;
@@ -586,6 +733,7 @@ static void HciAppSetHostOpen(HciApp_t *pApp, bool Open)
     }
 }
 
+#if HCI_APP_HAS_USB
 static bool HciAppUsbHostIsOpen(const HciApp_t *pApp)
 {
     if (pApp == nullptr || pApp->HostType != HCI_APP_HOST_USB)
@@ -609,6 +757,16 @@ static void HciAppStartLogPort(HciApp_t *)
 
     HciTrace("log: usb up\r\n");
 }
+#else
+static bool HciAppUsbHostIsOpen(const HciApp_t *)
+{
+    return false;
+}
+
+static void HciAppStartLogPort(HciApp_t *)
+{
+}
+#endif
 
 static bool HciAppHostStart(void *pContext)
 {
@@ -618,6 +776,7 @@ static bool HciAppHostStart(void *pContext)
         return false;
     }
 
+#if HCI_APP_HAS_USB
     if (pApp->HostType == HCI_APP_HOST_USB)
     {
         if (!UsbEnable(0))
@@ -661,7 +820,11 @@ static bool HciAppHostStart(void *pContext)
                  (unsigned)pApp->HostOpen);
     }
     else
+#endif
     {
+        /* The UART and an IPC host are both open from the start: the owner
+         * of an IPC link is always there, and the other core attaches when it
+         * is ready. */
         if (pApp->UsbRunning)
         {
             HciAppStartLogPort(pApp);
@@ -672,6 +835,7 @@ static bool HciAppHostStart(void *pContext)
     return true;
 }
 
+#if HCI_APP_HAS_USB
 static void HciAppLogPortOpened(HciApp_t *pApp)
 {
     const bool open = s_LogCdc.IsPortOpen();
@@ -687,6 +851,7 @@ static void HciAppLogPortOpened(HciApp_t *pApp)
         HciTrace("log: port open, host=%s\r\n", HciAppHostName(pApp));
     }
 }
+#endif
 
 #ifndef HCI_APP_LINK_IDLE_PASSES
 #define HCI_APP_LINK_IDLE_PASSES 4U
@@ -717,6 +882,7 @@ static void HciAppResyncOnIdle(HciApp_t *pApp)
     }
 }
 
+#if HCI_APP_HAS_USB
 /* Consume diagnostic CDC OUT bytes without interpreting them. This prevents
  * the standard blocking RX FIFO from remaining full under host traffic.
  */
@@ -742,6 +908,11 @@ static void HciAppDrainLog(HciApp_t *pApp)
         (void)HciTraceFlush();
     }
 }
+#else
+static void HciAppDrainLog(HciApp_t *)
+{
+}
+#endif
 
 static void HciAppHostProcess(void *pContext)
 {
@@ -784,6 +955,7 @@ static bool HciAppControllerInit(HciApp_t *pApp,
         return false;
     }
 
+#if HCI_APP_HAS_USB
     if (pApp->UsbHciNative)
     {
         pApp->pHostIntrf = s_HciUsb.Data();
@@ -801,6 +973,7 @@ static bool HciAppControllerInit(HciApp_t *pApp,
     {
         pApp->pHostIntrf = s_HostCdc.Data();
     }
+#endif
 
     return HciControllerInit(&pApp->Controller,
                              pApp->pHostIntrf,
@@ -826,7 +999,7 @@ bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode, HciTarget_t Target)
         Mode == HCI_APP_MODE_UART_H4 &&
         s_pApp == pApp &&
         pApp->HostType == HCI_APP_HOST_UART &&
-        pApp->pHostIntrf == static_cast<DevIntrf_t *>(s_HciUart);
+        pApp->pHostIntrf == HciAppUartIntrf();
 
     if (pApp == nullptr || (s_pApp != nullptr && !earlyUart))
     {
@@ -864,6 +1037,10 @@ bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode, HciTarget_t Target)
     if (hostType == HCI_APP_HOST_USB)
     {
         hostReady = HciAppUsbSetup(pApp, usbMode);
+    }
+    else if (hostType == HCI_APP_HOST_IPC)
+    {
+        hostReady = HciAppInitIpc(pApp);
     }
     else
     {
@@ -1005,12 +1182,14 @@ void HciAppStop(HciApp_t *pApp)
     {
         if (pApp->HostType == HCI_APP_HOST_UART)
         {
-            s_HciUart.Disable();
+            HciAppUartDisable();
         }
-        else
+#if HCI_APP_HAS_USB
+        else if (pApp->HostType == HCI_APP_HOST_USB)
         {
             s_HostCdc.Disable();
         }
+#endif
     }
     HciAppUartRelease(pApp);
     HciAppUsbRelease(pApp);

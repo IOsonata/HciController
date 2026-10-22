@@ -11,6 +11,7 @@ void NVIC_SetPriority(IRQn_Type, uint32_t);
 void NVIC_EnableIRQ(IRQn_Type);
 uint32_t NVIC_GetEnableIRQ(IRQn_Type);
 void NVIC_DisableIRQ(IRQn_Type);
+void NVIC_SystemReset(void);
 #ifdef __cplusplus
 }
 #endif
@@ -26,6 +27,7 @@ typedef struct {
 extern NRF_POWER_Type *NRF_POWER;
 #define __ISB() do { } while (0)
 #define __DSB() do { } while (0)
+#define __WFE() do { } while (0)
 
 /*
  * PRIMASK on the host. The firmware uses it to make a read and clear of the
