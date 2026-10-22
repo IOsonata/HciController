@@ -154,9 +154,9 @@ static bool HciMpslInit(HciNrf5340Net_t *pTarget)
     lfclk.skip_wait_lfclk_started = MPSL_DEFAULT_SKIP_WAIT_LFCLK_STARTED;
 
     /* The low priority line is a real NVIC interrupt, MPSL pends it through
-     * the NVIC. It only wakes the HCI thread, see SWI5_EGU5_IRQHandler.
+     * the NVIC. It only wakes the HCI thread, see SWI0_IRQHandler.
      */
-    const int32_t result = mpsl_init(&lfclk, SWI5_EGU5_IRQn, HciMpslAssert);
+    const int32_t result = mpsl_init(&lfclk, SWI0_IRQn, HciMpslAssert);
     if (result != 0)
     {
         pTarget->LastError = result;
@@ -167,14 +167,14 @@ static bool HciMpslInit(HciNrf5340Net_t *pTarget)
     NVIC_SetPriority(RADIO_IRQn, MPSL_HIGH_IRQ_PRIORITY);
     NVIC_SetPriority(RTC0_IRQn, MPSL_HIGH_IRQ_PRIORITY);
     NVIC_SetPriority(TIMER0_IRQn, MPSL_HIGH_IRQ_PRIORITY);
-    NVIC_SetPriority(POWER_CLOCK_IRQn, HCI_NRF5340_NET_LOW_IRQ_PRIORITY);
-    NVIC_SetPriority(SWI5_EGU5_IRQn, HCI_NRF5340_NET_LOW_IRQ_PRIORITY);
+    NVIC_SetPriority(CLOCK_POWER_IRQn, HCI_NRF5340_NET_LOW_IRQ_PRIORITY);
+    NVIC_SetPriority(SWI0_IRQn, HCI_NRF5340_NET_LOW_IRQ_PRIORITY);
 
     NVIC_EnableIRQ(RADIO_IRQn);
     NVIC_EnableIRQ(RTC0_IRQn);
     NVIC_EnableIRQ(TIMER0_IRQn);
-    NVIC_EnableIRQ(POWER_CLOCK_IRQn);
-    NVIC_EnableIRQ(SWI5_EGU5_IRQn);
+    NVIC_EnableIRQ(CLOCK_POWER_IRQn);
+    NVIC_EnableIRQ(SWI0_IRQn);
 
     return true;
 }
@@ -250,11 +250,11 @@ static void HciStop(void *pContext)
         pTarget->MpslInitialized = false;
     }
 
-    NVIC_DisableIRQ(SWI5_EGU5_IRQn);
+    NVIC_DisableIRQ(SWI0_IRQn);
     NVIC_DisableIRQ(RADIO_IRQn);
     NVIC_DisableIRQ(RTC0_IRQn);
     NVIC_DisableIRQ(TIMER0_IRQn);
-    NVIC_DisableIRQ(POWER_CLOCK_IRQn);
+    NVIC_DisableIRQ(CLOCK_POWER_IRQn);
 
     s_pTarget = nullptr;
 }
@@ -371,7 +371,7 @@ HciTarget_t HciNrf5340NetTarget(void)
 /* MPSL hardware vectors. The low priority work is always deferred to the HCI
  * thread, the vector only wakes it.
  */
-extern "C" void SWI5_EGU5_IRQHandler(void)
+extern "C" void SWI0_IRQHandler(void)
 {
     if (s_pTarget != nullptr && s_pTarget->pRuntime != nullptr)
     {
@@ -394,7 +394,7 @@ extern "C" void TIMER0_IRQHandler(void)
     MPSL_IRQ_TIMER0_Handler();
 }
 
-extern "C" void POWER_CLOCK_IRQHandler(void)
+extern "C" void CLOCK_POWER_IRQHandler(void)
 {
     MPSL_IRQ_CLOCK_Handler();
 }
