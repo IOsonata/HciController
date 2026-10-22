@@ -11,6 +11,7 @@ void NVIC_SetPriority(IRQn_Type, uint32_t);
 void NVIC_EnableIRQ(IRQn_Type);
 uint32_t NVIC_GetEnableIRQ(IRQn_Type);
 void NVIC_DisableIRQ(IRQn_Type);
+void NVIC_SystemReset(void);
 #ifdef __cplusplus
 }
 #endif
@@ -22,10 +23,12 @@ typedef struct {
     volatile uint32_t EVENTS_USBPWRRDY;
     volatile uint32_t RESETREAS;
     volatile uint32_t USBREGSTATUS;
+    volatile uint32_t GPREGRET[2];
 } NRF_POWER_Type;
 extern NRF_POWER_Type *NRF_POWER;
 #define __ISB() do { } while (0)
 #define __DSB() do { } while (0)
+#define __WFE() do { } while (0)
 
 /*
  * PRIMASK on the host. The firmware uses it to make a read and clear of the

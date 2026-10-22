@@ -33,19 +33,41 @@
 extern "C" {
 #endif
 
+/*
+ * A part with no USB device, such as the nRF5340 network core, builds without
+ * the USB host and diagnostic classes: set HCI_APP_HAS_USB to 0. The host is
+ * then the UART or the IPC link to another core.
+ */
+#ifndef HCI_APP_HAS_USB
+#define HCI_APP_HAS_USB             1
+#endif
+
+/* A UART host. A part that reaches its host only through IPC sets it to 0. */
+#ifndef HCI_APP_HAS_UART
+#define HCI_APP_HAS_UART            1
+#endif
+
+/* The host is reached through an IpcIntrf, this part is the IPC owner. */
+#ifndef HCI_APP_HAS_IPC
+#define HCI_APP_HAS_IPC             0
+#endif
+
 #define HCI_APP_PACKET_SIZE         1024U
 #define HCI_APP_COMMAND_EVENT_SIZE  260U
 #define HCI_APP_FIFO_DATA_SIZE      4096U
 #define HCI_APP_FIFO_MEM_SIZE       CFIFO_MEMSIZE(HCI_APP_FIFO_DATA_SIZE)
+#if HCI_APP_HAS_USB
 /* Diagnostic CDC input is consumed without processing. Keep two USB RX
  * packet slots; its TX log retention uses the original full FIFO. */
 #define HCI_APP_LOG_RX_MEM_SIZE      \
     USB_INTRF_RXMEM_SIZE(2U, USBD_CDC_TRANS_WORDS * sizeof(uint32_t))
+#endif
 
 typedef enum
 {
     HCI_APP_HOST_UART = 0,
     HCI_APP_HOST_USB = 1,
+    HCI_APP_HOST_IPC = 2,
 } HciAppHost_t;
 
 /*
@@ -57,6 +79,7 @@ typedef enum
     HCI_APP_MODE_UART_H4 = 0,
     HCI_APP_MODE_USB_H4 = 1,
     HCI_APP_MODE_USB_NATIVE = 2,
+    HCI_APP_MODE_IPC = 3,
 } HciAppMode_t;
 
 typedef struct
@@ -124,19 +147,24 @@ typedef struct
     uint8_t CommandEvent[HCI_APP_COMMAND_EVENT_SIZE];
     uint64_t SdcMem[(HCI_SDC_MEM_SIZE + 7U) / 8U];
 
+#if HCI_APP_HAS_USB || HCI_APP_HAS_UART
     /* UART H:4 and USB HCI are exclusive host modes. These FIFO buffers
      * are reused by whichever host transport is active. The diagnostic
-     * CDC and optional nRF91 UART bridge retain independent storage. */
+     * CDC and optional nRF91 UART bridge retain independent storage. An IPC
+     * host keeps its rings in the shared memory block instead. */
     alignas(4) uint8_t HostRxFifoMem[HCI_APP_FIFO_MEM_SIZE];
     alignas(4) uint8_t HostTxFifoMem[HCI_APP_FIFO_MEM_SIZE];
+#endif
 #if defined(HCI_UART_BRIDGE) && HCI_UART_BRIDGE
     alignas(4) uint8_t BridgeUartRxMem[HCI_APP_FIFO_MEM_SIZE];
     alignas(4) uint8_t BridgeUartTxMem[HCI_APP_FIFO_MEM_SIZE];
     alignas(4) uint8_t BridgeUsbRxMem[HCI_APP_FIFO_MEM_SIZE];
     alignas(4) uint8_t BridgeUsbTxMem[HCI_APP_FIFO_MEM_SIZE];
 #endif
+#if HCI_APP_HAS_USB
     alignas(4) uint8_t LogRxFifoMem[HCI_APP_LOG_RX_MEM_SIZE];
     alignas(4) uint8_t LogTxFifoMem[HCI_APP_FIFO_MEM_SIZE];
+#endif
 
     int LastError;
     bool Initialized;

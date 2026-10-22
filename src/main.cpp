@@ -26,17 +26,22 @@
 #include "coredev/iopincfg.h"
 #include "coredev/system_core_clock.h"
 #include "hci_app.h"
-#if defined(NRF54LM20B_XXAA) || defined(NRF54LM20A_XXAA)
+#if defined(NRF5340_XXAA_NETWORK)
+#include "hci_nrf5340_net.h"
+#define HCI_TARGET_IS_NRF5340_NET 1
+#elif defined(NRF54LM20B_XXAA) || defined(NRF54LM20A_XXAA)
 #include "hci_nrf54lm20.h"
+#define HCI_TARGET_IS_NRF5340_NET 0
 #else
 #include "hci_nrf52840.h"
+#define HCI_TARGET_IS_NRF5340_NET 0
 #endif
 #include "hci_trace.h"
 #include "hci_version.h"
 #include "iopinctrl.h"
 #include "miscdev/led.h"
 
-#if HCI_MODE_SWITCH
+#if HCI_MODE_SWITCH && !HCI_TARGET_IS_NRF5340_NET
 #include "storage/nvm.h"
 #include "storage/nvm_intrf.h"
 #include "storage/nvm_region.h"
@@ -81,7 +86,8 @@ const AppInfo_t g_AppInfo = {
 #define HCI_HOST_SELECT HCI_HOST_SELECT_AUTO
 #endif
 
-#if HCI_HOST_SELECT != HCI_HOST_SELECT_AUTO && \
+#if !HCI_TARGET_IS_NRF5340_NET && \
+    HCI_HOST_SELECT != HCI_HOST_SELECT_AUTO && \
     HCI_HOST_SELECT != HCI_HOST_SELECT_USB && \
     HCI_HOST_SELECT != HCI_HOST_SELECT_UART
 #error "HCI_HOST_SELECT must be HCI_HOST_SELECT_AUTO, _USB or _UART"
@@ -132,8 +138,10 @@ static const IOPinCfg_t s_ModeButtonPin = {
     IOPINTYPE_NORMAL,
 };
 
+#if !HCI_TARGET_IS_NRF5340_NET
 static NvmIntrf s_ModeNvmIntrf;
 static Nvm s_ModeNvm;
+#endif
 static bool s_ModeButtonLatched;
 static uint8_t s_ModeButtonDebounce;
 #endif
@@ -186,6 +194,8 @@ static const char *HciModeName(HciAppMode_t Mode)
             return "usb-h4";
         case HCI_APP_MODE_USB_NATIVE:
             return "usb-native";
+        case HCI_APP_MODE_IPC:
+            return "ipc";
         default:
             return "invalid";
     }
@@ -202,7 +212,10 @@ static HciAppMode_t HciUsbBuildDefaultMode(void)
 
 static HciAppMode_t HciBoardDefaultMode(void)
 {
-#if defined(NRF54LM20B_XXAA) || defined(NRF54LM20A_XXAA)
+#if HCI_TARGET_IS_NRF5340_NET
+    /* The application core is the normal host. UART is for a bench host. */
+    return HCI_APP_MODE_IPC;
+#elif defined(NRF54LM20B_XXAA) || defined(NRF54LM20A_XXAA)
 #if HCI_HOST_SELECT == HCI_HOST_SELECT_UART
     return HCI_APP_MODE_UART_H4;
 #else
@@ -226,7 +239,9 @@ static HciAppMode_t HciBoardDefaultMode(void)
 
 static bool HciModeAllowed(HciAppMode_t Mode)
 {
-#if defined(NRF54LM20B_XXAA) || defined(NRF54LM20A_XXAA)
+#if HCI_TARGET_IS_NRF5340_NET
+    return Mode == HCI_APP_MODE_IPC || Mode == HCI_APP_MODE_UART_H4;
+#elif defined(NRF54LM20B_XXAA) || defined(NRF54LM20A_XXAA)
 #if BOARD == UDG_NRF54LM20
     return Mode == HCI_APP_MODE_USB_H4 || Mode == HCI_APP_MODE_USB_NATIVE;
 #elif BOARD == WILDTHING51_NRF54LM20
@@ -245,7 +260,43 @@ static bool HciModeAllowed(HciAppMode_t Mode)
 #endif
 }
 
-#if HCI_MODE_SWITCH
+#if HCI_MODE_SWITCH && HCI_TARGET_IS_NRF5340_NET
+
+/*
+ * The network core has no NVM interface port. The target keeps the mode in
+ * retained registers, see hci_nrf5340_net.h: it survives the reset a mode
+ * change ends with, a power loss brings back the board default, IPC.
+ */
+static bool HciModeNvmSetup(void)
+{
+    return true;
+}
+
+static HciAppMode_t HciModeNvmLoad(HciAppMode_t Default, bool *pStored)
+{
+    uint8_t mode = 0U;
+    const bool valid = HciNrf5340NetModeLoad(&mode) &&
+                       HciModeAllowed((HciAppMode_t)mode);
+
+    if (pStored != nullptr)
+    {
+        *pStored = valid;
+    }
+
+    return valid ? (HciAppMode_t)mode : Default;
+}
+
+static bool HciModeNvmStore(HciAppMode_t Mode)
+{
+    return HciModeAllowed(Mode) && HciNrf5340NetModeStore((uint8_t)Mode);
+}
+
+static HciAppMode_t HciNextMode(HciAppMode_t Mode)
+{
+    return Mode == HCI_APP_MODE_IPC ? HCI_APP_MODE_UART_H4 : HCI_APP_MODE_IPC;
+}
+
+#elif HCI_MODE_SWITCH
 
 static uint32_t HciModeRecordCheck(const HciModeRecord_t *pRecord)
 {
@@ -357,6 +408,10 @@ static HciAppMode_t HciNextMode(HciAppMode_t Mode)
 #endif
 }
 
+#endif /* mode storage */
+
+#if HCI_MODE_SWITCH
+
 static uint32_t HciModeButtonRaw(void)
 {
     return (uint32_t)IOPinRead(HCI_MODE_BUTTON_PORT, HCI_MODE_BUTTON_PIN);
@@ -462,7 +517,9 @@ int main(void)
     HciUartHostNotReady();
 #endif
     HciTarget_t target =
-#if defined(NRF54LM20B_XXAA) || defined(NRF54LM20A_XXAA)
+#if HCI_TARGET_IS_NRF5340_NET
+        HciNrf5340NetTarget();
+#elif defined(NRF54LM20B_XXAA) || defined(NRF54LM20A_XXAA)
         HciNrf54lm20Target();
 #else
         HciNrf52840Target();
@@ -470,7 +527,9 @@ int main(void)
     const bool earlyUartReady = HciAppUartEarlyInit(&s_HciApp, target);
 #else
     HciTarget_t target =
-#if defined(NRF54LM20B_XXAA) || defined(NRF54LM20A_XXAA)
+#if HCI_TARGET_IS_NRF5340_NET
+        HciNrf5340NetTarget();
+#elif defined(NRF54LM20B_XXAA) || defined(NRF54LM20A_XXAA)
         HciNrf54lm20Target();
 #else
         HciNrf52840Target();
@@ -489,7 +548,8 @@ int main(void)
 #endif
 
     HciTraceInit();
-#if !defined(NRF54LM20B_XXAA) && !defined(NRF54LM20A_XXAA)
+#if !HCI_TARGET_IS_NRF5340_NET && \
+    !defined(NRF54LM20B_XXAA) && !defined(NRF54LM20A_XXAA)
     HciNrf52840ResetTrace();
 #endif
 
@@ -524,7 +584,8 @@ int main(void)
         HciFatal();
     }
 
-#if defined(NRF54LM20B_XXAA) || defined(NRF54LM20A_XXAA)
+#if HCI_TARGET_IS_NRF5340_NET || \
+    defined(NRF54LM20B_XXAA) || defined(NRF54LM20A_XXAA)
     /* nRF54L USB VBUS is managed by the IOsonata USB controller.
      * nRF52 NRF_POWER->USBREGSTATUS does not exist on this target.
      */

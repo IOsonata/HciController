@@ -68,10 +68,20 @@ def main(argv):
         "nRF52840": {
             "include/hci_nrf54lm20.h",
             "src/hci_nrf54lm20.cpp",
+            "include/hci_nrf5340_net.h",
+            "src/hci_nrf5340_net.cpp",
         },
         "nRF54LM20": {
             "include/hci_nrf52840.h",
             "src/hci_nrf52840.cpp",
+            "include/hci_nrf5340_net.h",
+            "src/hci_nrf5340_net.cpp",
+        },
+        "nRF5340_Net": {
+            "include/hci_nrf52840.h",
+            "src/hci_nrf52840.cpp",
+            "include/hci_nrf54lm20.h",
+            "src/hci_nrf54lm20.cpp",
         },
     }
 
