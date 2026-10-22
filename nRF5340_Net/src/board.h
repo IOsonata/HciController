@@ -44,7 +44,9 @@
  *
  * The application core must hand the button and UART pins to the network
  * core (GPIO MCUSEL) before it starts the network core. Pins below are for
- * the nRF5340 DK, change them for another board.
+ * the nRF5340 DK: button 1 is P0.23, the UART is the DK virtual COM port
+ * on P0.19 RTS, P0.20 TXD, P0.21 CTS, P0.22 RXD. Change them for another
+ * board.
  */
 #define HCI_MODE_SWITCH 1
 #define HCI_MODE_BUTTON_PORT 0
@@ -53,16 +55,16 @@
 
 #define UART_DEVNO 0
 #define UART_RX_PORT 0
-#define UART_RX_PIN 28
+#define UART_RX_PIN 22
 #define UART_RX_PINOP 1
 #define UART_TX_PORT 0
-#define UART_TX_PIN 29
+#define UART_TX_PIN 20
 #define UART_TX_PINOP 1
 #define UART_CTS_PORT 0
-#define UART_CTS_PIN 26
+#define UART_CTS_PIN 21
 #define UART_CTS_PINOP 1
 #define UART_RTS_PORT 0
-#define UART_RTS_PIN 27
+#define UART_RTS_PIN 19
 #define UART_RTS_PINOP 1
 #define UART_RATE 1000000
 #define UART_HW_FLOWCTRL 1
