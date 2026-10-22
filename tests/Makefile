@@ -98,6 +98,8 @@ IPC_SOURCES := $(UNIT)/hci_controller_ipc_test.cpp \
                $(SRC)/hci_intrf_transport.cpp \
                $(SRC)/hci_h4.cpp \
                $(IOSONATA_ROOT)/src/ipc/ipc_intrf.cpp \
+               $(IOSONATA_ROOT)/src/bluetooth/bt_hci_ipc.cpp \
+               $(IOSONATA_ROOT)/src/bluetooth/bt_hci_h4.cpp \
                $(IOSONATA_ROOT)/src/device_intrf.cpp \
                $(STUBS)/hci_trace_stub.cpp \
                $(BUILD_DIR)/ipc/cfifo.o
@@ -211,9 +213,10 @@ $(BUILD_DIR)/ipc/cfifo.o: $(IOSONATA_ROOT)/src/cfifo.c $(IOSONATA_ROOT)/include/
 	$(CC) -I$(IOSONATA_ROOT)/include $(CFLAGS) -c $< -o $@
 
 $(IPC_TARGET): $(IPC_SOURCES) $(HEADERS) $(IOSONATA_ROOT)/include/ipc/ipc_intrf.h \
-               | check-root
+               $(IOSONATA_ROOT)/include/bluetooth/bt_hci_ipc.h | check-root
 	@mkdir -p $(dir $@)
 	$(CXX) -I$(IOSONATA_ROOT)/include -I$(ROOT)/include -I$(STUBS)/nrfficr \
+	  -I$(IOSONATA_ROOT)/tests/dfu/hostport \
 	  $(MOCK_DEFINES) -DHCI_TRACE=0 $(CXXFLAGS) \
 	  $(filter %.cpp %.o,$^) -o $@
 
@@ -246,7 +249,7 @@ $(BUILD_DIR)/logport/%.o: $(SRC)/%.cpp $(HEADERS) | check-root
 $(BUILD_DIR)/ipchost/%.o: $(SRC)/%.cpp $(HEADERS) | check-root
 	@mkdir -p $(dir $@)
 	$(CXX) $(MOCK_INCLUDES) $(MOCK_DEFINES) -DHCI_TRACE=1 \
-	  -DHCI_APP_HAS_USB=0 -DHCI_APP_HAS_UART=0 -DHCI_APP_HAS_IPC=1 \
+	  -DHCI_APP_HAS_USB=0 -DHCI_APP_HAS_UART=1 -DHCI_APP_HAS_IPC=1 \
 	  -DHCI_IPC_MEM_ADDR=0x20070000UL -DHCI_IPC_MEM_SIZE=0x10000UL \
 	  $(CXXFLAGS) -c $< -o $@
 

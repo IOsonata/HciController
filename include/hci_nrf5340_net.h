@@ -47,6 +47,15 @@ typedef struct
  */
 HciTarget_t HciNrf5340NetTarget(void);
 
+/*
+ * Host transport mode kept across a reset. The network core has no NVM
+ * interface port, so the mode is held in the two retained general purpose
+ * registers: it survives a reset of the network core, not a power loss.
+ * These registers are not shared with any bootloader on this core.
+ */
+bool HciNrf5340NetModeLoad(uint8_t *pMode);
+bool HciNrf5340NetModeStore(uint8_t Mode);
+
 #ifdef __cplusplus
 }
 #endif

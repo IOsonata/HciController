@@ -79,7 +79,7 @@ typedef enum
     HCI_APP_MODE_UART_H4 = 0,
     HCI_APP_MODE_USB_H4 = 1,
     HCI_APP_MODE_USB_NATIVE = 2,
-    HCI_APP_MODE_IPC_H4 = 3,
+    HCI_APP_MODE_IPC = 3,
 } HciAppMode_t;
 
 typedef struct

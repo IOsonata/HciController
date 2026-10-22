@@ -2,13 +2,17 @@
  * Copyright (c) 2026 I-SYST inc.
  * SPDX-License-Identifier: MPL-2.0
  *
- * HciController with an IpcIntrf host. The controller side is the IPC owner,
- * the host side is the peer, as on the nRF5340: HciControllerInit takes the
- * IpcIntrf the way it takes the UART or the CDC, and H:4 crosses the rings.
+ * HciController with a BtHciIpc host. The controller side is the IPC owner,
+ * the host side is the peer, as on the nRF5340. BtHciIpc is a packet
+ * interface like native USB: HciControllerInitPacketTransport takes it, one
+ * ring slot is one HCI packet and DevAddr is the packet type. The host side
+ * here is a plain IpcIntrf peer that writes and reads slots as the app core
+ * does, so the slot format is checked from outside the transport code.
  * The controller itself is a fake that records what it is given.
  */
 
 #include "hci_controller.h"
+#include "bluetooth/bt_hci_ipc.h"
 #include "ipc/ipc_intrf.h"
 
 #include <stdio.h>
@@ -16,8 +20,8 @@
 
 #include "../stubs/ipc_sync_port.h"
 
-#define RING_BYTES 256U
-#define MEM_BYTES  IPC_INTRF_MEMSIZE(RING_BYTES, 0U, RING_BYTES, 0U)
+#define NB_SLOT    4U
+#define MEM_BYTES  BT_HCI_IPC_MEMSIZE(NB_SLOT)
 
 static int g_Pass;
 static int g_Fail;
@@ -92,13 +96,23 @@ static bool QueueOut(HciH4PacketType_t Type, const uint8_t *pPacket, size_t Len)
 }
 
 alignas(8) static uint8_t s_Mem[MEM_BYTES];
-static IpcIntrfDev_t s_Owner;
+static BtHciIpcIntrfDev_t s_Owner;
 static IpcIntrfDev_t s_Peer;
 static HciController_t s_Hci;
-static uint8_t s_HostPacket[HCI_INTRF_TX_STREAM_SIZE - 1U];
-static uint8_t s_CtrlPacket[HCI_INTRF_TX_STREAM_SIZE - 1U];
+static uint8_t s_HostPacket[BT_HCI_IPC_PKT_MAXLEN];
+static uint8_t s_CtrlPacket[BT_HCI_IPC_PKT_MAXLEN];
+static unsigned s_RxEvt;
 
-static int IpcEvt(DevIntrf_t *, DEVINTRF_EVT, uint8_t *, int Len)
+static int IpcEvt(DevIntrf_t *, DEVINTRF_EVT Evt, uint8_t *, int Len)
+{
+    if (Evt == DEVINTRF_EVT_RX_DATA)
+    {
+        s_RxEvt++;
+    }
+    return Len;
+}
+
+static int PeerEvt(DevIntrf_t *, DEVINTRF_EVT, uint8_t *, int Len)
 {
     return Len;
 }
@@ -106,14 +120,15 @@ static int IpcEvt(DevIntrf_t *, DEVINTRF_EVT, uint8_t *, int Len)
 static bool Setup(void)
 {
     memset(&g_Ctrl, 0, sizeof(g_Ctrl));
+    memset(s_pIpcByRx, 0, sizeof(s_pIpcByRx));
     memset(s_Mem, 0xA5, sizeof(s_Mem));
+    s_RxEvt = 0;
 
-    IpcIntrfCfg_t oc = {};
+    BtHciIpcIntrfCfg_t oc = {};
     oc.pMemBlk = s_Mem;
     oc.MemSize = sizeof(s_Mem);
     oc.bOwner = true;
-    oc.TxNbBlk = RING_BYTES;
-    oc.RxNbBlk = RING_BYTES;
+    oc.NbPkt = NB_SLOT;
     oc.TxChan = 0;
     oc.RxChan = 1;
     oc.IntPrio = 6;
@@ -126,21 +141,21 @@ static bool Setup(void)
     pc.TxChan = 1;
     pc.RxChan = 0;
     pc.IntPrio = 6;
-    pc.EvtCB = IpcEvt;
+    pc.EvtCB = PeerEvt;
 
-    if (!IpcIntrfInit(&s_Owner, &oc) || !IpcIntrfInit(&s_Peer, &pc))
+    if (!BtHciIpcIntrfInit(&s_Owner, &oc) || !IpcIntrfInit(&s_Peer, &pc))
     {
         return false;
     }
-    s_Owner.DevIntrf.MaxRetry = 1;
     s_Peer.DevIntrf.MaxRetry = 1;
 
     HciControllerOps_t ops = {};
     ops.Put = FakePut;
     ops.Get = FakeGet;
 
-    if (!HciControllerInit(&s_Hci, &s_Owner.DevIntrf, s_HostPacket, sizeof(s_HostPacket),
-                           s_CtrlPacket, sizeof(s_CtrlPacket), &ops))
+    if (!HciControllerInitPacketTransport(&s_Hci, BtHciIpcIntrfGet(&s_Owner),
+                                          s_HostPacket, sizeof(s_HostPacket),
+                                          s_CtrlPacket, sizeof(s_CtrlPacket), &ops))
     {
         return false;
     }
@@ -157,9 +172,14 @@ static void Run(unsigned Passes)
     }
 }
 
-static int HostTx(const uint8_t *pData, int Len)
+/* One slot: the type byte then the HCI packet. */
+static int HostTx(uint8_t Type, const uint8_t *pPkt, int Len)
 {
-    return DeviceIntrfTx(&s_Peer.DevIntrf, 0, pData, Len);
+    uint8_t slot[1 + BT_HCI_IPC_PKT_MAXLEN];
+
+    slot[0] = Type;
+    memcpy(slot + 1, pPkt, (size_t)Len);
+    return DeviceIntrfTx(&s_Peer.DevIntrf, 0, slot, Len + 1);
 }
 
 static int HostRx(uint8_t *pData, int Len)
@@ -173,16 +193,17 @@ static void TestCommandEvent(void)
     CHECK(Setup());
     CHECK(IpcIntrfIsUp(&s_Peer));
 
-    const uint8_t reset[] = { 0x01, 0x03, 0x0C, 0x00 };
+    const uint8_t reset[] = { 0x03, 0x0C, 0x00 };
     const uint8_t evt[] = { 0x0E, 0x04, 0x01, 0x03, 0x0C, 0x00 };
     uint8_t in[32];
 
-    CHECK(HostTx(reset, sizeof(reset)) == (int)sizeof(reset));
+    CHECK(HostTx(0x01, reset, sizeof(reset)) == (int)sizeof(reset) + 1);
+    CHECK(s_RxEvt >= 1U);
     Run(4);
     CHECK(g_Ctrl.PutCnt == 1U);
     CHECK(g_Ctrl.LastType == HCI_H4_PACKET_COMMAND);
     CHECK(g_Ctrl.LastLen == 3U);
-    CHECK(memcmp(g_Ctrl.LastPacket, reset + 1, 3) == 0);
+    CHECK(memcmp(g_Ctrl.LastPacket, reset, 3) == 0);
 
     CHECK(QueueOut(HCI_H4_PACKET_EVENT, evt, sizeof(evt)));
     Run(4);
@@ -191,24 +212,24 @@ static void TestCommandEvent(void)
     CHECK(memcmp(in + 1, evt, sizeof(evt)) == 0);
 }
 
-static void TestSplitCommand(void)
+static void TestBadSlot(void)
 {
-    printf("a command that arrives in pieces\n");
+    printf("a slot that is not a whole packet is dropped\n");
     CHECK(Setup());
 
-    const uint8_t cmd[] = { 0x01, 0x20, 0x20, 0x03, 0x11, 0x22, 0x33 };
+    /* Unknown type, then a command whose length byte says 3 but carries 1. */
+    const uint8_t junk[] = { 0x11, 0x22, 0x33 };
+    const uint8_t shortCmd[] = { 0x20, 0x20, 0x03, 0x11 };
+    const uint8_t good[] = { 0x20, 0x20, 0x03, 0x11, 0x22, 0x33 };
 
-    CHECK(HostTx(cmd, 2) == 2);
-    Run(3);
-    CHECK(g_Ctrl.PutCnt == 0U);
-    CHECK(HostTx(cmd + 2, 3) == 3);
-    Run(3);
-    CHECK(g_Ctrl.PutCnt == 0U);
-    CHECK(HostTx(cmd + 5, 2) == 2);
-    Run(3);
+    CHECK(HostTx(0x77, junk, sizeof(junk)) == (int)sizeof(junk) + 1);
+    CHECK(HostTx(0x01, shortCmd, sizeof(shortCmd)) == (int)sizeof(shortCmd) + 1);
+    CHECK(HostTx(0x01, good, sizeof(good)) == (int)sizeof(good) + 1);
+    Run(6);
     CHECK(g_Ctrl.PutCnt == 1U);
-    CHECK(g_Ctrl.LastLen == 6U);
-    CHECK(memcmp(g_Ctrl.LastPacket, cmd + 1, 6) == 0);
+    CHECK(g_Ctrl.LastLen == sizeof(good));
+    CHECK(memcmp(g_Ctrl.LastPacket, good, sizeof(good)) == 0);
+    CHECK(s_Owner.SyncErrCnt == 2U);
 }
 
 static void TestAcl(void)
@@ -218,22 +239,21 @@ static void TestAcl(void)
 
     for (unsigned round = 0; round < 12; round++)
     {
-        uint8_t down[5 + 120];
-        down[0] = 0x02;
-        down[1] = 0x40;
-        down[2] = 0x00;
-        down[3] = 120;
-        down[4] = 0x00;
+        uint8_t down[4 + 120];
+        down[0] = 0x40;
+        down[1] = 0x00;
+        down[2] = 120;
+        down[3] = 0x00;
         for (unsigned i = 0; i < 120; i++)
         {
-            down[5 + i] = (uint8_t)(round * 13U + i);
+            down[4 + i] = (uint8_t)(round * 13U + i);
         }
-        CHECK(HostTx(down, sizeof(down)) == (int)sizeof(down));
+        CHECK(HostTx(0x02, down, sizeof(down)) == (int)sizeof(down) + 1);
         Run(4);
         CHECK(g_Ctrl.PutCnt == round + 1U);
         CHECK(g_Ctrl.LastType == HCI_H4_PACKET_ACL);
-        CHECK(g_Ctrl.LastLen == sizeof(down) - 1U);
-        CHECK(memcmp(g_Ctrl.LastPacket, down + 1, sizeof(down) - 1U) == 0);
+        CHECK(g_Ctrl.LastLen == sizeof(down));
+        CHECK(memcmp(g_Ctrl.LastPacket, down, sizeof(down)) == 0);
 
         uint8_t up[4 + 100];
         up[0] = 0x40;
@@ -247,7 +267,7 @@ static void TestAcl(void)
         CHECK(QueueOut(HCI_H4_PACKET_ACL, up, sizeof(up)));
         Run(4);
 
-        uint8_t in[200];
+        uint8_t in[300];
         CHECK(HostRx(in, sizeof(in)) == (int)(sizeof(up) + 1U));
         CHECK(in[0] == 0x02);
         CHECK(memcmp(in + 1, up, sizeof(up)) == 0);
@@ -259,7 +279,8 @@ static void TestFullRing(void)
     printf("full ring: nothing lost, order kept\n");
     CHECK(Setup());
 
-    // Eight events of 60 bytes do not fit the 256 byte ring at once.
+    /* Eight events, four slots: the controller keeps one pending until the
+     * host frees a slot instead of dropping it. */
     uint8_t evt[2 + 58];
     evt[0] = 0xFF;
     evt[1] = 58;
@@ -269,42 +290,36 @@ static void TestFullRing(void)
         CHECK(QueueOut(HCI_H4_PACKET_EVENT, evt, sizeof(evt)));
     }
 
-    // The host reads nothing yet: the controller side keeps a packet pending
-    // instead of dropping it.
     Run(40);
     CHECK(s_Hci.UnsendableControllerPacketCount == 0U);
 
-    static uint8_t acc[8 * 61 + 64];
-    size_t have = 0;
+    unsigned got = 0;
 
-    for (unsigned pass = 0; pass < 80 && have < 8U * 61U; pass++)
+    for (unsigned pass = 0; pass < 80 && got < 8U; pass++)
     {
-        int n = HostRx(acc + have, 37);
+        uint8_t in[300];
+        int n = HostRx(in, sizeof(in));
 
         if (n > 0)
         {
-            have += (size_t)n;
+            CHECK(n == 61);
+            CHECK(in[0] == 0x04);
+            CHECK(in[1] == 0xFF);
+            CHECK(in[2] == 58);
+            CHECK(in[3] == (uint8_t)(0x10 + got));
+            CHECK(in[60] == (uint8_t)(0x10 + got));
+            got++;
         }
         Run(4);
     }
 
-    CHECK(have == 8U * 61U);
-    for (unsigned n = 0; n < 8U && have >= (n + 1U) * 61U; n++)
-    {
-        const uint8_t *p = acc + n * 61U;
-
-        CHECK(p[0] == 0x04);
-        CHECK(p[1] == 0xFF);
-        CHECK(p[2] == 58);
-        CHECK(p[3] == (uint8_t)(0x10 + n));
-        CHECK(p[60] == (uint8_t)(0x10 + n));
-    }
+    CHECK(got == 8U);
 }
 
 int main(void)
 {
     TestCommandEvent();
-    TestSplitCommand();
+    TestBadSlot();
     TestAcl();
     TestFullRing();
 

@@ -5,11 +5,12 @@
 ### Host transports
 
 - Added an IPC host transport for the nRF5340 network core (`nRF5340_Net`
-  target). HciController owns the shared IpcIntrf memory block and carries H:4
-  packets over two byte rings; the application core attaches as the peer. USB
-  and UART code in `hci_app.cpp` can be left out with `HCI_APP_HAS_USB=0` and
-  `HCI_APP_HAS_UART=0`. SDC resource counts can be overridden with `-D` for
-  the 64 KB network core RAM.
+  target). It is IOsonata's `BtHciIpc` packet interface: one ring slot is one
+  HCI packet, no H:4 framing. HciController owns the shared memory block and
+  the application core attaches as the peer. The host link swaps between IPC
+  and H:4 over UART with the mode button. USB and UART code in `hci_app.cpp`
+  can be left out with `HCI_APP_HAS_USB=0` and `HCI_APP_HAS_UART=0`. SDC
+  resource counts can be overridden with `-D` for the 64 KB network core RAM.
 - Reduced static RAM by sharing the mutually exclusive HCI host UART and USB
   transport FIFOs. The diagnostic CDC transmit buffering remains independent;
   diagnostic input is consumed and discarded.

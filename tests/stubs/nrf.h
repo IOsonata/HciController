@@ -23,6 +23,7 @@ typedef struct {
     volatile uint32_t EVENTS_USBPWRRDY;
     volatile uint32_t RESETREAS;
     volatile uint32_t USBREGSTATUS;
+    volatile uint32_t GPREGRET[2];
 } NRF_POWER_Type;
 extern NRF_POWER_Type *NRF_POWER;
 #define __ISB() do { } while (0)

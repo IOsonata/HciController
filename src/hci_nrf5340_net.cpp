@@ -398,3 +398,30 @@ extern "C" void POWER_CLOCK_IRQHandler(void)
 {
     MPSL_IRQ_CLOCK_Handler();
 }
+
+#define HCI_NET_MODE_TAG 0xA0U
+
+bool HciNrf5340NetModeLoad(uint8_t *pMode)
+{
+    const uint32_t tag = NRF_POWER->GPREGRET[0];
+    const uint32_t check = NRF_POWER->GPREGRET[1];
+
+    if (pMode == nullptr || (tag & 0xF0U) != HCI_NET_MODE_TAG ||
+        check != ((~tag) & 0xFFU))
+    {
+        return false;
+    }
+
+    *pMode = (uint8_t)(tag & 0x0FU);
+    return true;
+}
+
+bool HciNrf5340NetModeStore(uint8_t Mode)
+{
+    const uint32_t tag = HCI_NET_MODE_TAG | ((uint32_t)Mode & 0x0FU);
+
+    NRF_POWER->GPREGRET[0] = tag;
+    NRF_POWER->GPREGRET[1] = (~tag) & 0xFFU;
+
+    return NRF_POWER->GPREGRET[0] == tag;
+}

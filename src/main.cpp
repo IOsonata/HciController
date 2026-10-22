@@ -41,7 +41,7 @@
 #include "iopinctrl.h"
 #include "miscdev/led.h"
 
-#if HCI_MODE_SWITCH
+#if HCI_MODE_SWITCH && !HCI_TARGET_IS_NRF5340_NET
 #include "storage/nvm.h"
 #include "storage/nvm_intrf.h"
 #include "storage/nvm_region.h"
@@ -138,8 +138,10 @@ static const IOPinCfg_t s_ModeButtonPin = {
     IOPINTYPE_NORMAL,
 };
 
+#if !HCI_TARGET_IS_NRF5340_NET
 static NvmIntrf s_ModeNvmIntrf;
 static Nvm s_ModeNvm;
+#endif
 static bool s_ModeButtonLatched;
 static uint8_t s_ModeButtonDebounce;
 #endif
@@ -192,8 +194,8 @@ static const char *HciModeName(HciAppMode_t Mode)
             return "usb-h4";
         case HCI_APP_MODE_USB_NATIVE:
             return "usb-native";
-        case HCI_APP_MODE_IPC_H4:
-            return "ipc-h4";
+        case HCI_APP_MODE_IPC:
+            return "ipc";
         default:
             return "invalid";
     }
@@ -211,7 +213,8 @@ static HciAppMode_t HciUsbBuildDefaultMode(void)
 static HciAppMode_t HciBoardDefaultMode(void)
 {
 #if HCI_TARGET_IS_NRF5340_NET
-    return HCI_APP_MODE_IPC_H4;
+    /* The application core is the normal host. UART is for a bench host. */
+    return HCI_APP_MODE_IPC;
 #elif defined(NRF54LM20B_XXAA) || defined(NRF54LM20A_XXAA)
 #if HCI_HOST_SELECT == HCI_HOST_SELECT_UART
     return HCI_APP_MODE_UART_H4;
@@ -237,7 +240,7 @@ static HciAppMode_t HciBoardDefaultMode(void)
 static bool HciModeAllowed(HciAppMode_t Mode)
 {
 #if HCI_TARGET_IS_NRF5340_NET
-    return Mode == HCI_APP_MODE_IPC_H4;
+    return Mode == HCI_APP_MODE_IPC || Mode == HCI_APP_MODE_UART_H4;
 #elif defined(NRF54LM20B_XXAA) || defined(NRF54LM20A_XXAA)
 #if BOARD == UDG_NRF54LM20
     return Mode == HCI_APP_MODE_USB_H4 || Mode == HCI_APP_MODE_USB_NATIVE;
@@ -257,7 +260,43 @@ static bool HciModeAllowed(HciAppMode_t Mode)
 #endif
 }
 
-#if HCI_MODE_SWITCH
+#if HCI_MODE_SWITCH && HCI_TARGET_IS_NRF5340_NET
+
+/*
+ * The network core has no NVM interface port. The target keeps the mode in
+ * retained registers, see hci_nrf5340_net.h: it survives the reset a mode
+ * change ends with, a power loss brings back the board default, IPC.
+ */
+static bool HciModeNvmSetup(void)
+{
+    return true;
+}
+
+static HciAppMode_t HciModeNvmLoad(HciAppMode_t Default, bool *pStored)
+{
+    uint8_t mode = 0U;
+    const bool valid = HciNrf5340NetModeLoad(&mode) &&
+                       HciModeAllowed((HciAppMode_t)mode);
+
+    if (pStored != nullptr)
+    {
+        *pStored = valid;
+    }
+
+    return valid ? (HciAppMode_t)mode : Default;
+}
+
+static bool HciModeNvmStore(HciAppMode_t Mode)
+{
+    return HciModeAllowed(Mode) && HciNrf5340NetModeStore((uint8_t)Mode);
+}
+
+static HciAppMode_t HciNextMode(HciAppMode_t Mode)
+{
+    return Mode == HCI_APP_MODE_IPC ? HCI_APP_MODE_UART_H4 : HCI_APP_MODE_IPC;
+}
+
+#elif HCI_MODE_SWITCH
 
 static uint32_t HciModeRecordCheck(const HciModeRecord_t *pRecord)
 {
@@ -368,6 +407,10 @@ static HciAppMode_t HciNextMode(HciAppMode_t Mode)
     }
 #endif
 }
+
+#endif /* mode storage */
+
+#if HCI_MODE_SWITCH
 
 static uint32_t HciModeButtonRaw(void)
 {

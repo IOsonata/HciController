@@ -23,7 +23,7 @@
 #include "sdc_hci.h"
 
 #if HCI_APP_HAS_IPC
-#include "ipc/ipc_intrf.h"
+#include "bluetooth/bt_hci_ipc.h"
 #endif
 
 static_assert(HCI_APP_PACKET_SIZE + 1U <= HCI_INTRF_TX_STREAM_SIZE,
@@ -317,11 +317,12 @@ static int HciAppUartEvent(UARTDev_t * const,
 
 #if HCI_APP_HAS_IPC
 /*
- * The host is on another core, reached through an IpcIntrf. HciController is
- * the service provider, so it is the IPC owner: it partitions and formats the
- * shared memory block and the host core attaches to what it finds there. The
- * rings are byte streams carrying H:4, so the same HciIntrfTransport that
- * serves the UART serves this link.
+ * The host is on another core, reached through BtHciIpc (IOsonata). It is a
+ * packet interface like native USB: one ring slot is one HCI packet and
+ * DevAddr is the packet type, so nothing is framed from a byte stream.
+ * HciController is the service provider, so it is the IPC owner: it
+ * partitions and formats the shared memory block and the host core attaches
+ * to what it finds there.
  */
 #ifndef HCI_IPC_MEM_ADDR
 #error "board.h must define HCI_IPC_MEM_ADDR, the shared memory block address"
@@ -329,8 +330,8 @@ static int HciAppUartEvent(UARTDev_t * const,
 #ifndef HCI_IPC_MEM_SIZE
 #error "board.h must define HCI_IPC_MEM_SIZE, the shared memory block size"
 #endif
-#ifndef HCI_IPC_RING_BYTES
-#define HCI_IPC_RING_BYTES        2048U
+#ifndef HCI_IPC_NB_PKT
+#define HCI_IPC_NB_PKT            8U
 #endif
 #ifndef HCI_IPC_TX_CHAN
 #define HCI_IPC_TX_CHAN           0
@@ -342,11 +343,13 @@ static int HciAppUartEvent(UARTDev_t * const,
 #define HCI_IPC_IRQ_PRIORITY      6
 #endif
 
-static_assert(IPC_INTRF_MEMSIZE(HCI_IPC_RING_BYTES, 0U, HCI_IPC_RING_BYTES, 0U) <=
-              HCI_IPC_MEM_SIZE,
+static_assert(BT_HCI_IPC_MEMSIZE(HCI_IPC_NB_PKT) <= HCI_IPC_MEM_SIZE,
               "the IPC rings do not fit the shared memory block");
+static_assert(BT_HCI_IPC_PKT_MAXLEN >= HCI_MSG_BUFFER_MAX_SIZE &&
+              BT_HCI_IPC_PKT_MAXLEN >= HCI_SDC_ISO_PACKET_SIZE,
+              "an IPC slot must hold the largest packet the controller sends");
 
-static IpcIntrf s_HciIpc;
+static BtHciIpcIntrf s_HciIpc;
 
 /* RX data and TX room are the two reasons to run the host side again. */
 static int HciAppIpcEvent(DevIntrf_t *, DEVINTRF_EVT, uint8_t *, int Len)
@@ -357,15 +360,12 @@ static int HciAppIpcEvent(DevIntrf_t *, DEVINTRF_EVT, uint8_t *, int Len)
 
 static bool HciAppInitIpc(HciApp_t *pApp)
 {
-    IpcIntrfCfg_t cfg = {};
+    BtHciIpcIntrfCfg_t cfg = {};
 
     cfg.pMemBlk = reinterpret_cast<uint8_t *>(HCI_IPC_MEM_ADDR);
     cfg.MemSize = HCI_IPC_MEM_SIZE;
     cfg.bOwner = true;
-    cfg.TxNbBlk = HCI_IPC_RING_BYTES;   /* controller to host */
-    cfg.TxBlkSize = 0U;
-    cfg.RxNbBlk = HCI_IPC_RING_BYTES;   /* host to controller */
-    cfg.RxBlkSize = 0U;
+    cfg.NbPkt = HCI_IPC_NB_PKT;
     cfg.TxChan = HCI_IPC_TX_CHAN;
     cfg.RxChan = HCI_IPC_RX_CHAN;
     cfg.IntPrio = HCI_IPC_IRQ_PRIORITY;
@@ -376,8 +376,6 @@ static bool HciAppInitIpc(HciApp_t *pApp)
         return false;
     }
 
-    /* An empty read ends the polling loop at once. */
-    s_HciIpc.Data()->MaxRetry = 1;
     pApp->pHostIntrf = s_HciIpc.Data();
     return true;
 }
@@ -432,7 +430,7 @@ static bool HciAppResolveMode(HciAppMode_t Mode,
             *pUsbMode = HCI_USB_DESCRIPTOR_NATIVE_HCI;
             return true;
 
-        case HCI_APP_MODE_IPC_H4:
+        case HCI_APP_MODE_IPC:
             *pHostType = HCI_APP_HOST_IPC;
             *pUsbMode = HCI_USB_DESCRIPTOR_LOG_ONLY;
             return true;
@@ -972,6 +970,19 @@ static bool HciAppControllerInit(HciApp_t *pApp,
     if (pApp->HostType == HCI_APP_HOST_USB)
     {
         pApp->pHostIntrf = s_HostCdc.Data();
+    }
+#endif
+
+#if HCI_APP_HAS_IPC
+    if (pApp->HostType == HCI_APP_HOST_IPC)
+    {
+        return HciControllerInitPacketTransport(&pApp->Controller,
+                                                pApp->pHostIntrf,
+                                                pApp->HostPacket,
+                                                sizeof(pApp->HostPacket),
+                                                pApp->ControllerPacket,
+                                                sizeof(pApp->ControllerPacket),
+                                                pControllerOps);
     }
 #endif
 
