@@ -56,7 +56,6 @@ static HciApp_t *s_pApp;
 __attribute__((weak)) bool HciHostUartInit(HciApp_t *) { return false; }
 __attribute__((weak)) void HciHostUartRelease(HciApp_t *) {}
 __attribute__((weak)) bool HciHostUartLogOpen(HciApp_t *) { return false; }
-__attribute__((weak)) void HciHostIpcMonitor(void) {}
 __attribute__((weak)) bool HciHostUsbSetup(HciApp_t *) { return false; }
 __attribute__((weak)) void HciHostUsbRelease(HciApp_t *) {}
 __attribute__((weak)) bool HciHostUsbStart(HciApp_t *) { return false; }
@@ -363,7 +362,7 @@ bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode)
 
     if (!pApp->Sdc.Init(pApp->CommandEvent, sizeof(pApp->CommandEvent), &pApp->Counters))
     {
-        HciTrace("init: HciSdcNrfxlibInit failed\r\n");
+        HciTraceError("init: HciSdcNrfxlibInit failed\r\n");
         pApp->LastError = -1;
         s_pApp = nullptr;
         return false;
@@ -381,14 +380,14 @@ bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode)
     if (hostReady && hostType != HCI_APP_HOST_USB && HCI_USB_SOCKET &&
         !HciHostUsbSetup(pApp))
     {
-        HciTrace("init: log port setup failed, running without it\r\n");
+        HciTraceError("init: log port setup failed, running without it\r\n");
         pApp->UsbRunning = false;
     }
 
     if (!hostReady)
     {
         HciAppHostRelease(pApp);
-        HciTrace("init: host interface failed type=%u\r\n", (unsigned)hostType);
+        HciTraceError("init: host interface failed type=%u\r\n", (unsigned)hostType);
         pApp->LastError = -2;
         s_pApp = nullptr;
         return false;
@@ -396,7 +395,7 @@ bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode)
 
     if (!HciAppControllerInit(pApp, pApp->Sdc))
     {
-        HciTrace("init: controller transport failed host=%s\r\n",
+        HciTraceError("init: controller transport failed host=%s\r\n",
                  HciAppHostName(pApp));
         pApp->LastError = -3;
         HciAppHostRelease(pApp);
@@ -421,7 +420,7 @@ bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode)
                        reinterpret_cast<uint8_t *>(pApp->SdcMem),
                        sizeof(pApp->SdcMem)))
     {
-        HciTrace("init: target Init failed\r\n");
+        HciTraceError("init: target Init failed\r\n");
         pApp->LastError = -4;
         HciAppHostRelease(pApp);
         s_pApp = nullptr;
@@ -436,7 +435,7 @@ bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode)
     if (!HciTaktOsInit(&pApp->Runtime,
                        pApp->UsbRunning ? HCI_APP_USB_POLL_MS : 0U))
     {
-        HciTrace("init: HciTaktOsInit failed\r\n");
+        HciTraceError("init: HciTaktOsInit failed\r\n");
         pApp->LastError = -5;
         HciAppHostRelease(pApp);
         s_pApp = nullptr;

@@ -73,59 +73,14 @@ bool HciHostIpcInit(HciApp_t *pApp)
 
     if (!s_HciIpc.Init(cfg))
     {
-        HciTrace("ipc: owner init failed addr=0x%08lX size=%lu pkt=%u\r\n",
+        HciTraceError("ipc: owner init failed addr=0x%08lX size=%lu pkt=%u\r\n",
                  (unsigned long)HCI_IPC_MEM_ADDR,
                  (unsigned long)HCI_IPC_MEM_SIZE, (unsigned)HCI_IPC_NB_PKT);
         return false;
     }
 
-    /* The first words of the block show whether it was formatted. */
-    const volatile IpcIntrfHdr_t *pHdr =
-        reinterpret_cast<const volatile IpcIntrfHdr_t *>(HCI_IPC_MEM_ADDR);
-    HciTrace("ipc: owner addr=0x%08lX size=%lu pkt=%u tx=%d rx=%d magic=0x%08lX ver=%lu\r\n",
-             (unsigned long)HCI_IPC_MEM_ADDR, (unsigned long)HCI_IPC_MEM_SIZE,
-             (unsigned)HCI_IPC_NB_PKT, HCI_IPC_TX_CHAN, HCI_IPC_RX_CHAN,
-             (unsigned long)pHdr->Magic, (unsigned long)pHdr->Version);
-
     pApp->pHostIntrf = s_HciIpc.Data();
     return true;
-}
-
-/* Link state of the shared block, traced when it changes: the app core
- * attaching moves the ring indexes and the wait words. */
-void HciHostIpcMonitor(void)
-{
-    static uint32_t s_Last[6];
-    static bool s_First = true;
-    static uint8_t s_Printed;
-    const volatile IpcIntrfHdr_t *pHdr =
-        reinterpret_cast<const volatile IpcIntrfHdr_t *>(HCI_IPC_MEM_ADDR);
-
-    /* A few lines show the link coming up. After that the indexes move with
-     * every packet and the lines would only fill the trace output. */
-    if (s_Printed >= 6U || pHdr->Magic != IPC_INTRF_MAGIC)
-    {
-        return;
-    }
-
-    const volatile CFifo_t *pOut = reinterpret_cast<const volatile CFifo_t *>(
-        HCI_IPC_MEM_ADDR + pHdr->Ring[0].Off);
-    const volatile CFifo_t *pIn = reinterpret_cast<const volatile CFifo_t *>(
-        HCI_IPC_MEM_ADDR + pHdr->Ring[1].Off);
-    uint32_t now[6] = { pHdr->Epoch, pOut->PutIdx, pOut->GetIdx,
-                        pIn->PutIdx, pIn->GetIdx,
-                        pHdr->Wait[0] | (pHdr->Wait[1] << 1) };
-
-    if (!s_First && memcmp(now, s_Last, sizeof(now)) == 0)
-    {
-        return;
-    }
-    s_First = false;
-    s_Printed++;
-    memcpy(s_Last, now, sizeof(now));
-    HciTrace("ipc: epoch=%lu out put=%lu get=%lu in put=%lu get=%lu wait=%lu\r\n",
-             (unsigned long)now[0], (unsigned long)now[1], (unsigned long)now[2],
-             (unsigned long)now[3], (unsigned long)now[4], (unsigned long)now[5]);
 }
 
 void HciHostIpcRelease(HciApp_t *pApp)

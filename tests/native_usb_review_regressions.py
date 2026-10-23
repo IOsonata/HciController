@@ -33,7 +33,7 @@ def main(argv):
     root = os.path.abspath(argv[1])
 
     trace = read(os.path.join(root, "src", "hci_trace.cpp"))
-    trace_body = function_body(trace, "void HciTrace(", "void HciTraceInit(")
+    trace_body = function_body(trace, "static void HciTraceVa(", "void HciTrace(")
     format_at = trace_body.find("const int len = vsnprintf(")
     guard_at = trace_body.find("if (len >= 0)", format_at)
     output_at = trace_body.find("HciTraceWrite0(line);", guard_at)

@@ -429,28 +429,7 @@ static void HciControllerApplyCoreProfile(HciH4PacketType_t Type,
  * silent. The ring has no output sink on every target, so each kind stops
  * after a few records and leaves room for the rest of the trace.
  */
-#ifndef HCI_CONTROLLER_TRACE_PACKETS
-#define HCI_CONTROLLER_TRACE_PACKETS 5U
-#endif
-
-static uint8_t s_HostPktTrace;
-static uint8_t s_CtlrPktTrace;
 static uint8_t s_CtlrTxFailTrace;
-
-static void HciControllerTracePacket(const char *pDir, uint8_t *pCount,
-                                     HciH4PacketType_t Type,
-                                     const uint8_t *pPacket, size_t Len)
-{
-    if (*pCount >= HCI_CONTROLLER_TRACE_PACKETS)
-    {
-        return;
-    }
-
-    (*pCount)++;
-    HciTrace("%s type=%u len=%u %02X %02X\r\n", pDir, (unsigned)Type,
-             (unsigned)Len, Len > 0U ? pPacket[0] : 0U,
-             Len > 1U ? pPacket[1] : 0U);
-}
 
 static bool HciControllerHostTypeValid(HciH4PacketType_t Type)
 {
@@ -831,8 +810,6 @@ static void HciControllerHostProcess(HciController_t *pController)
         pController->HostPacketType = Types[i];
         pController->HostPacketLen = (size_t)received;
         pController->HostPacketPending = true;
-        HciControllerTracePacket("h>c", &s_HostPktTrace, Types[i],
-                                 pController->pHostPacket, (size_t)received);
 
         if (HciControllerPutHostPacket(pController,
                                        pController->HostPacketType,
@@ -901,8 +878,6 @@ static void HciControllerFetchPacket(HciController_t *pController)
     pController->ControllerPacketType = type;
     pController->ControllerPacketLen = packetLen;
     pController->ControllerPacketPending = true;
-    HciControllerTracePacket("c>h", &s_CtlrPktTrace, type,
-                             pController->pControllerPacket, packetLen);
 }
 
 static void HciControllerStartPacket(HciController_t *pController)
@@ -933,7 +908,7 @@ static void HciControllerStartPacket(HciController_t *pController)
         s_CtlrTxFailTrace < 2U)
     {
         s_CtlrTxFailTrace++;
-        HciTrace("c>h send sent=%d len=%u\r\n", sent,
+        HciTraceError("c>h send sent=%d len=%u\r\n", sent,
                  (unsigned)pController->ControllerPacketLen);
     }
 

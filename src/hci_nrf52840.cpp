@@ -195,7 +195,7 @@ static bool HciNrf52840HfclkStart(HciNrf52840_t *pTarget)
         }
     }
 
-    HciTrace("hfclk: timeout\r\n");
+    HciTraceError("hfclk: timeout\r\n");
     return HciNrf52840HfclkStartFailed(
         pTarget, HCI_NRF52840_ERR_HFCLK_TIMEOUT);
 }
@@ -385,7 +385,7 @@ static bool HciNrf52840RandSourceReady(HciNrf52840_t *pTarget)
 
     if (rng == nullptr)
     {
-        HciTrace("rand: no source instance\r\n");
+        HciTraceError("rand: no source instance\r\n");
         pTarget->LastError = HCI_NRF52840_ERR_NO_ENTROPY;
         return false;
     }
@@ -399,7 +399,7 @@ static bool HciNrf52840RandSourceReady(HciNrf52840_t *pTarget)
         }
     }
 
-    HciTrace("rand: source did not produce bytes\r\n");
+    HciTraceError("rand: source did not produce bytes\r\n");
     pTarget->LastError = HCI_NRF52840_ERR_NO_ENTROPY;
     return false;
 }
@@ -497,7 +497,7 @@ static bool HciNrf52840SdcInit(HciNrf52840_t *pTarget)
     if ((size_t)result > pTarget->SdcMemCapacity ||
         (((uintptr_t)pTarget->pSdcMem & 7U) != 0U))
     {
-        HciTrace("sdc: memory pool too small or misaligned\r\n");
+        HciTraceError("sdc: memory pool too small or misaligned\r\n");
         pTarget->LastError = -1;
         return false;
     }

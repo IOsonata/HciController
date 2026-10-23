@@ -391,7 +391,7 @@ bool HciHostUsbSetup(HciApp_t *pApp)
 
     if (!HciBridgeUartStart())
     {
-        HciTrace("init: bridge UART initialization failed\r\n");
+        HciTraceError("init: bridge UART initialization failed\r\n");
         HciHostUsbRelease(pApp);
         return false;
     }
@@ -465,7 +465,7 @@ bool HciHostUsbStart(HciApp_t *pApp)
 {
     if (!UsbEnable(0))
     {
-        HciTrace("host: UsbEnable failed\r\n");
+        HciTraceError("host: UsbEnable failed\r\n");
         return false;
     }
 
@@ -482,7 +482,7 @@ bool HciHostUsbStart(HciApp_t *pApp)
 
         if (pApp->Runtime.StopRequested)
         {
-            HciTrace("host: settle abandoned, stop requested\r\n");
+            HciTraceError("host: settle abandoned, stop requested\r\n");
             break;
         }
 

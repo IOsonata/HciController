@@ -21,7 +21,6 @@
 
 #include "sdc_hci.h"
 #include "hci_sdc_resources.h"
-#include "hci_trace.h"
 
 static_assert(HCI_SDC_PACKET_SIZE >= HCI_MSG_BUFFER_MAX_SIZE,
               "the held packet must take the largest SDC message");
@@ -580,10 +579,6 @@ static const HciCmdEntry_t s_HciSdcCompatCommands[] = {
 #endif
 };
 
-static uint8_t s_SdcCmdTrace;
-static uint8_t s_SdcDeferTrace;
-static uint8_t s_SdcGetTrace;
-
 static bool HciSdcSupplementalOpcode(uint16_t Opcode)
 {
     switch (Opcode)
@@ -1074,15 +1069,6 @@ bool HciSdcPutPacket(HciSdc_t *pSdc,
                 HciCmdDispatchEventPending(&pSdc->CompatCommands))
             {
                 pSdc->CommandDeferredCount++;
-                if (s_SdcDeferTrace < 3U)
-                {
-                    s_SdcDeferTrace++;
-                    HciTrace("sdc: cmd deferred delayed=%u last=%u cmdev=%u compev=%u\r\n",
-                             (unsigned)pSdc->DelayedCommandPending,
-                             (unsigned)pSdc->CommandEventLast,
-                             (unsigned)HciCmdDispatchEventPending(&pSdc->Commands),
-                             (unsigned)HciCmdDispatchEventPending(&pSdc->CompatCommands));
-                }
                 return false;
             }
 
@@ -1109,14 +1095,6 @@ bool HciSdcPutPacket(HciSdc_t *pSdc,
 
                 const bool accepted =
                     HciCmdDispatchPut(&pSdc->Commands, pPacket, PacketLen);
-                if (s_SdcCmdTrace < 6U)
-                {
-                    s_SdcCmdTrace++;
-                    HciTrace("sdc: cmd op=0x%04X accepted=%u evpend=%u evlen=%u\r\n",
-                             (unsigned)opcode, (unsigned)accepted,
-                             (unsigned)HciCmdDispatchEventPending(&pSdc->Commands),
-                             (unsigned)pSdc->Commands.EventLen);
-                }
                 if (accepted && delayedCandidate &&
                     pSdc->Commands.HandlerCallCount != handlerCallsBefore)
                 {
@@ -1251,12 +1229,6 @@ HciSdcGetResult_t HciSdcGetPacket(HciSdc_t *pSdc,
 
     uint8_t sdcType = HCI_SDC_MSG_TYPE_NONE;
     int32_t result = sdc_hci_get(pPacket, &sdcType);
-    if (result != -NRF_EAGAIN && s_SdcGetTrace < 4U)
-    {
-        s_SdcGetTrace++;
-        HciTrace("sdc: get result=%ld type=%u\r\n", (long)result,
-                 (unsigned)sdcType);
-    }
 
     /*
      * The controller queue has had its turn, even when it was empty or

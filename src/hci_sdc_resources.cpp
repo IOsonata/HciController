@@ -59,7 +59,7 @@ static bool HciSdcCfgSet(uint8_t Type, const sdc_cfg_t *pCfg)
      */
     if (required < 0)
     {
-        HciTrace("sdc: cfg type=%u failed result=%ld\r\n", (unsigned)Type,
+        HciTraceError("sdc: cfg type=%u failed result=%ld\r\n", (unsigned)Type,
                  (long)required);
         s_Required = required;
         return false;

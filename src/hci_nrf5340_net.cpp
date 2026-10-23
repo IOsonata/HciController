@@ -69,13 +69,17 @@ static void HciRadioAssert(uint32_t Reason)
     }
 }
 
-static void HciMpslAssert(const char *, uint32_t)
+/* Short, so the whole line is in the first transfer even when the output
+ * interrupt cannot run, the assert can come from the radio interrupt. */
+static void HciMpslAssert(const char *, uint32_t Line)
 {
+    HciTraceError("mpsl assert %lu\r\n", (unsigned long)Line);
     HciRadioAssert(0x1003U);
 }
 
-static void HciSdcAssert(const char *, uint32_t)
+static void HciSdcAssert(const char *, uint32_t Line)
 {
+    HciTraceError("sdc assert %lu\r\n", (unsigned long)Line);
     HciRadioAssert(0x1004U);
 }
 
@@ -165,13 +169,10 @@ static bool HciMpslInit(HciNrf5340Net_t *pTarget)
     /* The low priority line is a real NVIC interrupt, MPSL pends it through
      * the NVIC. It only wakes the HCI thread, see SWI0_IRQHandler.
      */
-    HciTrace("mpsl: init lfclk=%s ppm=%u\r\n",
-             lfclk.source == MPSL_CLOCK_LF_SRC_RC ? "rc" : "xtal",
-             (unsigned)lfclk.accuracy_ppm);
     const int32_t result = mpsl_init(&lfclk, SWI0_IRQn, HciMpslAssert);
-    HciTrace("mpsl: init result=%ld\r\n", (long)result);
     if (result != 0)
     {
+        HciTraceError("mpsl: init failed err=%ld\r\n", (long)result);
         pTarget->LastError = result;
         return false;
     }
@@ -195,9 +196,9 @@ static bool HciMpslInit(HciNrf5340Net_t *pTarget)
 static bool HciSdcInit(HciNrf5340Net_t *pTarget)
 {
     int32_t result = sdc_init(HciSdcAssert);
-    HciTrace("sdc: init result=%ld\r\n", (long)result);
     if (result != 0)
     {
+        HciTraceError("sdc: init failed err=%ld\r\n", (long)result);
         pTarget->LastError = result;
         return false;
     }
@@ -216,12 +217,10 @@ static bool HciSdcInit(HciNrf5340Net_t *pTarget)
         return false;
     }
 
-    HciTrace("sdc: rand ready\r\n");
     result = HciSdcResourcesApply();
-    HciTrace("sdc: cfg result=%ld cap=%lu\r\n", (long)result,
-             (unsigned long)pTarget->SdcMemCapacity);
     if (result < 0)
     {
+        HciTraceError("sdc: cfg failed err=%ld\r\n", (long)result);
         pTarget->LastError = result;
         return false;
     }
@@ -235,9 +234,9 @@ static bool HciSdcInit(HciNrf5340Net_t *pTarget)
     }
 
     result = sdc_enable(HciSdcCallback, pTarget->pSdcMem);
-    HciTrace("sdc: enable result=%ld\r\n", (long)result);
     if (result != 0)
     {
+        HciTraceError("sdc: enable failed err=%ld\r\n", (long)result);
         pTarget->LastError = result;
         return false;
     }
@@ -277,8 +276,6 @@ void HciTargetStop(void)
     s_pTarget = nullptr;
 }
 
-static void HciClockTrace(const char *pTag);
-
 bool HciTargetStart(void)
 {
     if (s_pTarget != nullptr)
@@ -289,34 +286,17 @@ bool HciTargetStart(void)
     s_pTarget = &s_Target;
     if (!HciMpslInit(&s_Target) || !HciSdcInit(&s_Target))
     {
-        HciTrace("target: start failed err=%ld\r\n", (long)s_Target.LastError);
+        HciTraceError("target: start failed err=%ld\r\n", (long)s_Target.LastError);
         HciTargetStop();
         return false;
     }
 
-    HciClockTrace("start");
     return true;
-}
-
-static void HciClockTrace(const char *pTag)
-{
-    HciTrace("clock %s: lfstat=0x%08lX hfstat=0x%08lX lfstarted=%lu\r\n", pTag,
-             (unsigned long)NRF_CLOCK->LFCLKSTAT,
-             (unsigned long)NRF_CLOCK->HFCLKSTAT,
-             (unsigned long)NRF_CLOCK->EVENTS_LFCLKSTARTED);
 }
 
 void HciTargetProcessMpsl(void)
 {
-    static uint32_t s_Calls;
-
     mpsl_low_priority_process();
-
-    /* Once more a little after start, the clock may come up late. */
-    if (++s_Calls == 40U)
-    {
-        HciClockTrace("late");
-    }
 }
 
 void HciTargetFault(int Error)

@@ -315,13 +315,13 @@ static bool HciModeNvmSetup(void)
     if (addr == 0U || cfg.EraseSize == 0U || size < cfg.EraseSize ||
         (addr % cfg.EraseSize) != 0U)
     {
-        HciTrace("mode: nvm geometry invalid\r\n");
+        HciTraceError("mode: nvm geometry invalid\r\n");
         return false;
     }
 
     if (!s_ModeNvmIntrf.Init(nullptr, false))
     {
-        HciTrace("mode: nvm interface init failed\r\n");
+        HciTraceError("mode: nvm interface init failed\r\n");
         return false;
     }
 
@@ -487,7 +487,6 @@ static void HciStatusThread(void *)
 #endif
 
         /* Send what the trace output could not take earlier. */
-        HciHostIpcMonitor();
         (void)HciTraceFlush();
 
         (void)TaktOSThreadSleep(TaktOSCurrentThread(), STATUS_UPDATE_MS);
@@ -541,7 +540,7 @@ int main(void)
 #if HCI_UART_EARLY_STARTUP
     if (!earlyUartReady)
     {
-        HciTrace("fatal: early UART init err=%d target=%ld\r\n",
+        HciTraceError("fatal: early UART init err=%d target=%ld\r\n",
                  s_HciApp.LastError,
                  (long)HciTargetLastError());
         HciFatal();
@@ -554,7 +553,7 @@ int main(void)
 #if HCI_MODE_SWITCH
     if (!HciModeNvmSetup())
     {
-        HciTrace("fatal: mode NVM region unavailable\r\n");
+        HciTraceError("fatal: mode NVM region unavailable\r\n");
         HciFatal();
     }
     s_HciMode = HciModeNvmLoad(defaultMode, &storedMode);
@@ -564,7 +563,7 @@ int main(void)
 
     if (!HciModeAllowed(s_HciMode))
     {
-        HciTrace("fatal: mode %u not allowed on BOARD=%u\r\n",
+        HciTraceError("fatal: mode %u not allowed on BOARD=%u\r\n",
                  (unsigned)s_HciMode, (unsigned)BOARD);
         HciFatal();
     }
@@ -595,13 +594,13 @@ int main(void)
     HciTrace("boot: coreclk=%lu\r\n", (unsigned long)kernelCfg.KernClockHz);
     if (TaktOSInit(&kernelCfg) != TAKTOS_OK)
     {
-        HciTrace("fatal: TaktOSInit\r\n");
+        HciTraceError("fatal: TaktOSInit\r\n");
         HciFatal();
     }
 
     if (!HciAppInitMode(&s_HciApp, s_HciMode))
     {
-        HciTrace("fatal: HciAppInitMode err=%d target=%ld\r\n",
+        HciTraceError("fatal: HciAppInitMode err=%d target=%ld\r\n",
                  s_HciApp.LastError,
                  (long)HciTargetLastError());
         HciFatal();
@@ -615,7 +614,7 @@ int main(void)
                            HCI_THREAD_PRIORITY) == nullptr)
     {
         HciTaktOsThreadDisarm(&s_HciApp.Runtime);
-        HciTrace("fatal: hci thread create\r\n");
+        HciTraceError("fatal: hci thread create\r\n");
         HciFatal();
     }
 
@@ -625,7 +624,7 @@ int main(void)
                            nullptr,
                            STATUS_THREAD_PRIORITY) == nullptr)
     {
-        HciTrace("fatal: status thread create\r\n");
+        HciTraceError("fatal: status thread create\r\n");
         HciFatal();
     }
 

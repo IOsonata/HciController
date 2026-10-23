@@ -81,21 +81,19 @@ static void HciTraceDrain(void)
             idle++;
         }
         /* about 0.5 ms at 64 MHz */
-        for (volatile uint32_t d = 0; d < 8000U; d++)
+        for (uint32_t d = 0U; d < 8000U; d++)
         {
+            __asm__ volatile ("" ::: "memory");
         }
     }
 }
 
-void HciTrace(const char *pFormat, ...)
+static void HciTraceVa(const char *pFormat, va_list args, bool bDrain)
 {
     if (pFormat == nullptr || !HciTraceEnsureInit())
     {
         return;
     }
-
-    va_list args;
-    va_start(args, pFormat);
 
 #if HCI_TRACE
     va_list debugArgs;
@@ -118,12 +116,27 @@ void HciTrace(const char *pFormat, ...)
 #endif
 
     (void)SysLogVPrintf(&s_Log, pFormat, args);
-    va_end(args);
 
-    if (s_BootDrain && s_SinkSet)
+    if ((bDrain || s_BootDrain) && s_SinkSet)
     {
         HciTraceDrain();
     }
+}
+
+void HciTrace(const char *pFormat, ...)
+{
+    va_list args;
+    va_start(args, pFormat);
+    HciTraceVa(pFormat, args, false);
+    va_end(args);
+}
+
+void HciTraceError(const char *pFormat, ...)
+{
+    va_list args;
+    va_start(args, pFormat);
+    HciTraceVa(pFormat, args, true);
+    va_end(args);
 }
 
 void HciTraceInit(void)

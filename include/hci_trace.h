@@ -45,6 +45,15 @@ void HciTrace(const char *pFormat, ...)
 #endif
     ;
 
+/* Error report. Same output as HciTrace, but it is pushed out and waited for
+ * (bounded) before it returns, so the text is on the log when the failure
+ * happens and not left in the store by a stop or reset that follows. */
+void HciTraceError(const char *pFormat, ...)
+#if defined(__GNUC__) || defined(__clang__)
+    __attribute__((format(printf, 1, 2)))
+#endif
+    ;
+
 void HciTraceInit(void);
 
 /* Select or detach the DeviceIntrf used by SysLog output. */

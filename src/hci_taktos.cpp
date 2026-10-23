@@ -245,7 +245,7 @@ void HciTaktOsThread(void *pContext)
     HciTrace("runtime: target start\r\n");
     if (!HciTargetStart())
     {
-        HciTrace("runtime: target start failed\r\n");
+        HciTraceError("runtime: target start failed\r\n");
         pRuntime->StartErrorCount++;
         HciTargetFault(-1);
         HciTaktOsThreadLeave(pRuntime);
@@ -263,7 +263,7 @@ void HciTaktOsThread(void *pContext)
     pRuntime->HostStarted = HciAppHostStart();
     if (!pRuntime->HostStarted)
     {
-        HciTrace("runtime: host start failed, servicing mpsl without it\r\n");
+        HciTraceError("runtime: host start failed, servicing mpsl without it\r\n");
         pRuntime->StartErrorCount++;
         HciTargetFault(-1);
     }
