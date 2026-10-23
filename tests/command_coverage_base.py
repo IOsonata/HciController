@@ -238,6 +238,21 @@ def firmware_tables(root, values):
             raise SystemExit("local command %s is not routed by hci_controller.cpp" % name)
         local_names.append(name)
 
+    # The I-SYST commands of hci_vendor.h are routed as one range through
+    # HciVendorIsCommand, so each opcode is read from the header and the
+    # bridge is checked for the range test rather than one test per opcode.
+    vendor_header = read_text(os.path.join(root, "include", "hci_vendor.h"))
+    vendor_opcodes = re.findall(
+        r"#define\s+(HCI_VENDOR_OPCODE_[A-Z0-9_]+)\s+(0x[0-9A-Fa-f]+)U?",
+        vendor_header)
+    if vendor_opcodes and not re.search(
+            r"if\s*\(\s*HciVendorIsCommand\s*\(\s*opcode\s*\)\s*\)",
+            controller_source):
+        raise SystemExit("I-SYST vendor commands are not routed by hci_controller.cpp")
+    for name, value in vendor_opcodes:
+        values[name] = int(value, 16)
+        local_names.append(name)
+
     names = vendor_names + supplemental_names + local_names
     unresolved = sorted(set(n for n in names if n not in values))
     if unresolved:

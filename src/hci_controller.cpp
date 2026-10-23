@@ -15,6 +15,7 @@
 
 #include "hci_controller.h"
 #include "hci_core_profile.h"
+#include "hci_vendor.h"
 
 #include <limits.h>
 #include <string.h>
@@ -106,8 +107,35 @@ size_t HciUsbPlatformReadTxValidation(uint8_t *pData, size_t Capacity)
     return 0U;
 }
 
+/*
+ * The I-SYST vendor commands live in hci_vendor.cpp, which a target links
+ * along with the IOsonata crypto engines it runs on. A build without it,
+ * the host tests among them, answers them Unknown HCI Command.
+ */
+extern "C" __attribute__((weak)) bool HciVendorIsCommand(uint16_t Opcode)
+{
+    (void)Opcode;
+    return false;
+}
+
+extern "C" __attribute__((weak))
+size_t HciVendorCommand(const uint8_t *pPacket, size_t PacketLen,
+                        uint8_t *pEvent, size_t Capacity)
+{
+    (void)pPacket;
+    (void)PacketLen;
+    (void)pEvent;
+    (void)Capacity;
+    return 0U;
+}
+
 bool HciControllerKnowsLocalCommand(uint16_t Opcode, size_t ParamLen)
 {
+    if (HciVendorIsCommand(Opcode))
+    {
+        return true;
+    }
+
     if (Opcode == HCI_CONTROLLER_USB_TX_VALIDATION_OPCODE)
     {
         return ParamLen == 0U;
@@ -246,6 +274,31 @@ static bool HciControllerQueueLoopback(HciController_t *pController,
     HciControllerWriteLe32(&pReturn[6], HciControllerCrc32(pPayload, dataLen));
     memcpy(&pReturn[HCI_CONTROLLER_LOOPBACK_RETURN_HEADER_LEN],
            pPayload, dataLen);
+
+    pController->ControllerPacketType = HCI_H4_PACKET_EVENT;
+    pController->ControllerPacketLen = eventLen;
+    pController->ControllerPacketPending = true;
+    return true;
+}
+
+static bool HciControllerQueueVendor(HciController_t *pController,
+                                     const uint8_t *pPacket,
+                                     size_t PacketLen)
+{
+    if (pController->ControllerPacketPending)
+    {
+        return false;
+    }
+
+    const size_t eventLen = HciVendorCommand(pPacket, PacketLen,
+                                             pController->pControllerPacket,
+                                             pController->ControllerPacketCapacity);
+    if (eventLen == 0U)
+    {
+        return HciControllerQueueCommandStatus(
+            pController, HciControllerReadLe16(pPacket),
+            HCI_CONTROLLER_STATUS_MEMORY_CAPACITY_EXCEEDED);
+    }
 
     pController->ControllerPacketType = HCI_H4_PACKET_EVENT;
     pController->ControllerPacketLen = eventLen;
@@ -425,6 +478,16 @@ bool HciControllerPutHostPacket(HciController_t *pController,
         if (opcode == HCI_CONTROLLER_LOOPBACK_OPCODE)
         {
             if (!HciControllerQueueLoopback(pController, pPacket, PacketLen))
+            {
+                pController->HostPacketRetryCount++;
+                return false;
+            }
+            return true;
+        }
+
+        if (HciVendorIsCommand(opcode))
+        {
+            if (!HciControllerQueueVendor(pController, pPacket, PacketLen))
             {
                 pController->HostPacketRetryCount++;
                 return false;

@@ -116,6 +116,11 @@
 			<locationURI>PARENT-2-PROJECT_LOC/include/hci_version.h</locationURI>
 		</link>
 		<link>
+			<name>include/hci_vendor.h</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/include/hci_vendor.h</locationURI>
+		</link>
+		<link>
 			<name>include/hci_usb.h</name>
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/include/hci_usb.h</locationURI>
@@ -184,6 +189,16 @@
 			<name>src/hci_trace.cpp</name>
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/src/hci_trace.cpp</locationURI>
+		</link>
+		<link>
+			<name>src/hci_vendor.cpp</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/src/hci_vendor.cpp</locationURI>
+		</link>
+		<link>
+			<name>src/hci_vendor_nrf.cpp</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/src/hci_vendor_nrf.cpp</locationURI>
 		</link>
 		<link>
 			<name>src/main.cpp</name>

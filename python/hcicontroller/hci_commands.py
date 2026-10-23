@@ -167,9 +167,40 @@ _LOCAL = (
             note="sequence 0, PRBS8 seed 1 and zero payload octets"),
 )
 
-COMMANDS = tuple(_catalog.COMMANDS) + _CORE_62 + _SDC_VS + _LOCAL
+# The I-SYST commands, consumed by the bridge like 0xFFF1. Each probe is the
+# smallest well formed request; the known answers are checked by the unit
+# test tests/unit/hci_vendor_test.cpp and the harness only wants the status.
+_ISYST = (
+    Command(0xFFF3, "VS I-SYST Read Static Address", COMPLETE, b"",
+            expect=(STATUS_UNSUPPORTED_FEATURE,),
+            note="FICR static random address, LSB first"),
+    Command(0xFFF4, "VS I-SYST Crypto Supported", COMPLETE, b"",
+            note="bitmap of the crypto commands this build answers"),
+    Command(0xFFF5, "VS I-SYST AES-CMAC", COMPLETE, bytes(16) + b"\x00",
+            note="all-zero key over the empty message"),
+    Command(0xFFF6, "VS I-SYST AES-CCM", COMPLETE,
+            b"\x00" + bytes(16) + b"\x0d" + bytes(13) + b"\x00" + b"\x04\x00",
+            note="encrypt nothing with a 13 octet nonce and a 4 octet tag"),
+    Command(0xFFF7, "VS I-SYST Random", COMPLETE, b"\x08",
+            expect=(STATUS_UNSUPPORTED_FEATURE,),
+            note="eight octets, Unsupported Feature with no entropy source"),
+    Command(0xFFF8, "VS I-SYST SHA-256", COMPLETE, b"\x00",
+            note="digest of the empty message"),
+    Command(0xFFF9, "VS I-SYST HMAC-SHA-256", COMPLETE, b"\x00\x00",
+            note="empty key over the empty message"),
+    Command(0xFFFA, "VS I-SYST ECDSA P-256 Sign", COMPLETE,
+            bytes(31) + b"\x02" + bytes(32),
+            expect=(STATUS_UNSUPPORTED_FEATURE,),
+            note="private scalar 2 over an all-zero digest"),
+    Command(0xFFFB, "VS I-SYST ECDSA P-256 Verify", COMPLETE,
+            bytes(64) + bytes(32) + bytes(64),
+            expect=(0x05,),
+            note="the all-zero public key is not on the curve, Authentication Failure"),
+)
+
+COMMANDS = tuple(_catalog.COMMANDS) + _CORE_62 + _SDC_VS + _LOCAL + _ISYST
 BY_OPCODE = dict(_catalog.BY_OPCODE)
-for _command in _CORE_62 + _SDC_VS + _LOCAL:
+for _command in _CORE_62 + _SDC_VS + _LOCAL + _ISYST:
     if _command.opcode in BY_OPCODE:
         raise AssertionError("opcode 0x%04X listed twice" % _command.opcode)
     BY_OPCODE[_command.opcode] = _command

@@ -123,18 +123,18 @@ The nRF52840 board does not carry a programmed public Bluetooth device address,
 so `HCI_Read_BD_ADDR` reports all zeroes. A host must not assume public address
 type 0x00 is available just because the command exists.
 
-The Nordic static-address vendor command reports the static random identity
-derived from FICR. The hardware harness resolves an identity before running
-advertising, scanning or initiating procedures so a missing public address is
-not misdiagnosed as a failure of the following HCI command.
+The I-SYST `Read Static Address` command (`0xFFF3`, below) reports the static
+random identity derived from FICR. The hardware harness resolves an identity
+before running advertising, scanning or initiating procedures so a missing
+public address is not misdiagnosed as a failure of the following HCI command.
 
 ## HciController vendor diagnostics
 
-HciController exposes three project-specific vendor commands. `0xFFF0` is
+HciController exposes three diagnostic vendor commands. `0xFFF0` is
 routed by the SDC command layer, while `0xFFF1` and `0xFFF2` are consumed by the
 generic bridge before SDC dispatch. All three are part of the externally
 reachable HCI surface and are included in the command-coverage check and broad
-hardware probe.
+hardware probe. The I-SYST commands from `0xFFF3` on are in the next section.
 
 `0xFFF0` is VS Read Counters. It reports counters spanning the H:4 parser,
 transport, bridge and SDC routing paths without issuing a radio command.
@@ -162,6 +162,45 @@ bytes and last eight bytes. It is read-only and the snapshot is taken before
 its own Command Complete enters USB, so the reply does not overwrite the event
 history it is reporting. A build without the strong USB platform hook answers
 Unknown HCI Command.
+
+## I-SYST vendor commands
+
+`0xFFF3` to `0xFFFB` are I-SYST commands, consumed by the bridge ahead of SDC
+like `0xFFF1`, on every host transport. They serve a host that runs on a part
+with no Bluetooth identity and no crypto of its own: the IOsonata HCI host on
+an nRF91, on the nRF5340 application core or behind a USB dongle. Every one
+answers with a Command Complete whose first return octet is the HCI status.
+The layouts are in `hci_vendor.h`.
+
+| Opcode | Command | Parameters | Returns |
+| --- | --- | --- | --- |
+| `0xFFF3` | Read Static Address | none | `addr[6]`, LSB first, top two bits set |
+| `0xFFF4` | Crypto Supported | none | bitmap, 4 octets LE |
+| `0xFFF5` | AES-CMAC | `key[16]`, `len`, `msg[len]` | `mac[16]` |
+| `0xFFF6` | AES-CCM | `flags`, `key[16]`, `nonce_len`, `nonce`, `aad_len`, `aad`, `tag_len`, `msg_len`, `msg`, (`tag` on decrypt) | `out[msg_len]`, (`tag` on encrypt) |
+| `0xFFF7` | Random | `len` (1 to 251) | `rand[len]` |
+| `0xFFF8` | SHA-256 | `len`, `msg[len]` | `digest[32]` |
+| `0xFFF9` | HMAC-SHA-256 | `key_len`, `key`, `msg_len`, `msg` | `mac[32]` |
+| `0xFFFA` | ECDSA P-256 Sign | `priv[32]`, `hash[32]` | `sig[64]` |
+| `0xFFFB` | ECDSA P-256 Verify | `pub[64]`, `hash[32]`, `sig[64]` | none, status Success or Authentication Failure |
+
+`Read Static Address` exists because `HCI_Read_BD_ADDR` is the public address
+and the part has none. Answering `Read BD_ADDR` with the FICR value would make
+a Linux or Zephyr host advertise it as public; the vendor command keeps the
+two apart, and a host that knows it sets the value with `LE Set Random
+Address`. A target with no factory address answers Unsupported Feature.
+
+The crypto commands run on the IOsonata engines the target links for its own
+link layer, software AES, SHA-256 and micro-ecc today, over the entropy source
+of the part. A host asks `Crypto Supported` once: `Random` and `ECDSA Sign`
+are left out of the bitmap on a build with no entropy source and answer
+Unsupported Feature. A CCM decrypt whose tag does not check and a signature
+that does not verify answer Authentication Failure (0x05). A length that does
+not add up to the parameter count answers Invalid HCI Command Parameters.
+
+The target supplies the two hooks `HciVendorStaticAddr` and `HciVendorRng`;
+`hci_vendor_nrf.cpp` has the Nordic ones. A build without `hci_vendor.cpp`
+answers these opcodes Unknown HCI Command.
 
 ## Handler rules
 
