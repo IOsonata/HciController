@@ -19,6 +19,7 @@
 
 #include "board.h"
 #include "hci_app.h"
+#include <string.h>
 #include "hci_trace.h"
 
 #include "bluetooth/bt_hci_ipc.h"
@@ -88,6 +89,39 @@ bool HciHostIpcInit(HciApp_t *pApp)
 
     pApp->pHostIntrf = s_HciIpc.Data();
     return true;
+}
+
+/* Link state of the shared block, traced when it changes: the app core
+ * attaching moves the ring indexes and the wait words. */
+void HciHostIpcMonitor(void)
+{
+    static uint32_t s_Last[6];
+    static bool s_First = true;
+    const volatile IpcIntrfHdr_t *pHdr =
+        reinterpret_cast<const volatile IpcIntrfHdr_t *>(HCI_IPC_MEM_ADDR);
+
+    if (pHdr->Magic != IPC_INTRF_MAGIC)
+    {
+        return;
+    }
+
+    const volatile CFifo_t *pOut = reinterpret_cast<const volatile CFifo_t *>(
+        HCI_IPC_MEM_ADDR + pHdr->Ring[0].Off);
+    const volatile CFifo_t *pIn = reinterpret_cast<const volatile CFifo_t *>(
+        HCI_IPC_MEM_ADDR + pHdr->Ring[1].Off);
+    uint32_t now[6] = { pHdr->Epoch, pOut->PutIdx, pOut->GetIdx,
+                        pIn->PutIdx, pIn->GetIdx,
+                        pHdr->Wait[0] | (pHdr->Wait[1] << 1) };
+
+    if (!s_First && memcmp(now, s_Last, sizeof(now)) == 0)
+    {
+        return;
+    }
+    s_First = false;
+    memcpy(s_Last, now, sizeof(now));
+    HciTrace("ipc: epoch=%lu out put=%lu get=%lu in put=%lu get=%lu wait=%lu\r\n",
+             (unsigned long)now[0], (unsigned long)now[1], (unsigned long)now[2],
+             (unsigned long)now[3], (unsigned long)now[4], (unsigned long)now[5]);
 }
 
 void HciHostIpcRelease(HciApp_t *pApp)

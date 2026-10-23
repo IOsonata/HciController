@@ -144,6 +144,9 @@ void HciHostUartRelease(HciApp_t *pApp);
  */
 bool HciHostUartLogOpen(HciApp_t *pApp);
 
+/* Traces the IPC shared block state when it changes. No-op without IPC. */
+void HciHostIpcMonitor(void);
+
 /*
  * USB host: the device stack with the HCI function the mode asks for (none
  * for a UART or IPC host that only wants the diagnostic CDC port), the

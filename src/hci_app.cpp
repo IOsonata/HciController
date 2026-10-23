@@ -56,6 +56,7 @@ static HciApp_t *s_pApp;
 __attribute__((weak)) bool HciHostUartInit(HciApp_t *) { return false; }
 __attribute__((weak)) void HciHostUartRelease(HciApp_t *) {}
 __attribute__((weak)) bool HciHostUartLogOpen(HciApp_t *) { return false; }
+__attribute__((weak)) void HciHostIpcMonitor(void) {}
 __attribute__((weak)) bool HciHostUsbSetup(HciApp_t *) { return false; }
 __attribute__((weak)) void HciHostUsbRelease(HciApp_t *) {}
 __attribute__((weak)) bool HciHostUsbStart(HciApp_t *) { return false; }

@@ -487,6 +487,7 @@ static void HciStatusThread(void *)
 #endif
 
         /* Send what the trace output could not take earlier. */
+        HciHostIpcMonitor();
         (void)HciTraceFlush();
 
         (void)TaktOSThreadSleep(TaktOSCurrentThread(), STATUS_UPDATE_MS);
