@@ -89,8 +89,14 @@
 #define UART_CTS_PINOP 1
 #define UART_RTS_PINOP 1
 #define UART_RATE 1000000
+#if defined(NRF5340_DK_PCA10095)
 #define UART_HW_FLOWCTRL 1
 #define UART_FLOWCTRL UART_FLWCTRL_HW
+#else
+/* The Audio DK virtual COM port runs without flow control, as the IPC test does. */
+#define UART_HW_FLOWCTRL 0
+#define UART_FLOWCTRL UART_FLWCTRL_NONE
+#endif
 
 /*
  * Shared memory block used by the IPC host transport.

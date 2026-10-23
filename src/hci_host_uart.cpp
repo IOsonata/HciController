@@ -84,6 +84,42 @@ bool HciHostUartInit(HciApp_t *pApp)
     return true;
 }
 
+bool HciHostUartLogOpen(HciApp_t *pApp)
+{
+    static_assert(sizeof(s_HciUartPins) / sizeof(s_HciUartPins[0]) >= 2U,
+                  "UART_PINS must list the receive and transmit pins first");
+
+    UARTCfg_t cfg = {};
+    cfg.DevNo = UART_DEVNO;
+    cfg.pIOPinMap = s_HciUartPins;
+    cfg.NbIOPins = 2;
+    cfg.Rate = UART_RATE;
+    cfg.DataBits = 8;
+    cfg.Parity = UART_PARITY_NONE;
+    cfg.StopBits = 1;
+    cfg.FlowControl = UART_FLWCTRL_NONE;
+    cfg.bIntMode = true;
+    cfg.IntPrio = HCI_UART_IRQ_PRIORITY;
+    cfg.bFifoBlocking = true;
+    cfg.RxMemSize = sizeof(pApp->HostRxFifoMem);
+    cfg.pRxMem = pApp->HostRxFifoMem;
+    cfg.TxMemSize = sizeof(pApp->HostTxFifoMem);
+    cfg.pTxMem = pApp->HostTxFifoMem;
+    cfg.bDMAMode = true;
+    cfg.Duplex = UART_DUPLEX_FULL;
+    cfg.Mode = UART_MODE_UART;
+
+    if (!s_HciUart.Init(cfg))
+    {
+        return false;
+    }
+
+    /* Records kept while no output was set go out first. */
+    HciTraceSetSink(static_cast<DevIntrf_t *>(s_HciUart), 0U);
+    (void)HciTraceFlush();
+    return true;
+}
+
 void HciHostUartRelease(HciApp_t *pApp)
 {
     if (pApp->pHostIntrf == static_cast<DevIntrf_t *>(s_HciUart))
@@ -94,6 +130,11 @@ void HciHostUartRelease(HciApp_t *pApp)
 }
 
 #else
+
+bool HciHostUartLogOpen(HciApp_t *)
+{
+    return false;
+}
 
 bool HciHostUartInit(HciApp_t *)
 {

@@ -55,6 +55,7 @@ static HciApp_t *s_pApp;
  */
 __attribute__((weak)) bool HciHostUartInit(HciApp_t *) { return false; }
 __attribute__((weak)) void HciHostUartRelease(HciApp_t *) {}
+__attribute__((weak)) bool HciHostUartLogOpen(HciApp_t *) { return false; }
 __attribute__((weak)) bool HciHostUsbSetup(HciApp_t *) { return false; }
 __attribute__((weak)) void HciHostUsbRelease(HciApp_t *) {}
 __attribute__((weak)) bool HciHostUsbStart(HciApp_t *) { return false; }
@@ -350,6 +351,13 @@ bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode)
     pApp->HostType = hostType;
     pApp->Mode = Mode;
     pApp->UsbHciNative = Mode == HCI_APP_MODE_USB_NATIVE;
+
+    /* An IPC host leaves the UART idle: use it for the trace, before the
+     * rest of init so a failure there is seen. */
+    if (hostType == HCI_APP_HOST_IPC)
+    {
+        (void)HciHostUartLogOpen(pApp);
+    }
     HciCountersInit(&pApp->Counters, pApp->Sdc, &pApp->Controller);
 
     if (!pApp->Sdc.Init(pApp->CommandEvent, sizeof(pApp->CommandEvent), &pApp->Counters))

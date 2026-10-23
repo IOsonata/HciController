@@ -138,6 +138,13 @@ bool HciHostUartInit(HciApp_t *pApp);
 void HciHostUartRelease(HciApp_t *pApp);
 
 /*
+ * Send the trace out of the UART. For a host that does not use the UART, such
+ * as IPC: the UART and the host FIFO memory are idle, so they carry the trace
+ * at no cost in RAM. No flow control, transmit and receive pins only.
+ */
+bool HciHostUartLogOpen(HciApp_t *pApp);
+
+/*
  * USB host: the device stack with the HCI function the mode asks for (none
  * for a UART or IPC host that only wants the diagnostic CDC port), the
  * diagnostic CDC and, on a board that has one, the UART bridge.
