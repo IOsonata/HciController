@@ -1130,8 +1130,8 @@ bool HciSdcPutPacket(HciSdc_t *pSdc,
             }
 #endif
 
-            int32_t result = pSdc->Ops.AclPut(pSdc->Ops.pContext, pPacket);
-            if (result == pSdc->Ops.RetryError)
+            int32_t result = sdc_hci_data_put(pPacket);
+            if (result == -NRF_EAGAIN)
             {
                 pSdc->PutRetryCount++;
                 return false;
@@ -1151,14 +1151,8 @@ bool HciSdcPutPacket(HciSdc_t *pSdc,
 
         case HCI_H4_PACKET_ISO:
         {
-            if (pSdc->Ops.IsoPut == NULL)
-            {
-                pSdc->IsoPutErrorCount++;
-                return true;
-            }
-
-            int32_t result = pSdc->Ops.IsoPut(pSdc->Ops.pContext, pPacket);
-            if (result == pSdc->Ops.RetryError)
+            int32_t result = sdc_hci_iso_data_put(pPacket);
+            if (result == -NRF_EAGAIN)
             {
                 pSdc->IsoDropCount++;
                 return true;
@@ -1234,7 +1228,7 @@ HciSdcGetResult_t HciSdcGetPacket(HciSdc_t *pSdc,
     }
 
     uint8_t sdcType = HCI_SDC_MSG_TYPE_NONE;
-    int32_t result = pSdc->Ops.Get(pSdc->Ops.pContext, pPacket, &sdcType);
+    int32_t result = sdc_hci_get(pPacket, &sdcType);
 
     /*
      * The controller queue has had its turn, even when it was empty or
@@ -1245,7 +1239,7 @@ HciSdcGetResult_t HciSdcGetPacket(HciSdc_t *pSdc,
     pSdc->CommandEventLast = false;
     pSdc->CreditEventLast = false;
 
-    if (result == pSdc->Ops.RetryError)
+    if (result == -NRF_EAGAIN)
     {
         return HCI_SDC_GET_EMPTY;
     }
@@ -1302,14 +1296,6 @@ HciSdcGetResult_t HciSdcGetPacket(HciSdc_t *pSdc,
     }
 
     return HCI_SDC_GET_PACKET;
-}
-
-void HciSdcProcess(HciSdc_t *pSdc)
-{
-    if (pSdc != NULL && pSdc->Ops.Process != NULL)
-    {
-        pSdc->Ops.Process(pSdc->Ops.pContext);
-    }
 }
 
 /*---------------------------------------------------------------------------
@@ -1458,24 +1444,18 @@ static void HciSdcIntrfInit(HciSdc_t *pSdc)
 
 
 bool HciSdcInit(HciSdc_t *pSdc,
-                const HciSdcOps_t *pOps,
                 const HciCmdEntry_t *pCommands,
                 size_t CommandCount,
                 void *pCommandContext,
                 uint8_t *pCommandEvent,
                 size_t CommandEventCapacity)
 {
-    if (pSdc == NULL || pOps == NULL || pOps->AclPut == NULL || pOps->Get == NULL)
+    if (pSdc == NULL)
     {
         return false;
     }
 
     memset(pSdc, 0, sizeof(*pSdc));
-    pSdc->Ops = *pOps;
-    if (pSdc->Ops.RetryError == 0)
-    {
-        pSdc->Ops.RetryError = HCI_SDC_RETRY_ERROR;
-    }
 
     if (!HciCmdDispatchInit(&pSdc->Commands,
                             pCommands,

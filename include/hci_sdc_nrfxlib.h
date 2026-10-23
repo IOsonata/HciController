@@ -64,8 +64,7 @@ void HciSdcNrfxlibResetAdvCommandType(void);
 /*
  * The SoftDevice Controller as an IOsonata interface object: the packet
  * DeviceIntrf the bridge drives, DevAddr the packet type, over the nrfxlib
- * controller. Init takes what HciSdcNrfxlibInit takes; Process runs the
- * controller, to be called before the bridge moves its packets.
+ * controller. Init takes what HciSdcNrfxlibInit takes.
  */
 class HciSdcNrfxlib : public DeviceIntrf {
 public:
@@ -76,7 +75,6 @@ public:
     bool Init(uint8_t *pCommandEvent, size_t CommandEventCapacity, HciCounters_t *pCounters) {
         return HciSdcNrfxlibInit(&vDevData, pCommandEvent, CommandEventCapacity, pCounters);
     }
-    void Process(void) { HciSdcProcess(&vDevData); }
     bool KnowsCommand(uint16_t Opcode, size_t ParamLen) { return HciSdcKnowsCommand(&vDevData, Opcode, ParamLen); }
 
     operator DevIntrf_t * () override { return &vDevData.DevIntrf; }

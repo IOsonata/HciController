@@ -2587,24 +2587,6 @@ HCI_SDC_SPEC_LEN(sdc_hci_cmd_cb_write_authenticated_payload_timeout_return_t, 2U
 
 #undef HCI_SDC_SPEC_LEN
 
-static int32_t HciSdcNrfxlibAclPut(void *, const uint8_t *pPacket)
-{
-    return sdc_hci_data_put(pPacket);
-}
-
-static int32_t HciSdcNrfxlibIsoPut(void *, const uint8_t *pPacket)
-{
-    return sdc_hci_iso_data_put(pPacket);
-}
-
-static int32_t HciSdcNrfxlibGet(void *, uint8_t *pPacket, uint8_t *pType)
-{
-    uint8_t type = SDC_HCI_MSG_TYPE_NONE;
-    int32_t result = sdc_hci_get(pPacket, &type);
-    *pType = type;
-    return result;
-}
-
 /*
  * Legacy and extended advertising, Vol 4 Part E 3.1.1.
  *
@@ -2704,18 +2686,8 @@ bool HciSdcNrfxlibInit(HciSdc_t *pSdc,
                        size_t CommandEventCapacity,
                        HciCounters_t *pCounters)
 {
-    HciSdcOps_t ops = {
-        HciSdcNrfxlibAclPut,
-        HciSdcNrfxlibIsoPut,
-        HciSdcNrfxlibGet,
-        NULL,
-        NULL,
-        -NRF_EAGAIN,
-    };
-
     /* The counter readout uses the command context; other handlers access SDC directly. */
     if (!HciSdcInit(pSdc,
-                    &ops,
                     s_HciSdcCommands,
                     sizeof(s_HciSdcCommands) / sizeof(s_HciSdcCommands[0]),
                     pCounters,

@@ -1,4 +1,5 @@
 #include "hci_sdc.h"
+#include "sdc_hci.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -14,26 +15,26 @@ struct FakeSdc
     unsigned AclCount;
     unsigned IsoCount;
     unsigned GetCount;
-    unsigned ProcessCount;
 };
 
-static int32_t AclPut(void *pContext, const uint8_t *)
+/* The nrfxlib controller entry points hci_sdc.cpp calls, over a fake. */
+static FakeSdc *s_pFake;
+
+int32_t sdc_hci_data_put(uint8_t const *)
 {
-    FakeSdc *sdc = static_cast<FakeSdc *>(pContext);
-    sdc->AclCount++;
-    return sdc->AclResult;
+    s_pFake->AclCount++;
+    return s_pFake->AclResult;
 }
 
-static int32_t IsoPut(void *pContext, const uint8_t *)
+int32_t sdc_hci_iso_data_put(uint8_t const *)
 {
-    FakeSdc *sdc = static_cast<FakeSdc *>(pContext);
-    sdc->IsoCount++;
-    return sdc->IsoResult;
+    s_pFake->IsoCount++;
+    return s_pFake->IsoResult;
 }
 
-static int32_t Get(void *pContext, uint8_t *pPacket, uint8_t *pType)
+int32_t sdc_hci_get(uint8_t *pPacket, uint8_t *pType)
 {
-    FakeSdc *sdc = static_cast<FakeSdc *>(pContext);
+    FakeSdc *sdc = s_pFake;
     sdc->GetCount++;
     if (sdc->GetResult == 0)
     {
@@ -41,11 +42,6 @@ static int32_t Get(void *pContext, uint8_t *pPacket, uint8_t *pType)
         *pType = sdc->GetType;
     }
     return sdc->GetResult;
-}
-
-static void Process(void *pContext)
-{
-    static_cast<FakeSdc *>(pContext)->ProcessCount++;
 }
 
 static HciCmdResult_t Reset(void *, const uint8_t *, size_t, uint8_t *, size_t)
@@ -74,12 +70,11 @@ static void TestImmediatePawrCompletion(void)
     for (uint8_t status : statuses)
     {
         FakeSdc fake = {};
-        fake.GetResult = HCI_SDC_RETRY_ERROR;
-        HciSdcOps_t ops = {AclPut, IsoPut, Get, Process, &fake,
-                            HCI_SDC_RETRY_ERROR};
+        fake.GetResult = -NRF_EAGAIN;
+        s_pFake = &fake;
         HciSdc_t sdc;
         uint8_t commandEvent[80];
-        assert(HciSdcInit(&sdc, &ops, commands, 2U, &status,
+        assert(HciSdcInit(&sdc, commands, 2U, &status,
                           commandEvent, sizeof(commandEvent)));
         HciSdc_t *controller = &sdc;
         const uint8_t response[] = {0x83U, 0x20U, 8U,
@@ -96,7 +91,7 @@ static void TestImmediatePawrCompletion(void)
                                      status, 0x34U, 0x02U};
         assert(memcmp(packet, expected, sizeof(expected)) == 0);
         assert(!sdc.DelayedCommandPending);
-        /* Drain the backend turn; no duplicate completion may appear. */
+        /* Drain the controller turn; no duplicate completion may appear. */
         assert(HciSdcGetPacket(controller, &type, packet,
                                  sizeof(packet), &length) == HCI_SDC_GET_EMPTY);
         const uint8_t reset[] = {0x03U, 0x0CU, 0U};
@@ -120,21 +115,13 @@ int main()
     };
 
     FakeSdc fake = {};
-    fake.GetResult = HCI_SDC_RETRY_ERROR;
+    fake.GetResult = -NRF_EAGAIN;
 
-    HciSdcOps_t ops = {
-        AclPut,
-        IsoPut,
-        Get,
-        Process,
-        &fake,
-        HCI_SDC_RETRY_ERROR,
-    };
+    s_pFake = &fake;
 
     uint8_t commandEvent[80];
     HciSdc_t sdc;
     assert(HciSdcInit(&sdc,
-                      &ops,
                       commands,
                       sizeof(commands) / sizeof(commands[0]),
                       NULL,
@@ -157,7 +144,7 @@ int main()
     assert(packet[3] == 0x03U && packet[4] == 0x0CU && packet[5] == HCI_STATUS_SUCCESS);
 
     const uint8_t acl[] = {0x01U, 0x20U, 0x00U, 0x00U};
-    fake.AclResult = HCI_SDC_RETRY_ERROR;
+    fake.AclResult = -NRF_EAGAIN;
     assert(!HciSdcPutPacket(controller, HCI_H4_PACKET_ACL, acl, sizeof(acl)));
     assert(sdc.PutRetryCount == 1U);
     fake.AclResult = 0;
@@ -191,11 +178,8 @@ int main()
     assert(HciSdcGetPacket(controller, &type, packet, sizeof(packet), &packetLen) == HCI_SDC_GET_PACKET);
     assert(type == HCI_H4_PACKET_ISO && packetLen == 7U);
 
-    fake.GetResult = HCI_SDC_RETRY_ERROR;
+    fake.GetResult = -NRF_EAGAIN;
     assert(HciSdcGetPacket(controller, &type, packet, sizeof(packet), &packetLen) == HCI_SDC_GET_EMPTY);
-
-    HciSdcProcess(controller);
-    assert(fake.ProcessCount == 1U);
 
     /*
      * A steady command stream must not starve the controller queue. Both
@@ -206,22 +190,20 @@ int main()
      */
     {
         HciSdc_t busy;
-        FakeSdc backend = {};
+        FakeSdc ctlr = {};
         uint8_t busyEvent[80];
 
         /* One ACL packet permanently waiting. */
-        backend.GetResult = 0;
-        backend.GetType = HCI_SDC_MSG_TYPE_ACL;
-        backend.GetPacket[0] = 0x01U;
-        backend.GetPacket[1] = 0x20U;
-        backend.GetPacket[2] = 0x02U;
-        backend.GetPacket[3] = 0x00U;
+        ctlr.GetResult = 0;
+        ctlr.GetType = HCI_SDC_MSG_TYPE_ACL;
+        ctlr.GetPacket[0] = 0x01U;
+        ctlr.GetPacket[1] = 0x20U;
+        ctlr.GetPacket[2] = 0x02U;
+        ctlr.GetPacket[3] = 0x00U;
 
-        HciSdcOps_t busyOps = {
-            AclPut, IsoPut, Get, Process, &backend, HCI_SDC_RETRY_ERROR,
-        };
+        s_pFake = &ctlr;
 
-        assert(HciSdcInit(&busy, &busyOps, commands,
+        assert(HciSdcInit(&busy, commands,
                           sizeof(commands) / sizeof(commands[0]), NULL,
                           busyEvent, sizeof(busyEvent)));
 
@@ -254,7 +236,7 @@ int main()
             }
         }
 
-        assert(backend.GetCount > 0U);
+        assert(ctlr.GetCount > 0U);
         assert(aclOut > 0U);
         assert(events > 0U);
 
@@ -274,15 +256,13 @@ int main()
      */
     {
         HciSdc_t ordered;
-        FakeSdc backend = {};
+        FakeSdc ctlr = {};
         uint8_t orderedEvent[80];
 
-        HciSdcOps_t orderedOps = {
-            AclPut, IsoPut, Get, Process, &backend, HCI_SDC_RETRY_ERROR,
-        };
-        backend.GetResult = HCI_SDC_RETRY_ERROR;
+        s_pFake = &ctlr;
+        ctlr.GetResult = -NRF_EAGAIN;
 
-        assert(HciSdcInit(&ordered, &orderedOps, commands,
+        assert(HciSdcInit(&ordered, commands,
                           sizeof(commands) / sizeof(commands[0]), NULL,
                           orderedEvent, sizeof(orderedEvent)));
 
@@ -306,11 +286,11 @@ int main()
                 if (accepted[1])
                 {
                     /* The controller now has an event waiting. */
-                    backend.GetResult = 0;
-                    backend.GetType = HCI_SDC_MSG_TYPE_EVENT;
-                    backend.GetPacket[0] = 0x3EU;
-                    backend.GetPacket[1] = 0x01U;
-                    backend.GetPacket[2] = 0x01U;
+                    ctlr.GetResult = 0;
+                    ctlr.GetType = HCI_SDC_MSG_TYPE_EVENT;
+                    ctlr.GetPacket[0] = 0x3EU;
+                    ctlr.GetPacket[1] = 0x01U;
+                    ctlr.GetPacket[2] = 0x01U;
                 }
             }
 
@@ -324,7 +304,7 @@ int main()
                 seen[seenCount++] = out[0];
                 if (out[0] == 0x3EU)
                 {
-                    backend.GetResult = HCI_SDC_RETRY_ERROR;
+                    ctlr.GetResult = -NRF_EAGAIN;
                 }
             }
         }
@@ -346,16 +326,14 @@ int main()
      */
     {
         HciSdc_t credit;
-        FakeSdc backend = {};
+        FakeSdc ctlr = {};
         uint8_t creditEvent[80];
 
-        HciSdcOps_t creditOps = {
-            AclPut, IsoPut, Get, Process, &backend, HCI_SDC_RETRY_ERROR,
-        };
-        backend.GetResult = HCI_SDC_RETRY_ERROR;
-        backend.AclResult = -1;          /* the controller refuses every one */
+        s_pFake = &ctlr;
+        ctlr.GetResult = -NRF_EAGAIN;
+        ctlr.AclResult = -1;          /* the controller refuses every one */
 
-        assert(HciSdcInit(&credit, &creditOps, commands,
+        assert(HciSdcInit(&credit, commands,
                           sizeof(commands) / sizeof(commands[0]), NULL,
                           creditEvent, sizeof(creditEvent)));
 
@@ -404,8 +382,8 @@ int main()
          * controller, and still returns its credit. The host is not entitled
          * to send it, Vol 4 Part E 7.8.2.
          */
-        backend.AclResult = 0;
-        backend.AclCount = 0U;
+        ctlr.AclResult = 0;
+        ctlr.AclCount = 0U;
 
         static uint8_t oversize[HCI_SDC_ACL_MAX_PAYLOAD + 8U];
         memset(oversize, 0, sizeof(oversize));
@@ -413,12 +391,12 @@ int main()
         assert(HciSdcPutPacket(ops4, HCI_H4_PACKET_ACL, oversize,
                          sizeof(oversize)));
         assert(credit.AclOversizeCount == 1U);
-        assert(backend.AclCount == 0U);          /* never handed over */
+        assert(ctlr.AclCount == 0U);          /* never handed over */
 
         /* The largest packet that is allowed still goes through. */
         assert(HciSdcPutPacket(ops4, HCI_H4_PACKET_ACL, oversize,
                          HCI_SDC_ACL_HEADER_SIZE + HCI_SDC_ACL_MAX_PAYLOAD));
-        assert(backend.AclCount == 1U);
+        assert(ctlr.AclCount == 1U);
 
         assert(HciSdcGetPacket(ops4, &creditType, out, sizeof(out),
                          &outLen) == HCI_SDC_GET_PACKET);
@@ -443,16 +421,14 @@ int main()
      */
     {
         HciSdc_t limit;
-        FakeSdc backend = {};
+        FakeSdc ctlr = {};
         uint8_t limitEvent[80];
 
-        HciSdcOps_t limitOps = {
-            AclPut, IsoPut, Get, Process, &backend, HCI_SDC_RETRY_ERROR,
-        };
-        backend.GetResult = HCI_SDC_RETRY_ERROR;
-        backend.AclResult = 0;
+        s_pFake = &ctlr;
+        ctlr.GetResult = -NRF_EAGAIN;
+        ctlr.AclResult = 0;
 
-        assert(HciSdcInit(&limit, &limitOps, commands,
+        assert(HciSdcInit(&limit, commands,
                           sizeof(commands) / sizeof(commands[0]), NULL,
                           limitEvent, sizeof(limitEvent)));
 
@@ -514,13 +490,13 @@ int main()
          */
         const uint8_t completed[] = {HCI_SDC_EVENT_NUM_COMPLETED_PACKETS, 5U,
                                      1U, 0x05U, 0x00U, 0x04U, 0x00U};
-        backend.GetResult = 0;
-        backend.GetType = HCI_SDC_MSG_TYPE_EVENT;
-        memcpy(backend.GetPacket, completed, sizeof(completed));
+        ctlr.GetResult = 0;
+        ctlr.GetType = HCI_SDC_MSG_TYPE_EVENT;
+        memcpy(ctlr.GetPacket, completed, sizeof(completed));
         assert(HciSdcGetPacket(ops5, &limitType, limitOut,
                          sizeof(limitOut), &limitLen) ==
                HCI_SDC_GET_PACKET);
-        backend.GetResult = HCI_SDC_RETRY_ERROR;
+        ctlr.GetResult = -NRF_EAGAIN;
 
         for (unsigned i = 0U; i < 4U; i++)
         {
@@ -534,13 +510,13 @@ int main()
         /* A disconnection discards what the controller held, so it resets. */
         const uint8_t gone[] = {HCI_SDC_EVENT_DISCONNECTION_COMPLETE, 4U,
                                 0x00U, 0x05U, 0x00U, 0x13U};
-        backend.GetResult = 0;
-        backend.GetType = HCI_SDC_MSG_TYPE_EVENT;
-        memcpy(backend.GetPacket, gone, sizeof(gone));
+        ctlr.GetResult = 0;
+        ctlr.GetType = HCI_SDC_MSG_TYPE_EVENT;
+        memcpy(ctlr.GetPacket, gone, sizeof(gone));
         assert(HciSdcGetPacket(ops5, &limitType, limitOut,
                          sizeof(limitOut), &limitLen) ==
                HCI_SDC_GET_PACKET);
-        backend.GetResult = HCI_SDC_RETRY_ERROR;
+        ctlr.GetResult = -NRF_EAGAIN;
 
         for (unsigned i = 0U; i < 4U; i++)
         {
@@ -567,13 +543,13 @@ int main()
 
         const uint8_t failed[] = {HCI_SDC_EVENT_DISCONNECTION_COMPLETE, 4U,
                                   0x0CU, 0x05U, 0x00U, 0x13U};
-        backend.GetResult = 0;
-        backend.GetType = HCI_SDC_MSG_TYPE_EVENT;
-        memcpy(backend.GetPacket, failed, sizeof(failed));
+        ctlr.GetResult = 0;
+        ctlr.GetType = HCI_SDC_MSG_TYPE_EVENT;
+        memcpy(ctlr.GetPacket, failed, sizeof(failed));
         assert(HciSdcGetPacket(ops5, &limitType, limitOut,
                          sizeof(limitOut), &limitLen) ==
                HCI_SDC_GET_PACKET);
-        backend.GetResult = HCI_SDC_RETRY_ERROR;
+        ctlr.GetResult = -NRF_EAGAIN;
 
         const uint32_t putAfterFailed = limit.AclPutCount;
         const uint32_t overrunAfterFailed = limit.AclCreditOverrunCount;
@@ -650,13 +626,13 @@ int main()
         /* What one link returns is spendable by the other. */
         const uint8_t freedOne[] = {HCI_SDC_EVENT_NUM_COMPLETED_PACKETS, 5U,
                                     1U, 0x05U, 0x00U, 0x02U, 0x00U};
-        backend.GetResult = 0;
-        backend.GetType = HCI_SDC_MSG_TYPE_EVENT;
-        memcpy(backend.GetPacket, freedOne, sizeof(freedOne));
+        ctlr.GetResult = 0;
+        ctlr.GetType = HCI_SDC_MSG_TYPE_EVENT;
+        memcpy(ctlr.GetPacket, freedOne, sizeof(freedOne));
         assert(HciSdcGetPacket(ops5, &limitType, limitOut,
                          sizeof(limitOut), &limitLen) ==
                HCI_SDC_GET_PACKET);
-        backend.GetResult = HCI_SDC_RETRY_ERROR;
+        ctlr.GetResult = -NRF_EAGAIN;
 
         for (unsigned i = 0U; i < 2U; i++)
         {
@@ -674,13 +650,13 @@ int main()
          */
         const uint8_t goneFive[] = {HCI_SDC_EVENT_DISCONNECTION_COMPLETE, 4U,
                                     0x00U, 0x05U, 0x00U, 0x13U};
-        backend.GetResult = 0;
-        backend.GetType = HCI_SDC_MSG_TYPE_EVENT;
-        memcpy(backend.GetPacket, goneFive, sizeof(goneFive));
+        ctlr.GetResult = 0;
+        ctlr.GetType = HCI_SDC_MSG_TYPE_EVENT;
+        memcpy(ctlr.GetPacket, goneFive, sizeof(goneFive));
         assert(HciSdcGetPacket(ops5, &limitType, limitOut,
                          sizeof(limitOut), &limitLen) ==
                HCI_SDC_GET_PACKET);
-        backend.GetResult = HCI_SDC_RETRY_ERROR;
+        ctlr.GetResult = -NRF_EAGAIN;
 
         const uint32_t overrunBeforeGone = limit.AclCreditOverrunCount;
         assert(HciSdcPutPacket(ops5, HCI_H4_PACKET_ACL, aclSix,

@@ -283,8 +283,6 @@ static void HciAppHostProcess(void *pContext)
         }
     }
 
-    /* The controller runs first, then the bridge moves what it produced. */
-    pApp->Sdc.Process();
     HciControllerProcess(&pApp->Controller);
     HciAppResyncOnIdle(pApp);
 }

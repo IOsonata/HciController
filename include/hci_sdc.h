@@ -33,8 +33,6 @@ extern "C" {
 #define HCI_SDC_MSG_TYPE_EVENT  0x04U
 #define HCI_SDC_MSG_TYPE_ISO    0x08U
 
-#define HCI_SDC_RETRY_ERROR     (-11)
-
 /*
  * The largest packet the controller hands up: an HCI message of
  * HCI_MSG_BUFFER_MAX_SIZE or an ISO packet of HCI_SDC_ISO_PACKET_SIZE,
@@ -72,20 +70,6 @@ typedef enum
  * event, including its headers.
  */
 #define HCI_SDC_COMPAT_EVENT_SIZE                      254U
-
-typedef int32_t (*HciSdcDataPut_t)(void *pContext, const uint8_t *pPacket);
-typedef int32_t (*HciSdcGet_t)(void *pContext, uint8_t *pPacket, uint8_t *pType);
-typedef void (*HciSdcProcess_t)(void *pContext);
-
-typedef struct
-{
-    HciSdcDataPut_t AclPut;
-    HciSdcDataPut_t IsoPut;
-    HciSdcGet_t Get;
-    HciSdcProcess_t Process;
-    void *pContext;
-    int32_t RetryError;
-} HciSdcOps_t;
 
 /*
  * Number of simultaneously tracked ACL connection handles. The default
@@ -164,8 +148,6 @@ typedef struct
      */
     HciCmdDispatch_t CompatCommands;
     uint8_t CompatEvent[HCI_SDC_COMPAT_EVENT_SIZE];
-
-    HciSdcOps_t Ops;
 
     /*
      * Two sources share one outgoing packet slot: command events from the
@@ -285,7 +267,6 @@ void HciSdcSetAclLimit(HciSdc_t *pSdc, uint16_t Limit);
 void HciSdcResetFlowControl(HciSdc_t *pSdc);
 
 bool HciSdcInit(HciSdc_t *pSdc,
-                const HciSdcOps_t *pOps,
                 const HciCmdEntry_t *pCommands,
                 size_t CommandCount,
                 void *pCommandContext,
@@ -316,9 +297,6 @@ HciSdcGetResult_t HciSdcGetPacket(HciSdc_t *pSdc,
                                   uint8_t *pPacket,
                                   size_t PacketCapacity,
                                   size_t *pPacketLen);
-
-/* Run the controller. The application calls it before the bridge. */
-void HciSdcProcess(HciSdc_t *pSdc);
 
 #ifdef __cplusplus
 }
