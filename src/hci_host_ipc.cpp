@@ -97,10 +97,13 @@ void HciHostIpcMonitor(void)
 {
     static uint32_t s_Last[6];
     static bool s_First = true;
+    static uint8_t s_Printed;
     const volatile IpcIntrfHdr_t *pHdr =
         reinterpret_cast<const volatile IpcIntrfHdr_t *>(HCI_IPC_MEM_ADDR);
 
-    if (pHdr->Magic != IPC_INTRF_MAGIC)
+    /* A few lines show the link coming up. After that the indexes move with
+     * every packet and the lines would only fill the trace output. */
+    if (s_Printed >= 6U || pHdr->Magic != IPC_INTRF_MAGIC)
     {
         return;
     }
@@ -118,6 +121,7 @@ void HciHostIpcMonitor(void)
         return;
     }
     s_First = false;
+    s_Printed++;
     memcpy(s_Last, now, sizeof(now));
     HciTrace("ipc: epoch=%lu out put=%lu get=%lu in put=%lu get=%lu wait=%lu\r\n",
              (unsigned long)now[0], (unsigned long)now[1], (unsigned long)now[2],
