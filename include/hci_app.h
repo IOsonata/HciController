@@ -35,7 +35,9 @@ extern "C" {
 
 #define HCI_APP_PACKET_SIZE         1024U
 #define HCI_APP_COMMAND_EVENT_SIZE  260U
+#ifndef HCI_APP_FIFO_DATA_SIZE
 #define HCI_APP_FIFO_DATA_SIZE      4096U
+#endif
 #define HCI_APP_FIFO_MEM_SIZE       CFIFO_MEMSIZE(HCI_APP_FIFO_DATA_SIZE)
 
 typedef enum

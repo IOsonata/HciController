@@ -13,9 +13,21 @@ A target with a hardware engine substitutes it behind the same facets.
 ----------------------------------------------------------------------------*/
 #include "hci_vendor.h"
 
+/*
+ * The crypto commands pull the software AES, SHA-256 and uECC engines into
+ * the image, about 16 KB of flash. A part with little flash, such as the
+ * nRF5340 network core, builds with HCI_VENDOR_CRYPTO=0. The crypto opcodes
+ * then answer Unsupported Feature and Crypto Supported reports no bits.
+ */
+#ifndef HCI_VENDOR_CRYPTO
+#define HCI_VENDOR_CRYPTO 1
+#endif
+
+#if HCI_VENDOR_CRYPTO
 #include "crypto/crypto_softaes.h"
 #include "crypto/crypto_softsha256.h"
 #include "crypto/crypto_uecc.h"
+#endif
 
 #include <string.h>
 
@@ -35,10 +47,12 @@ A target with a hardware engine substitutes it behind the same facets.
 #define P256_PUB_LEN    64U
 #define P256_SIG_LEN    64U
 
+#if HCI_VENDOR_CRYPTO
 static CryptoSoftAes s_Aes;
 static CryptoSoftSha256 s_Sha;
 static CryptoUecc s_Ecc;
 static bool s_bEnginesReady = false;
+#endif
 
 extern "C" __attribute__((weak)) bool HciVendorStaticAddr(uint8_t Addr[6])
 {
@@ -51,6 +65,7 @@ __attribute__((weak)) RngEngine *HciVendorRng(void)
     return nullptr;
 }
 
+#if HCI_VENDOR_CRYPTO
 static void HciVendorEnginesPrepare(void)
 {
     if (s_bEnginesReady)
@@ -79,6 +94,12 @@ static uint32_t HciVendorSupported(void)
 
     return bits;
 }
+#else
+static uint32_t HciVendorSupported(void)
+{
+    return 0U;
+}
+#endif
 
 extern "C" bool HciVendorIsCommand(uint16_t Opcode)
 {
@@ -116,6 +137,7 @@ static uint8_t HciVendorCryptoSupported(uint8_t *pRet, size_t *pRetLen)
     return HCI_VENDOR_STATUS_SUCCESS;
 }
 
+#if HCI_VENDOR_CRYPTO
 static uint8_t HciVendorAesCmac(const uint8_t *pParam, size_t ParamLen,
                                 uint8_t *pRet, size_t *pRetLen)
 {
@@ -335,6 +357,7 @@ static uint8_t HciVendorEcdsaVerify(const uint8_t *pParam, size_t ParamLen)
 
     return HCI_VENDOR_STATUS_SUCCESS;
 }
+#endif /* HCI_VENDOR_CRYPTO */
 
 extern "C" size_t HciVendorCommand(const uint8_t *pPacket, size_t PacketLen,
                                    uint8_t *pEvent, size_t Capacity)
@@ -363,7 +386,9 @@ extern "C" size_t HciVendorCommand(const uint8_t *pPacket, size_t PacketLen,
     }
     else
     {
+#if HCI_VENDOR_CRYPTO
         HciVendorEnginesPrepare();
+#endif
 
         switch (opcode)
         {
@@ -375,6 +400,7 @@ extern "C" size_t HciVendorCommand(const uint8_t *pPacket, size_t PacketLen,
                 status = paramLen == 0U ? HciVendorCryptoSupported(pRet, &retLen)
                                         : HCI_VENDOR_STATUS_INVALID_PARAMS;
                 break;
+#if HCI_VENDOR_CRYPTO
             case HCI_VENDOR_OPCODE_AES_CMAC:
                 status = HciVendorAesCmac(pParam, paramLen, pRet, &retLen);
                 break;
@@ -396,6 +422,7 @@ extern "C" size_t HciVendorCommand(const uint8_t *pPacket, size_t PacketLen,
             case HCI_VENDOR_OPCODE_ECDSA_P256_VERIFY:
                 status = HciVendorEcdsaVerify(pParam, paramLen);
                 break;
+#endif /* HCI_VENDOR_CRYPTO */
             default:
                 status = HCI_VENDOR_STATUS_UNSUPPORTED;
                 break;
