@@ -152,7 +152,15 @@ static bool HciMpslInit(HciNrf5340Net_t *pTarget)
         lfclk.source = MPSL_CLOCK_LF_SRC_XTAL;
         lfclk.accuracy_ppm = (uint16_t)lfosc->Accuracy;
     }
+#ifdef HCI_MPSL_WAIT_LFCLK
     lfclk.skip_wait_lfclk_started = MPSL_DEFAULT_SKIP_WAIT_LFCLK_STARTED;
+#else
+    /* mpsl_init sleeps until EVENTS_LFCLKSTARTED. When the clock does not
+     * come up the whole controller stops there, before the host side is
+     * served. Return at once, the clock event is handled by the CLOCK_POWER
+     * interrupt that is enabled below. Define HCI_MPSL_WAIT_LFCLK to wait. */
+    lfclk.skip_wait_lfclk_started = true;
+#endif
 
     /* The low priority line is a real NVIC interrupt, MPSL pends it through
      * the NVIC. It only wakes the HCI thread, see SWI0_IRQHandler.
