@@ -19,6 +19,7 @@
 
 #include "board.h"
 #include "hci_app.h"
+#include "hci_trace.h"
 
 #include "bluetooth/bt_hci_ipc.h"
 
@@ -71,8 +72,19 @@ bool HciHostIpcInit(HciApp_t *pApp)
 
     if (!s_HciIpc.Init(cfg))
     {
+        HciTrace("ipc: owner init failed addr=0x%08lX size=%lu pkt=%u\r\n",
+                 (unsigned long)HCI_IPC_MEM_ADDR,
+                 (unsigned long)HCI_IPC_MEM_SIZE, (unsigned)HCI_IPC_NB_PKT);
         return false;
     }
+
+    /* The first words of the block show whether it was formatted. */
+    const volatile IpcIntrfHdr_t *pHdr =
+        reinterpret_cast<const volatile IpcIntrfHdr_t *>(HCI_IPC_MEM_ADDR);
+    HciTrace("ipc: owner addr=0x%08lX size=%lu pkt=%u tx=%d rx=%d magic=0x%08lX ver=%lu\r\n",
+             (unsigned long)HCI_IPC_MEM_ADDR, (unsigned long)HCI_IPC_MEM_SIZE,
+             (unsigned)HCI_IPC_NB_PKT, HCI_IPC_TX_CHAN, HCI_IPC_RX_CHAN,
+             (unsigned long)pHdr->Magic, (unsigned long)pHdr->Version);
 
     pApp->pHostIntrf = s_HciIpc.Data();
     return true;

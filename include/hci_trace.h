@@ -24,7 +24,9 @@ typedef struct __device_intrf DevIntrf_t;
 #define HCI_TRACE 0
 #endif
 
+#ifndef HCI_TRACE_RECORD_SIZE
 #define HCI_TRACE_RECORD_SIZE  160U
+#endif
 #ifndef HCI_TRACE_RECORD_COUNT
 #define HCI_TRACE_RECORD_COUNT 26U
 #endif
