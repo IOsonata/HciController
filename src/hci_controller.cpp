@@ -1024,4 +1024,12 @@ void HciControllerProcess(HciController_t *pController)
     }
 
     HciControllerHostProcess(pController);
+
+    /*
+     * The host process above can accept a command that the first one only
+     * held, and the reply is queued by then. An event driven transport does
+     * not wake the loop again, so the reply goes out in this pass.
+     */
+    HciControllerFetchPacket(pController);
+    HciControllerStartPacket(pController);
 }
