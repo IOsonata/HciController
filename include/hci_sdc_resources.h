@@ -297,17 +297,25 @@ static_assert(HCI_SDC_ISO_RX_SDU_SIZE <= HCI_SDC_ISO_SDU_LIMIT,
  *   HCI_SDC_FEAT_PAWR         periodic advertising with responses, which
  *                             needs the sync transfer above
  */
+/* The nRF5340 network core has 256 KB of flash and does not fit with all of
+ * them, so for that target they start off. A build can still turn one on. */
+#ifdef NRF5340_XXAA_NETWORK
+#define HCI_SDC_FEAT_DEFAULT       0
+#else
+#define HCI_SDC_FEAT_DEFAULT       1
+#endif
+
 #ifndef HCI_SDC_FEAT_SUBRATING
-#define HCI_SDC_FEAT_SUBRATING     1
+#define HCI_SDC_FEAT_SUBRATING     HCI_SDC_FEAT_DEFAULT
 #endif
 #ifndef HCI_SDC_FEAT_EXT_FEATURES
-#define HCI_SDC_FEAT_EXT_FEATURES  1
+#define HCI_SDC_FEAT_EXT_FEATURES  HCI_SDC_FEAT_DEFAULT
 #endif
 #ifndef HCI_SDC_FEAT_PAST
-#define HCI_SDC_FEAT_PAST          1
+#define HCI_SDC_FEAT_PAST          HCI_SDC_FEAT_DEFAULT
 #endif
 #ifndef HCI_SDC_FEAT_PAWR
-#define HCI_SDC_FEAT_PAWR          1
+#define HCI_SDC_FEAT_PAWR          HCI_SDC_FEAT_DEFAULT
 #endif
 
 /* What is really built, after the dependencies between the features. */
