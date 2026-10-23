@@ -202,9 +202,9 @@ static void HciAppSetHostOpen(HciApp_t *pApp, bool Open)
     }
 }
 
-static bool HciAppHostStart(void *pContext)
+bool HciAppHostStart(void)
 {
-    HciApp_t *pApp = static_cast<HciApp_t *>(pContext);
+    HciApp_t *pApp = s_pApp;
     if (pApp == nullptr)
     {
         return false;
@@ -261,9 +261,9 @@ static void HciAppResyncOnIdle(HciApp_t *pApp)
     }
 }
 
-static void HciAppHostProcess(void *pContext)
+void HciAppHostProcess(void)
 {
-    HciApp_t *pApp = static_cast<HciApp_t *>(pContext);
+    HciApp_t *pApp = s_pApp;
     if (pApp == nullptr)
     {
         return;
@@ -424,13 +424,8 @@ bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode)
     HciTargetGetSdcMem(&sdcRequired, &sdcCapacity);
     HciCountersSetSdcMem(&pApp->Counters, sdcRequired, sdcCapacity);
 
-    HciTaktOsHostOps_t hostOps = {};
-    hostOps.Start = HciAppHostStart;
-    hostOps.Process = HciAppHostProcess;
-    hostOps.pContext = pApp;
-    hostOps.PollIntervalMs = pApp->UsbRunning ? HCI_APP_USB_POLL_MS : 0U;
-
-    if (!HciTaktOsInit(&pApp->Runtime, &hostOps))
+    if (!HciTaktOsInit(&pApp->Runtime,
+                       pApp->UsbRunning ? HCI_APP_USB_POLL_MS : 0U))
     {
         HciTrace("init: HciTaktOsInit failed\r\n");
         pApp->LastError = -5;

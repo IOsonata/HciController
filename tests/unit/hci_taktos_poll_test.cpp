@@ -71,8 +71,9 @@ bool HciTargetStart(void) { gTargetStart++; return gTargetStartResult; }
 void HciTargetProcessMpsl(void) { gMpslProcess++; }
 void HciTargetFault(int) {}
 
-static bool HostStart(void *) { gHostStart++; return true; }
-static void Process(void *) { gProcess++; }
+/* The host side the runtime thread calls, over counters. */
+bool HciAppHostStart(void) { gHostStart++; return true; }
+void HciAppHostProcess(void) { gProcess++; }
 
 static void Reset(void)
 {
@@ -88,25 +89,15 @@ static void Reset(void)
     gRuntime = nullptr;
 }
 
-static void SetOps(HciTaktOsHostOps_t *pHostOps)
-{
-    memset(pHostOps, 0, sizeof(*pHostOps));
-    pHostOps->Start = HostStart;
-    pHostOps->Process = Process;
-}
-
 static void Run(uint32_t PollMs, bool AlwaysTimeout)
 {
     static HciTaktOs_t runtime;
-    HciTaktOsHostOps_t hostOps;
 
     Reset();
     gSemAlwaysTimesOut = AlwaysTimeout;
     gRuntime = &runtime;
-    SetOps(&hostOps);
-    hostOps.PollIntervalMs = PollMs;
 
-    assert(HciTaktOsInit(&runtime, &hostOps));
+    assert(HciTaktOsInit(&runtime, PollMs));
     HciTaktOsThreadArm(&runtime);
     HciTaktOsThread(&runtime);
 
@@ -132,10 +123,8 @@ int main(void)
 
     {
         HciTaktOs_t runtime = {};
-        HciTaktOsHostOps_t hostOps;
         Reset();
-        SetOps(&hostOps);
-        assert(HciTaktOsInit(&runtime, &hostOps));
+        assert(HciTaktOsInit(&runtime, 0U));
 
         HciTaktOsWake(&runtime, HCI_TAKTOS_EVENT_HOST);
         assert(gGiveCount == 1U);
@@ -153,14 +142,12 @@ int main(void)
 
     {
         HciTaktOs_t runtime = {};
-        HciTaktOsHostOps_t hostOps;
 
         Reset();
         gRuntime = &runtime;
         gTargetStartResult = false;
-        SetOps(&hostOps);
 
-        assert(HciTaktOsInit(&runtime, &hostOps));
+        assert(HciTaktOsInit(&runtime, 0U));
         HciTaktOsThreadArm(&runtime);
         HciTaktOsThread(&runtime);
 
@@ -181,11 +168,9 @@ int main(void)
      */
     {
         HciTaktOs_t runtime = {};
-        HciTaktOsHostOps_t hostOps;
 
         Reset();
-        SetOps(&hostOps);
-        assert(HciTaktOsInit(&runtime, &hostOps));
+        assert(HciTaktOsInit(&runtime, 0U));
         HciTaktOsThreadArm(&runtime);
         assert(runtime.ThreadArmed && !runtime.ThreadLive);
 
@@ -201,12 +186,10 @@ int main(void)
     /* A stop before first entry must exit without bringing the target up. */
     {
         HciTaktOs_t runtime = {};
-        HciTaktOsHostOps_t hostOps;
 
         Reset();
         gRuntime = &runtime;
-        SetOps(&hostOps);
-        assert(HciTaktOsInit(&runtime, &hostOps));
+        assert(HciTaktOsInit(&runtime, 0U));
         HciTaktOsThreadArm(&runtime);
         HciTaktOsStop(&runtime);
         HciTaktOsThread(&runtime);

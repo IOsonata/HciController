@@ -3,8 +3,9 @@
 
 @brief	TaktOS runtime integration for HciController.
 
-		Defines controller wake events, Host and MPSL processing hooks, runtime
-		state, thread lifecycle control, and stop synchronization.
+		Defines controller wake events, runtime state, thread lifecycle
+		control and stop synchronization, and the host functions the
+		runtime thread runs.
 
 @author	Nguyen Hoan Hoang
 @date	August 2026
@@ -29,30 +30,19 @@ extern "C" {
 #define HCI_TAKTOS_EVENT_SDC   (1UL << 2)
 #define HCI_TAKTOS_EVENT_STOP  (1UL << 31)
 
-typedef bool (*HciTaktOsStart_t)(void *pContext);
-typedef void (*HciTaktOsProcess_t)(void *pContext);
-
-typedef struct
-{
-    HciTaktOsStart_t Start;
-    HciTaktOsProcess_t Process;
-    void *pContext;
-
-    /*
-     * Milliseconds between forced Process calls when no wake arrives. Zero
-     * waits for a wake only. USB work normally wakes the worker through
-     * UsbEvtQue or its data callback; the timeout also polls host-open state
-     * and retries bridge packets waiting on transport capacity.
-     */
-    uint32_t PollIntervalMs;
-} HciTaktOsHostOps_t;
-
 typedef struct
 {
     TaktOSSem_t WakeSem;
     /* Given by the runtime thread as it leaves, so a stop can wait for it. */
     TaktOSSem_t StoppedSem;
-    HciTaktOsHostOps_t HostOps;
+
+    /*
+     * Milliseconds between forced host passes when no wake arrives. Zero
+     * waits for a wake only. USB work normally wakes the worker through
+     * UsbEvtQue or its data callback; the timeout also polls host-open state
+     * and retries bridge packets waiting on transport capacity.
+     */
+    uint32_t PollIntervalMs;
 
     volatile uint32_t PendingEvents;
     volatile bool Started;
@@ -86,10 +76,20 @@ typedef struct
 } HciTaktOs_t;
 
 /*
- * The runtime thread starts and services the target through the functions of
- * hci_target.h, which the target file a project links defines.
+ * The host side the runtime thread runs, defined by the application
+ * (hci_app.cpp). Start brings the host transport up, and runs again on the
+ * next pass after HciTaktOsHostDown; Process runs one pass of the host and
+ * the bridge.
  */
-bool HciTaktOsInit(HciTaktOs_t *pRuntime, const HciTaktOsHostOps_t *pHostOps);
+bool HciAppHostStart(void);
+void HciAppHostProcess(void);
+
+/*
+ * The runtime thread starts and services the target through the functions of
+ * hci_target.h, which the target file a project links defines, and the host
+ * through the two above. PollIntervalMs as in HciTaktOs_t.
+ */
+bool HciTaktOsInit(HciTaktOs_t *pRuntime, uint32_t PollIntervalMs);
 
 /*
  * Arm before creating the kernel thread. If creation itself fails, disarm it.
@@ -105,7 +105,7 @@ void HciTaktOsStop(HciTaktOs_t *pRuntime);
 
 /*
  * Called only from the runtime thread when the host transport has become
- * unusable after it was started. The next service pass runs HostOps.Start
+ * unusable after it was started. The next service pass runs HciAppHostStart
  * again instead of continuing to pump a failed transport.
  */
 void HciTaktOsHostDown(HciTaktOs_t *pRuntime);

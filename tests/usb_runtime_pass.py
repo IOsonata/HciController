@@ -98,7 +98,7 @@ def main() -> None:
         die("diagnostic CDC TX logging must continue to flush")
 
     app_process = function_body(
-        source, "static void HciAppHostProcess(void *pContext)"
+        source, "void HciAppHostProcess(void)"
     )
     if "HciHostUsbProcess(pApp)" not in app_process:
         die("the app must run the USB transport every pass it is up")
