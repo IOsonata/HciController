@@ -30,7 +30,6 @@ typedef struct
     bool SdcInitialized;
     bool SdcEnabled;
 } HciNrf54lm20_t;
-HciTarget_t HciNrf54lm20Target(void);
 #ifdef __cplusplus
 }
 #endif

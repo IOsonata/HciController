@@ -100,11 +100,6 @@ typedef struct
     uint32_t LinkIdlePasses;
 
     HciTaktOs_t Runtime;
-    /*
-     * The part, held through its interface. The instance belongs to the port,
-     * so nothing here has to know how large it is or which part it is.
-     */
-    HciTarget_t Target;
 
     uint8_t HostPacket[HCI_APP_PACKET_SIZE];
     uint8_t ControllerPacket[HCI_APP_PACKET_SIZE];
@@ -168,16 +163,16 @@ void HciHostIpcRelease(HciApp_t *pApp);
  * The caller owns the object storage and must supply its cold-boot initialized
  * instance. H:4/controller processing remains deferred until HciAppInit().
  */
-bool HciAppUartEarlyInit(HciApp_t *pApp, HciTarget_t Target);
+bool HciAppUartEarlyInit(HciApp_t *pApp);
 
 /* Runtime transport selection used by the persistent board mode setting. */
-bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode, HciTarget_t Target);
+bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode);
 
 /*
  * Compatibility entry point. USB keeps the compile-time
  * HCI_USB_HCI_TRANSPORT default; UART is H:4.
  */
-bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType, HciTarget_t Target);
+bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType);
 void HciAppStop(HciApp_t *pApp);
 void HciAppThread(void *pContext);
 bool HciAppHostIsOpen(const HciApp_t *pApp);

@@ -66,6 +66,9 @@ __attribute__((weak)) bool HciHostUsbIsPacket(const HciApp_t *) { return false; 
 __attribute__((weak)) bool HciHostIpcInit(HciApp_t *) { return false; }
 __attribute__((weak)) void HciHostIpcRelease(HciApp_t *) {}
 
+/* A target that does not decode its UART prints nothing for it. */
+__attribute__((weak)) void HciTargetUartTrace(uint8_t) {}
+
 void HciAppWake(void)
 {
     HciApp_t *pApp = s_pApp;
@@ -140,9 +143,9 @@ static void HciAppHostRelease(HciApp_t *pApp)
     pApp->pHostIntrf = nullptr;
 }
 
-bool HciAppUartEarlyInit(HciApp_t *pApp, HciTarget_t Target)
+bool HciAppUartEarlyInit(HciApp_t *pApp)
 {
-    if (pApp == nullptr || !HciTargetValid(&Target) || s_pApp != nullptr)
+    if (pApp == nullptr || s_pApp != nullptr)
     {
         return false;
     }
@@ -152,7 +155,6 @@ bool HciAppUartEarlyInit(HciApp_t *pApp, HciTarget_t Target)
 #endif
     pApp->HostType = HCI_APP_HOST_UART;
     pApp->Mode = HCI_APP_MODE_UART_H4;
-    pApp->Target = Target;
     pApp->UsbHciNative = false;
     s_pApp = pApp;
 
@@ -319,10 +321,10 @@ static bool HciAppControllerInit(HciApp_t *pApp, DevIntrf_t *pCtlrIntrf)
                              pCtlrIntrf);
 }
 
-bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode, HciTarget_t Target)
+bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode)
 {
     HciAppHost_t hostType;
-    if (!HciAppResolveMode(Mode, &hostType) || !HciTargetValid(&Target))
+    if (!HciAppResolveMode(Mode, &hostType))
     {
         return false;
     }
@@ -347,7 +349,6 @@ bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode, HciTarget_t Target)
 
     pApp->HostType = hostType;
     pApp->Mode = Mode;
-    pApp->Target = Target;
     pApp->UsbHciNative = Mode == HCI_APP_MODE_USB_NATIVE;
     HciCountersInit(&pApp->Counters, pApp->Sdc, &pApp->Controller);
 
@@ -407,10 +408,9 @@ bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode, HciTarget_t Target)
                                           pApp);
     }
 
-    if (!pApp->Target.pOps->Init(pApp->Target.pContext,
-                                 &pApp->Runtime,
-                                 reinterpret_cast<uint8_t *>(pApp->SdcMem),
-                                 sizeof(pApp->SdcMem)))
+    if (!HciTargetInit(&pApp->Runtime,
+                       reinterpret_cast<uint8_t *>(pApp->SdcMem),
+                       sizeof(pApp->SdcMem)))
     {
         HciTrace("init: target Init failed\r\n");
         pApp->LastError = -4;
@@ -421,11 +421,8 @@ bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode, HciTarget_t Target)
 
     uint32_t sdcRequired = 0U;
     uint32_t sdcCapacity = 0U;
-    HciTargetGetSdcMem(&pApp->Target, &sdcRequired, &sdcCapacity);
+    HciTargetGetSdcMem(&sdcRequired, &sdcCapacity);
     HciCountersSetSdcMem(&pApp->Counters, sdcRequired, sdcCapacity);
-
-    HciTaktOsOps_t runtimeOps = {};
-    pApp->Target.pOps->GetTaktOsOps(pApp->Target.pContext, &runtimeOps);
 
     HciTaktOsHostOps_t hostOps = {};
     hostOps.Start = HciAppHostStart;
@@ -433,7 +430,7 @@ bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode, HciTarget_t Target)
     hostOps.pContext = pApp;
     hostOps.PollIntervalMs = pApp->UsbRunning ? HCI_APP_USB_POLL_MS : 0U;
 
-    if (!HciTaktOsInit(&pApp->Runtime, &runtimeOps, &hostOps))
+    if (!HciTaktOsInit(&pApp->Runtime, &hostOps))
     {
         HciTrace("init: HciTaktOsInit failed\r\n");
         pApp->LastError = -5;
@@ -447,16 +444,16 @@ bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode, HciTarget_t Target)
     return true;
 }
 
-bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType, HciTarget_t Target)
+bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType)
 {
     switch (HostType)
     {
         case HCI_APP_HOST_UART:
-            return HciAppInitMode(pApp, HCI_APP_MODE_UART_H4, Target);
+            return HciAppInitMode(pApp, HCI_APP_MODE_UART_H4);
         case HCI_APP_HOST_USB:
-            return HciAppInitMode(pApp, HCI_APP_MODE_USB_NATIVE, Target);
+            return HciAppInitMode(pApp, HCI_APP_MODE_USB_NATIVE);
         case HCI_APP_HOST_IPC:
-            return HciAppInitMode(pApp, HCI_APP_MODE_IPC, Target);
+            return HciAppInitMode(pApp, HCI_APP_MODE_IPC);
         default:
             return false;
     }
@@ -484,7 +481,7 @@ void HciAppStop(HciApp_t *pApp)
     }
 
     HciAppHostRelease(pApp);
-    pApp->Target.pOps->Stop(pApp->Target.pContext);
+    HciTargetStop();
 
     pApp->Initialized = false;
     s_pApp = nullptr;

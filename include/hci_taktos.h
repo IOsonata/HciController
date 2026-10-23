@@ -31,15 +31,6 @@ extern "C" {
 
 typedef bool (*HciTaktOsStart_t)(void *pContext);
 typedef void (*HciTaktOsProcess_t)(void *pContext);
-typedef void (*HciTaktOsFault_t)(void *pContext, int Error);
-
-typedef struct
-{
-    HciTaktOsStart_t Start;
-    HciTaktOsProcess_t ProcessMpsl;
-    HciTaktOsFault_t Fault;
-    void *pContext;
-} HciTaktOsOps_t;
 
 typedef struct
 {
@@ -61,7 +52,6 @@ typedef struct
     TaktOSSem_t WakeSem;
     /* Given by the runtime thread as it leaves, so a stop can wait for it. */
     TaktOSSem_t StoppedSem;
-    HciTaktOsOps_t Ops;
     HciTaktOsHostOps_t HostOps;
 
     volatile uint32_t PendingEvents;
@@ -95,9 +85,11 @@ typedef struct
     uint32_t PollWakeCount;
 } HciTaktOs_t;
 
-bool HciTaktOsInit(HciTaktOs_t *pRuntime,
-                   const HciTaktOsOps_t *pOps,
-                   const HciTaktOsHostOps_t *pHostOps);
+/*
+ * The runtime thread starts and services the target through the functions of
+ * hci_target.h, which the target file a project links defines.
+ */
+bool HciTaktOsInit(HciTaktOs_t *pRuntime, const HciTaktOsHostOps_t *pHostOps);
 
 /*
  * Arm before creating the kernel thread. If creation itself fails, disarm it.

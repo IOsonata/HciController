@@ -79,7 +79,7 @@ bool HciHostUartInit(HciApp_t *pApp)
         return false;
     }
 
-    HciTargetUartTrace(&pApp->Target, UART_DEVNO);
+    HciTargetUartTrace(UART_DEVNO);
     pApp->pHostIntrf = static_cast<DevIntrf_t *>(s_HciUart);
     return true;
 }

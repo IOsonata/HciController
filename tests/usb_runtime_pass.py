@@ -110,7 +110,7 @@ def main() -> None:
 
     stop = function_body(source, "void HciAppStop(HciApp_t *pApp)")
     release_at = stop.find("HciAppHostRelease(pApp)")
-    target_at = stop.find("pApp->Target.pOps->Stop")
+    target_at = stop.find("HciTargetStop()")
     if release_at < 0 or target_at < 0 or release_at > target_at:
         die("USB must be disabled before MPSL target teardown")
 

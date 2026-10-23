@@ -140,7 +140,7 @@ def validate_source_contracts(root):
     if stop_at < 0:
         raise SystemExit("HciAppStop not found")
     stop_body = app_source[stop_at:]
-    target_stop = stop_body.find("pApp->Target.pOps->Stop")
+    target_stop = stop_body.find("HciTargetStop()")
     usb_release = stop_body.find("HciAppHostRelease(pApp)")
     if target_stop < 0 or usb_release < 0 or usb_release > target_stop:
         raise SystemExit(

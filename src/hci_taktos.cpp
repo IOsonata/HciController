@@ -13,6 +13,7 @@
 ----------------------------------------------------------------------------*/
 
 #include "hci_taktos.h"
+#include "hci_target.h"
 
 #include <string.h>
 
@@ -44,19 +45,15 @@ static uint32_t HciTaktOsTakeEvents(HciTaktOs_t *pRuntime)
     return events;
 }
 
-bool HciTaktOsInit(HciTaktOs_t *pRuntime,
-                   const HciTaktOsOps_t *pOps,
-                   const HciTaktOsHostOps_t *pHostOps)
+bool HciTaktOsInit(HciTaktOs_t *pRuntime, const HciTaktOsHostOps_t *pHostOps)
 {
-    if (pRuntime == nullptr || pOps == nullptr || pHostOps == nullptr ||
-        pOps->Start == nullptr || pOps->ProcessMpsl == nullptr ||
+    if (pRuntime == nullptr || pHostOps == nullptr ||
         pHostOps->Start == nullptr || pHostOps->Process == nullptr)
     {
         return false;
     }
 
     memset(pRuntime, 0, sizeof(*pRuntime));
-    pRuntime->Ops = *pOps;
     pRuntime->HostOps = *pHostOps;
 
     if (TaktOSSemInit(&pRuntime->StoppedSem, 0U, 1U) != TAKTOS_OK)
@@ -248,14 +245,11 @@ void HciTaktOsThread(void *pContext)
     }
 
     HciTrace("runtime: target start\r\n");
-    if (!pRuntime->Ops.Start(pRuntime->Ops.pContext))
+    if (!HciTargetStart())
     {
         HciTrace("runtime: target start failed\r\n");
         pRuntime->StartErrorCount++;
-        if (pRuntime->Ops.Fault != nullptr)
-        {
-            pRuntime->Ops.Fault(pRuntime->Ops.pContext, -1);
-        }
+        HciTargetFault(-1);
         HciTaktOsThreadLeave(pRuntime);
         return;
     }
@@ -273,10 +267,7 @@ void HciTaktOsThread(void *pContext)
     {
         HciTrace("runtime: host start failed, servicing mpsl without it\r\n");
         pRuntime->StartErrorCount++;
-        if (pRuntime->Ops.Fault != nullptr)
-        {
-            pRuntime->Ops.Fault(pRuntime->Ops.pContext, -1);
-        }
+        HciTargetFault(-1);
     }
 
     HciTrace("runtime: started\r\n");
@@ -316,7 +307,7 @@ void HciTaktOsThread(void *pContext)
 
             if ((events & HCI_TAKTOS_EVENT_MPSL) != 0U)
             {
-                pRuntime->Ops.ProcessMpsl(pRuntime->Ops.pContext);
+                HciTargetProcessMpsl();
                 pRuntime->MpslProcessCount++;
             }
 

@@ -1,10 +1,11 @@
 /**-------------------------------------------------------------------------
 @file	hci_target.h
 
-@brief	Portable HciController target lifecycle interface.
+@brief	HciController target, the MCU port a project links.
 
-		Defines part-specific initialization, UART diagnostics, runtime
-		hooks, shutdown, SDC memory reporting, and target error access.
+		Declares what each target file defines: initialization, start
+		and stop of MPSL and the SDC, MPSL servicing, UART diagnostics,
+		SDC memory reporting and target error access.
 
 @author	Nguyen Hoan Hoang
 @date	August 2026
@@ -26,95 +27,43 @@ extern "C" {
 #endif
 
 /*
- * Target-specific lifecycle and diagnostic operations.
- * Hardware initialization, MPSL integration, and interrupt ownership belong
- * to the target implementation. SDC feature configuration is shared.
- * Each target implementation owns the state referenced by HciTarget_t.
+ * The MCU port of HciController. Each target file defines these for its MCU
+ * (hci_nrf52840.cpp, hci_nrf5340_net.cpp, hci_nrf54lm20.cpp) and a project
+ * links the one of its MCU. Hardware initialization, MPSL integration and
+ * interrupt ownership belong to the target; the SDC feature configuration is
+ * shared, in hci_sdc_resources.h.
  */
-typedef struct
-{
-    bool (*Init)(void *pContext,
-                 HciTaktOs_t *pRuntime,
-                 uint8_t *pSdcMem,
-                 size_t SdcMemCapacity);
 
-    void (*GetTaktOsOps)(void *pContext, HciTaktOsOps_t *pOps);
+/*
+ * Keep what the target needs to start later: the runtime its interrupts wake
+ * and the SDC memory pool, 8 byte aligned. Touches no hardware.
+ */
+bool HciTargetInit(HciTaktOs_t *pRuntime, uint8_t *pSdcMem, size_t SdcMemCapacity);
 
-    /*
-     * Optional UART host-link diagnostics: peripheral state, pin mapping,
-     * error status, and hardware flow-control signals.
-     */
-    void (*UartTrace)(const void *pContext, uint8_t DevNo);
+/* Bring up MPSL, then the SoftDevice Controller. Runs on the runtime thread. */
+bool HciTargetStart(void);
 
-    void (*Stop)(void *pContext);
+/* MPSL low priority work, run by the runtime thread on HCI_TAKTOS_EVENT_MPSL. */
+void HciTargetProcessMpsl(void);
 
-    /* Report required and allocated SDC memory in bytes when available. */
-    void (*GetSdcMem)(const void *pContext,
-                      uint32_t *pRequired,
-                      uint32_t *pCapacity);
+/* Record a runtime start failure. */
+void HciTargetFault(int Error);
 
-    /* Return the most recent target error. */
-    int32_t (*LastError)(const void *pContext);
-} HciTargetOps_t;
+/* Take down the SoftDevice Controller, then MPSL, and their interrupts. */
+void HciTargetStop(void);
 
-typedef struct
-{
-    const HciTargetOps_t *pOps;
-    void *pContext;
-} HciTarget_t;
+/* Required and allocated SDC memory in bytes, 0 when not known yet. */
+void HciTargetGetSdcMem(uint32_t *pRequired, uint32_t *pCapacity);
 
-static inline bool HciTargetValid(const HciTarget_t *pTarget)
-{
-    return pTarget != NULL && pTarget->pOps != NULL &&
-           pTarget->pOps->Init != NULL &&
-           pTarget->pOps->GetTaktOsOps != NULL &&
-           pTarget->pOps->Stop != NULL;
-}
+/* The most recent target error. */
+int32_t HciTargetLastError(void);
 
-static inline void HciTargetUartTrace(const HciTarget_t *pTarget, uint8_t DevNo)
-{
-    if (pTarget == NULL || pTarget->pOps == NULL ||
-        pTarget->pOps->UartTrace == NULL)
-    {
-        return;
-    }
-
-    pTarget->pOps->UartTrace(pTarget->pContext, DevNo);
-}
-
-static inline void HciTargetGetSdcMem(const HciTarget_t *pTarget,
-                                      uint32_t *pRequired,
-                                      uint32_t *pCapacity)
-{
-    if (pRequired != NULL)
-    {
-        *pRequired = 0U;
-    }
-
-    if (pCapacity != NULL)
-    {
-        *pCapacity = 0U;
-    }
-
-    if (pTarget == NULL || pTarget->pOps == NULL ||
-        pTarget->pOps->GetSdcMem == NULL)
-    {
-        return;
-    }
-
-    pTarget->pOps->GetSdcMem(pTarget->pContext, pRequired, pCapacity);
-}
-
-static inline int32_t HciTargetLastError(const HciTarget_t *pTarget)
-{
-    if (pTarget == NULL || pTarget->pOps == NULL ||
-        pTarget->pOps->LastError == NULL)
-    {
-        return 0;
-    }
-
-    return pTarget->pOps->LastError(pTarget->pContext);
-}
+/*
+ * UART host link diagnostics: peripheral state, pin mapping, error status and
+ * hardware flow control signals. hci_app.cpp has a weak default that prints
+ * nothing, for a target that does not decode its UART.
+ */
+void HciTargetUartTrace(uint8_t DevNo);
 
 #ifdef __cplusplus
 }

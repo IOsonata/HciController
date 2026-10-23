@@ -471,10 +471,7 @@ bool HciHostUsbStart(HciApp_t *pApp)
 
     for (uint32_t pass = 0U; pass < HCI_USB_SETTLE_PASSES; pass++)
     {
-        if (pApp->Runtime.Ops.ProcessMpsl != nullptr)
-        {
-            pApp->Runtime.Ops.ProcessMpsl(pApp->Runtime.Ops.pContext);
-        }
+        HciTargetProcessMpsl();
 
         HciHostUsbWorkExec();
 

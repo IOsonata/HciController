@@ -514,24 +514,7 @@ int main(void)
 #if UART_HW_FLOWCTRL
     HciUartHostNotReady();
 #endif
-    HciTarget_t target =
-#if HCI_TARGET_IS_NRF5340_NET
-        HciNrf5340NetTarget();
-#elif defined(NRF54LM20B_XXAA) || defined(NRF54LM20A_XXAA)
-        HciNrf54lm20Target();
-#else
-        HciNrf52840Target();
-#endif
-    const bool earlyUartReady = HciAppUartEarlyInit(&s_HciApp, target);
-#else
-    HciTarget_t target =
-#if HCI_TARGET_IS_NRF5340_NET
-        HciNrf5340NetTarget();
-#elif defined(NRF54LM20B_XXAA) || defined(NRF54LM20A_XXAA)
-        HciNrf54lm20Target();
-#else
-        HciNrf52840Target();
-#endif
+    const bool earlyUartReady = HciAppUartEarlyInit(&s_HciApp);
 #endif
 
 #if HCI_STATUS_LEDS
@@ -556,7 +539,7 @@ int main(void)
     {
         HciTrace("fatal: early UART init err=%d target=%ld\r\n",
                  s_HciApp.LastError,
-                 (long)HciTargetLastError(&s_HciApp.Target));
+                 (long)HciTargetLastError());
         HciFatal();
     }
 #endif
@@ -612,11 +595,11 @@ int main(void)
         HciFatal();
     }
 
-    if (!HciAppInitMode(&s_HciApp, s_HciMode, target))
+    if (!HciAppInitMode(&s_HciApp, s_HciMode))
     {
         HciTrace("fatal: HciAppInitMode err=%d target=%ld\r\n",
                  s_HciApp.LastError,
-                 (long)HciTargetLastError(&s_HciApp.Target));
+                 (long)HciTargetLastError());
         HciFatal();
     }
 
