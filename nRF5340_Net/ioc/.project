@@ -121,6 +121,11 @@
 			<locationURI>PARENT-2-PROJECT_LOC/include/hci_usb.h</locationURI>
 		</link>
 		<link>
+			<name>include/hci_usb_mode.h</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/include/hci_usb_mode.h</locationURI>
+		</link>
+		<link>
 			<name>src/hci_app.cpp</name>
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/src/hci_app.cpp</locationURI>

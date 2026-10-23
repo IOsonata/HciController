@@ -44,25 +44,43 @@
  *
  * The application core must hand the button and UART pins to the network
  * core (GPIO MCUSEL) before it starts the network core. Pins below are for
- * the nRF5340 DK, change them for another board.
+ * the nRF5340 Audio DK by default. Define NRF5340_DK_PCA10095 for the
+ * standard nRF5340 DK. Change them for another board.
  */
 #define HCI_MODE_SWITCH 1
+
+#if defined(NRF5340_DK_PCA10095)
+/* nRF5340 DK: button 1 P0.23, virtual COM P0.19 RTS, P0.20 TXD, P0.21 CTS, P0.22 RXD */
 #define HCI_MODE_BUTTON_PORT 0
 #define HCI_MODE_BUTTON_PIN 23
 #define HCI_MODE_BUTTON_PINOP 0
+#define UART_RX_PORT 0
+#define UART_RX_PIN 22
+#define UART_TX_PORT 0
+#define UART_TX_PIN 20
+#define UART_CTS_PORT 0
+#define UART_CTS_PIN 21
+#define UART_RTS_PORT 0
+#define UART_RTS_PIN 19
+#else
+/* nRF5340 Audio DK: button SW0 (VOL-) P0.02, virtual COM P1.05 TXD, P1.04 RXD, P1.06 CTS, P1.07 RTS */
+#define HCI_MODE_BUTTON_PORT 0
+#define HCI_MODE_BUTTON_PIN 2
+#define HCI_MODE_BUTTON_PINOP 0
+#define UART_RX_PORT 1
+#define UART_RX_PIN 4
+#define UART_TX_PORT 1
+#define UART_TX_PIN 5
+#define UART_CTS_PORT 1
+#define UART_CTS_PIN 6
+#define UART_RTS_PORT 1
+#define UART_RTS_PIN 7
+#endif
 
 #define UART_DEVNO 0
-#define UART_RX_PORT 0
-#define UART_RX_PIN 28
 #define UART_RX_PINOP 1
-#define UART_TX_PORT 0
-#define UART_TX_PIN 29
 #define UART_TX_PINOP 1
-#define UART_CTS_PORT 0
-#define UART_CTS_PIN 26
 #define UART_CTS_PINOP 1
-#define UART_RTS_PORT 0
-#define UART_RTS_PIN 27
 #define UART_RTS_PINOP 1
 #define UART_RATE 1000000
 #define UART_HW_FLOWCTRL 1

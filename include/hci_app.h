@@ -19,20 +19,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "cfifo.h"
-#include "coredev/uart.h"
-#include "hci_controller.h"
-#include "hci_sdc_resources.h"
-#include "hci_target.h"
-#include "hci_sdc_nrfxlib.h"
-#include "hci_taktos.h"
-#include "hci_usb.h"
-#include "usb/usbd_cdc.h"
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 /*
  * A part with no USB device, such as the nRF5340 network core, builds without
  * the USB host and diagnostic classes: set HCI_APP_HAS_USB to 0. The host is
@@ -40,6 +26,23 @@ extern "C" {
  */
 #ifndef HCI_APP_HAS_USB
 #define HCI_APP_HAS_USB             1
+#endif
+
+#include "cfifo.h"
+#include "coredev/uart.h"
+#include "hci_controller.h"
+#include "hci_sdc_resources.h"
+#include "hci_target.h"
+#include "hci_sdc_nrfxlib.h"
+#include "hci_taktos.h"
+#include "hci_usb_mode.h"
+#if HCI_APP_HAS_USB
+#include "hci_usb.h"
+#include "usb/usbd_cdc.h"
+#endif
+
+#ifdef __cplusplus
+extern "C" {
 #endif
 
 /* A UART host. A part that reaches its host only through IPC sets it to 0. */

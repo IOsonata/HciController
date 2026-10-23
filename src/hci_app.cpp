@@ -65,6 +65,7 @@ static_assert(HCI_SDC_ACL_TRACK_HANDLES >=
 #define HCI_APP_USB_POLL_MS 5U
 #endif
 
+#if HCI_APP_HAS_USB
 #define HCI_USB_WORK_COUNT 16U
 #define HCI_USB_WORK_PER_PASS 30U
 typedef struct
@@ -73,6 +74,7 @@ typedef struct
     void *pCtx;
     UsbEvtQueHandler_t Handler;
 } HciUsbWork_t;
+#endif
 
 static HciApp_t *s_pApp;
 

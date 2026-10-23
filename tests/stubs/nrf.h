@@ -2,7 +2,7 @@
 #define STUB_NRF_H
 #include <stdint.h>
 typedef enum {
-    RADIO_IRQn = 1, RTC0_IRQn, TIMER0_IRQn, POWER_CLOCK_IRQn, SWI5_EGU5_IRQn, USBD_IRQn
+    RADIO_IRQn = 1, RTC0_IRQn, TIMER0_IRQn, POWER_CLOCK_IRQn, CLOCK_POWER_IRQn, SWI5_EGU5_IRQn, SWI0_IRQn, USBD_IRQn
 } IRQn_Type;
 #ifdef __cplusplus
 extern "C" {
