@@ -17,6 +17,7 @@
 #include "hci_nrf5340_net.h"
 
 #include "hci_sdc_resources.h"
+#include "hci_trace.h"
 
 #include <stdint.h>
 #include <string.h>
@@ -156,7 +157,11 @@ static bool HciMpslInit(HciNrf5340Net_t *pTarget)
     /* The low priority line is a real NVIC interrupt, MPSL pends it through
      * the NVIC. It only wakes the HCI thread, see SWI0_IRQHandler.
      */
+    HciTrace("mpsl: init lfclk=%s ppm=%u\r\n",
+             lfclk.source == MPSL_CLOCK_LF_SRC_RC ? "rc" : "xtal",
+             (unsigned)lfclk.accuracy_ppm);
     const int32_t result = mpsl_init(&lfclk, SWI0_IRQn, HciMpslAssert);
+    HciTrace("mpsl: init result=%ld\r\n", (long)result);
     if (result != 0)
     {
         pTarget->LastError = result;
@@ -182,6 +187,7 @@ static bool HciMpslInit(HciNrf5340Net_t *pTarget)
 static bool HciSdcInit(HciNrf5340Net_t *pTarget)
 {
     int32_t result = sdc_init(HciSdcAssert);
+    HciTrace("sdc: init result=%ld\r\n", (long)result);
     if (result != 0)
     {
         pTarget->LastError = result;
@@ -202,7 +208,10 @@ static bool HciSdcInit(HciNrf5340Net_t *pTarget)
         return false;
     }
 
+    HciTrace("sdc: rand ready\r\n");
     result = HciSdcResourcesApply();
+    HciTrace("sdc: cfg result=%ld cap=%lu\r\n", (long)result,
+             (unsigned long)pTarget->SdcMemCapacity);
     if (result < 0)
     {
         pTarget->LastError = result;
@@ -218,6 +227,7 @@ static bool HciSdcInit(HciNrf5340Net_t *pTarget)
     }
 
     result = sdc_enable(HciSdcCallback, pTarget->pSdcMem);
+    HciTrace("sdc: enable result=%ld\r\n", (long)result);
     if (result != 0)
     {
         pTarget->LastError = result;
@@ -269,6 +279,7 @@ bool HciTargetStart(void)
     s_pTarget = &s_Target;
     if (!HciMpslInit(&s_Target) || !HciSdcInit(&s_Target))
     {
+        HciTrace("target: start failed err=%ld\r\n", (long)s_Target.LastError);
         HciTargetStop();
         return false;
     }
