@@ -163,8 +163,10 @@ extern "C" {
  * every sync rather than an extra term.
  */
 #define HCI_SDC_MEM_PER_SYNC                                         \
-    SDC_MEM_PER_PERIODIC_SYNC_RSP(HCI_SDC_PERIODIC_SYNC_RSP_TX_BUFFERS,  \
-                                  HCI_SDC_PERIODIC_SYNC_BUFFER_COUNT)
+    (HCI_SDC_USE_PAWR ?                                                  \
+     SDC_MEM_PER_PERIODIC_SYNC_RSP(HCI_SDC_PERIODIC_SYNC_RSP_TX_BUFFERS, \
+                                   HCI_SDC_PERIODIC_SYNC_BUFFER_COUNT) : \
+     SDC_MEM_PER_PERIODIC_SYNC(HCI_SDC_PERIODIC_SYNC_BUFFER_COUNT))
 
 /*
  * SDC_MEM_PER_PERIODIC_ADV_RSP_SET already includes a plain periodic set
@@ -178,7 +180,7 @@ extern "C" {
  * the counter block.
  */
 #define HCI_SDC_MEM_PERIODIC_ADV_RSP                                 \
-    (SDC_MEM_PER_PERIODIC_ADV_RSP_SET(                                        \
+    (!HCI_SDC_USE_PAWR ? 0U : SDC_MEM_PER_PERIODIC_ADV_RSP_SET(                                        \
          HCI_SDC_MAX_ADV_DATA,                                           \
          HCI_SDC_PERIODIC_ADV_RSP_TX_BUFFERS,                            \
          HCI_SDC_PERIODIC_ADV_RSP_RX_BUFFERS,                            \
@@ -281,21 +283,64 @@ static_assert(HCI_SDC_ISO_RX_SDU_SIZE <= HCI_SDC_ISO_SDU_LIMIT,
     (HCI_SDC_ISO_RX_SDU_SIZE + HCI_ISO_DATA_HEADER_SIZE)
 
 /*
+ * Optional controller features. All on by default. A part short of flash
+ * turns some off in its build: each one keeps its sdc_support_ call, its
+ * sdc_cfg_set call and its share of the pool out of the image, the code the
+ * library only links in through that call goes with it, and the matching HCI
+ * commands answer as unsupported. On the nRF5340 network core the four below
+ * free about 11 KB of flash and a few KB of the pool.
+ *
+ *   HCI_SDC_FEAT_SUBRATING    connection subrating, and with it shorter
+ *                             connection intervals
+ *   HCI_SDC_FEAT_EXT_FEATURES extended feature set and frame space update
+ *   HCI_SDC_FEAT_PAST         periodic advertising sync transfer
+ *   HCI_SDC_FEAT_PAWR         periodic advertising with responses, which
+ *                             needs the sync transfer above
+ */
+#ifndef HCI_SDC_FEAT_SUBRATING
+#define HCI_SDC_FEAT_SUBRATING     1
+#endif
+#ifndef HCI_SDC_FEAT_EXT_FEATURES
+#define HCI_SDC_FEAT_EXT_FEATURES  1
+#endif
+#ifndef HCI_SDC_FEAT_PAST
+#define HCI_SDC_FEAT_PAST          1
+#endif
+#ifndef HCI_SDC_FEAT_PAWR
+#define HCI_SDC_FEAT_PAWR          1
+#endif
+
+/* What is really built, after the dependencies between the features. */
+#define HCI_SDC_USE_SUBRATING      (HCI_SDC_FEAT_SUBRATING)
+#define HCI_SDC_USE_EXT_FEATURES   (HCI_SDC_FEAT_EXT_FEATURES)
+#define HCI_SDC_USE_PAST           (HCI_SDC_FEAT_PAST)
+#define HCI_SDC_USE_PAWR           (HCI_SDC_FEAT_PAWR && HCI_SDC_FEAT_PAST)
+
+/*
  * Core 6.2 adds Frame Space Update and Shorter Connection Intervals. They are
  * real nRF52 multirole SDC capabilities, but their memory must enter the pool
  * only with the same product-profile gate as their sdc_support_* calls and HCI
  * commands. Keeping all three behind one version gate prevents a half-enabled
  * controller profile.
  */
-#if HCI_CONTROLLER_TARGET_CORE_VERSION >= HCI_CORE_VERSION_6_2
+#if HCI_CONTROLLER_TARGET_CORE_VERSION >= HCI_CORE_VERSION_6_2 && HCI_SDC_USE_EXT_FEATURES
 #define HCI_SDC_MEM_FRAME_SPACE_UPDATE                                  \
     SDC_MEM_FRAME_SPACE_UPDATE(HCI_SDC_PERIPHERAL_COUNT +               \
                                HCI_SDC_CENTRAL_COUNT)
+#else
+#define HCI_SDC_MEM_FRAME_SPACE_UPDATE 0U
+#endif
+
+/* Shorter Connection Intervals need Connection Subrating and the extended
+ * feature set. */
+#if HCI_CONTROLLER_TARGET_CORE_VERSION >= HCI_CORE_VERSION_6_2 && \
+    HCI_SDC_USE_EXT_FEATURES && HCI_SDC_USE_SUBRATING
+#define HCI_SDC_USE_SHORTER_INTERVALS 1
 #define HCI_SDC_MEM_SHORTER_CONNECTION_INTERVALS                        \
     SDC_MEM_SHORTER_CONNECTION_INTERVALS(HCI_SDC_PERIPHERAL_COUNT +     \
                                          HCI_SDC_CENTRAL_COUNT)
 #else
-#define HCI_SDC_MEM_FRAME_SPACE_UPDATE 0U
+#define HCI_SDC_USE_SHORTER_INTERVALS 0
 #define HCI_SDC_MEM_SHORTER_CONNECTION_INTERVALS 0U
 #endif
 
@@ -318,11 +363,13 @@ static_assert(HCI_SDC_ISO_RX_SDU_SIZE <= HCI_SDC_ISO_SDU_LIMIT,
      SDC_MEM_QOS_CHANNEL_SURVEY +                                             \
      SDC_MEM_LE_POWER_CONTROL(HCI_SDC_PERIPHERAL_COUNT +                 \
                               HCI_SDC_CENTRAL_COUNT) +                   \
-     SDC_MEM_SUBRATING(HCI_SDC_PERIPHERAL_COUNT +                        \
-                       HCI_SDC_CENTRAL_COUNT) +                          \
-     SDC_MEM_EXTENDED_FEATURE_SET(HCI_SDC_PERIPHERAL_COUNT +             \
-                                      HCI_SDC_CENTRAL_COUNT,             \
-                                  HCI_SDC_EXTENDED_FEATURE_PAGES) +      \
+     (HCI_SDC_USE_SUBRATING ?                                            \
+      SDC_MEM_SUBRATING(HCI_SDC_PERIPHERAL_COUNT +                       \
+                        HCI_SDC_CENTRAL_COUNT) : 0U) +                   \
+     (HCI_SDC_USE_EXT_FEATURES ?                                         \
+      SDC_MEM_EXTENDED_FEATURE_SET(HCI_SDC_PERIPHERAL_COUNT +            \
+                                       HCI_SDC_CENTRAL_COUNT,            \
+                                   HCI_SDC_EXTENDED_FEATURE_PAGES) : 0U) + \
      HCI_SDC_MEM_FRAME_SPACE_UPDATE +                                    \
      HCI_SDC_MEM_SHORTER_CONNECTION_INTERVALS +                          \
      SDC_MEM_INITIATOR +                                                      \
@@ -330,8 +377,9 @@ static_assert(HCI_SDC_ISO_RX_SDU_SIZE <= HCI_SDC_ISO_SDU_LIMIT,
          HCI_SDC_PERIODIC_ADV_COUNT +                                    \
      HCI_SDC_MEM_PER_SYNC * HCI_SDC_PERIODIC_SYNC_COUNT +       \
      SDC_MEM_PERIODIC_ADV_LIST(HCI_SDC_PERIODIC_ADV_LIST_SIZE) +         \
-     SDC_MEM_SYNC_TRANSFER(HCI_SDC_PERIPHERAL_COUNT +                    \
-                           HCI_SDC_CENTRAL_COUNT) +                      \
+     (HCI_SDC_USE_PAST ?                                                 \
+      SDC_MEM_SYNC_TRANSFER(HCI_SDC_PERIPHERAL_COUNT +                   \
+                            HCI_SDC_CENTRAL_COUNT) : 0U) +               \
      HCI_SDC_MEM_PERIODIC_ADV_RSP +                                      \
      HCI_SDC_MEM_ISO)
 

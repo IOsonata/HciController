@@ -114,15 +114,17 @@ int32_t HciSdcResourcesApply(void)
     sdc_support_sca_central();
     sdc_support_sca_peripheral();
 
+#if HCI_SDC_USE_SUBRATING
     sdc_support_connection_subrating_central();
     sdc_support_connection_subrating_peripheral();
+#endif
 
-#if HCI_CONTROLLER_TARGET_CORE_VERSION >= HCI_CORE_VERSION_6_0
+#if HCI_CONTROLLER_TARGET_CORE_VERSION >= HCI_CORE_VERSION_6_0 && HCI_SDC_USE_EXT_FEATURES
     sdc_support_extended_feature_set_central();
     sdc_support_extended_feature_set_peripheral();
 #endif
 
-#if HCI_CONTROLLER_TARGET_CORE_VERSION >= HCI_CORE_VERSION_6_2
+#if HCI_CONTROLLER_TARGET_CORE_VERSION >= HCI_CORE_VERSION_6_2 && HCI_SDC_USE_EXT_FEATURES
     /*
      * Both Core 6.2 additions depend on the Extended Feature Set above, and
      * Shorter Connection Intervals also depends on Connection Subrating. Keep
@@ -131,8 +133,10 @@ int32_t HciSdcResourcesApply(void)
      */
     sdc_support_frame_space_update_central();
     sdc_support_frame_space_update_peripheral();
+#if HCI_SDC_USE_SHORTER_INTERVALS
     sdc_support_shorter_connection_intervals_central();
     sdc_support_shorter_connection_intervals_peripheral();
+#endif
 #endif
 
     /*
@@ -151,19 +155,23 @@ int32_t HciSdcResourcesApply(void)
      * sync out still needs both sender calls, and this image supports both
      * roles.
      */
+#if HCI_SDC_USE_PAST
     sdc_support_periodic_adv_sync_transfer_sender_central();
     sdc_support_periodic_adv_sync_transfer_sender_peripheral();
     sdc_support_periodic_adv_sync_transfer_receiver_central();
     sdc_support_periodic_adv_sync_transfer_receiver_peripheral();
+#endif
 
     /*
      * Periodic advertising with responses, last because sdk-nrfxlib requires
      * extended advertising, the matching plain periodic half, and a sync
      * transfer sender or receiver, all of which are above.
      */
+#if HCI_SDC_USE_PAWR
     sdc_support_le_periodic_adv_with_rsp();
 
     sdc_support_le_periodic_sync_with_rsp();
+#endif
 
     /*
      * Isochronous channels, four roles. A controller does not get to decide
@@ -216,7 +224,7 @@ int32_t HciSdcResourcesApply(void)
     cfg.fal_size = HCI_SDC_FAL_SIZE;
     if (!HciSdcCfgSet(SDC_CFG_TYPE_FAL_SIZE, &cfg)) return s_Required;
 
-#if HCI_CONTROLLER_TARGET_CORE_VERSION >= HCI_CORE_VERSION_6_0
+#if HCI_CONTROLLER_TARGET_CORE_VERSION >= HCI_CORE_VERSION_6_0 && HCI_SDC_USE_EXT_FEATURES
     /*
      * How many feature pages the controller keeps per link. The pool in
      * hci_sdc_resources.h is computed from the same macro, so the two cannot
@@ -272,6 +280,7 @@ int32_t HciSdcResourcesApply(void)
         return s_Required;
     }
 
+#if HCI_SDC_USE_PAWR
     cfg = {};
     cfg.periodic_adv_rsp_count.count = HCI_SDC_PERIODIC_ADV_RSP_COUNT;
     if (!HciSdcCfgSet(SDC_CFG_TYPE_PERIODIC_ADV_RSP_COUNT, &cfg))
@@ -297,6 +306,7 @@ int32_t HciSdcResourcesApply(void)
     {
         return s_Required;
     }
+#endif
 
     cfg = {};
     cfg.cig_count.count = HCI_SDC_CIG_COUNT;
