@@ -127,4 +127,13 @@
     {UART_RTS_PORT, UART_RTS_PIN, UART_RTS_PINOP, IOPINDIR_OUTPUT, IOPINRES_NONE, IOPINTYPE_NORMAL}, \
 }
 
+/* Low frequency clock of the network core. The 32 kHz crystal needs its load
+ * capacitance set from the application core, and mpsl_init waits for the
+ * clock to run, so a crystal that never starts holds the controller in
+ * mpsl_init. The RC oscillator starts by itself. Define HCI_LFCLK_XTAL to
+ * use the crystal once the application core sets it up. */
+#ifndef HCI_LFCLK_XTAL
+#define MCU_OSC { {OSC_TYPE_XTAL, 32000000, 20, 0}, {OSC_TYPE_RC, 32768, 250, 0}, false }
+#endif
+
 #endif /* __BOARD_H__ */
