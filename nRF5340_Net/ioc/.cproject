@@ -58,7 +58,7 @@
 									<listOptionValue builtIn="false" value="HCI_APP_HAS_IPC=1"/>
 									<listOptionValue builtIn="false" value="HCI_SDC_PERIPHERAL_COUNT=4U"/>
 									<listOptionValue builtIn="false" value="HCI_SDC_ACL_PACKET_COUNT=3U"/>
-									<listOptionValue builtIn="false" value="HCI_APP_FIFO_DATA_SIZE=1024U"/>
+									<listOptionValue builtIn="false" value="HCI_APP_FIFO_DATA_SIZE=256U"/>
 									<listOptionValue builtIn="false" value="HCI_TRACE_RECORD_COUNT=12U"/>
 									<listOptionValue builtIn="false" value="HCI_VENDOR_CRYPTO=0"/>
 									<listOptionValue builtIn="false" value="HCI_SDC_CENTRAL_COUNT=1U"/>
@@ -114,7 +114,7 @@
 									<listOptionValue builtIn="false" value="HCI_APP_HAS_IPC=1"/>
 									<listOptionValue builtIn="false" value="HCI_SDC_PERIPHERAL_COUNT=4U"/>
 									<listOptionValue builtIn="false" value="HCI_SDC_ACL_PACKET_COUNT=3U"/>
-									<listOptionValue builtIn="false" value="HCI_APP_FIFO_DATA_SIZE=1024U"/>
+									<listOptionValue builtIn="false" value="HCI_APP_FIFO_DATA_SIZE=256U"/>
 									<listOptionValue builtIn="false" value="HCI_TRACE_RECORD_COUNT=12U"/>
 									<listOptionValue builtIn="false" value="HCI_VENDOR_CRYPTO=0"/>
 									<listOptionValue builtIn="false" value="HCI_SDC_CENTRAL_COUNT=1U"/>
@@ -293,7 +293,7 @@
 									<listOptionValue builtIn="false" value="HCI_APP_HAS_IPC=1"/>
 									<listOptionValue builtIn="false" value="HCI_SDC_PERIPHERAL_COUNT=4U"/>
 									<listOptionValue builtIn="false" value="HCI_SDC_ACL_PACKET_COUNT=3U"/>
-									<listOptionValue builtIn="false" value="HCI_APP_FIFO_DATA_SIZE=1024U"/>
+									<listOptionValue builtIn="false" value="HCI_APP_FIFO_DATA_SIZE=256U"/>
 									<listOptionValue builtIn="false" value="HCI_TRACE_RECORD_COUNT=12U"/>
 									<listOptionValue builtIn="false" value="HCI_VENDOR_CRYPTO=0"/>
 									<listOptionValue builtIn="false" value="HCI_SDC_CENTRAL_COUNT=1U"/>
@@ -350,7 +350,7 @@
 									<listOptionValue builtIn="false" value="HCI_APP_HAS_IPC=1"/>
 									<listOptionValue builtIn="false" value="HCI_SDC_PERIPHERAL_COUNT=4U"/>
 									<listOptionValue builtIn="false" value="HCI_SDC_ACL_PACKET_COUNT=3U"/>
-									<listOptionValue builtIn="false" value="HCI_APP_FIFO_DATA_SIZE=1024U"/>
+									<listOptionValue builtIn="false" value="HCI_APP_FIFO_DATA_SIZE=256U"/>
 									<listOptionValue builtIn="false" value="HCI_TRACE_RECORD_COUNT=12U"/>
 									<listOptionValue builtIn="false" value="HCI_VENDOR_CRYPTO=0"/>
 									<listOptionValue builtIn="false" value="HCI_SDC_CENTRAL_COUNT=1U"/>
