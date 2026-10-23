@@ -31,6 +31,8 @@ static const SysLogCfg_t s_LogCfg = {
 };
 static SysLog_t s_Log;
 static bool s_LogInitialized;
+static bool s_BootDrain;
+static bool s_SinkSet;
 
 static bool HciTraceEnsureInit(void)
 {
@@ -61,6 +63,29 @@ static void HciTraceWrite0(const char *pStr)
 #endif
 }
 #endif
+
+/* Push out what is stored and wait until the output takes no more, giving up
+ * after a fixed time so a stalled output cannot hold the start up. */
+static void HciTraceDrain(void)
+{
+    int idle = 0;
+
+    for (int i = 0; i < 400 && idle < 2; i++)
+    {
+        if (SysLogFlush(&s_Log) > 0)
+        {
+            idle = 0;
+        }
+        else
+        {
+            idle++;
+        }
+        /* about 0.5 ms at 64 MHz */
+        for (volatile uint32_t d = 0; d < 8000U; d++)
+        {
+        }
+    }
+}
 
 void HciTrace(const char *pFormat, ...)
 {
@@ -94,6 +119,11 @@ void HciTrace(const char *pFormat, ...)
 
     (void)SysLogVPrintf(&s_Log, pFormat, args);
     va_end(args);
+
+    if (s_BootDrain && s_SinkSet)
+    {
+        HciTraceDrain();
+    }
 }
 
 void HciTraceInit(void)
@@ -108,10 +138,16 @@ void HciTraceSetSink(DevIntrf_t *pSink, uint32_t SinkAddr)
         return;
     }
 
+    s_SinkSet = pSink != nullptr;
     SysLogSetSink(&s_Log, pSink, SinkAddr);
 }
 
 int HciTraceFlush(void)
 {
     return HciTraceEnsureInit() ? SysLogFlush(&s_Log) : 0;
+}
+
+void HciTraceBootDrain(bool bEnable)
+{
+    s_BootDrain = bEnable;
 }

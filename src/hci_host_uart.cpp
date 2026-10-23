@@ -118,6 +118,7 @@ bool HciHostUartLogOpen(HciApp_t *pApp)
 
     /* Records kept while no output was set go out first. */
     HciTraceSetSink(static_cast<DevIntrf_t *>(s_HciUart), 0U);
+    HciTraceBootDrain(true);
     (void)HciTraceFlush();
     return true;
 }

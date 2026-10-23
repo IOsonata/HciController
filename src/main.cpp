@@ -629,5 +629,6 @@ int main(void)
     }
 
     HciTrace("boot: starting scheduler\r\n");
+    HciTraceBootDrain(false);
     TaktOSStart();
 }

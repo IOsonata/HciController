@@ -53,6 +53,10 @@ void HciTraceSetSink(DevIntrf_t *pSink, uint32_t SinkAddr);
 /* Flush queued SysLog records through the selected DeviceIntrf. */
 int HciTraceFlush(void);
 
+/* While set, every record is pushed out and waited for (bounded) before
+ * HciTrace returns. For start up only, before the scheduler runs. */
+void HciTraceBootDrain(bool bEnable);
+
 #ifdef __cplusplus
 }
 #endif
