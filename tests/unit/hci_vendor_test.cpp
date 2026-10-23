@@ -8,6 +8,7 @@
  */
 
 #include "hci_controller.h"
+#include "hci_ctlr_fake_intrf.h"
 #include "hci_vendor.h"
 #include "crypto/icrypto.h"
 
@@ -63,10 +64,15 @@ RngEngine *HciVendorRng(void)
 
 /* Transport stand-ins the bridge test needs. */
 
-int DeviceIntrfRx(DevIntrf_t * const, uint32_t, uint8_t *, int) { return 0; }
-int DeviceIntrfTx(DevIntrf_t * const, uint32_t, const uint8_t *, int DataLen)
+static HciCtlrFakeIntrf_t s_Fake;
+
+int DeviceIntrfRx(DevIntrf_t * const pDev, uint32_t DevAddr, uint8_t *pBuffer, int BufferLen)
 {
-    return DataLen;
+    return pDev == &s_Fake.Intrf ? HciCtlrFakeRx(pDev, DevAddr, pBuffer, BufferLen) : 0;
+}
+int DeviceIntrfTx(DevIntrf_t * const pDev, uint32_t DevAddr, const uint8_t *pData, int DataLen)
+{
+    return pDev == &s_Fake.Intrf ? HciCtlrFakeTx(pDev, DevAddr, pData, DataLen) : DataLen;
 }
 void DeviceIntrfEnable(DevIntrf_t *) {}
 void DeviceIntrfDisable(DevIntrf_t *) {}
@@ -79,13 +85,12 @@ static bool BackendPut(void *, HciH4PacketType_t, const uint8_t *, size_t)
     return true;
 }
 
-static HciControllerGetResult_t BackendGet(void *, HciH4PacketType_t *,
+static HciSdcGetResult_t BackendGet(void *, HciH4PacketType_t *,
                                             uint8_t *, size_t, size_t *)
 {
-    return HCI_CONTROLLER_GET_EMPTY;
+    return HCI_SDC_GET_EMPTY;
 }
 
-static void BackendProcess(void *) {}
 
 /* Helpers. */
 
@@ -446,14 +451,11 @@ static void TestBridge(void)
     memset(&f, 0, sizeof(f));
     s_BackendPutCount = 0U;
 
-    HciControllerOps_t ops = {};
-    ops.Put = BackendPut;
-    ops.Get = BackendGet;
-    ops.Process = BackendProcess;
+    DevIntrf_t *ctlr = HciCtlrFakeIntrfInit(&s_Fake, BackendPut, BackendGet, NULL);
     assert(HciControllerInitPacketTransport(&f.Controller, &f.Host,
                                             f.HostPacket, sizeof(f.HostPacket),
                                             f.ControllerPacket,
-                                            sizeof(f.ControllerPacket), &ops));
+                                            sizeof(f.ControllerPacket), ctlr));
 
     const uint8_t cmd[] = {0xF3U, 0xFFU, 0x00U};
     assert(HciControllerPutHostPacket(&f.Controller, HCI_H4_PACKET_COMMAND,

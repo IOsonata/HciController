@@ -21,6 +21,7 @@
 #include <stdint.h>
 
 #include "hci_cmd_dispatch.h"
+#include "device_intrf.h"
 #include "hci_controller.h"
 
 #ifdef __cplusplus
@@ -33,6 +34,20 @@ extern "C" {
 #define HCI_SDC_MSG_TYPE_ISO    0x08U
 
 #define HCI_SDC_RETRY_ERROR     (-11)
+
+/*
+ * The largest packet the controller hands up: an HCI message of
+ * HCI_MSG_BUFFER_MAX_SIZE or an ISO packet of HCI_SDC_ISO_PACKET_SIZE,
+ * both checked against this in hci_sdc.cpp.
+ */
+#define HCI_SDC_PACKET_SIZE     1024U
+
+typedef enum
+{
+    HCI_SDC_GET_ERROR  = -1,
+    HCI_SDC_GET_EMPTY  = 0,
+    HCI_SDC_GET_PACKET = 1,
+} HciSdcGetResult_t;
 
 /*
  * Current nrfxlib returns PAwR response-data status from the direct command
@@ -128,6 +143,18 @@ typedef struct
 
 typedef struct
 {
+    /*
+     * The face the bridge drives: a packet DeviceIntrf, DevAddr the packet
+     * type, first so the object is its interface. One packet fetched from
+     * the controller is held until it is asked for by its type, the way
+     * the IPC face of the host holds one.
+     */
+    DevIntrf_t DevIntrf;
+    uint8_t HeldPacket[HCI_SDC_PACKET_SIZE];
+    size_t HeldLen;
+    HciH4PacketType_t HeldType;
+    HciH4PacketType_t TxType;
+
     HciCmdDispatch_t Commands;
 
     /*
@@ -139,7 +166,6 @@ typedef struct
     uint8_t CompatEvent[HCI_SDC_COMPAT_EVENT_SIZE];
 
     HciSdcOps_t Ops;
-    HciControllerOps_t ControllerOps;
 
     /*
      * Two sources share one outgoing packet slot: command events from the
@@ -271,7 +297,28 @@ bool HciSdcKnowsCommand(const HciSdc_t *pSdc,
                         uint16_t Opcode,
                         size_t ParamLen);
 
-const HciControllerOps_t *HciSdcGetControllerOps(HciSdc_t *pSdc);
+/*
+ * The controller as the bridge sees it. HciControllerInit takes it; the
+ * three calls below are what it is made of, for a test or a caller that
+ * wants the packets without the interface.
+ */
+static inline DevIntrf_t *HciSdcIntrfGet(HciSdc_t * const pSdc) { return &pSdc->DevIntrf; }
+
+/* A host packet to the controller. false is backpressure: offer it again. */
+bool HciSdcPutPacket(HciSdc_t *pSdc,
+                     HciH4PacketType_t Type,
+                     const uint8_t *pPacket,
+                     size_t PacketLen);
+
+/* The next packet the controller has for the host, whatever its type. */
+HciSdcGetResult_t HciSdcGetPacket(HciSdc_t *pSdc,
+                                  HciH4PacketType_t *pType,
+                                  uint8_t *pPacket,
+                                  size_t PacketCapacity,
+                                  size_t *pPacketLen);
+
+/* Run the controller. The application calls it before the bridge. */
+void HciSdcProcess(HciSdc_t *pSdc);
 
 #ifdef __cplusplus
 }

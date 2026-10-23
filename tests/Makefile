@@ -218,6 +218,7 @@ $(IPC_TARGET): $(IPC_SOURCES) $(HEADERS) $(IOSONATA_ROOT)/include/ipc/ipc_intrf.
                $(IOSONATA_ROOT)/include/bluetooth/bt_hci_ipc.h | check-root
 	@mkdir -p $(dir $@)
 	$(CXX) -I$(IOSONATA_ROOT)/include -I$(ROOT)/include -I$(STUBS)/nrfficr \
+	  -I$(STUBS)/sdc -I$(STUBS) \
 	  -I$(IOSONATA_ROOT)/tests/dfu/hostport \
 	  $(MOCK_DEFINES) -DHCI_TRACE=0 $(CXXFLAGS) \
 	  $(filter %.cpp %.o,$^) -o $@

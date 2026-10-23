@@ -17,6 +17,7 @@
 #include "board.h"
 #include "hci_app.h"
 
+#include <new>
 #include <string.h>
 #include "hci_trace.h"
 #include "hci_version.h"
@@ -147,7 +148,7 @@ bool HciAppUartEarlyInit(HciApp_t *pApp, HciTarget_t Target)
     }
 
 #if !HCI_UART_EARLY_STARTUP
-    memset(static_cast<void *>(pApp), 0, sizeof(*pApp));
+    new (pApp) HciApp_t();
 #endif
     pApp->HostType = HCI_APP_HOST_UART;
     pApp->Mode = HCI_APP_MODE_UART_H4;
@@ -178,7 +179,7 @@ static bool HciAppSuspectFilter(void *pContext,
     }
 
     const uint16_t opcode = (uint16_t)pPacket[0] | ((uint16_t)pPacket[1] << 8);
-    return HciSdcKnowsCommand(&pApp->Sdc, opcode, pPacket[2]);
+    return HciSdcKnowsCommand(pApp->Sdc, opcode, pPacket[2]);
 }
 
 static void HciAppSetHostOpen(HciApp_t *pApp, bool Open)
@@ -282,14 +283,15 @@ static void HciAppHostProcess(void *pContext)
         }
     }
 
+    /* The controller runs first, then the bridge moves what it produced. */
+    pApp->Sdc.Process();
     HciControllerProcess(&pApp->Controller);
     HciAppResyncOnIdle(pApp);
 }
 
-static bool HciAppControllerInit(HciApp_t *pApp,
-                                 const HciControllerOps_t *pControllerOps)
+static bool HciAppControllerInit(HciApp_t *pApp, DevIntrf_t *pCtlrIntrf)
 {
-    if (pApp == nullptr || pControllerOps == nullptr || pApp->pHostIntrf == nullptr)
+    if (pApp == nullptr || pCtlrIntrf == nullptr || pApp->pHostIntrf == nullptr)
     {
         return false;
     }
@@ -307,7 +309,7 @@ static bool HciAppControllerInit(HciApp_t *pApp,
                                                 sizeof(pApp->HostPacket),
                                                 pApp->ControllerPacket,
                                                 sizeof(pApp->ControllerPacket),
-                                                pControllerOps);
+                                                pCtlrIntrf);
     }
 
     return HciControllerInit(&pApp->Controller,
@@ -316,7 +318,7 @@ static bool HciAppControllerInit(HciApp_t *pApp,
                              sizeof(pApp->HostPacket),
                              pApp->ControllerPacket,
                              sizeof(pApp->ControllerPacket),
-                             pControllerOps);
+                             pCtlrIntrf);
 }
 
 bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode, HciTarget_t Target)
@@ -341,7 +343,7 @@ bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode, HciTarget_t Target)
 
     if (!earlyUart)
     {
-        memset(static_cast<void *>(pApp), 0, sizeof(*pApp));
+        new (pApp) HciApp_t();
         s_pApp = pApp;
     }
 
@@ -349,12 +351,9 @@ bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode, HciTarget_t Target)
     pApp->Mode = Mode;
     pApp->Target = Target;
     pApp->UsbHciNative = Mode == HCI_APP_MODE_USB_NATIVE;
-    HciCountersInit(&pApp->Counters, &pApp->Sdc, &pApp->Controller);
+    HciCountersInit(&pApp->Counters, pApp->Sdc, &pApp->Controller);
 
-    if (!HciSdcNrfxlibInit(&pApp->Sdc,
-                           pApp->CommandEvent,
-                           sizeof(pApp->CommandEvent),
-                           &pApp->Counters))
+    if (!pApp->Sdc.Init(pApp->CommandEvent, sizeof(pApp->CommandEvent), &pApp->Counters))
     {
         HciTrace("init: HciSdcNrfxlibInit failed\r\n");
         pApp->LastError = -1;
@@ -363,7 +362,7 @@ bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode, HciTarget_t Target)
     }
 
 #if HCI_SDC_STARTUP_NOP
-    HciSdcNrfxlibQueueStartupNop(&pApp->Sdc);
+    HciSdcNrfxlibQueueStartupNop(pApp->Sdc);
 #endif
 
     bool hostReady = earlyUart || HciAppHostInit(pApp);
@@ -387,8 +386,7 @@ bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode, HciTarget_t Target)
         return false;
     }
 
-    const HciControllerOps_t *pControllerOps = HciSdcGetControllerOps(&pApp->Sdc);
-    if (!HciAppControllerInit(pApp, pControllerOps))
+    if (!HciAppControllerInit(pApp, pApp->Sdc))
     {
         HciTrace("init: controller transport failed host=%s\r\n",
                  HciAppHostName(pApp));

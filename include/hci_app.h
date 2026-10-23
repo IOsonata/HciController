@@ -60,7 +60,7 @@ typedef enum
 typedef struct
 {
     HciController_t Controller;
-    HciSdc_t Sdc;
+    HciSdcNrfxlib Sdc;
 
     /* Which layers the vendor specific counter readout reports. */
     HciCounters_t Counters;

@@ -38,7 +38,7 @@ static HciSdc_t gSdc;
  */
 static HciCounters_t gCounters;
 static uint8_t gEventBuffer[300];
-static const HciControllerOps_t *gOps;
+static HciSdc_t *gOps;
 
 /* Return parameters of the last exchange, for tests that read them back. */
 static uint8_t gLastReturn[300];
@@ -70,7 +70,7 @@ static Response Exchange(uint16_t opcode, const uint8_t *pParams, size_t len)
     HciH4PacketType_t type = HCI_H4_PACKET_NONE;
     uint8_t out[300];
     size_t outLen = 0U;
-    HciControllerGetResult_t result = HCI_CONTROLLER_GET_EMPTY;
+    HciSdcGetResult_t result = HCI_SDC_GET_EMPTY;
     bool put = false;
     bool matched = false;
 
@@ -78,12 +78,12 @@ static Response Exchange(uint16_t opcode, const uint8_t *pParams, size_t len)
     {
         if (!put)
         {
-            put = gOps->Put(gOps->pContext, HCI_H4_PACKET_COMMAND, packet,
+            put = HciSdcPutPacket(gOps, HCI_H4_PACKET_COMMAND, packet,
                             3U + len);
         }
 
-        result = gOps->Get(gOps->pContext, &type, out, sizeof(out), &outLen);
-        if (!put || result != HCI_CONTROLLER_GET_PACKET ||
+        result = HciSdcGetPacket(gOps, &type, out, sizeof(out), &outLen);
+        if (!put || result != HCI_SDC_GET_PACKET ||
             type != HCI_H4_PACKET_EVENT || outLen < 6U)
         {
             continue;
@@ -171,11 +171,11 @@ static void ExpectSilent(const char *label, uint16_t opcode,
     {
         if (!put)
         {
-            put = gOps->Put(gOps->pContext, HCI_H4_PACKET_COMMAND, packet,
+            put = HciSdcPutPacket(gOps, HCI_H4_PACKET_COMMAND, packet,
                             3U + len);
         }
-        assert(gOps->Get(gOps->pContext, &type, out, sizeof(out), &outLen) !=
-               HCI_CONTROLLER_GET_PACKET);
+        assert(HciSdcGetPacket(gOps, &type, out, sizeof(out), &outLen) !=
+               HCI_SDC_GET_PACKET);
     }
 
     assert(put);
@@ -328,7 +328,7 @@ int main(void)
     HciCountersInit(&gCounters, &gSdc, NULL);
     assert(HciSdcNrfxlibInit(&gSdc, gEventBuffer, sizeof(gEventBuffer),
                              &gCounters));
-    gOps = HciSdcGetControllerOps(&gSdc);
+    gOps = &gSdc;
     assert(gOps != NULL);
 
     /*
@@ -349,8 +349,8 @@ int main(void)
         HciH4PacketType_t nopType = HCI_H4_PACKET_NONE;
         uint8_t nop[16];
         size_t nopLen = 0U;
-        assert(gOps->Get(gOps->pContext, &nopType, nop, sizeof(nop),
-                         &nopLen) == HCI_CONTROLLER_GET_PACKET);
+        assert(HciSdcGetPacket(gOps, &nopType, nop, sizeof(nop),
+                         &nopLen) == HCI_SDC_GET_PACKET);
         assert(nopType == HCI_H4_PACKET_EVENT);
         assert(nopLen == 5U);
         assert(nop[0] == EVENT_COMMAND_COMPLETE);

@@ -7,6 +7,7 @@
  */
 
 #include "hci_controller.h"
+#include "hci_ctlr_fake_intrf.h"
 
 #include <assert.h>
 #include <stddef.h>
@@ -30,19 +31,29 @@ extern "C" size_t HciUsbPlatformReadTxValidation(uint8_t *pData,
     return 2U;
 }
 
-int DeviceIntrfRx(DevIntrf_t * const,
-                  uint32_t,
-                  uint8_t *,
-                  int)
+static HciCtlrFakeIntrf_t s_Fake;
+
+int DeviceIntrfRx(DevIntrf_t * const pDev,
+                  uint32_t DevAddr,
+                  uint8_t *pBuffer,
+                  int BufferLen)
 {
+    if (pDev == &s_Fake.Intrf)
+    {
+        return HciCtlrFakeRx(pDev, DevAddr, pBuffer, BufferLen);
+    }
     return 0;
 }
 
-int DeviceIntrfTx(DevIntrf_t * const,
-                  uint32_t,
-                  const uint8_t *,
+int DeviceIntrfTx(DevIntrf_t * const pDev,
+                  uint32_t DevAddr,
+                  const uint8_t *pData,
                   int DataLen)
 {
+    if (pDev == &s_Fake.Intrf)
+    {
+        return HciCtlrFakeTx(pDev, DevAddr, pData, DataLen);
+    }
     return DataLen;
 }
 
@@ -63,18 +74,15 @@ static bool BackendPut(void *,
     return true;
 }
 
-static HciControllerGetResult_t BackendGet(void *,
+static HciSdcGetResult_t BackendGet(void *,
                                             HciH4PacketType_t *,
                                             uint8_t *,
                                             size_t,
                                             size_t *)
 {
-    return HCI_CONTROLLER_GET_EMPTY;
+    return HCI_SDC_GET_EMPTY;
 }
 
-static void BackendProcess(void *)
-{
-}
 
 typedef struct
 {
@@ -90,10 +98,7 @@ static void Setup(Fixture_t *pFixture)
     s_BackendPutCount = 0U;
     s_ValidationAvailable = true;
 
-    HciControllerOps_t ops = {};
-    ops.Put = BackendPut;
-    ops.Get = BackendGet;
-    ops.Process = BackendProcess;
+    DevIntrf_t *ctlr = HciCtlrFakeIntrfInit(&s_Fake, BackendPut, BackendGet, NULL);
 
     assert(HciControllerInitPacketTransport(&pFixture->Controller,
                                             &pFixture->Host,
@@ -101,7 +106,7 @@ static void Setup(Fixture_t *pFixture)
                                             sizeof(pFixture->HostPacket),
                                             pFixture->ControllerPacket,
                                             sizeof(pFixture->ControllerPacket),
-                                            &ops));
+                                            ctlr));
 }
 
 static void ClearPending(Fixture_t *pFixture)

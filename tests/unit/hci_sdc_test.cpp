@@ -81,29 +81,29 @@ static void TestImmediatePawrCompletion(void)
         uint8_t commandEvent[80];
         assert(HciSdcInit(&sdc, &ops, commands, 2U, &status,
                           commandEvent, sizeof(commandEvent)));
-        const HciControllerOps_t *controller = HciSdcGetControllerOps(&sdc);
+        HciSdc_t *controller = &sdc;
         const uint8_t response[] = {0x83U, 0x20U, 8U,
                                      0x34U, 0x02U, 0U, 0U, 1U, 1U, 0U, 0U};
-        assert(controller->Put(controller->pContext, HCI_H4_PACKET_COMMAND,
+        assert(HciSdcPutPacket(controller, HCI_H4_PACKET_COMMAND,
                                  response, sizeof(response)));
         uint8_t packet[32];
         HciH4PacketType_t type;
         size_t length;
-        assert(controller->Get(controller->pContext, &type, packet,
-                                 sizeof(packet), &length) == HCI_CONTROLLER_GET_PACKET);
+        assert(HciSdcGetPacket(controller, &type, packet,
+                                 sizeof(packet), &length) == HCI_SDC_GET_PACKET);
         assert(type == HCI_H4_PACKET_EVENT && length == 8U);
         const uint8_t expected[] = {0x0EU, 6U, 1U, 0x83U, 0x20U,
                                      status, 0x34U, 0x02U};
         assert(memcmp(packet, expected, sizeof(expected)) == 0);
         assert(!sdc.DelayedCommandPending);
         /* Drain the backend turn; no duplicate completion may appear. */
-        assert(controller->Get(controller->pContext, &type, packet,
-                                 sizeof(packet), &length) == HCI_CONTROLLER_GET_EMPTY);
+        assert(HciSdcGetPacket(controller, &type, packet,
+                                 sizeof(packet), &length) == HCI_SDC_GET_EMPTY);
         const uint8_t reset[] = {0x03U, 0x0CU, 0U};
-        assert(controller->Put(controller->pContext, HCI_H4_PACKET_COMMAND,
+        assert(HciSdcPutPacket(controller, HCI_H4_PACKET_COMMAND,
                                  reset, sizeof(reset)));
-        assert(controller->Get(controller->pContext, &type, packet,
-                                 sizeof(packet), &length) == HCI_CONTROLLER_GET_PACKET);
+        assert(HciSdcGetPacket(controller, &type, packet,
+                                 sizeof(packet), &length) == HCI_SDC_GET_PACKET);
         assert(length == 6U && packet[3] == 0x03U && packet[4] == 0x0CU);
     }
     printf("[ok] PAwR completion preserves status, handle and subsequent Reset\n");
@@ -141,16 +141,16 @@ int main()
                       commandEvent,
                       sizeof(commandEvent)));
 
-    const HciControllerOps_t *controller = HciSdcGetControllerOps(&sdc);
+    HciSdc_t *controller = &sdc;
     assert(controller != NULL);
 
     const uint8_t reset[] = {0x03U, 0x0CU, 0x00U};
-    assert(controller->Put(controller->pContext, HCI_H4_PACKET_COMMAND, reset, sizeof(reset)));
+    assert(HciSdcPutPacket(controller, HCI_H4_PACKET_COMMAND, reset, sizeof(reset)));
 
     uint8_t packet[32];
     HciH4PacketType_t type = HCI_H4_PACKET_NONE;
     size_t packetLen = 0U;
-    assert(controller->Get(controller->pContext, &type, packet, sizeof(packet), &packetLen) == HCI_CONTROLLER_GET_PACKET);
+    assert(HciSdcGetPacket(controller, &type, packet, sizeof(packet), &packetLen) == HCI_SDC_GET_PACKET);
     assert(type == HCI_H4_PACKET_EVENT);
     assert(packetLen == 6U);
     assert(packet[0] == HCI_EVENT_COMMAND_COMPLETE);
@@ -158,21 +158,21 @@ int main()
 
     const uint8_t acl[] = {0x01U, 0x20U, 0x00U, 0x00U};
     fake.AclResult = HCI_SDC_RETRY_ERROR;
-    assert(!controller->Put(controller->pContext, HCI_H4_PACKET_ACL, acl, sizeof(acl)));
+    assert(!HciSdcPutPacket(controller, HCI_H4_PACKET_ACL, acl, sizeof(acl)));
     assert(sdc.PutRetryCount == 1U);
     fake.AclResult = 0;
-    assert(controller->Put(controller->pContext, HCI_H4_PACKET_ACL, acl, sizeof(acl)));
+    assert(HciSdcPutPacket(controller, HCI_H4_PACKET_ACL, acl, sizeof(acl)));
     assert(fake.AclCount == 2U);
 
     const uint8_t iso[] = {0x01U, 0x00U, 0x00U, 0x00U};
-    assert(controller->Put(controller->pContext, HCI_H4_PACKET_ISO, iso, sizeof(iso)));
+    assert(HciSdcPutPacket(controller, HCI_H4_PACKET_ISO, iso, sizeof(iso)));
     assert(fake.IsoCount == 1U);
 
     fake.GetResult = 0;
     fake.GetType = HCI_SDC_MSG_TYPE_EVENT;
     fake.GetPacket[0] = 0x0EU;
     fake.GetPacket[1] = 0x04U;
-    assert(controller->Get(controller->pContext, &type, packet, sizeof(packet), &packetLen) == HCI_CONTROLLER_GET_PACKET);
+    assert(HciSdcGetPacket(controller, &type, packet, sizeof(packet), &packetLen) == HCI_SDC_GET_PACKET);
     assert(type == HCI_H4_PACKET_EVENT && packetLen == 6U);
 
     fake.GetType = HCI_SDC_MSG_TYPE_ACL;
@@ -180,7 +180,7 @@ int main()
     fake.GetPacket[1] = 0x20U;
     fake.GetPacket[2] = 0x03U;
     fake.GetPacket[3] = 0x00U;
-    assert(controller->Get(controller->pContext, &type, packet, sizeof(packet), &packetLen) == HCI_CONTROLLER_GET_PACKET);
+    assert(HciSdcGetPacket(controller, &type, packet, sizeof(packet), &packetLen) == HCI_SDC_GET_PACKET);
     assert(type == HCI_H4_PACKET_ACL && packetLen == 7U);
 
     fake.GetType = HCI_SDC_MSG_TYPE_ISO;
@@ -188,13 +188,13 @@ int main()
     fake.GetPacket[1] = 0x00U;
     fake.GetPacket[2] = 0x03U;
     fake.GetPacket[3] = 0xC0U;
-    assert(controller->Get(controller->pContext, &type, packet, sizeof(packet), &packetLen) == HCI_CONTROLLER_GET_PACKET);
+    assert(HciSdcGetPacket(controller, &type, packet, sizeof(packet), &packetLen) == HCI_SDC_GET_PACKET);
     assert(type == HCI_H4_PACKET_ISO && packetLen == 7U);
 
     fake.GetResult = HCI_SDC_RETRY_ERROR;
-    assert(controller->Get(controller->pContext, &type, packet, sizeof(packet), &packetLen) == HCI_CONTROLLER_GET_EMPTY);
+    assert(HciSdcGetPacket(controller, &type, packet, sizeof(packet), &packetLen) == HCI_SDC_GET_EMPTY);
 
-    controller->Process(controller->pContext);
+    HciSdcProcess(controller);
     assert(fake.ProcessCount == 1U);
 
     /*
@@ -225,21 +225,21 @@ int main()
                           sizeof(commands) / sizeof(commands[0]), NULL,
                           busyEvent, sizeof(busyEvent)));
 
-        const HciControllerOps_t *ops2 = HciSdcGetControllerOps(&busy);
+        HciSdc_t *ops2 = &busy;
         unsigned events = 0U;
         unsigned aclOut = 0U;
 
         for (unsigned pass = 0U; pass < 200U; pass++)
         {
             /* The host has a command ready every single pass. */
-            (void)ops2->Put(ops2->pContext, HCI_H4_PACKET_COMMAND, reset,
+            (void)HciSdcPutPacket(ops2, HCI_H4_PACKET_COMMAND, reset,
                             sizeof(reset));
 
             HciH4PacketType_t outType = HCI_H4_PACKET_NONE;
             uint8_t out[64];
             size_t outLen = 0U;
-            if (ops2->Get(ops2->pContext, &outType, out, sizeof(out),
-                          &outLen) != HCI_CONTROLLER_GET_PACKET)
+            if (HciSdcGetPacket(ops2, &outType, out, sizeof(out),
+                          &outLen) != HCI_SDC_GET_PACKET)
             {
                 continue;
             }
@@ -286,7 +286,7 @@ int main()
                           sizeof(commands) / sizeof(commands[0]), NULL,
                           orderedEvent, sizeof(orderedEvent)));
 
-        const HciControllerOps_t *ops3 = HciSdcGetControllerOps(&ordered);
+        HciSdc_t *ops3 = &ordered;
         uint8_t seen[8];
         unsigned seenCount = 0U;
         bool accepted[2] = {false, false};
@@ -296,12 +296,12 @@ int main()
             /* Two commands back to back, the second queues a controller event. */
             if (!accepted[0])
             {
-                accepted[0] = ops3->Put(ops3->pContext, HCI_H4_PACKET_COMMAND,
+                accepted[0] = HciSdcPutPacket(ops3, HCI_H4_PACKET_COMMAND,
                                         reset, sizeof(reset));
             }
             else if (!accepted[1])
             {
-                accepted[1] = ops3->Put(ops3->pContext, HCI_H4_PACKET_COMMAND,
+                accepted[1] = HciSdcPutPacket(ops3, HCI_H4_PACKET_COMMAND,
                                         reset, sizeof(reset));
                 if (accepted[1])
                 {
@@ -317,8 +317,8 @@ int main()
             HciH4PacketType_t outType = HCI_H4_PACKET_NONE;
             uint8_t out[64];
             size_t outLen = 0U;
-            if (ops3->Get(ops3->pContext, &outType, out, sizeof(out),
-                          &outLen) == HCI_CONTROLLER_GET_PACKET)
+            if (HciSdcGetPacket(ops3, &outType, out, sizeof(out),
+                          &outLen) == HCI_SDC_GET_PACKET)
             {
                 assert(seenCount < sizeof(seen));
                 seen[seenCount++] = out[0];
@@ -359,19 +359,19 @@ int main()
                           sizeof(commands) / sizeof(commands[0]), NULL,
                           creditEvent, sizeof(creditEvent)));
 
-        const HciControllerOps_t *ops4 = HciSdcGetControllerOps(&credit);
+        HciSdc_t *ops4 = &credit;
 
         /* Three packets on handle 0x0001, two on handle 0x0002. */
         const uint8_t aclOne[] = {0x01U, 0x00U, 0x01U, 0x00U, 0xAAU};
         const uint8_t aclTwo[] = {0x02U, 0x20U, 0x01U, 0x00U, 0xBBU};
         for (unsigned i = 0U; i < 3U; i++)
         {
-            assert(ops4->Put(ops4->pContext, HCI_H4_PACKET_ACL, aclOne,
+            assert(HciSdcPutPacket(ops4, HCI_H4_PACKET_ACL, aclOne,
                              sizeof(aclOne)));
         }
         for (unsigned i = 0U; i < 2U; i++)
         {
-            assert(ops4->Put(ops4->pContext, HCI_H4_PACKET_ACL, aclTwo,
+            assert(HciSdcPutPacket(ops4, HCI_H4_PACKET_ACL, aclTwo,
                              sizeof(aclTwo)));
         }
         assert(credit.AclPutErrorCount == 5U);
@@ -379,8 +379,8 @@ int main()
         HciH4PacketType_t creditType = HCI_H4_PACKET_NONE;
         uint8_t out[64];
         size_t outLen = 0U;
-        assert(ops4->Get(ops4->pContext, &creditType, out, sizeof(out),
-                         &outLen) == HCI_CONTROLLER_GET_PACKET);
+        assert(HciSdcGetPacket(ops4, &creditType, out, sizeof(out),
+                         &outLen) == HCI_SDC_GET_PACKET);
 
         assert(creditType == HCI_H4_PACKET_EVENT);
         assert(out[0] == 0x13U);          /* Number Of Completed Packets */
@@ -394,8 +394,8 @@ int main()
         assert(out[9] == 2U && out[10] == 0U);        /* two packets */
 
         /* Emptied by the one event, so it does not repeat. */
-        assert(ops4->Get(ops4->pContext, &creditType, out, sizeof(out),
-                         &outLen) == HCI_CONTROLLER_GET_EMPTY);
+        assert(HciSdcGetPacket(ops4, &creditType, out, sizeof(out),
+                         &outLen) == HCI_SDC_GET_EMPTY);
 
         printf("[ok] a refused ACL packet returns its flow control credit\n");
 
@@ -410,18 +410,18 @@ int main()
         static uint8_t oversize[HCI_SDC_ACL_MAX_PAYLOAD + 8U];
         memset(oversize, 0, sizeof(oversize));
         oversize[0] = 0x03U;                     /* handle 0x0003 */
-        assert(ops4->Put(ops4->pContext, HCI_H4_PACKET_ACL, oversize,
+        assert(HciSdcPutPacket(ops4, HCI_H4_PACKET_ACL, oversize,
                          sizeof(oversize)));
         assert(credit.AclOversizeCount == 1U);
         assert(backend.AclCount == 0U);          /* never handed over */
 
         /* The largest packet that is allowed still goes through. */
-        assert(ops4->Put(ops4->pContext, HCI_H4_PACKET_ACL, oversize,
+        assert(HciSdcPutPacket(ops4, HCI_H4_PACKET_ACL, oversize,
                          HCI_SDC_ACL_HEADER_SIZE + HCI_SDC_ACL_MAX_PAYLOAD));
         assert(backend.AclCount == 1U);
 
-        assert(ops4->Get(ops4->pContext, &creditType, out, sizeof(out),
-                         &outLen) == HCI_CONTROLLER_GET_PACKET);
+        assert(HciSdcGetPacket(ops4, &creditType, out, sizeof(out),
+                         &outLen) == HCI_SDC_GET_PACKET);
         assert(out[0] == 0x13U);
         assert(out[2] == 1U);
         assert(out[3] == 0x03U && out[4] == 0x00U);
@@ -456,13 +456,13 @@ int main()
                           sizeof(commands) / sizeof(commands[0]), NULL,
                           limitEvent, sizeof(limitEvent)));
 
-        const HciControllerOps_t *ops5 = HciSdcGetControllerOps(&limit);
+        HciSdc_t *ops5 = &limit;
         const uint8_t aclFive[] = {0x05U, 0x00U, 0x01U, 0x00U, 0xCCU};
 
         /* Nothing is enforced until the host has been told a number. */
         for (unsigned i = 0U; i < 8U; i++)
         {
-            assert(ops5->Put(ops5->pContext, HCI_H4_PACKET_ACL, aclFive,
+            assert(HciSdcPutPacket(ops5, HCI_H4_PACKET_ACL, aclFive,
                              sizeof(aclFive)));
         }
         assert(limit.AclPutCount == 8U);
@@ -482,13 +482,13 @@ int main()
 
         for (unsigned i = 0U; i < 4U; i++)
         {
-            assert(ops5->Put(ops5->pContext, HCI_H4_PACKET_ACL, aclFive,
+            assert(HciSdcPutPacket(ops5, HCI_H4_PACKET_ACL, aclFive,
                              sizeof(aclFive)));
         }
         assert(limit.AclPutCount == 12U);
         assert(limit.AclCreditOverrunCount == 0U);
 
-        assert(ops5->Put(ops5->pContext, HCI_H4_PACKET_ACL, aclFive,
+        assert(HciSdcPutPacket(ops5, HCI_H4_PACKET_ACL, aclFive,
                          sizeof(aclFive)));
         assert(limit.AclPutCount == 12U);
         assert(limit.AclCreditOverrunCount == 1U);
@@ -498,9 +498,9 @@ int main()
         HciH4PacketType_t limitType = HCI_H4_PACKET_NONE;
         uint8_t limitOut[64];
         size_t limitLen = 0U;
-        assert(ops5->Get(ops5->pContext, &limitType, limitOut,
+        assert(HciSdcGetPacket(ops5, &limitType, limitOut,
                          sizeof(limitOut), &limitLen) ==
-               HCI_CONTROLLER_GET_PACKET);
+               HCI_SDC_GET_PACKET);
         assert(limitType == HCI_H4_PACKET_EVENT);
         assert(limitOut[0] == HCI_SDC_EVENT_NUM_COMPLETED_PACKETS);
         assert(limitOut[2] == 1U);
@@ -517,14 +517,14 @@ int main()
         backend.GetResult = 0;
         backend.GetType = HCI_SDC_MSG_TYPE_EVENT;
         memcpy(backend.GetPacket, completed, sizeof(completed));
-        assert(ops5->Get(ops5->pContext, &limitType, limitOut,
+        assert(HciSdcGetPacket(ops5, &limitType, limitOut,
                          sizeof(limitOut), &limitLen) ==
-               HCI_CONTROLLER_GET_PACKET);
+               HCI_SDC_GET_PACKET);
         backend.GetResult = HCI_SDC_RETRY_ERROR;
 
         for (unsigned i = 0U; i < 4U; i++)
         {
-            assert(ops5->Put(ops5->pContext, HCI_H4_PACKET_ACL, aclFive,
+            assert(HciSdcPutPacket(ops5, HCI_H4_PACKET_ACL, aclFive,
                              sizeof(aclFive)));
         }
         assert(limit.AclPutCount == 16U);
@@ -537,14 +537,14 @@ int main()
         backend.GetResult = 0;
         backend.GetType = HCI_SDC_MSG_TYPE_EVENT;
         memcpy(backend.GetPacket, gone, sizeof(gone));
-        assert(ops5->Get(ops5->pContext, &limitType, limitOut,
+        assert(HciSdcGetPacket(ops5, &limitType, limitOut,
                          sizeof(limitOut), &limitLen) ==
-               HCI_CONTROLLER_GET_PACKET);
+               HCI_SDC_GET_PACKET);
         backend.GetResult = HCI_SDC_RETRY_ERROR;
 
         for (unsigned i = 0U; i < 4U; i++)
         {
-            assert(ops5->Put(ops5->pContext, HCI_H4_PACKET_ACL, aclFive,
+            assert(HciSdcPutPacket(ops5, HCI_H4_PACKET_ACL, aclFive,
                              sizeof(aclFive)));
         }
         assert(limit.AclPutCount == 20U);
@@ -561,7 +561,7 @@ int main()
          */
         for (unsigned i = 0U; i < 4U; i++)
         {
-            (void)ops5->Put(ops5->pContext, HCI_H4_PACKET_ACL, aclFive,
+            (void)HciSdcPutPacket(ops5, HCI_H4_PACKET_ACL, aclFive,
                             sizeof(aclFive));
         }
 
@@ -570,16 +570,16 @@ int main()
         backend.GetResult = 0;
         backend.GetType = HCI_SDC_MSG_TYPE_EVENT;
         memcpy(backend.GetPacket, failed, sizeof(failed));
-        assert(ops5->Get(ops5->pContext, &limitType, limitOut,
+        assert(HciSdcGetPacket(ops5, &limitType, limitOut,
                          sizeof(limitOut), &limitLen) ==
-               HCI_CONTROLLER_GET_PACKET);
+               HCI_SDC_GET_PACKET);
         backend.GetResult = HCI_SDC_RETRY_ERROR;
 
         const uint32_t putAfterFailed = limit.AclPutCount;
         const uint32_t overrunAfterFailed = limit.AclCreditOverrunCount;
         for (unsigned i = 0U; i < 4U; i++)
         {
-            assert(ops5->Put(ops5->pContext, HCI_H4_PACKET_ACL, aclFive,
+            assert(HciSdcPutPacket(ops5, HCI_H4_PACKET_ACL, aclFive,
                              sizeof(aclFive)));
         }
         assert(limit.AclPutCount == putAfterFailed);
@@ -595,7 +595,7 @@ int main()
         const uint32_t putAfterReset = limit.AclPutCount;
         for (unsigned i = 0U; i < 4U; i++)
         {
-            assert(ops5->Put(ops5->pContext, HCI_H4_PACKET_ACL, aclFive,
+            assert(HciSdcPutPacket(ops5, HCI_H4_PACKET_ACL, aclFive,
                              sizeof(aclFive)));
         }
         assert(limit.AclPutCount == putAfterReset + 4U);
@@ -618,18 +618,18 @@ int main()
 
         for (unsigned i = 0U; i < 2U; i++)
         {
-            assert(ops5->Put(ops5->pContext, HCI_H4_PACKET_ACL, aclFive,
+            assert(HciSdcPutPacket(ops5, HCI_H4_PACKET_ACL, aclFive,
                              sizeof(aclFive)));
-            assert(ops5->Put(ops5->pContext, HCI_H4_PACKET_ACL, aclSix,
+            assert(HciSdcPutPacket(ops5, HCI_H4_PACKET_ACL, aclSix,
                              sizeof(aclSix)));
         }
         assert(limit.AclPutCount == putBeforeShare + 4U);
         assert(limit.AclCreditOverrunCount == overrunBeforeShare);
 
         /* The pool is spent. Neither link may send, however little it sent. */
-        assert(ops5->Put(ops5->pContext, HCI_H4_PACKET_ACL, aclFive,
+        assert(HciSdcPutPacket(ops5, HCI_H4_PACKET_ACL, aclFive,
                          sizeof(aclFive)));
-        assert(ops5->Put(ops5->pContext, HCI_H4_PACKET_ACL, aclSix,
+        assert(HciSdcPutPacket(ops5, HCI_H4_PACKET_ACL, aclSix,
                          sizeof(aclSix)));
         assert(limit.AclPutCount == putBeforeShare + 4U);
         assert(limit.AclCreditOverrunCount == overrunBeforeShare + 2U);
@@ -641,9 +641,9 @@ int main()
          * controller queue, so leaving them here would mean the next Get hands
          * back one of those instead of the event being injected below.
          */
-        assert(ops5->Get(ops5->pContext, &limitType, limitOut,
+        assert(HciSdcGetPacket(ops5, &limitType, limitOut,
                          sizeof(limitOut), &limitLen) ==
-               HCI_CONTROLLER_GET_PACKET);
+               HCI_SDC_GET_PACKET);
         assert(limitOut[0] == HCI_SDC_EVENT_NUM_COMPLETED_PACKETS);
         assert(limitOut[2] == 2U);
 
@@ -653,14 +653,14 @@ int main()
         backend.GetResult = 0;
         backend.GetType = HCI_SDC_MSG_TYPE_EVENT;
         memcpy(backend.GetPacket, freedOne, sizeof(freedOne));
-        assert(ops5->Get(ops5->pContext, &limitType, limitOut,
+        assert(HciSdcGetPacket(ops5, &limitType, limitOut,
                          sizeof(limitOut), &limitLen) ==
-               HCI_CONTROLLER_GET_PACKET);
+               HCI_SDC_GET_PACKET);
         backend.GetResult = HCI_SDC_RETRY_ERROR;
 
         for (unsigned i = 0U; i < 2U; i++)
         {
-            assert(ops5->Put(ops5->pContext, HCI_H4_PACKET_ACL, aclSix,
+            assert(HciSdcPutPacket(ops5, HCI_H4_PACKET_ACL, aclSix,
                              sizeof(aclSix)));
         }
         assert(limit.AclPutCount == putBeforeShare + 6U);
@@ -677,13 +677,13 @@ int main()
         backend.GetResult = 0;
         backend.GetType = HCI_SDC_MSG_TYPE_EVENT;
         memcpy(backend.GetPacket, goneFive, sizeof(goneFive));
-        assert(ops5->Get(ops5->pContext, &limitType, limitOut,
+        assert(HciSdcGetPacket(ops5, &limitType, limitOut,
                          sizeof(limitOut), &limitLen) ==
-               HCI_CONTROLLER_GET_PACKET);
+               HCI_SDC_GET_PACKET);
         backend.GetResult = HCI_SDC_RETRY_ERROR;
 
         const uint32_t overrunBeforeGone = limit.AclCreditOverrunCount;
-        assert(ops5->Put(ops5->pContext, HCI_H4_PACKET_ACL, aclSix,
+        assert(HciSdcPutPacket(ops5, HCI_H4_PACKET_ACL, aclSix,
                          sizeof(aclSix)));
         assert(limit.AclPutCount == putBeforeShare + 6U);
         assert(limit.AclCreditOverrunCount == overrunBeforeGone + 1U);

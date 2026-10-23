@@ -429,14 +429,6 @@ static bool HciControllerHostTypeValid(HciH4PacketType_t Type)
            Type == HCI_H4_PACKET_ISO;
 }
 
-static bool HciControllerOutputTypeValid(HciH4PacketType_t Type)
-{
-    return Type == HCI_H4_PACKET_EVENT ||
-           Type == HCI_H4_PACKET_ACL ||
-           Type == HCI_H4_PACKET_SCO ||
-           Type == HCI_H4_PACKET_ISO;
-}
-
 static bool HciControllerH4IndicatorValid(uint8_t Type)
 {
     return Type >= (uint8_t)HCI_H4_PACKET_COMMAND &&
@@ -506,10 +498,8 @@ bool HciControllerPutHostPacket(HciController_t *pController,
         }
     }
 
-    if (!pController->Controller.Put(pController->Controller.pContext,
-                                     Type,
-                                     pPacket,
-                                     PacketLen))
+    if (DeviceIntrfTx(pController->pCtlrIntrf, (uint32_t)Type, pPacket,
+                      (int)PacketLen) != (int)PacketLen)
     {
         pController->HostPacketRetryCount++;
         return false;
@@ -524,7 +514,7 @@ static bool HciControllerInitCore(HciController_t *pController,
                                   size_t HostPacketCapacity,
                                   uint8_t *pControllerPacket,
                                   size_t ControllerPacketCapacity,
-                                  const HciControllerOps_t *pControllerOps)
+                                  DevIntrf_t *pCtlrIntrf)
 {
     if (pController == nullptr || pPacketIntrf == nullptr ||
         pHostPacket == nullptr || HostPacketCapacity == 0U ||
@@ -532,8 +522,7 @@ static bool HciControllerInitCore(HciController_t *pController,
         pControllerPacket == nullptr ||
         ControllerPacketCapacity < HCI_CONTROLLER_UNKNOWN_COMMAND_EVENT_SIZE ||
         ControllerPacketCapacity > (size_t)INT_MAX ||
-        pControllerOps == nullptr || pControllerOps->Put == nullptr ||
-        pControllerOps->Get == nullptr)
+        pCtlrIntrf == nullptr)
     {
         return false;
     }
@@ -541,7 +530,7 @@ static bool HciControllerInitCore(HciController_t *pController,
     pController->pHostIntrf = pPacketIntrf;
     pController->pHostPacket = pHostPacket;
     pController->HostPacketCapacity = HostPacketCapacity;
-    pController->Controller = *pControllerOps;
+    pController->pCtlrIntrf = pCtlrIntrf;
     pController->pControllerPacket = pControllerPacket;
     pController->ControllerPacketCapacity = ControllerPacketCapacity;
     return true;
@@ -553,7 +542,7 @@ bool HciControllerInitPacketTransport(HciController_t *pController,
                                       size_t HostPacketCapacity,
                                       uint8_t *pControllerPacket,
                                       size_t ControllerPacketCapacity,
-                                      const HciControllerOps_t *pControllerOps)
+                                      DevIntrf_t *pCtlrIntrf)
 {
     if (pController == nullptr)
     {
@@ -567,7 +556,7 @@ bool HciControllerInitPacketTransport(HciController_t *pController,
                                HostPacketCapacity,
                                pControllerPacket,
                                ControllerPacketCapacity,
-                               pControllerOps))
+                               pCtlrIntrf))
     {
         return false;
     }
@@ -582,7 +571,7 @@ bool HciControllerInit(HciController_t *pController,
                        size_t HostPacketCapacity,
                        uint8_t *pControllerPacket,
                        size_t ControllerPacketCapacity,
-                       const HciControllerOps_t *pControllerOps)
+                       DevIntrf_t *pCtlrIntrf)
 {
     if (pController == nullptr || pHostIntrf == nullptr ||
         pHostPacket == nullptr || HostPacketCapacity == 0U)
@@ -607,7 +596,7 @@ bool HciControllerInit(HciController_t *pController,
                                HostPacketCapacity,
                                pControllerPacket,
                                ControllerPacketCapacity,
-                               pControllerOps))
+                               pCtlrIntrf))
     {
         return false;
     }
@@ -833,30 +822,38 @@ static void HciControllerFetchPacket(HciController_t *pController)
         return;
     }
 
+    /*
+     * The controller is a packet interface asked by type, the way the packet
+     * hosts are: the first type the controller has a packet of answers it.
+     * The controller validates and counts its own packets, so the bridge
+     * never sees an invalid one, only the next valid one or nothing.
+     */
+    static const HciH4PacketType_t Types[] = {
+        HCI_H4_PACKET_EVENT,
+        HCI_H4_PACKET_ACL,
+        HCI_H4_PACKET_ISO,
+        HCI_H4_PACKET_SCO,
+    };
+
     HciH4PacketType_t type = HCI_H4_PACKET_NONE;
     size_t packetLen = 0U;
-    HciControllerGetResult_t result =
-        pController->Controller.Get(pController->Controller.pContext,
-                                    &type,
-                                    pController->pControllerPacket,
-                                    pController->ControllerPacketCapacity,
-                                    &packetLen);
 
-    if (result == HCI_CONTROLLER_GET_EMPTY)
+    for (size_t i = 0U; i < sizeof(Types) / sizeof(Types[0]); ++i)
     {
-        return;
+        const int received = DeviceIntrfRx(pController->pCtlrIntrf,
+                                           (uint32_t)Types[i],
+                                           pController->pControllerPacket,
+                                           (int)pController->ControllerPacketCapacity);
+        if (received > 0)
+        {
+            type = Types[i];
+            packetLen = (size_t)received;
+            break;
+        }
     }
 
-    if (result != HCI_CONTROLLER_GET_PACKET)
+    if (packetLen == 0U)
     {
-        pController->ControllerGetErrorCount++;
-        return;
-    }
-
-    if (!HciControllerOutputTypeValid(type) || packetLen == 0U ||
-        packetLen > pController->ControllerPacketCapacity)
-    {
-        pController->InvalidControllerPacketCount++;
         return;
     }
 
@@ -963,11 +960,6 @@ void HciControllerProcess(HciController_t *pController)
     if (pController == nullptr)
     {
         return;
-    }
-
-    if (pController->Controller.Process != nullptr)
-    {
-        pController->Controller.Process(pController->Controller.pContext);
     }
 
     /*
