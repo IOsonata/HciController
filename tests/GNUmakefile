@@ -97,6 +97,30 @@ TARGETS += $(BUILD_DIR)/hci_usb_test \
            $(BUILD_DIR)/hci_controller_invalid_host_test \
            $(BUILD_DIR)/hci_controller_local_commands_test
 
+# The I-SYST vendor commands over the IOsonata software engines and
+# micro-ecc, the same code the targets link from the IOsonata library.
+UECC_OBJ := $(BUILD_DIR)/uECC.o
+UECC_DEFINES := -DuECC_ENABLE_VLI_API -DuECC_SUPPORTS_secp256r1=1 \
+                -DuECC_SUPPORT_COMPRESSED_POINT=0 -DuECC_OPTIMIZATION_LEVEL=2
+hci_vendor_SRC := $(SRC)/hci_vendor.cpp \
+                  $(SRC)/hci_controller.cpp \
+                  $(SRC)/hci_intrf_transport.cpp \
+                  $(SRC)/hci_h4.cpp \
+                  $(IOSONATA_ROOT)/src/crypto/crypto_softaes.cpp \
+                  $(IOSONATA_ROOT)/src/crypto/crypto_softsha256.cpp \
+                  $(IOSONATA_ROOT)/src/crypto/crypto_uecc.cpp \
+                  $(IOSONATA_ROOT)/src/crypto/crypto_p256.cpp \
+                  $(IOSONATA_ROOT)/src/device.cpp \
+                  $(UECC_OBJ)
+$(BUILD_DIR)/hci_vendor_test: MOCK_INCLUDES += -I$(IOSONATA_ROOT)/micro-ecc $(UECC_DEFINES)
+$(BUILD_DIR)/hci_vendor_test: CXXFLAGS += -Wno-error=undef
+TESTS += hci_vendor
+TARGETS += $(BUILD_DIR)/hci_vendor_test
+
+$(UECC_OBJ): $(IOSONATA_ROOT)/micro-ecc/uECC.c | check-root
+	@mkdir -p $(dir $@)
+	$(CC) -I$(IOSONATA_ROOT)/micro-ecc $(UECC_DEFINES) -std=gnu17 -O2 -g -c $< -o $@
+
 $(USB_DESC_OBJ): $(SRC)/usb_descriptors.c $(ROOT)/include/hci_usb.h \
                  $(IOSONATA_ROOT)/include/bluetooth/bt_hci_usb.h | check-root
 	@mkdir -p $(dir $@)
@@ -144,7 +168,8 @@ check-mode-policy:
 
 all: $(BUILD_DIR)/hci_usb_test \
      $(BUILD_DIR)/hci_controller_invalid_host_test \
-     $(BUILD_DIR)/hci_controller_local_commands_test
+     $(BUILD_DIR)/hci_controller_local_commands_test \
+     $(BUILD_DIR)/hci_vendor_test
 run: check-hci-transport check-python-api check-native-usb-review \
      check-counter-schema check-harness-layout check-mode-policy
 
