@@ -141,7 +141,7 @@ def validate_source_contracts(root):
         raise SystemExit("HciAppStop not found")
     stop_body = app_source[stop_at:]
     target_stop = stop_body.find("pApp->Target.pOps->Stop")
-    usb_release = stop_body.find("HciAppUsbRelease(pApp)")
+    usb_release = stop_body.find("HciAppHostRelease(pApp)")
     if target_stop < 0 or usb_release < 0 or usb_release > target_stop:
         raise SystemExit(
             "HciAppStop must disable IOsonata USB before releasing MPSL clocks"

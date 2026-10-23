@@ -48,4 +48,8 @@
          IOPINTYPE_NORMAL},                                                   \
     }
 
+/* An IPC block, for the IPC host transport to compile against. */
+#define HCI_IPC_MEM_ADDR 0x20070000UL
+#define HCI_IPC_MEM_SIZE 0x10000UL
+
 #endif /* BOARD_H__ */

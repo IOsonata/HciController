@@ -8,9 +8,14 @@
   target). It is IOsonata's `BtHciIpc` packet interface: one ring slot is one
   HCI packet, no H:4 framing. HciController owns the shared memory block and
   the application core attaches as the peer. The host link swaps between IPC
-  and H:4 over UART with the mode button. USB and UART code in `hci_app.cpp`
-  can be left out with `HCI_APP_HAS_USB=0` and `HCI_APP_HAS_UART=0`. SDC
-  resource counts can be overridden with `-D` for the 64 KB network core RAM.
+  and H:4 over UART with the mode button. SDC resource counts can be
+  overridden with `-D` for the 64 KB network core RAM.
+- The host transports are files a project links: `hci_host_uart.cpp`,
+  `hci_host_usb.cpp` (the HCI function, the diagnostic CDC port and the
+  UART bridge) and `hci_host_ipc.cpp`, with weak defaults in `hci_app.cpp`
+  for the ones a board does not have. The `HCI_APP_HAS_*` compile switches
+  and `hci_usb_mode.h` are gone; `HCI_USB_HCI_TRANSPORT` too, native HCI
+  being the USB default and CDC H:4 a mode button press away.
 - Reduced static RAM by sharing the mutually exclusive HCI host UART and USB
   transport FIFOs. The diagnostic CDC transmit buffering remains independent;
   diagnostic input is consumed and discarded.

@@ -73,14 +73,14 @@ HCI_USB_HEADERS := $(IOSONATA_ROOT)/include/device_intrf.h \
                    $(IOSONATA_ROOT)/include/usb/usbd_epalloc.h
 $(BUILD_DIR)/hci_usb_test: $(HCI_USB_HEADERS)
 
-# This integration fixture includes hci_app.cpp to exercise its actual class
+# This integration fixture includes hci_host_usb.cpp to exercise its actual class
 # setup and RTOS queue. Discard only unrelated application/radio entry points.
 ifeq ($(shell uname -s),Darwin)
 HCI_USB_GC_LDFLAGS := -Wl,-dead_strip
 else
 HCI_USB_GC_LDFLAGS := -Wl,--gc-sections
 endif
-$(BUILD_DIR)/hci_usb_test: $(SRC)/hci_app.cpp $(UNIT)/hci_usb_test.cpp \
+$(BUILD_DIR)/hci_usb_test: $(SRC)/hci_host_usb.cpp $(UNIT)/hci_usb_test.cpp \
                          $(hci_usb_SRC) $(COMMON_SRC) $(HEADERS) | check-root
 	@mkdir -p $(dir $@)
 	$(CXX) $(MOCK_INCLUDES) $(MOCK_DEFINES) -DHCI_TRACE=0 $(CXXFLAGS) \

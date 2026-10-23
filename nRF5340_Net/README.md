@@ -49,10 +49,14 @@ libraries, and the nrfxlib nrf53 soft-float multirole SDC and MPSL archives.
 The IOsonata library must contain `ipc_intrf.cpp`, `ipc_ctrlr_nrf53.cpp`,
 `bt_hci_ipc.cpp` and `bt_hci_h4.cpp`.
 
-Defined symbols: `NRF5340_XXAA_NETWORK`, `NRFXLIB_SDC`,
-`HCI_APP_HAS_USB=0`, `HCI_APP_HAS_UART=1`, `HCI_APP_HAS_IPC=1`. The
-`HCI_APP_HAS_*` switches leave out the USB code and statics of
-`hci_app.cpp`; the other targets keep their defaults.
+Defined symbols: `NRF5340_XXAA_NETWORK`, `NRFXLIB_SDC`.
+
+The host transports are files the project links, the way a target port
+is: this project links `hci_host_uart.cpp` and `hci_host_ipc.cpp` and not
+`hci_host_usb.cpp`, since the network core has no USB. `hci_app.cpp` has a
+weak default for every transport entry that reports it absent, so a mode
+whose file is not in the image fails at init with the host interface
+error, and nothing is selected with a define.
 
 ## Shared memory
 

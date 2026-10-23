@@ -64,24 +64,29 @@ def main(argv):
         return 1
 
     disk = on_disk(root)
+    # The target port and the host transports are what a project links; a
+    # board has the transports of its hardware and none of the others.
     target_specific = {
         "nRF52840": {
             "include/hci_nrf54lm20.h",
             "src/hci_nrf54lm20.cpp",
             "include/hci_nrf5340_net.h",
             "src/hci_nrf5340_net.cpp",
+            "src/hci_host_ipc.cpp",
         },
         "nRF54LM20": {
             "include/hci_nrf52840.h",
             "src/hci_nrf52840.cpp",
             "include/hci_nrf5340_net.h",
             "src/hci_nrf5340_net.cpp",
+            "src/hci_host_ipc.cpp",
         },
         "nRF5340_Net": {
             "include/hci_nrf52840.h",
             "src/hci_nrf52840.cpp",
             "include/hci_nrf54lm20.h",
             "src/hci_nrf54lm20.cpp",
+            "src/hci_host_usb.cpp",
         },
     }
 

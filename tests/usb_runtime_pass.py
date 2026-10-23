@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Guard IOsonata USB lifecycle and processing in hci_app.cpp."""
+"""Guard IOsonata USB lifecycle and processing in hci_host_usb.cpp and hci_app.cpp."""
 
 from pathlib import Path
 import sys
@@ -72,42 +72,44 @@ def main() -> None:
 
     root = Path(sys.argv[1]).resolve()
     source = (root / "src" / "hci_app.cpp").read_text(encoding="utf-8")
+    usb = (root / "src" / "hci_host_usb.cpp").read_text(encoding="utf-8")
 
-    start = function_body(
-        source, "static bool HciAppHostStart(void *pContext)"
-    )
+    start = function_body(usb, "bool HciHostUsbStart(HciApp_t *pApp)")
     settle_at = start.find("for (uint32_t pass")
     if settle_at < 0:
-        die("HciAppHostStart: cannot find USB settle loop")
-    process_at = start.find("HciAppUsbWorkExec()", settle_at)
+        die("HciHostUsbStart: cannot find USB settle loop")
+    process_at = start.find("HciHostUsbWorkExec()", settle_at)
     configured_at = start.find("UsbConfigured(0)", process_at)
     if process_at < 0 or configured_at < 0 or process_at > configured_at:
         die("USB enumeration must process IOsonata before testing configured")
 
-    runtime = function_body(
-        source, "static void HciAppHostProcess(void *pContext)"
-    )
-    if "HciAppUsbWorkExec()" not in runtime:
+    runtime = function_body(usb, "void HciHostUsbProcess(HciApp_t *pApp)")
+    if "HciHostUsbWorkExec()" not in runtime:
         die("steady-state USB must drain its worker queue")
-    discard = function_body(source, "static void HciAppDiscardLogInput(void)")
+    discard = function_body(usb, "static void HciHostUsbDiscardLogInput(void)")
     if "s_LogCdc.Rx(" not in discard:
         die("diagnostic CDC RX data must be read and ignored")
     if "pass < 16U" not in discard or "sizeof(data)" not in discard:
         die("diagnostic CDC RX reads must remain bounded")
 
-    drain = function_body(source, "static void HciAppDrainLog(HciApp_t *pApp)")
-    if "HciAppDiscardLogInput()" not in drain:
+    if "HciHostUsbDiscardLogInput()" not in runtime:
         die("diagnostic CDC RX must be consumed during USB processing")
-    if "HciTraceFlush()" not in drain:
+    if "HciTraceFlush()" not in runtime:
         die("diagnostic CDC TX logging must continue to flush")
 
-    if "UsbProcess(0)" in source:
+    app_process = function_body(
+        source, "static void HciAppHostProcess(void *pContext)"
+    )
+    if "HciHostUsbProcess(pApp)" not in app_process:
+        die("the app must run the USB transport every pass it is up")
+
+    if "UsbProcess(0)" in source or "UsbProcess(0)" in usb:
         die("UsbProcess belongs to the IOsonata queued callback")
-    if "bool UsbEvtQue(" not in source or "UsbCheckStatus();" not in source:
+    if "bool UsbEvtQue(" not in usb or "UsbCheckStatus();" not in usb:
         die("USB needs the RTOS queue override and refused-work retry")
 
     stop = function_body(source, "void HciAppStop(HciApp_t *pApp)")
-    release_at = stop.find("HciAppUsbRelease(pApp)")
+    release_at = stop.find("HciAppHostRelease(pApp)")
     target_at = stop.find("pApp->Target.pOps->Stop")
     if release_at < 0 or target_at < 0 or release_at > target_at:
         die("USB must be disabled before MPSL target teardown")

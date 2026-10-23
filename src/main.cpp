@@ -201,13 +201,11 @@ static const char *HciModeName(HciAppMode_t Mode)
     }
 }
 
+/* Native HCI over USB is the USB default; CDC H:4 is a press of the mode
+ * button away. */
 static HciAppMode_t HciUsbBuildDefaultMode(void)
 {
-#if HCI_USB_HCI_TRANSPORT == HCI_USB_HCI_TRANSPORT_NATIVE
     return HCI_APP_MODE_USB_NATIVE;
-#else
-    return HCI_APP_MODE_USB_H4;
-#endif
 }
 
 static HciAppMode_t HciBoardDefaultMode(void)

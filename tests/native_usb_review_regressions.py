@@ -59,7 +59,7 @@ def main(argv):
     print("[ok] IOsonata BtHciUsb exclusively owns native HCI transport")
 
     descriptors = read(os.path.join(root, "src", "usb_descriptors.c"))
-    app = read(os.path.join(root, "src", "hci_app.cpp"))
+    app = read(os.path.join(root, "src", "hci_host_usb.cpp"))
     app_header = read(os.path.join(root, "include", "hci_app.h"))
     if "HciUsbDescriptorLogCdcInstance" in header or \
             "HciUsbDescriptorLogCdcInstance" in descriptors or \

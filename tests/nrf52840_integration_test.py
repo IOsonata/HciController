@@ -31,7 +31,7 @@ class Nrf52840IntegrationTest(unittest.TestCase):
                 self.assertIn("nRF52840/lib/ioc/", text)
 
     def test_usb_worker_and_shared_clock_irq(self):
-        app = (ROOT / "src" / "hci_app.cpp").read_text()
+        app = (ROOT / "src" / "hci_host_usb.cpp").read_text()
         target = (ROOT / "src" / "hci_nrf52840.cpp").read_text()
         self.assertIn("bool UsbEvtQue(", app)
         self.assertIn("UsbCheckStatus();", app)
