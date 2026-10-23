@@ -277,6 +277,8 @@ void HciTargetStop(void)
     s_pTarget = nullptr;
 }
 
+static void HciClockTrace(const char *pTag);
+
 bool HciTargetStart(void)
 {
     if (s_pTarget != nullptr)
@@ -292,12 +294,29 @@ bool HciTargetStart(void)
         return false;
     }
 
+    HciClockTrace("start");
     return true;
+}
+
+static void HciClockTrace(const char *pTag)
+{
+    HciTrace("clock %s: lfstat=0x%08lX hfstat=0x%08lX lfstarted=%lu\r\n", pTag,
+             (unsigned long)NRF_CLOCK->LFCLKSTAT,
+             (unsigned long)NRF_CLOCK->HFCLKSTAT,
+             (unsigned long)NRF_CLOCK->EVENTS_LFCLKSTARTED);
 }
 
 void HciTargetProcessMpsl(void)
 {
+    static uint32_t s_Calls;
+
     mpsl_low_priority_process();
+
+    /* Once more a little after start, the clock may come up late. */
+    if (++s_Calls == 40U)
+    {
+        HciClockTrace("late");
+    }
 }
 
 void HciTargetFault(int Error)
