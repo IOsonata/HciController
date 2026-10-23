@@ -63,18 +63,24 @@
 #define UART_RTS_PORT 0
 #define UART_RTS_PIN 19
 #else
-/* nRF5340 Audio DK: button SW0 (VOL-) P0.02, virtual COM P1.05 TXD, P1.04 RXD, P1.06 CTS, P1.07 RTS */
+/*
+ * nRF5340 Audio DK: button VOL- P0.02; the network core's own virtual COM
+ * port, the second one the board enumerates: P1.09 TXD, P1.08 RXD,
+ * P1.10 RTS, P1.11 CTS (Zephyr nrf5340_audio_dk_nrf5340_cpunet-pinctrl).
+ * The first port, P1.05/P1.04, is the application core console and stays
+ * with it.
+ */
 #define HCI_MODE_BUTTON_PORT 0
 #define HCI_MODE_BUTTON_PIN 2
 #define HCI_MODE_BUTTON_PINOP 0
 #define UART_RX_PORT 1
-#define UART_RX_PIN 4
+#define UART_RX_PIN 8
 #define UART_TX_PORT 1
-#define UART_TX_PIN 5
+#define UART_TX_PIN 9
 #define UART_CTS_PORT 1
-#define UART_CTS_PIN 6
+#define UART_CTS_PIN 11
 #define UART_RTS_PORT 1
-#define UART_RTS_PIN 7
+#define UART_RTS_PIN 10
 #endif
 
 #define UART_DEVNO 0

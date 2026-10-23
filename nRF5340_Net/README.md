@@ -23,7 +23,11 @@ network core has no NVM interface port, so the mode survives a reset but not
 a power loss: after a power cycle IPC is used again. A vendor HCI command to
 change the mode is planned.
 
-The button and the UART pins are set in `src/board.h` (nRF5340 DK values).
+The button and the UART pins are set in `src/board.h`: the nRF5340 Audio DK
+by default (VOL- button, the network core's own virtual COM port P1.09 TXD,
+P1.08 RXD, P1.10 RTS, P1.11 CTS, the second port the board enumerates; the
+first one is the application core console), the nRF5340 DK with
+`NRF5340_DK_PCA10095`.
 The application core must hand those pins to the network core (GPIO MCUSEL)
 before it starts the network core.
 
