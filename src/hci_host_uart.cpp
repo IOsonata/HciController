@@ -100,7 +100,9 @@ bool HciHostUartLogOpen(HciApp_t *pApp)
     cfg.FlowControl = UART_FLWCTRL_NONE;
     cfg.bIntMode = true;
     cfg.IntPrio = HCI_UART_IRQ_PRIORITY;
-    cfg.bFifoBlocking = true;
+    /* The trace must never hold up the controller: when the FIFO is full the
+     * excess is dropped, and the rest goes out on the next flush. */
+    cfg.bFifoBlocking = false;
     cfg.RxMemSize = sizeof(pApp->HostRxFifoMem);
     cfg.pRxMem = pApp->HostRxFifoMem;
     cfg.TxMemSize = sizeof(pApp->HostTxFifoMem);

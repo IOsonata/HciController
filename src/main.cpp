@@ -486,6 +486,9 @@ static void HciStatusThread(void *)
         HciModeButtonProcess();
 #endif
 
+        /* Send what the trace output could not take earlier. */
+        (void)HciTraceFlush();
+
         (void)TaktOSThreadSleep(TaktOSCurrentThread(), STATUS_UPDATE_MS);
     }
 }
