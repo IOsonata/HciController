@@ -20,16 +20,6 @@
 struct __device_intrf;
 typedef struct __device_intrf DevIntrf_t;
 
-/*
- * HCI_TRACE_COMMANDS=1 logs every command from the host and every event to
- * the host on the trace output: opcode, status and length. Data packets are
- * left out. It also adds a line every 5 s. It is for finding which command a
- * host stack stops at.
- */
-#ifndef HCI_TRACE_COMMANDS
-#define HCI_TRACE_COMMANDS 0
-#endif
-
 #ifndef HCI_TRACE
 #define HCI_TRACE 0
 #endif
@@ -75,6 +65,21 @@ int HciTraceFlush(void);
 /* While set, every record is pushed out and waited for (bounded) before
  * HciTrace returns. For start up only, before the scheduler runs. */
 void HciTraceBootDrain(bool bEnable);
+
+/*
+ * Command log. When on, every command from the host and every event to the
+ * host is logged: opcode, status and length, data packets left out. With
+ * bSync the line is written out at once and the UART waited for, which loses
+ * nothing in a burst but holds up the command path by about a millisecond a
+ * line. Off at start.
+ */
+void HciTraceCommands(bool bEnable, bool bSync);
+bool HciTraceCommandsEnabled(void);
+void HciTraceCommandLine(const char *pFormat, ...)
+#if defined(__GNUC__) || defined(__clang__)
+    __attribute__((format(printf, 1, 2)))
+#endif
+    ;
 
 #ifdef __cplusplus
 }

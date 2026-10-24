@@ -467,10 +467,8 @@ static void HciModeButtonProcess(void)
 
 static void HciStatusThread(void *)
 {
-#if HCI_TRACE_COMMANDS
     uint32_t seconds = 0U;
     uint32_t elapsedMs = 0U;
-#endif
 
     for (;;)
     {
@@ -494,18 +492,16 @@ static void HciStatusThread(void *)
         /* Send what the trace output could not take earlier. */
         (void)HciTraceFlush();
 
-#if HCI_TRACE_COMMANDS
         /* A line every 5 s shows the trace output is alive for a terminal
          * opened after the boot lines went by. */
         elapsedMs += STATUS_UPDATE_MS;
-        if (elapsedMs >= 5000U)
+        if (elapsedMs >= 5000U && HciTraceCommandsEnabled())
         {
             elapsedMs -= 5000U;
             seconds += 5U;
             HciTrace("alive %lus host=%u\r\n", (unsigned long)seconds,
                      (unsigned)HciAppHostIsOpen(&s_HciApp));
         }
-#endif
 
         (void)TaktOSThreadSleep(TaktOSCurrentThread(), STATUS_UPDATE_MS);
     }
@@ -550,6 +546,8 @@ int main(void)
 #endif
 
     HciTraceInit();
+    /* Command log on during bring-up. HciTraceCommands(false, false) turns it off. */
+    HciTraceCommands(true, false);
 #if !HCI_TARGET_IS_NRF5340_NET && \
     !defined(NRF54LM20B_XXAA) && !defined(NRF54LM20A_XXAA)
     HciNrf52840ResetTrace();

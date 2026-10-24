@@ -762,28 +762,12 @@ static void HciControllerH4Open(HciController_t *pController)
     HciIntrfTransportOpen(pHost);
 }
 
-#if HCI_TRACE_COMMANDS
-/*
- * The command log is stored like the other trace lines and goes out as the
- * UART takes it. HCI_TRACE_COMMANDS_SYNC=1 writes each line out at once and
- * waits for the UART, which loses nothing in a burst but holds up the command
- * path by about a millisecond a line.
- */
-#ifndef HCI_TRACE_COMMANDS_SYNC
-#define HCI_TRACE_COMMANDS_SYNC 0
-#endif
-#if HCI_TRACE_COMMANDS_SYNC
-#define HCI_CONTROLLER_CMD_LOG HciTraceError
-#else
-#define HCI_CONTROLLER_CMD_LOG HciTrace
-#endif
-
 static void HciControllerTraceFromHost(HciH4PacketType_t Type,
                                        const uint8_t *pPacket, size_t Len)
 {
     if (Type == HCI_H4_PACKET_COMMAND && Len >= 3U)
     {
-        HCI_CONTROLLER_CMD_LOG("h>c cmd %04X len=%u\r\n",
+        HciTraceCommandLine("h>c cmd %04X len=%u\r\n",
                  (unsigned)HciControllerReadLe16(pPacket), (unsigned)pPacket[2]);
     }
 }
@@ -798,26 +782,25 @@ static void HciControllerTraceToHost(HciH4PacketType_t Type,
 
     if (pPacket[0] == 0x0EU && Len >= 6U)
     {
-        HCI_CONTROLLER_CMD_LOG("c>h cc %04X st=%02X len=%u\r\n",
+        HciTraceCommandLine("c>h cc %04X st=%02X len=%u\r\n",
                  (unsigned)HciControllerReadLe16(&pPacket[3]),
                  (unsigned)pPacket[5], (unsigned)Len);
     }
     else if (pPacket[0] == 0x0FU && Len >= 6U)
     {
-        HCI_CONTROLLER_CMD_LOG("c>h cs %04X st=%02X\r\n",
+        HciTraceCommandLine("c>h cs %04X st=%02X\r\n",
                  (unsigned)HciControllerReadLe16(&pPacket[4]),
                  (unsigned)pPacket[2]);
     }
     else if (pPacket[0] == 0x3EU && Len >= 3U)
     {
-        HCI_CONTROLLER_CMD_LOG("c>h le %02X len=%u\r\n", (unsigned)pPacket[2], (unsigned)Len);
+        HciTraceCommandLine("c>h le %02X len=%u\r\n", (unsigned)pPacket[2], (unsigned)Len);
     }
     else
     {
-        HCI_CONTROLLER_CMD_LOG("c>h ev %02X len=%u\r\n", (unsigned)pPacket[0], (unsigned)Len);
+        HciTraceCommandLine("c>h ev %02X len=%u\r\n", (unsigned)pPacket[0], (unsigned)Len);
     }
 }
-#endif
 
 static void HciControllerHostProcess(HciController_t *pController)
 {
@@ -867,10 +850,11 @@ static void HciControllerHostProcess(HciController_t *pController)
         pController->HostPacketType = Types[i];
         pController->HostPacketLen = (size_t)received;
         pController->HostPacketPending = true;
-#if HCI_TRACE_COMMANDS
-        HciControllerTraceFromHost(Types[i], pController->pHostPacket,
-                                   (size_t)received);
-#endif
+        if (HciTraceCommandsEnabled())
+        {
+            HciControllerTraceFromHost(Types[i], pController->pHostPacket,
+                                       (size_t)received);
+        }
 
         if (HciControllerPutHostPacket(pController,
                                        pController->HostPacketType,
@@ -975,11 +959,12 @@ static void HciControllerStartPacket(HciController_t *pController)
 
     if (sent == (int)pController->ControllerPacketLen)
     {
-#if HCI_TRACE_COMMANDS
-        HciControllerTraceToHost(pController->ControllerPacketType,
-                                 pController->pControllerPacket,
-                                 pController->ControllerPacketLen);
-#endif
+        if (HciTraceCommandsEnabled())
+        {
+            HciControllerTraceToHost(pController->ControllerPacketType,
+                                     pController->pControllerPacket,
+                                     pController->ControllerPacketLen);
+        }
         if (pController->ControllerPacketType == HCI_H4_PACKET_ACL)
         {
             pController->HostAclPacketCount++;

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Features are linked, not compiled in
+
+- The vendor crypto commands moved to `hci_vendor_crypto.cpp` and the four
+  optional SDC features to `hci_sdc_feat_subrating.cpp`,
+  `hci_sdc_feat_extfeat.cpp`, `hci_sdc_feat_past.cpp` and
+  `hci_sdc_feat_pawr.cpp`. A project links the files it wants; weak defaults
+  report the rest absent. `HCI_VENDOR_CRYPTO`, `HCI_SDC_FEAT_*` and
+  `HCI_TRACE_COMMANDS` are gone. The SDC pool is sized for all four
+  features. The command log is a runtime setting, `HciTraceCommands()`.
+
 ### Host transports
 
 - Added an IPC host transport for the nRF5340 network core (`nRF5340_Net`

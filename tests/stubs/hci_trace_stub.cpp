@@ -108,3 +108,16 @@ extern "C" size_t HciTraceTestTake(char *pOut, size_t Capacity)
     pOut[count] = '\0';
     return count;
 }
+
+extern "C" void HciTraceCommands(bool, bool)
+{
+}
+
+extern "C" bool HciTraceCommandsEnabled(void)
+{
+    return false;
+}
+
+extern "C" void HciTraceCommandLine(const char *, ...)
+{
+}

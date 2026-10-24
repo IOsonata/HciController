@@ -1,0 +1,326 @@
+/**-------------------------------------------------------------------------
+@file	hci_vendor_crypto.cpp
+@brief	I-SYST vendor crypto commands (0xFFF4 to 0xFFFB).
+
+A project links this file to offer the crypto commands. Without it the
+commands answer Unsupported Feature and Crypto Supported reports no bits, and
+the software AES, SHA-256 and uECC code stays out of the image.
+
+The crypto runs on one IOsonata Crypto object. Its Init() binds the engines
+of the linked MCU library, hardware where the library has a driver (the ECB
+block on the nRF5340 network core) and software for the rest. The object
+reports a secure entropy source through IsSecure(); without one, Random and
+ECDSA sign answer Unsupported Feature.
+
+@author	Nguyen Hoan Hoang
+@date	October 2026
+@license MPL-2.0, (c) 2026 I-SYST inc. See LICENSE.
+----------------------------------------------------------------------------*/
+#include "hci_vendor.h"
+#include "crypto/crypto.h"
+
+#include <string.h>
+
+#define AES_KEY_LEN     16U
+#define AES_BLOCK_LEN   16U
+#define SHA256_LEN      32U
+#define P256_PRIV_LEN   32U
+#define P256_PUB_LEN    64U
+#define P256_SIG_LEN    64U
+
+static Crypto s_Crypto;
+static bool s_bEnginesReady = false;
+
+static bool HciVendorEnginesPrepare(void)
+{
+    if (!s_bEnginesReady)
+    {
+        s_bEnginesReady = s_Crypto.Init();
+    }
+
+    return s_bEnginesReady;
+}
+
+static uint32_t HciVendorSupported(void)
+{
+    uint32_t bits = HCI_VENDOR_CRYPTO_AES_CMAC | HCI_VENDOR_CRYPTO_AES_CCM |
+                    HCI_VENDOR_CRYPTO_SHA256 | HCI_VENDOR_CRYPTO_HMAC_SHA256 |
+                    HCI_VENDOR_CRYPTO_ECDSA_P256_VERIFY;
+
+    if (s_Crypto.IsSecure())
+    {
+        bits |= HCI_VENDOR_CRYPTO_RANDOM | HCI_VENDOR_CRYPTO_ECDSA_P256_SIGN;
+    }
+
+    return bits;
+}
+
+extern "C" uint32_t HciVendorCryptoBits(void)
+{
+    return HciVendorEnginesPrepare() ? HciVendorSupported() : 0U;
+}
+
+static uint8_t HciVendorAesCmac(const uint8_t *pParam, size_t ParamLen,
+                                uint8_t *pRet, size_t *pRetLen)
+{
+    if (ParamLen < HCI_VENDOR_AES_CMAC_HDR_LEN)
+    {
+        return HCI_VENDOR_STATUS_INVALID_PARAMS;
+    }
+
+    size_t len = pParam[AES_KEY_LEN];
+    if (ParamLen != HCI_VENDOR_AES_CMAC_HDR_LEN + len)
+    {
+        return HCI_VENDOR_STATUS_INVALID_PARAMS;
+    }
+
+    CryptoKey key{CRYPTO_KEY_AES_128, CRYPTO_KEY_LOC_PLAIN, CRYPTO_KEY_USE_SIGN, {}};
+    key.Plain.pData = pParam;
+    key.Plain.Len = AES_KEY_LEN;
+
+    if (s_Crypto.Mac(CRYPTO_MAC_CMAC, key, pParam + HCI_VENDOR_AES_CMAC_HDR_LEN,
+                  len, pRet, AES_BLOCK_LEN) != CRYPTO_STATUS_OK)
+    {
+        return HCI_VENDOR_STATUS_HW_FAILURE;
+    }
+
+    *pRetLen = AES_BLOCK_LEN;
+    return HCI_VENDOR_STATUS_SUCCESS;
+}
+
+static uint8_t HciVendorAesCcm(const uint8_t *pParam, size_t ParamLen,
+                               uint8_t *pRet, size_t *pRetLen)
+{
+    /* flags, key[16], nonce_len */
+    if (ParamLen < 1U + AES_KEY_LEN + 1U)
+    {
+        return HCI_VENDOR_STATUS_INVALID_PARAMS;
+    }
+
+    const uint8_t flags = pParam[0];
+    const uint8_t *pKey = pParam + 1U;
+    size_t pos = 1U + AES_KEY_LEN;
+    const size_t nonceLen = pParam[pos++];
+    if (nonceLen < HCI_VENDOR_AES_CCM_NONCE_MIN ||
+        nonceLen > HCI_VENDOR_AES_CCM_NONCE_MAX || ParamLen < pos + nonceLen + 1U)
+    {
+        return HCI_VENDOR_STATUS_INVALID_PARAMS;
+    }
+    const uint8_t *pNonce = pParam + pos;
+    pos += nonceLen;
+
+    const size_t aadLen = pParam[pos++];
+    if (ParamLen < pos + aadLen + 2U)
+    {
+        return HCI_VENDOR_STATUS_INVALID_PARAMS;
+    }
+    const uint8_t *pAad = pParam + pos;
+    pos += aadLen;
+
+    const size_t tagLen = pParam[pos++];
+    const size_t msgLen = pParam[pos++];
+    if (tagLen < 4U || tagLen > AES_BLOCK_LEN || (tagLen & 1U) != 0U)
+    {
+        return HCI_VENDOR_STATUS_INVALID_PARAMS;
+    }
+    const uint8_t *pMsg = pParam + pos;
+    pos += msgLen;
+
+    const bool decrypt = (flags & HCI_VENDOR_AES_CCM_FLAG_DECRYPT) != 0U;
+    const size_t tail = decrypt ? tagLen : 0U;
+    if (ParamLen != pos + tail || msgLen + (decrypt ? 0U : tagLen) > HCI_VENDOR_RETURN_MAX)
+    {
+        return HCI_VENDOR_STATUS_INVALID_PARAMS;
+    }
+
+    CryptoKey key{CRYPTO_KEY_AES_128, CRYPTO_KEY_LOC_PLAIN,
+                  decrypt ? CRYPTO_KEY_USE_DECRYPT : CRYPTO_KEY_USE_ENCRYPT, {}};
+    key.Plain.pData = pKey;
+    key.Plain.Len = AES_KEY_LEN;
+
+    CRYPTO_STATUS st;
+    if (decrypt)
+    {
+        st = s_Crypto.Open(CRYPTO_AEAD_AES_CCM, key, pNonce, nonceLen, pAad, aadLen,
+                        pMsg, msgLen, pRet, pParam + pos, tagLen);
+        if (st != CRYPTO_STATUS_OK)
+        {
+            memset(pRet, 0, msgLen);
+            return HCI_VENDOR_STATUS_AUTH_FAILURE;
+        }
+        *pRetLen = msgLen;
+    }
+    else
+    {
+        st = s_Crypto.Seal(CRYPTO_AEAD_AES_CCM, key, pNonce, nonceLen, pAad, aadLen,
+                        pMsg, msgLen, pRet, pRet + msgLen, tagLen);
+        if (st != CRYPTO_STATUS_OK)
+        {
+            return HCI_VENDOR_STATUS_HW_FAILURE;
+        }
+        *pRetLen = msgLen + tagLen;
+    }
+
+    return HCI_VENDOR_STATUS_SUCCESS;
+}
+
+static uint8_t HciVendorRandom(const uint8_t *pParam, size_t ParamLen,
+                               uint8_t *pRet, size_t *pRetLen)
+{
+    if (ParamLen != 1U || pParam[0] == 0U || pParam[0] > HCI_VENDOR_RETURN_MAX)
+    {
+        return HCI_VENDOR_STATUS_INVALID_PARAMS;
+    }
+
+    if (!s_Crypto.IsSecure())
+    {
+        return HCI_VENDOR_STATUS_UNSUPPORTED;
+    }
+
+    if (s_Crypto.Random(pRet, pParam[0]) != CRYPTO_STATUS_OK)
+    {
+        return HCI_VENDOR_STATUS_HW_FAILURE;
+    }
+
+    *pRetLen = pParam[0];
+    return HCI_VENDOR_STATUS_SUCCESS;
+}
+
+static uint8_t HciVendorSha256(const uint8_t *pParam, size_t ParamLen,
+                               uint8_t *pRet, size_t *pRetLen)
+{
+    if (ParamLen < 1U || ParamLen != 1U + (size_t)pParam[0])
+    {
+        return HCI_VENDOR_STATUS_INVALID_PARAMS;
+    }
+
+    if (s_Crypto.Hash(CRYPTO_HASH_SHA256, pParam + 1U, pParam[0], pRet) != CRYPTO_STATUS_OK)
+    {
+        return HCI_VENDOR_STATUS_HW_FAILURE;
+    }
+
+    *pRetLen = SHA256_LEN;
+    return HCI_VENDOR_STATUS_SUCCESS;
+}
+
+static uint8_t HciVendorHmacSha256(const uint8_t *pParam, size_t ParamLen,
+                                   uint8_t *pRet, size_t *pRetLen)
+{
+    if (ParamLen < 2U)
+    {
+        return HCI_VENDOR_STATUS_INVALID_PARAMS;
+    }
+
+    const size_t keyLen = pParam[0];
+    if (ParamLen < 2U + keyLen)
+    {
+        return HCI_VENDOR_STATUS_INVALID_PARAMS;
+    }
+    const size_t msgLen = pParam[1U + keyLen];
+    if (ParamLen != 2U + keyLen + msgLen)
+    {
+        return HCI_VENDOR_STATUS_INVALID_PARAMS;
+    }
+
+    CryptoKey key{CRYPTO_KEY_HMAC, CRYPTO_KEY_LOC_PLAIN, CRYPTO_KEY_USE_SIGN, {}};
+    key.Plain.pData = pParam + 1U;
+    key.Plain.Len = keyLen;
+
+    if (s_Crypto.Mac(CRYPTO_MAC_HMAC, key, pParam + 2U + keyLen, msgLen,
+                  pRet, SHA256_LEN) != CRYPTO_STATUS_OK)
+    {
+        return HCI_VENDOR_STATUS_HW_FAILURE;
+    }
+
+    *pRetLen = SHA256_LEN;
+    return HCI_VENDOR_STATUS_SUCCESS;
+}
+
+static uint8_t HciVendorEcdsaSign(const uint8_t *pParam, size_t ParamLen,
+                                  uint8_t *pRet, size_t *pRetLen)
+{
+    if (ParamLen != P256_PRIV_LEN + SHA256_LEN)
+    {
+        return HCI_VENDOR_STATUS_INVALID_PARAMS;
+    }
+
+    if (!s_Crypto.IsSecure())
+    {
+        return HCI_VENDOR_STATUS_UNSUPPORTED;
+    }
+
+    CryptoKey key{CRYPTO_KEY_ECC_P256, CRYPTO_KEY_LOC_PLAIN, CRYPTO_KEY_USE_SIGN, {}};
+    key.Plain.pData = pParam;
+    key.Plain.Len = P256_PRIV_LEN;
+
+    if (s_Crypto.Sign(CRYPTO_CURVE_P256, key, pParam + P256_PRIV_LEN, SHA256_LEN,
+                   pRet) != CRYPTO_STATUS_OK)
+    {
+        return HCI_VENDOR_STATUS_HW_FAILURE;
+    }
+
+    *pRetLen = P256_SIG_LEN;
+    return HCI_VENDOR_STATUS_SUCCESS;
+}
+
+static uint8_t HciVendorEcdsaVerify(const uint8_t *pParam, size_t ParamLen)
+{
+    if (ParamLen != P256_PUB_LEN + SHA256_LEN + P256_SIG_LEN)
+    {
+        return HCI_VENDOR_STATUS_INVALID_PARAMS;
+    }
+
+    if (s_Crypto.Verify(CRYPTO_CURVE_P256, pParam, pParam + P256_PUB_LEN, SHA256_LEN,
+                     pParam + P256_PUB_LEN + SHA256_LEN) != CRYPTO_STATUS_OK)
+    {
+        return HCI_VENDOR_STATUS_AUTH_FAILURE;
+    }
+
+    return HCI_VENDOR_STATUS_SUCCESS;
+}
+
+extern "C" bool HciVendorCryptoCommand(uint16_t Opcode, const uint8_t *pParam,
+                                       size_t ParamLen, uint8_t *pRet,
+                                       size_t *pRetLen, uint8_t *pStatus)
+{
+    if (Opcode < HCI_VENDOR_OPCODE_AES_CMAC ||
+        Opcode > HCI_VENDOR_OPCODE_ECDSA_P256_VERIFY)
+    {
+        return false;
+    }
+
+    if (!HciVendorEnginesPrepare())
+    {
+        *pStatus = HCI_VENDOR_STATUS_HW_FAILURE;
+        return true;
+    }
+
+    switch (Opcode)
+    {
+        case HCI_VENDOR_OPCODE_AES_CMAC:
+            *pStatus = HciVendorAesCmac(pParam, ParamLen, pRet, pRetLen);
+            break;
+        case HCI_VENDOR_OPCODE_AES_CCM:
+            *pStatus = HciVendorAesCcm(pParam, ParamLen, pRet, pRetLen);
+            break;
+        case HCI_VENDOR_OPCODE_RANDOM:
+            *pStatus = HciVendorRandom(pParam, ParamLen, pRet, pRetLen);
+            break;
+        case HCI_VENDOR_OPCODE_SHA256:
+            *pStatus = HciVendorSha256(pParam, ParamLen, pRet, pRetLen);
+            break;
+        case HCI_VENDOR_OPCODE_HMAC_SHA256:
+            *pStatus = HciVendorHmacSha256(pParam, ParamLen, pRet, pRetLen);
+            break;
+        case HCI_VENDOR_OPCODE_ECDSA_P256_SIGN:
+            *pStatus = HciVendorEcdsaSign(pParam, ParamLen, pRet, pRetLen);
+            break;
+        case HCI_VENDOR_OPCODE_ECDSA_P256_VERIFY:
+            *pStatus = HciVendorEcdsaVerify(pParam, ParamLen);
+            break;
+        default:
+            return false;
+    }
+
+    return true;
+}

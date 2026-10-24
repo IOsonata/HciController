@@ -102,7 +102,7 @@ TARGETS += $(BUILD_DIR)/hci_usb_test \
 UECC_OBJ := $(BUILD_DIR)/uECC.o
 UECC_DEFINES := -DuECC_ENABLE_VLI_API -DuECC_SUPPORTS_secp256r1=1 \
                 -DuECC_SUPPORT_COMPRESSED_POINT=0 -DuECC_OPTIMIZATION_LEVEL=2
-hci_vendor_SRC := $(SRC)/hci_vendor.cpp \
+hci_vendor_SRC := $(SRC)/hci_vendor.cpp $(SRC)/hci_vendor_crypto.cpp \
                   $(SRC)/hci_controller.cpp \
                   $(SRC)/hci_intrf_transport.cpp \
                   $(SRC)/hci_h4.cpp \

@@ -164,3 +164,41 @@ void HciTraceBootDrain(bool bEnable)
 {
     s_BootDrain = bEnable;
 }
+
+static bool s_bCmdTrace;
+static bool s_bCmdTraceSync;
+
+void HciTraceCommands(bool bEnable, bool bSync)
+{
+    s_bCmdTrace = bEnable;
+    s_bCmdTraceSync = bSync;
+}
+
+bool HciTraceCommandsEnabled(void)
+{
+    return s_bCmdTrace;
+}
+
+void HciTraceCommandLine(const char *pFormat, ...)
+{
+    if (!s_bCmdTrace)
+    {
+        return;
+    }
+
+    char line[96];
+    va_list args;
+
+    va_start(args, pFormat);
+    vsnprintf(line, sizeof(line), pFormat, args);
+    va_end(args);
+
+    if (s_bCmdTraceSync)
+    {
+        HciTraceError("%s", line);
+    }
+    else
+    {
+        HciTrace("%s", line);
+    }
+}
