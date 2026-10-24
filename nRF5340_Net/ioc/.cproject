@@ -62,8 +62,8 @@
 									<listOptionValue builtIn="false" value="HCI_SDC_CIG_COUNT=1U"/>
 									<listOptionValue builtIn="false" value="HCI_SDC_CIS_COUNT=2U"/>
 									<listOptionValue builtIn="false" value="HCI_SDC_BIG_COUNT=1U"/>
-									<listOptionValue builtIn="false" value="HCI_SDC_BIS_SOURCE_COUNT=1U"/>
-									<listOptionValue builtIn="false" value="HCI_SDC_BIS_SINK_COUNT=1U"/>
+									<listOptionValue builtIn="false" value="HCI_SDC_BIS_SOURCE_COUNT=2U"/>
+									<listOptionValue builtIn="false" value="HCI_SDC_BIS_SINK_COUNT=2U"/>
 									<listOptionValue builtIn="false" value="HCI_SDC_PERIODIC_ADV_COUNT=1U"/>
 									<listOptionValue builtIn="false" value="HCI_SDC_PERIODIC_SYNC_COUNT=1U"/>
 									<listOptionValue builtIn="false" value="NRFXLIB_SDC"/>
@@ -115,8 +115,8 @@
 									<listOptionValue builtIn="false" value="HCI_SDC_CIG_COUNT=1U"/>
 									<listOptionValue builtIn="false" value="HCI_SDC_CIS_COUNT=2U"/>
 									<listOptionValue builtIn="false" value="HCI_SDC_BIG_COUNT=1U"/>
-									<listOptionValue builtIn="false" value="HCI_SDC_BIS_SOURCE_COUNT=1U"/>
-									<listOptionValue builtIn="false" value="HCI_SDC_BIS_SINK_COUNT=1U"/>
+									<listOptionValue builtIn="false" value="HCI_SDC_BIS_SOURCE_COUNT=2U"/>
+									<listOptionValue builtIn="false" value="HCI_SDC_BIS_SINK_COUNT=2U"/>
 									<listOptionValue builtIn="false" value="HCI_SDC_PERIODIC_ADV_COUNT=1U"/>
 									<listOptionValue builtIn="false" value="HCI_SDC_PERIODIC_SYNC_COUNT=1U"/>
 									<listOptionValue builtIn="false" value="NRFXLIB_SDC"/>
@@ -292,8 +292,8 @@
 									<listOptionValue builtIn="false" value="HCI_SDC_CIG_COUNT=1U"/>
 									<listOptionValue builtIn="false" value="HCI_SDC_CIS_COUNT=2U"/>
 									<listOptionValue builtIn="false" value="HCI_SDC_BIG_COUNT=1U"/>
-									<listOptionValue builtIn="false" value="HCI_SDC_BIS_SOURCE_COUNT=1U"/>
-									<listOptionValue builtIn="false" value="HCI_SDC_BIS_SINK_COUNT=1U"/>
+									<listOptionValue builtIn="false" value="HCI_SDC_BIS_SOURCE_COUNT=2U"/>
+									<listOptionValue builtIn="false" value="HCI_SDC_BIS_SINK_COUNT=2U"/>
 									<listOptionValue builtIn="false" value="HCI_SDC_PERIODIC_ADV_COUNT=1U"/>
 									<listOptionValue builtIn="false" value="HCI_SDC_PERIODIC_SYNC_COUNT=1U"/>
 									<listOptionValue builtIn="false" value="NRFXLIB_SDC"/>
@@ -347,8 +347,8 @@
 									<listOptionValue builtIn="false" value="HCI_SDC_CIG_COUNT=1U"/>
 									<listOptionValue builtIn="false" value="HCI_SDC_CIS_COUNT=2U"/>
 									<listOptionValue builtIn="false" value="HCI_SDC_BIG_COUNT=1U"/>
-									<listOptionValue builtIn="false" value="HCI_SDC_BIS_SOURCE_COUNT=1U"/>
-									<listOptionValue builtIn="false" value="HCI_SDC_BIS_SINK_COUNT=1U"/>
+									<listOptionValue builtIn="false" value="HCI_SDC_BIS_SOURCE_COUNT=2U"/>
+									<listOptionValue builtIn="false" value="HCI_SDC_BIS_SINK_COUNT=2U"/>
 									<listOptionValue builtIn="false" value="HCI_SDC_PERIODIC_ADV_COUNT=1U"/>
 									<listOptionValue builtIn="false" value="HCI_SDC_PERIODIC_SYNC_COUNT=1U"/>
 									<listOptionValue builtIn="false" value="NRFXLIB_SDC"/>
