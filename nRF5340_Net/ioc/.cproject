@@ -59,6 +59,7 @@
 									<listOptionValue builtIn="false" value="HCI_TRACE_RECORD_COUNT=28U"/>
 									<listOptionValue builtIn="false" value="HCI_TRACE_RECORD_SIZE=112U"/>
 									<listOptionValue builtIn="false" value="HCI_VENDOR_CRYPTO=1"/>
+									<listOptionValue builtIn="false" value="HCI_TRACE_COMMANDS=1"/>
 									<listOptionValue builtIn="false" value="HCI_SDC_FEAT_SUBRATING=0"/>
 									<listOptionValue builtIn="false" value="HCI_SDC_FEAT_EXT_FEATURES=0"/>
 									<listOptionValue builtIn="false" value="HCI_SDC_FEAT_PAST=0"/>
@@ -117,6 +118,7 @@
 									<listOptionValue builtIn="false" value="HCI_TRACE_RECORD_COUNT=28U"/>
 									<listOptionValue builtIn="false" value="HCI_TRACE_RECORD_SIZE=112U"/>
 									<listOptionValue builtIn="false" value="HCI_VENDOR_CRYPTO=1"/>
+									<listOptionValue builtIn="false" value="HCI_TRACE_COMMANDS=1"/>
 									<listOptionValue builtIn="false" value="HCI_SDC_FEAT_SUBRATING=0"/>
 									<listOptionValue builtIn="false" value="HCI_SDC_FEAT_EXT_FEATURES=0"/>
 									<listOptionValue builtIn="false" value="HCI_SDC_FEAT_PAST=0"/>
@@ -298,6 +300,7 @@
 									<listOptionValue builtIn="false" value="HCI_TRACE_RECORD_COUNT=28U"/>
 									<listOptionValue builtIn="false" value="HCI_TRACE_RECORD_SIZE=112U"/>
 									<listOptionValue builtIn="false" value="HCI_VENDOR_CRYPTO=1"/>
+									<listOptionValue builtIn="false" value="HCI_TRACE_COMMANDS=1"/>
 									<listOptionValue builtIn="false" value="HCI_SDC_FEAT_SUBRATING=0"/>
 									<listOptionValue builtIn="false" value="HCI_SDC_FEAT_EXT_FEATURES=0"/>
 									<listOptionValue builtIn="false" value="HCI_SDC_FEAT_PAST=0"/>
@@ -357,6 +360,7 @@
 									<listOptionValue builtIn="false" value="HCI_TRACE_RECORD_COUNT=28U"/>
 									<listOptionValue builtIn="false" value="HCI_TRACE_RECORD_SIZE=112U"/>
 									<listOptionValue builtIn="false" value="HCI_VENDOR_CRYPTO=1"/>
+									<listOptionValue builtIn="false" value="HCI_TRACE_COMMANDS=1"/>
 									<listOptionValue builtIn="false" value="HCI_SDC_FEAT_SUBRATING=0"/>
 									<listOptionValue builtIn="false" value="HCI_SDC_FEAT_EXT_FEATURES=0"/>
 									<listOptionValue builtIn="false" value="HCI_SDC_FEAT_PAST=0"/>

@@ -21,6 +21,15 @@
 #include <limits.h>
 #include <string.h>
 
+/*
+ * HCI_TRACE_COMMANDS=1 logs every command from the host and every event to
+ * the host on the trace output: opcode, status and length. Data packets are
+ * left out. It is for finding which command a host stack stops at.
+ */
+#ifndef HCI_TRACE_COMMANDS
+#define HCI_TRACE_COMMANDS 0
+#endif
+
 #define HCI_CONTROLLER_EVENT_COMMAND_COMPLETE          0x0EU
 #define HCI_CONTROLLER_STATUS_SUCCESS                  0x00U
 #define HCI_CONTROLLER_STATUS_UNKNOWN_HCI_COMMAND      0x01U
@@ -762,6 +771,48 @@ static void HciControllerH4Open(HciController_t *pController)
     HciIntrfTransportOpen(pHost);
 }
 
+#if HCI_TRACE_COMMANDS
+static void HciControllerTraceFromHost(HciH4PacketType_t Type,
+                                       const uint8_t *pPacket, size_t Len)
+{
+    if (Type == HCI_H4_PACKET_COMMAND && Len >= 3U)
+    {
+        HciTrace("h>c cmd %04X len=%u\r\n",
+                 (unsigned)HciControllerReadLe16(pPacket), (unsigned)pPacket[2]);
+    }
+}
+
+static void HciControllerTraceToHost(HciH4PacketType_t Type,
+                                     const uint8_t *pPacket, size_t Len)
+{
+    if (Type != HCI_H4_PACKET_EVENT || Len < 2U)
+    {
+        return;
+    }
+
+    if (pPacket[0] == 0x0EU && Len >= 6U)
+    {
+        HciTrace("c>h cc %04X st=%02X len=%u\r\n",
+                 (unsigned)HciControllerReadLe16(&pPacket[3]),
+                 (unsigned)pPacket[5], (unsigned)Len);
+    }
+    else if (pPacket[0] == 0x0FU && Len >= 6U)
+    {
+        HciTrace("c>h cs %04X st=%02X\r\n",
+                 (unsigned)HciControllerReadLe16(&pPacket[4]),
+                 (unsigned)pPacket[2]);
+    }
+    else if (pPacket[0] == 0x3EU && Len >= 3U)
+    {
+        HciTrace("c>h le %02X len=%u\r\n", (unsigned)pPacket[2], (unsigned)Len);
+    }
+    else
+    {
+        HciTrace("c>h ev %02X len=%u\r\n", (unsigned)pPacket[0], (unsigned)Len);
+    }
+}
+#endif
+
 static void HciControllerHostProcess(HciController_t *pController)
 {
     if (pController->HostPacketPending)
@@ -810,6 +861,10 @@ static void HciControllerHostProcess(HciController_t *pController)
         pController->HostPacketType = Types[i];
         pController->HostPacketLen = (size_t)received;
         pController->HostPacketPending = true;
+#if HCI_TRACE_COMMANDS
+        HciControllerTraceFromHost(Types[i], pController->pHostPacket,
+                                   (size_t)received);
+#endif
 
         if (HciControllerPutHostPacket(pController,
                                        pController->HostPacketType,
@@ -914,6 +969,11 @@ static void HciControllerStartPacket(HciController_t *pController)
 
     if (sent == (int)pController->ControllerPacketLen)
     {
+#if HCI_TRACE_COMMANDS
+        HciControllerTraceToHost(pController->ControllerPacketType,
+                                 pController->pControllerPacket,
+                                 pController->ControllerPacketLen);
+#endif
         if (pController->ControllerPacketType == HCI_H4_PACKET_ACL)
         {
             pController->HostAclPacketCount++;
