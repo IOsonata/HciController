@@ -106,7 +106,11 @@ hci_vendor_SRC := $(SRC)/hci_vendor.cpp \
                   $(SRC)/hci_controller.cpp \
                   $(SRC)/hci_intrf_transport.cpp \
                   $(SRC)/hci_h4.cpp \
-                  $(IOSONATA_ROOT)/src/crypto/crypto_softaes.cpp \
+                  $(IOSONATA_ROOT)/src/crypto/crypto.cpp \
+                  $(IOSONATA_ROOT)/src/crypto/crypto_default.cpp \
+                  $(IOSONATA_ROOT)/src/crypto/crypto_aes_soft.cpp \
+                  $(IOSONATA_ROOT)/src/crypto/crypto_aes_modes.cpp \
+                  $(IOSONATA_ROOT)/src/crypto/crypto_softrng.cpp \
                   $(IOSONATA_ROOT)/src/crypto/crypto_softsha256.cpp \
                   $(IOSONATA_ROOT)/src/crypto/crypto_uecc.cpp \
                   $(IOSONATA_ROOT)/src/crypto/crypto_p256.cpp \

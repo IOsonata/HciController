@@ -2,10 +2,10 @@
 @file	hci_vendor.cpp
 @brief	I-SYST vendor commands: static address and controller crypto.
 
-The crypto runs on the IOsonata engines the target already links for the
-link layer: CryptoSoftAes (CMAC, CCM), CryptoSoftSha256 (SHA-256, HMAC)
-and CryptoUecc (ECDSA P-256) over the entropy source HciVendorRng names.
-A target with a hardware engine substitutes it behind the same facets.
+The crypto runs on one IOsonata Crypto object. Its Init() binds the engines
+of the linked MCU library, hardware where the library has a driver (the ECB
+block on the nRF5340 network core) and software for the rest. HciVendorRng
+only tells whether the target has a secure entropy source.
 
 @author	Nguyen Hoan Hoang
 @date	October 2026
@@ -24,9 +24,7 @@ A target with a hardware engine substitutes it behind the same facets.
 #endif
 
 #if HCI_VENDOR_CRYPTO
-#include "crypto/crypto_softaes.h"
-#include "crypto/crypto_softsha256.h"
-#include "crypto/crypto_uecc.h"
+#include "crypto/crypto.h"
 #endif
 
 #include <string.h>
@@ -48,9 +46,7 @@ A target with a hardware engine substitutes it behind the same facets.
 #define P256_SIG_LEN    64U
 
 #if HCI_VENDOR_CRYPTO
-static CryptoSoftAes s_Aes;
-static CryptoSoftSha256 s_Sha;
-static CryptoUecc s_Ecc;
+static Crypto s_Crypto;
 static bool s_bEnginesReady = false;
 #endif
 
@@ -66,19 +62,19 @@ __attribute__((weak)) RngEngine *HciVendorRng(void)
 }
 
 #if HCI_VENDOR_CRYPTO
-static void HciVendorEnginesPrepare(void)
+static bool HciVendorEnginesPrepare(void)
 {
-    if (s_bEnginesReady)
+    if (!s_bEnginesReady)
     {
-        s_Ecc.SetRng(HciVendorRng());
-        return;
+        s_bEnginesReady = s_Crypto.Init();
+        if (s_bEnginesReady && HciVendorRng() != nullptr)
+        {
+            /* software P-256 draws from the secure source the target names */
+            s_Crypto.SetRng(HciVendorRng());
+        }
     }
 
-    s_Aes.Enable();
-    s_Sha.Enable();
-    s_Ecc.SetRng(HciVendorRng());
-    s_Ecc.Enable();
-    s_bEnginesReady = true;
+    return s_bEnginesReady;
 }
 
 static uint32_t HciVendorSupported(void)
@@ -156,7 +152,7 @@ static uint8_t HciVendorAesCmac(const uint8_t *pParam, size_t ParamLen,
     key.Plain.pData = pParam;
     key.Plain.Len = AES_KEY_LEN;
 
-    if (s_Aes.Mac(CRYPTO_MAC_CMAC, key, pParam + HCI_VENDOR_AES_CMAC_HDR_LEN,
+    if (s_Crypto.Mac(CRYPTO_MAC_CMAC, key, pParam + HCI_VENDOR_AES_CMAC_HDR_LEN,
                   len, pRet, AES_BLOCK_LEN) != CRYPTO_STATUS_OK)
     {
         return HCI_VENDOR_STATUS_HW_FAILURE;
@@ -219,7 +215,7 @@ static uint8_t HciVendorAesCcm(const uint8_t *pParam, size_t ParamLen,
     CRYPTO_STATUS st;
     if (decrypt)
     {
-        st = s_Aes.Open(CRYPTO_AEAD_AES_CCM, key, pNonce, nonceLen, pAad, aadLen,
+        st = s_Crypto.Open(CRYPTO_AEAD_AES_CCM, key, pNonce, nonceLen, pAad, aadLen,
                         pMsg, msgLen, pRet, pParam + pos, tagLen);
         if (st != CRYPTO_STATUS_OK)
         {
@@ -230,7 +226,7 @@ static uint8_t HciVendorAesCcm(const uint8_t *pParam, size_t ParamLen,
     }
     else
     {
-        st = s_Aes.Seal(CRYPTO_AEAD_AES_CCM, key, pNonce, nonceLen, pAad, aadLen,
+        st = s_Crypto.Seal(CRYPTO_AEAD_AES_CCM, key, pNonce, nonceLen, pAad, aadLen,
                         pMsg, msgLen, pRet, pRet + msgLen, tagLen);
         if (st != CRYPTO_STATUS_OK)
         {
@@ -273,7 +269,7 @@ static uint8_t HciVendorSha256(const uint8_t *pParam, size_t ParamLen,
         return HCI_VENDOR_STATUS_INVALID_PARAMS;
     }
 
-    if (s_Sha.Hash(CRYPTO_HASH_SHA256, pParam + 1U, pParam[0], pRet) != CRYPTO_STATUS_OK)
+    if (s_Crypto.Hash(CRYPTO_HASH_SHA256, pParam + 1U, pParam[0], pRet) != CRYPTO_STATUS_OK)
     {
         return HCI_VENDOR_STATUS_HW_FAILURE;
     }
@@ -305,7 +301,7 @@ static uint8_t HciVendorHmacSha256(const uint8_t *pParam, size_t ParamLen,
     key.Plain.pData = pParam + 1U;
     key.Plain.Len = keyLen;
 
-    if (s_Sha.Mac(CRYPTO_MAC_HMAC, key, pParam + 2U + keyLen, msgLen,
+    if (s_Crypto.Mac(CRYPTO_MAC_HMAC, key, pParam + 2U + keyLen, msgLen,
                   pRet, SHA256_LEN) != CRYPTO_STATUS_OK)
     {
         return HCI_VENDOR_STATUS_HW_FAILURE;
@@ -332,7 +328,7 @@ static uint8_t HciVendorEcdsaSign(const uint8_t *pParam, size_t ParamLen,
     key.Plain.pData = pParam;
     key.Plain.Len = P256_PRIV_LEN;
 
-    if (s_Ecc.Sign(CRYPTO_CURVE_P256, key, pParam + P256_PRIV_LEN, SHA256_LEN,
+    if (s_Crypto.Sign(CRYPTO_CURVE_P256, key, pParam + P256_PRIV_LEN, SHA256_LEN,
                    pRet) != CRYPTO_STATUS_OK)
     {
         return HCI_VENDOR_STATUS_HW_FAILURE;
@@ -349,7 +345,7 @@ static uint8_t HciVendorEcdsaVerify(const uint8_t *pParam, size_t ParamLen)
         return HCI_VENDOR_STATUS_INVALID_PARAMS;
     }
 
-    if (s_Ecc.Verify(CRYPTO_CURVE_P256, pParam, pParam + P256_PUB_LEN, SHA256_LEN,
+    if (s_Crypto.Verify(CRYPTO_CURVE_P256, pParam, pParam + P256_PUB_LEN, SHA256_LEN,
                      pParam + P256_PUB_LEN + SHA256_LEN) != CRYPTO_STATUS_OK)
     {
         return HCI_VENDOR_STATUS_AUTH_FAILURE;
@@ -387,7 +383,11 @@ extern "C" size_t HciVendorCommand(const uint8_t *pPacket, size_t PacketLen,
     else
     {
 #if HCI_VENDOR_CRYPTO
-        HciVendorEnginesPrepare();
+        if (!HciVendorEnginesPrepare())
+        {
+            status = HCI_VENDOR_STATUS_HW_FAILURE;
+        }
+        else
 #endif
 
         switch (opcode)
