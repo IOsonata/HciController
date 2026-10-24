@@ -546,8 +546,8 @@ int main(void)
 #endif
 
     HciTraceInit();
-    /* Command log on during bring-up. HciTraceCommands(false, false) turns it off. */
-    HciTraceCommands(true, false);
+    /* Command log is off. HciTraceCommands(true, false) turns it on. */
+    HciTraceCommands(false, false);
 #if !HCI_TARGET_IS_NRF5340_NET && \
     !defined(NRF54LM20B_XXAA) && !defined(NRF54LM20A_XXAA)
     HciNrf52840ResetTrace();
