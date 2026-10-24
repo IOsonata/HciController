@@ -83,13 +83,52 @@ typedef HciCmdResult_t (*HciCmdHandler_t)(void *pContext,
  */
 typedef uint8_t (*HciCmdGuard_t)(void *pContext, uint16_t Opcode);
 
+/*
+ * How a row reaches its SDC call. Kind 0 is a handler written out in full.
+ * The others describe a command that is nothing more than copy the
+ * parameters, call one SDC function, copy the return structure back. Those
+ * rows carry the SDC function itself in Handler and the dispatcher makes the
+ * call, so the roughly one hundred such commands share one code path instead
+ * of one function each.
+ *
+ *   P   status = Func(&params)
+ *   PR  status = Func(&params, &result)
+ *   N   status = Func()
+ *   NR  status = Func(&result)
+ *
+ * ParamLen and ReturnLen of the row are the sizes of the two structures.
+ */
+#define HCI_CMD_KIND_HANDLER    0U
+#define HCI_CMD_KIND_P          1U
+#define HCI_CMD_KIND_PR         2U
+#define HCI_CMD_KIND_N          3U
+#define HCI_CMD_KIND_NR         4U
+
+/* Largest parameter and return structure a shared row can carry. */
+#define HCI_CMD_GENERIC_IN_MAX  80U
+#define HCI_CMD_GENERIC_OUT_MAX 252U
+
 typedef struct {
     uint16_t Opcode;
     uint16_t ParamLen;
     uint16_t ReturnLen;
-    HciCmdResponse_t Response;
+    uint8_t Response;       /* HciCmdResponse_t */
     HciCmdHandler_t Handler;
+    uint8_t Kind
+#ifdef __cplusplus
+        = HCI_CMD_KIND_HANDLER   /* a row that leaves it out is a handler */
+#endif
+    ;                       /* HCI_CMD_KIND_x */
 } HciCmdEntry_t;
+
+/*
+ * Run a shared row. The dispatcher calls it for Kind other than 0, and the
+ * result has the same shape a handler returns.
+ */
+HciCmdResult_t HciCmdGenericCall(const HciCmdEntry_t *pEntry,
+                                 const uint8_t *pParams,
+                                 uint8_t *pReturn,
+                                 size_t ReturnCapacity);
 
 typedef struct {
     const HciCmdEntry_t *pEntries;
