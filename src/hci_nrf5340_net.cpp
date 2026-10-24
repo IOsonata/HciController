@@ -17,6 +17,7 @@
 #include "hci_nrf5340_net.h"
 
 #include "hci_sdc_resources.h"
+#include "hci_trace.h"
 
 #include <stdint.h>
 #include <string.h>
@@ -68,13 +69,17 @@ static void HciRadioAssert(uint32_t Reason)
     }
 }
 
-static void HciMpslAssert(const char *, uint32_t)
+/* Short, so the whole line is in the first transfer even when the output
+ * interrupt cannot run, the assert can come from the radio interrupt. */
+static void HciMpslAssert(const char *, uint32_t Line)
 {
+    HciTraceError("mpsl assert %lu\r\n", (unsigned long)Line);
     HciRadioAssert(0x1003U);
 }
 
-static void HciSdcAssert(const char *, uint32_t)
+static void HciSdcAssert(const char *, uint32_t Line)
 {
+    HciTraceError("sdc assert %lu\r\n", (unsigned long)Line);
     HciRadioAssert(0x1004U);
 }
 
@@ -151,7 +156,15 @@ static bool HciMpslInit(HciNrf5340Net_t *pTarget)
         lfclk.source = MPSL_CLOCK_LF_SRC_XTAL;
         lfclk.accuracy_ppm = (uint16_t)lfosc->Accuracy;
     }
+#ifdef HCI_MPSL_WAIT_LFCLK
     lfclk.skip_wait_lfclk_started = MPSL_DEFAULT_SKIP_WAIT_LFCLK_STARTED;
+#else
+    /* mpsl_init sleeps until EVENTS_LFCLKSTARTED. When the clock does not
+     * come up the whole controller stops there, before the host side is
+     * served. Return at once, the clock event is handled by the CLOCK_POWER
+     * interrupt that is enabled below. Define HCI_MPSL_WAIT_LFCLK to wait. */
+    lfclk.skip_wait_lfclk_started = true;
+#endif
 
     /* The low priority line is a real NVIC interrupt, MPSL pends it through
      * the NVIC. It only wakes the HCI thread, see SWI0_IRQHandler.
@@ -159,6 +172,7 @@ static bool HciMpslInit(HciNrf5340Net_t *pTarget)
     const int32_t result = mpsl_init(&lfclk, SWI0_IRQn, HciMpslAssert);
     if (result != 0)
     {
+        HciTraceError("mpsl: init failed err=%ld\r\n", (long)result);
         pTarget->LastError = result;
         return false;
     }
@@ -184,6 +198,7 @@ static bool HciSdcInit(HciNrf5340Net_t *pTarget)
     int32_t result = sdc_init(HciSdcAssert);
     if (result != 0)
     {
+        HciTraceError("sdc: init failed err=%ld\r\n", (long)result);
         pTarget->LastError = result;
         return false;
     }
@@ -205,6 +220,7 @@ static bool HciSdcInit(HciNrf5340Net_t *pTarget)
     result = HciSdcResourcesApply();
     if (result < 0)
     {
+        HciTraceError("sdc: cfg failed err=%ld\r\n", (long)result);
         pTarget->LastError = result;
         return false;
     }
@@ -220,6 +236,7 @@ static bool HciSdcInit(HciNrf5340Net_t *pTarget)
     result = sdc_enable(HciSdcCallback, pTarget->pSdcMem);
     if (result != 0)
     {
+        HciTraceError("sdc: enable failed err=%ld\r\n", (long)result);
         pTarget->LastError = result;
         return false;
     }
@@ -228,11 +245,11 @@ static bool HciSdcInit(HciNrf5340Net_t *pTarget)
     return true;
 }
 
-static void HciStop(void *pContext)
+void HciTargetStop(void)
 {
-    HciNrf5340Net_t *pTarget = static_cast<HciNrf5340Net_t *>(pContext);
+    HciNrf5340Net_t *pTarget = s_pTarget;
 
-    if (pTarget == nullptr || pTarget != s_pTarget)
+    if (pTarget == nullptr)
     {
         return;
     }
@@ -259,113 +276,70 @@ static void HciStop(void *pContext)
     s_pTarget = nullptr;
 }
 
-static bool HciStart(void *pContext)
+bool HciTargetStart(void)
 {
-    HciNrf5340Net_t *pTarget = static_cast<HciNrf5340Net_t *>(pContext);
-
-    if (pTarget == nullptr || s_pTarget != nullptr)
+    if (s_pTarget != nullptr)
     {
         return false;
     }
 
-    s_pTarget = pTarget;
-    if (!HciMpslInit(pTarget) || !HciSdcInit(pTarget))
+    s_pTarget = &s_Target;
+    if (!HciMpslInit(&s_Target) || !HciSdcInit(&s_Target))
     {
-        HciStop(pContext);
+        HciTraceError("target: start failed err=%ld\r\n", (long)s_Target.LastError);
+        HciTargetStop();
         return false;
     }
 
     return true;
 }
 
-static void HciProcessMpsl(void *)
+void HciTargetProcessMpsl(void)
 {
     mpsl_low_priority_process();
 }
 
-static void HciFault(void *pContext, int Error)
+void HciTargetFault(int Error)
 {
-    HciNrf5340Net_t *pTarget = static_cast<HciNrf5340Net_t *>(pContext);
-
-    if (pTarget != nullptr)
+    s_Target.FaultCount++;
+    if (s_Target.LastError == 0)
     {
-        pTarget->FaultCount++;
-        if (pTarget->LastError == 0)
-        {
-            pTarget->LastError = Error;
-        }
+        s_Target.LastError = Error;
     }
 }
 
-static bool HciInit(void *pContext,
-                    HciTaktOs_t *pRuntime,
-                    uint8_t *pSdcMem,
-                    size_t SdcMemCapacity)
+bool HciTargetInit(HciTaktOs_t *pRuntime, uint8_t *pSdcMem, size_t SdcMemCapacity)
 {
-    HciNrf5340Net_t *pTarget = static_cast<HciNrf5340Net_t *>(pContext);
-
-    if (pTarget == nullptr || pRuntime == nullptr || pSdcMem == nullptr ||
+    if (pRuntime == nullptr || pSdcMem == nullptr ||
         SdcMemCapacity == 0U || (((uintptr_t)pSdcMem & 7U) != 0U))
     {
         return false;
     }
 
-    memset(pTarget, 0, sizeof(*pTarget));
-    pTarget->pRuntime = pRuntime;
-    pTarget->pSdcMem = pSdcMem;
-    pTarget->SdcMemCapacity = SdcMemCapacity;
+    memset(&s_Target, 0, sizeof(s_Target));
+    s_Target.pRuntime = pRuntime;
+    s_Target.pSdcMem = pSdcMem;
+    s_Target.SdcMemCapacity = SdcMemCapacity;
     return true;
 }
 
-static void HciGetTaktOsOps(void *pContext, HciTaktOsOps_t *pOps)
+void HciTargetGetSdcMem(uint32_t *pRequired, uint32_t *pCapacity)
 {
-    if (pOps == nullptr)
-    {
-        return;
-    }
-
-    pOps->Start = HciStart;
-    pOps->ProcessMpsl = HciProcessMpsl;
-    pOps->Fault = HciFault;
-    pOps->pContext = pContext;
-}
-
-static void HciGetSdcMem(const void *pContext,
-                         uint32_t *pRequired,
-                         uint32_t *pCapacity)
-{
-    const HciNrf5340Net_t *pTarget =
-        static_cast<const HciNrf5340Net_t *>(pContext);
-
     if (pRequired != nullptr)
     {
-        *pRequired = pTarget != nullptr && pTarget->RequiredSdcMem > 0 ?
-                     (uint32_t)pTarget->RequiredSdcMem : 0U;
+        *pRequired = s_Target.RequiredSdcMem > 0 ?
+                     (uint32_t)s_Target.RequiredSdcMem : 0U;
     }
 
     if (pCapacity != nullptr)
     {
-        *pCapacity = pTarget != nullptr ? (uint32_t)pTarget->SdcMemCapacity : 0U;
+        *pCapacity = (uint32_t)s_Target.SdcMemCapacity;
     }
 }
 
-static int32_t HciLastError(const void *pContext)
+int32_t HciTargetLastError(void)
 {
-    const HciNrf5340Net_t *pTarget =
-        static_cast<const HciNrf5340Net_t *>(pContext);
-
-    return pTarget != nullptr ? pTarget->LastError : 0;
-}
-
-/* No UART host link on this target, so no UART diagnostic. */
-static const HciTargetOps_t s_TargetOps = {
-    HciInit, HciGetTaktOsOps, nullptr, HciStop, HciGetSdcMem, HciLastError
-};
-
-HciTarget_t HciNrf5340NetTarget(void)
-{
-    HciTarget_t target = { &s_TargetOps, &s_Target };
-    return target;
+    return s_Target.LastError;
 }
 
 /* MPSL hardware vectors. The low priority work is always deferred to the HCI

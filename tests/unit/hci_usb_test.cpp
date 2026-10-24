@@ -19,7 +19,7 @@
 
 // Exercise the application setup and worker with the real IOsonata stack.
 // Unused radio/application entry points are discarded by the test link.
-#include "../../src/hci_app.cpp"
+#include "../../src/hci_host_usb.cpp"
 
 #include "app_evt_handler.h"
 #include <assert.h>
@@ -33,7 +33,9 @@ static unsigned s_ProcessCount;
 static unsigned s_StartCount;
 static bool s_Vbus = true;
 
-extern "C" void HciTaktOsWake(HciTaktOs_t *, uint32_t)
+/* The transport wakes the worker through hci_app.cpp, which is not linked
+ * here: count the wakes instead. */
+void HciAppWake(void)
 {
 	s_WorkWakeCount++;
 }
@@ -159,6 +161,15 @@ static void CheckHci(const BtHciUsbSerialDesc_t *pHci)
 	assert(pHci->Sync.bNumEndpoints == 0U);
 }
 
+/* The descriptor set follows the app mode, as hci_app.cpp sets it. */
+static bool UsbSetup(HciApp_t &App, HciUsbDescriptorMode_t Mode)
+{
+	App.HostType = Mode == HCI_USB_DESCRIPTOR_LOG_ONLY ? HCI_APP_HOST_UART
+	                                                   : HCI_APP_HOST_USB;
+	App.UsbHciNative = Mode == HCI_USB_DESCRIPTOR_NATIVE_HCI;
+	return HciHostUsbSetup(&App);
+}
+
 static unsigned s_WorkCount;
 static unsigned s_RequeueRemaining;
 
@@ -184,19 +195,19 @@ static void CheckWorkerQueue(HciApp_t &App)
 	assert(s_WorkCount == 0U); // Producers must never execute callbacks.
 	const unsigned processed = s_ProcessCount;
 	UsbProcessQue(0); // Full queue: IOsonata owes the process event.
-	HciAppUsbWorkExec();
+	HciHostUsbWorkExec();
 	assert(s_WorkCount == HCI_USB_WORK_COUNT);
 	assert(CFifoPeek(s_hUsbWork) != nullptr);
-	HciAppUsbWorkExec();
+	HciHostUsbWorkExec();
 	assert(s_ProcessCount == processed + 1U);
 
 	s_WorkCount = 0U;
 	s_RequeueRemaining = HCI_USB_WORK_PER_PASS + 4U;
 	assert(UsbEvtQue(0U, &s_WorkCount, Work));
-	HciAppUsbWorkExec();
+	HciHostUsbWorkExec();
 	assert(s_WorkCount == HCI_USB_WORK_PER_PASS);
 	assert(CFifoPeek(s_hUsbWork) != nullptr);
-	HciAppUsbWorkExec();
+	HciHostUsbWorkExec();
 	assert(s_WorkCount == HCI_USB_WORK_PER_PASS + 5U);
 	assert(CFifoPeek(s_hUsbWork) == nullptr);
 
@@ -204,38 +215,36 @@ static void CheckWorkerQueue(HciApp_t &App)
 	// USB is down (UsbProcess would reconnect a cable that is still present).
 	UsbProcessQue(0);
 	const unsigned starts = s_StartCount;
-	HciAppUsbRelease(&App);
+	HciHostUsbRelease(&App);
 	assert(!App.UsbRunning);
 	assert(s_StartCount == starts);
-	assert(HciAppUsbSetup(&App, HCI_USB_DESCRIPTOR_CDC_H4));
+	assert(UsbSetup(App, HCI_USB_DESCRIPTOR_CDC_H4));
 	assert(UsbEnable(0));
-	HciAppUsbWorkExec();
+	HciHostUsbWorkExec();
 	const unsigned afterRestart = s_ProcessCount;
 	UsbProcessQue(0);
-	HciAppUsbWorkExec();
+	HciHostUsbWorkExec();
 	assert(s_ProcessCount == afterRestart + 1U); // No stranded queued latch.
 	assert(!AppEvtHandlerPending());
-	HciAppUsbRelease(&App);
-	assert(HciAppUsbSetup(&App, HCI_USB_DESCRIPTOR_LOG_ONLY));
+	HciHostUsbRelease(&App);
+	assert(UsbSetup(App, HCI_USB_DESCRIPTOR_LOG_ONLY));
 	assert(s_LogCdc.FirstInterface() == 0U);
 	s_Vbus = false;
-	HciAppStartLogPort(&App);
+	HciHostUsbStartLogPort(&App);
 	assert(App.UsbRunning);
-	HciAppUsbWorkExec();
+	HciHostUsbWorkExec();
 	const unsigned beforeAttach = s_StartCount;
 	s_Vbus = true;
 	UsbProcessQue(0);
-	HciAppUsbWorkExec();
+	HciHostUsbWorkExec();
 	assert(s_StartCount == beforeAttach + 1U);
-	HciAppUsbRelease(&App);
+	HciHostUsbRelease(&App);
 }
 
 int main(void)
 {
 	static HciApp_t app;
-	s_pApp = &app;
-	assert(HciAppUsbSetup(&app, HCI_USB_DESCRIPTOR_NATIVE_HCI));
-	app.Initialized = true;
+	assert(UsbSetup(app, HCI_USB_DESCRIPTOR_NATIVE_HCI));
 	BtHciUsb &hci = s_HciUsb;
 	UsbdCdc &log = s_LogCdc;
 
@@ -291,7 +300,7 @@ int main(void)
 
 	assert(s_ProcessCount == 0U);
 	assert(s_WorkWakeCount != 0U);
-	HciAppUsbWorkExec();
+	HciHostUsbWorkExec();
 	assert(s_ProcessCount == 1U);
 	assert(!AppEvtHandlerPending());
 	CheckWorkerQueue(app);

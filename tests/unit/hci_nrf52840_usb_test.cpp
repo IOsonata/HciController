@@ -204,43 +204,36 @@ static void TestUsbClockOwnership(void)
 
     alignas(8) static uint8_t mem[10000];
     HciTaktOs_t runtime = {};
-    HciNrf52840_t target;
-    HciTaktOsOps_t ops = {};
 
-    assert(HciNrf52840Init(&target, &runtime, mem, sizeof(mem)));
-    HciNrf52840GetTaktOsOps(&target, &ops);
-    assert(ops.Start(ops.pContext));
+    assert(HciTargetInit(&runtime, mem, sizeof(mem)));
+    assert(HciTargetStart());
 
-    assert(target.HfclkRequested);
-    assert(gHfclkRequests == 1U);
+    assert(gHfclkRequests == 1U && gHfclkReleases == 0U);
     POWER_CLOCK_IRQHandler();
     assert(gClockIrqs == 1U && gUsbPowerIrqs == 1U);
-    HciNrf52840Stop(&target);
-    assert(!target.HfclkRequested);
+    HciTargetStop();
     assert(gHfclkReleases == 1U);
 
     gHfclkRuns = false;
     gHfclkStartAfter = 0U;
-    assert(!ops.Start(ops.pContext));
-    assert(!target.HfclkRequested);
+    assert(!HciTargetStart());
     assert(gHfclkRequests == 2U);
     assert(gHfclkReleases == 2U);
 
-    HciNrf52840Stop(&target);
+    HciTargetStop();
     assert(gHfclkReleases == 2U);
     POWER_CLOCK_IRQHandler();
     assert(gClockIrqs == 1U && gUsbPowerIrqs == 2U);
     gUsbConfigured = false;
-    assert(ops.Start(ops.pContext));
+    assert(HciTargetStart());
     assert(gHfclkRequests == 2U);
-    HciNrf52840Stop(&target);
+    HciTargetStop();
     printf("[ok] IOsonata USB crystal ownership is routed through MPSL\n");
 }
 
 static void TestUartTraceUsesDatasheetPinNames(void)
 {
     char text[512];
-    const HciTarget_t target = HciNrf52840Target();
 
     gUarte0.ENABLE = 8U;
     gUarte0.BAUDRATE = 0x10000000UL;
@@ -254,7 +247,7 @@ static void TestUartTraceUsesDatasheetPinNames(void)
     gP1.IN = 0xFFFFFFFFU;
 
     HciTraceTestReset();
-    HciTargetUartTrace(&target, 0U);
+    HciTargetUartTrace(0U);
     (void)HciTraceTestTake(text, sizeof(text));
     assert(strstr(text, "uart0: enabled=yes") != NULL);
     assert(strstr(text, "hwfc=on") != NULL);
@@ -268,7 +261,7 @@ static void TestUartTraceUsesDatasheetPinNames(void)
 
     gP0.IN = 1UL << 22;
     HciTraceTestReset();
-    HciTargetUartTrace(&target, 0U);
+    HciTargetUartTrace(0U);
     (void)HciTraceTestTake(text, sizeof(text));
     assert(strstr(text, "cts=high(peer-not-ready)") != NULL);
 
@@ -276,14 +269,14 @@ static void TestUartTraceUsesDatasheetPinNames(void)
     gP0.IN = 0xFFFFFFFFU;
     gP1.IN = 0U;
     HciTraceTestReset();
-    HciTargetUartTrace(&target, 0U);
+    HciTargetUartTrace(0U);
     (void)HciTraceTestTake(text, sizeof(text));
     assert(strstr(text, "cts=low(peer-ready)") != NULL);
     assert(strstr(text, "CTS=P1.00") != NULL);
 
     gUarte0.PSEL.CTS = 0x80000000UL;
     HciTraceTestReset();
-    HciTargetUartTrace(&target, 0U);
+    HciTargetUartTrace(0U);
     (void)HciTraceTestTake(text, sizeof(text));
     assert(strstr(text, "cts=not-connected") != NULL);
     assert(strstr(text, "CTS=NC") != NULL);
@@ -291,7 +284,7 @@ static void TestUartTraceUsesDatasheetPinNames(void)
     gUarte1.ENABLE = 8U;
     gUarte1.PSEL.CTS = 0x80000000UL;
     HciTraceTestReset();
-    HciTargetUartTrace(&target, 1U);
+    HciTargetUartTrace(1U);
     (void)HciTraceTestTake(text, sizeof(text));
     assert(strstr(text, "uart1: enabled=yes") != NULL);
 
@@ -305,12 +298,9 @@ static void TestResetTraceKeepsSdcAssert(void)
     char text[512];
     alignas(8) static uint8_t mem[10000];
     HciTaktOs_t runtime = {};
-    HciNrf52840_t target;
-    HciTaktOsOps_t ops = {};
 
-    assert(HciNrf52840Init(&target, &runtime, mem, sizeof(mem)));
-    HciNrf52840GetTaktOsOps(&target, &ops);
-    assert(ops.Start(ops.pContext));
+    assert(HciTargetInit(&runtime, mem, sizeof(mem)));
+    assert(HciTargetStart());
     assert(gSdcAssert != nullptr);
 
     gSdcAssert("controller_fault.c", 321U);
@@ -329,7 +319,7 @@ static void TestResetTraceKeepsSdcAssert(void)
     (void)HciTraceTestTake(text, sizeof(text));
     assert(strstr(text, "previous=SDC-assert") == NULL);
 
-    HciNrf52840Stop(&target);
+    HciTargetStop();
     printf("[ok] reset trace keeps the SDC assertion across reset state\n");
 }
 

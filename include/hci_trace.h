@@ -24,8 +24,12 @@ typedef struct __device_intrf DevIntrf_t;
 #define HCI_TRACE 0
 #endif
 
+#ifndef HCI_TRACE_RECORD_SIZE
 #define HCI_TRACE_RECORD_SIZE  160U
+#endif
+#ifndef HCI_TRACE_RECORD_COUNT
 #define HCI_TRACE_RECORD_COUNT 26U
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -41,6 +45,15 @@ void HciTrace(const char *pFormat, ...)
 #endif
     ;
 
+/* Error report. Same output as HciTrace, but it is pushed out and waited for
+ * (bounded) before it returns, so the text is on the log when the failure
+ * happens and not left in the store by a stop or reset that follows. */
+void HciTraceError(const char *pFormat, ...)
+#if defined(__GNUC__) || defined(__clang__)
+    __attribute__((format(printf, 1, 2)))
+#endif
+    ;
+
 void HciTraceInit(void);
 
 /* Select or detach the DeviceIntrf used by SysLog output. */
@@ -48,6 +61,25 @@ void HciTraceSetSink(DevIntrf_t *pSink, uint32_t SinkAddr);
 
 /* Flush queued SysLog records through the selected DeviceIntrf. */
 int HciTraceFlush(void);
+
+/* While set, every record is pushed out and waited for (bounded) before
+ * HciTrace returns. For start up only, before the scheduler runs. */
+void HciTraceBootDrain(bool bEnable);
+
+/*
+ * Command log. When on, every command from the host and every event to the
+ * host is logged: opcode, status and length, data packets left out. With
+ * bSync the line is written out at once and the UART waited for, which loses
+ * nothing in a burst but holds up the command path by about a millisecond a
+ * line. Off at start.
+ */
+void HciTraceCommands(bool bEnable, bool bSync);
+bool HciTraceCommandsEnabled(void);
+void HciTraceCommandLine(const char *pFormat, ...)
+#if defined(__GNUC__) || defined(__clang__)
+    __attribute__((format(printf, 1, 2)))
+#endif
+    ;
 
 #ifdef __cplusplus
 }

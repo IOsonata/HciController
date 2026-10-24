@@ -78,33 +78,6 @@ extern "C" {
  */
 #define HCI_CONTROLLER_USB_TX_VALIDATION_OPCODE 0xFFF2U
 
-typedef enum
-{
-    HCI_CONTROLLER_GET_ERROR  = -1,
-    HCI_CONTROLLER_GET_EMPTY  = 0,
-    HCI_CONTROLLER_GET_PACKET = 1,
-} HciControllerGetResult_t;
-
-typedef bool (*HciControllerPut_t)(void *pContext,
-                                   HciH4PacketType_t Type,
-                                   const uint8_t *pPacket,
-                                   size_t PacketLen);
-
-typedef HciControllerGetResult_t (*HciControllerGet_t)(void *pContext,
-                                                        HciH4PacketType_t *pType,
-                                                        uint8_t *pPacket,
-                                                        size_t PacketCapacity,
-                                                        size_t *pPacketLen);
-typedef void (*HciControllerProcess_t)(void *pContext);
-
-typedef struct
-{
-    HciControllerPut_t Put;
-    HciControllerGet_t Get;
-    HciControllerProcess_t Process;
-    void *pContext;
-} HciControllerOps_t;
-
 typedef struct
 {
     /*
@@ -135,7 +108,15 @@ typedef struct
     HciH4PacketType_t HostPacketType;
     bool HostPacketPending;
 
-    HciControllerOps_t Controller;
+    /*
+     * The controller, a packet DeviceIntrf like the native USB and IPC
+     * hosts: DevAddr is the packet type, one transfer is one HCI packet.
+     * Tx refused (0) is backpressure and the packet is offered again; Rx of
+     * a type answers that packet when it is the next one the controller
+     * has, 0 otherwise. The controller validates and counts its own
+     * packets, the bridge only ever sees a valid one.
+     */
+    DevIntrf_t *pCtlrIntrf;
 
     uint8_t *pControllerPacket;
     size_t ControllerPacketCapacity;
@@ -145,8 +126,6 @@ typedef struct
 
     uint32_t HostPacketRetryCount;
     uint32_t InvalidHostPacketCount;
-    uint32_t ControllerGetErrorCount;
-    uint32_t InvalidControllerPacketCount;
     uint32_t UnsendableControllerPacketCount;
 
     /* Successful Controller-to-Host ACL checkpoints for transport diagnosis. */
@@ -164,7 +143,7 @@ bool HciControllerInit(HciController_t *pController,
                        size_t HostPacketCapacity,
                        uint8_t *pControllerPacket,
                        size_t ControllerPacketCapacity,
-                       const HciControllerOps_t *pControllerOps);
+                       DevIntrf_t *pCtlrIntrf);
 
 /*
  * Use an already packet-oriented DeviceIntrf such as native Bluetooth USB.
@@ -180,7 +159,7 @@ bool HciControllerInitPacketTransport(HciController_t *pController,
                                       size_t HostPacketCapacity,
                                       uint8_t *pControllerPacket,
                                       size_t ControllerPacketCapacity,
-                                      const HciControllerOps_t *pControllerOps);
+                                      DevIntrf_t *pCtlrIntrf);
 
 bool HciControllerPutHostPacket(HciController_t *pController,
                                 HciH4PacketType_t Type,

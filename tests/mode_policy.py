@@ -60,6 +60,7 @@ def main():
     board = read(os.path.join(root, "nRF52840", "src", "board.h"))
     app_h = read(os.path.join(root, "include", "hci_app.h"))
     app_cpp = read(os.path.join(root, "src", "hci_app.cpp"))
+    usb_cpp = read(os.path.join(root, "src", "hci_host_usb.cpp"))
     main_cpp = read(os.path.join(root, "src", "main.cpp"))
     boards = board_branches(board)
     failures = []
@@ -112,8 +113,8 @@ def main():
           "all three runtime HCI modes are declared", failures)
     check("HciAppInitMode" in app_h and "HciAppInitMode" in app_cpp,
           "runtime mode initializer is declared and implemented", failures)
-    check("HCI_USB_DESCRIPTOR_CDC_H4" in app_cpp and
-          "HCI_USB_DESCRIPTOR_NATIVE_HCI" in app_cpp,
+    check("HCI_USB_DESCRIPTOR_CDC_H4" in usb_cpp and
+          "HCI_USB_DESCRIPTOR_NATIVE_HCI" in usb_cpp,
           "USB H:4/native descriptors are selected at runtime", failures)
 
     for token in ("NvmMcuCfg", "NvmRegionAddr", "HciModeNvmLoad",

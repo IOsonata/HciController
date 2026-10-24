@@ -102,8 +102,10 @@ extern "C" {
  *  24  TxOversizeCount                  packet too large for the tx stream
  *  25  HostPacketRetryCount             host packet offered to the controller again
  *  26  InvalidHostPacketCount           host packet the bridge rejected
- *  27  ControllerGetErrorCount          controller queue error seen by the bridge
- *  28  InvalidControllerPacketCount     controller packet the bridge rejected
+ *  27-28                                reserved compatibility slots; always zero.
+ *                                       The controller validates its own packets
+ *                                       (counters 9 to 11) and the bridge only
+ *                                       reads packets of a host facing type.
  *  29  UnsendableControllerPacketCount  controller packet the host would not take
  *  30  AclCreditOverrunCount            host exceeded the buffers it was told
  *  31  AclTrackOverflowCount            more links in flight than tracked

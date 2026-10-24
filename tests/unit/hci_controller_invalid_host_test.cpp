@@ -5,6 +5,7 @@
  */
 
 #include "hci_controller.h"
+#include "hci_ctlr_fake_intrf.h"
 
 #include <assert.h>
 #include <string.h>
@@ -27,6 +28,11 @@ int DeviceIntrfRx(DevIntrf_t * const pDev,
                   uint8_t *pBuffer,
                   int BufferLen)
 {
+    if (pDev != &s_Host.Dev)
+    {
+        return HciCtlrFakeRx(pDev, DevAddr, pBuffer, BufferLen);
+    }
+
     FakePacketIntrf *pHost = static_cast<FakePacketIntrf *>(pDev->pDevData);
     if (!pHost->Pending || DevAddr != (uint32_t)pHost->Type ||
         BufferLen < pHost->Len)
@@ -40,11 +46,15 @@ int DeviceIntrfRx(DevIntrf_t * const pDev,
     return len;
 }
 
-int DeviceIntrfTx(DevIntrf_t * const,
-                  uint32_t,
-                  const uint8_t *,
+int DeviceIntrfTx(DevIntrf_t * const pDev,
+                  uint32_t DevAddr,
+                  const uint8_t *pData,
                   int DataLen)
 {
+    if (pDev != &s_Host.Dev)
+    {
+        return HciCtlrFakeTx(pDev, DevAddr, pData, DataLen);
+    }
     return DataLen;
 }
 
@@ -66,13 +76,13 @@ static bool Put(void *,
     return true;
 }
 
-static HciControllerGetResult_t Get(void *,
+static HciSdcGetResult_t Get(void *,
                                     HciH4PacketType_t *,
                                     uint8_t *,
                                     size_t,
                                     size_t *)
 {
-    return HCI_CONTROLLER_GET_EMPTY;
+    return HCI_SDC_GET_EMPTY;
 }
 
 static void Queue(HciH4PacketType_t Type,
@@ -91,9 +101,10 @@ int main(void)
     memset(&s_Host, 0, sizeof(s_Host));
     s_Host.Dev.pDevData = &s_Host;
 
-    HciControllerOps_t ops = {};
-    ops.Put = Put;
-    ops.Get = Get;
+    static HciCtlrFakeIntrf_t fake;
+
+
+    DevIntrf_t *ctlr = HciCtlrFakeIntrfInit(&fake, Put, Get, NULL);
 
     HciController_t controller = {};
     uint8_t hostPacket[64] = {};
@@ -104,7 +115,7 @@ int main(void)
                                             sizeof(hostPacket),
                                             controllerPacket,
                                             sizeof(controllerPacket),
-                                            &ops));
+                                            ctlr));
 
     const uint8_t invalidEvent[] = {0x0EU, 0x00U};
     Queue(HCI_H4_PACKET_EVENT, invalidEvent, sizeof(invalidEvent));

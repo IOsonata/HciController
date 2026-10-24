@@ -16,6 +16,7 @@
 #include "hci_controller.h"
 #include "hci_core_profile.h"
 #include "hci_vendor.h"
+#include "hci_trace.h"
 
 #include <limits.h>
 #include <string.h>
@@ -422,18 +423,18 @@ static void HciControllerApplyCoreProfile(HciH4PacketType_t Type,
 }
 
 /* This SDC product has no Host-to-Controller SCO data path. */
+/*
+ * Trace the first few packets each way and the first few failed sends to the
+ * host, so a link that never comes up can be told from one that is up and
+ * silent. The ring has no output sink on every target, so each kind stops
+ * after a few records and leaves room for the rest of the trace.
+ */
+static uint8_t s_CtlrTxFailTrace;
+
 static bool HciControllerHostTypeValid(HciH4PacketType_t Type)
 {
     return Type == HCI_H4_PACKET_COMMAND ||
            Type == HCI_H4_PACKET_ACL ||
-           Type == HCI_H4_PACKET_ISO;
-}
-
-static bool HciControllerOutputTypeValid(HciH4PacketType_t Type)
-{
-    return Type == HCI_H4_PACKET_EVENT ||
-           Type == HCI_H4_PACKET_ACL ||
-           Type == HCI_H4_PACKET_SCO ||
            Type == HCI_H4_PACKET_ISO;
 }
 
@@ -506,10 +507,8 @@ bool HciControllerPutHostPacket(HciController_t *pController,
         }
     }
 
-    if (!pController->Controller.Put(pController->Controller.pContext,
-                                     Type,
-                                     pPacket,
-                                     PacketLen))
+    if (DeviceIntrfTx(pController->pCtlrIntrf, (uint32_t)Type, pPacket,
+                      (int)PacketLen) != (int)PacketLen)
     {
         pController->HostPacketRetryCount++;
         return false;
@@ -524,7 +523,7 @@ static bool HciControllerInitCore(HciController_t *pController,
                                   size_t HostPacketCapacity,
                                   uint8_t *pControllerPacket,
                                   size_t ControllerPacketCapacity,
-                                  const HciControllerOps_t *pControllerOps)
+                                  DevIntrf_t *pCtlrIntrf)
 {
     if (pController == nullptr || pPacketIntrf == nullptr ||
         pHostPacket == nullptr || HostPacketCapacity == 0U ||
@@ -532,8 +531,7 @@ static bool HciControllerInitCore(HciController_t *pController,
         pControllerPacket == nullptr ||
         ControllerPacketCapacity < HCI_CONTROLLER_UNKNOWN_COMMAND_EVENT_SIZE ||
         ControllerPacketCapacity > (size_t)INT_MAX ||
-        pControllerOps == nullptr || pControllerOps->Put == nullptr ||
-        pControllerOps->Get == nullptr)
+        pCtlrIntrf == nullptr)
     {
         return false;
     }
@@ -541,7 +539,7 @@ static bool HciControllerInitCore(HciController_t *pController,
     pController->pHostIntrf = pPacketIntrf;
     pController->pHostPacket = pHostPacket;
     pController->HostPacketCapacity = HostPacketCapacity;
-    pController->Controller = *pControllerOps;
+    pController->pCtlrIntrf = pCtlrIntrf;
     pController->pControllerPacket = pControllerPacket;
     pController->ControllerPacketCapacity = ControllerPacketCapacity;
     return true;
@@ -553,7 +551,7 @@ bool HciControllerInitPacketTransport(HciController_t *pController,
                                       size_t HostPacketCapacity,
                                       uint8_t *pControllerPacket,
                                       size_t ControllerPacketCapacity,
-                                      const HciControllerOps_t *pControllerOps)
+                                      DevIntrf_t *pCtlrIntrf)
 {
     if (pController == nullptr)
     {
@@ -567,7 +565,7 @@ bool HciControllerInitPacketTransport(HciController_t *pController,
                                HostPacketCapacity,
                                pControllerPacket,
                                ControllerPacketCapacity,
-                               pControllerOps))
+                               pCtlrIntrf))
     {
         return false;
     }
@@ -582,7 +580,7 @@ bool HciControllerInit(HciController_t *pController,
                        size_t HostPacketCapacity,
                        uint8_t *pControllerPacket,
                        size_t ControllerPacketCapacity,
-                       const HciControllerOps_t *pControllerOps)
+                       DevIntrf_t *pCtlrIntrf)
 {
     if (pController == nullptr || pHostIntrf == nullptr ||
         pHostPacket == nullptr || HostPacketCapacity == 0U)
@@ -607,7 +605,7 @@ bool HciControllerInit(HciController_t *pController,
                                HostPacketCapacity,
                                pControllerPacket,
                                ControllerPacketCapacity,
-                               pControllerOps))
+                               pCtlrIntrf))
     {
         return false;
     }
@@ -764,6 +762,46 @@ static void HciControllerH4Open(HciController_t *pController)
     HciIntrfTransportOpen(pHost);
 }
 
+static void HciControllerTraceFromHost(HciH4PacketType_t Type,
+                                       const uint8_t *pPacket, size_t Len)
+{
+    if (Type == HCI_H4_PACKET_COMMAND && Len >= 3U)
+    {
+        HciTraceCommandLine("h>c cmd %04X len=%u\r\n",
+                 (unsigned)HciControllerReadLe16(pPacket), (unsigned)pPacket[2]);
+    }
+}
+
+static void HciControllerTraceToHost(HciH4PacketType_t Type,
+                                     const uint8_t *pPacket, size_t Len)
+{
+    if (Type != HCI_H4_PACKET_EVENT || Len < 2U)
+    {
+        return;
+    }
+
+    if (pPacket[0] == 0x0EU && Len >= 6U)
+    {
+        HciTraceCommandLine("c>h cc %04X st=%02X len=%u\r\n",
+                 (unsigned)HciControllerReadLe16(&pPacket[3]),
+                 (unsigned)pPacket[5], (unsigned)Len);
+    }
+    else if (pPacket[0] == 0x0FU && Len >= 6U)
+    {
+        HciTraceCommandLine("c>h cs %04X st=%02X\r\n",
+                 (unsigned)HciControllerReadLe16(&pPacket[4]),
+                 (unsigned)pPacket[2]);
+    }
+    else if (pPacket[0] == 0x3EU && Len >= 3U)
+    {
+        HciTraceCommandLine("c>h le %02X len=%u\r\n", (unsigned)pPacket[2], (unsigned)Len);
+    }
+    else
+    {
+        HciTraceCommandLine("c>h ev %02X len=%u\r\n", (unsigned)pPacket[0], (unsigned)Len);
+    }
+}
+
 static void HciControllerHostProcess(HciController_t *pController)
 {
     if (pController->HostPacketPending)
@@ -812,6 +850,11 @@ static void HciControllerHostProcess(HciController_t *pController)
         pController->HostPacketType = Types[i];
         pController->HostPacketLen = (size_t)received;
         pController->HostPacketPending = true;
+        if (HciTraceCommandsEnabled())
+        {
+            HciControllerTraceFromHost(Types[i], pController->pHostPacket,
+                                       (size_t)received);
+        }
 
         if (HciControllerPutHostPacket(pController,
                                        pController->HostPacketType,
@@ -833,30 +876,38 @@ static void HciControllerFetchPacket(HciController_t *pController)
         return;
     }
 
+    /*
+     * The controller is a packet interface asked by type, the way the packet
+     * hosts are: the first type the controller has a packet of answers it.
+     * The controller validates and counts its own packets, so the bridge
+     * never sees an invalid one, only the next valid one or nothing.
+     */
+    static const HciH4PacketType_t Types[] = {
+        HCI_H4_PACKET_EVENT,
+        HCI_H4_PACKET_ACL,
+        HCI_H4_PACKET_ISO,
+        HCI_H4_PACKET_SCO,
+    };
+
     HciH4PacketType_t type = HCI_H4_PACKET_NONE;
     size_t packetLen = 0U;
-    HciControllerGetResult_t result =
-        pController->Controller.Get(pController->Controller.pContext,
-                                    &type,
-                                    pController->pControllerPacket,
-                                    pController->ControllerPacketCapacity,
-                                    &packetLen);
 
-    if (result == HCI_CONTROLLER_GET_EMPTY)
+    for (size_t i = 0U; i < sizeof(Types) / sizeof(Types[0]); ++i)
     {
-        return;
+        const int received = DeviceIntrfRx(pController->pCtlrIntrf,
+                                           (uint32_t)Types[i],
+                                           pController->pControllerPacket,
+                                           (int)pController->ControllerPacketCapacity);
+        if (received > 0)
+        {
+            type = Types[i];
+            packetLen = (size_t)received;
+            break;
+        }
     }
 
-    if (result != HCI_CONTROLLER_GET_PACKET)
+    if (packetLen == 0U)
     {
-        pController->ControllerGetErrorCount++;
-        return;
-    }
-
-    if (!HciControllerOutputTypeValid(type) || packetLen == 0U ||
-        packetLen > pController->ControllerPacketCapacity)
-    {
-        pController->InvalidControllerPacketCount++;
         return;
     }
 
@@ -898,8 +949,22 @@ static void HciControllerStartPacket(HciController_t *pController)
                                    (uint32_t)pController->ControllerPacketType,
                                    pController->pControllerPacket,
                                    (int)pController->ControllerPacketLen);
+    if (sent != (int)pController->ControllerPacketLen &&
+        s_CtlrTxFailTrace < 2U)
+    {
+        s_CtlrTxFailTrace++;
+        HciTraceError("c>h send sent=%d len=%u\r\n", sent,
+                 (unsigned)pController->ControllerPacketLen);
+    }
+
     if (sent == (int)pController->ControllerPacketLen)
     {
+        if (HciTraceCommandsEnabled())
+        {
+            HciControllerTraceToHost(pController->ControllerPacketType,
+                                     pController->pControllerPacket,
+                                     pController->ControllerPacketLen);
+        }
         if (pController->ControllerPacketType == HCI_H4_PACKET_ACL)
         {
             pController->HostAclPacketCount++;
@@ -965,11 +1030,6 @@ void HciControllerProcess(HciController_t *pController)
         return;
     }
 
-    if (pController->Controller.Process != nullptr)
-    {
-        pController->Controller.Process(pController->Controller.pContext);
-    }
-
     /*
      * The H:4 adapter uses pHostPacket as its parser buffer. Do not feed it new
      * bytes while that same buffer is retained for a backend retry.
@@ -990,4 +1050,12 @@ void HciControllerProcess(HciController_t *pController)
     }
 
     HciControllerHostProcess(pController);
+
+    /*
+     * The host process above can accept a command that the first one only
+     * held, and the reply is queued by then. An event driven transport does
+     * not wake the loop again, so the reply goes out in this pass.
+     */
+    HciControllerFetchPacket(pController);
+    HciControllerStartPacket(pController);
 }

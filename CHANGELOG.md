@@ -2,15 +2,30 @@
 
 ## Unreleased
 
+### Features are linked, not compiled in
+
+- The vendor crypto commands moved to `hci_vendor_crypto.cpp` and the four
+  optional SDC features to `hci_sdc_feat_subrating.cpp`,
+  `hci_sdc_feat_extfeat.cpp`, `hci_sdc_feat_past.cpp` and
+  `hci_sdc_feat_pawr.cpp`. A project links the files it wants; weak defaults
+  report the rest absent. `HCI_VENDOR_CRYPTO`, `HCI_SDC_FEAT_*` and
+  `HCI_TRACE_COMMANDS` are gone. The SDC pool is sized for all four
+  features. The command log is a runtime setting, `HciTraceCommands()`.
+
 ### Host transports
 
 - Added an IPC host transport for the nRF5340 network core (`nRF5340_Net`
   target). It is IOsonata's `BtHciIpc` packet interface: one ring slot is one
   HCI packet, no H:4 framing. HciController owns the shared memory block and
   the application core attaches as the peer. The host link swaps between IPC
-  and H:4 over UART with the mode button. USB and UART code in `hci_app.cpp`
-  can be left out with `HCI_APP_HAS_USB=0` and `HCI_APP_HAS_UART=0`. SDC
-  resource counts can be overridden with `-D` for the 64 KB network core RAM.
+  and H:4 over UART with the mode button. SDC resource counts can be
+  overridden with `-D` for the 64 KB network core RAM.
+- The host transports are files a project links: `hci_host_uart.cpp`,
+  `hci_host_usb.cpp` (the HCI function, the diagnostic CDC port and the
+  UART bridge) and `hci_host_ipc.cpp`, with weak defaults in `hci_app.cpp`
+  for the ones a board does not have. The `HCI_APP_HAS_*` compile switches
+  and `hci_usb_mode.h` are gone; `HCI_USB_HCI_TRANSPORT` too, native HCI
+  being the USB default and CDC H:4 a mode button press away.
 - Reduced static RAM by sharing the mutually exclusive HCI host UART and USB
   transport FIFOs. The diagnostic CDC transmit buffering remains independent;
   diagnostic input is consumed and discarded.

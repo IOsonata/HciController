@@ -42,12 +42,6 @@ typedef struct
 } HciNrf5340Net_t;
 
 /*
- * This part as a target the application can hold without naming it. There is
- * one radio, so the instance is owned here.
- */
-HciTarget_t HciNrf5340NetTarget(void);
-
-/*
  * Host transport mode kept across a reset. The network core has no NVM
  * interface port, so the mode is held in the two retained general purpose
  * registers: it survives a reset of the network core, not a power loss.

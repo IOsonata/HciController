@@ -146,8 +146,6 @@ HciCmdResult_t HciCountersRead(void *pContext,
         values[24] = pController->Host.TxOversizeCount;
         values[25] = pController->HostPacketRetryCount;
         values[26] = pController->InvalidHostPacketCount;
-        values[27] = pController->ControllerGetErrorCount;
-        values[28] = pController->InvalidControllerPacketCount;
         values[29] = pController->UnsendableControllerPacketCount;
         values[38] = pController->ControllerAclPacketCount;
         values[39] = pController->HostAclPacketCount;

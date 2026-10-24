@@ -63,18 +63,24 @@
 #define UART_RTS_PORT 0
 #define UART_RTS_PIN 19
 #else
-/* nRF5340 Audio DK: button SW0 (VOL-) P0.02, virtual COM P1.05 TXD, P1.04 RXD, P1.06 CTS, P1.07 RTS */
+/*
+ * nRF5340 Audio DK: button VOL- P0.02; the network core's own virtual COM
+ * port, the second one the board enumerates: P1.09 TXD, P1.08 RXD,
+ * P1.10 RTS, P1.11 CTS (Zephyr nrf5340_audio_dk_nrf5340_cpunet-pinctrl).
+ * The first port, P1.05/P1.04, is the application core console and stays
+ * with it.
+ */
 #define HCI_MODE_BUTTON_PORT 0
 #define HCI_MODE_BUTTON_PIN 2
 #define HCI_MODE_BUTTON_PINOP 0
 #define UART_RX_PORT 1
-#define UART_RX_PIN 4
+#define UART_RX_PIN 8
 #define UART_TX_PORT 1
-#define UART_TX_PIN 5
+#define UART_TX_PIN 9
 #define UART_CTS_PORT 1
-#define UART_CTS_PIN 6
+#define UART_CTS_PIN 11
 #define UART_RTS_PORT 1
-#define UART_RTS_PIN 7
+#define UART_RTS_PIN 10
 #endif
 
 #define UART_DEVNO 0
@@ -83,8 +89,14 @@
 #define UART_CTS_PINOP 1
 #define UART_RTS_PINOP 1
 #define UART_RATE 1000000
+#if defined(NRF5340_DK_PCA10095)
 #define UART_HW_FLOWCTRL 1
 #define UART_FLOWCTRL UART_FLWCTRL_HW
+#else
+/* The Audio DK virtual COM port runs without flow control, as the IPC test does. */
+#define UART_HW_FLOWCTRL 0
+#define UART_FLOWCTRL UART_FLWCTRL_NONE
+#endif
 
 /*
  * Shared memory block used by the IPC host transport.
@@ -114,5 +126,14 @@
     {UART_CTS_PORT, UART_CTS_PIN, UART_CTS_PINOP, IOPINDIR_INPUT, IOPINRES_NONE, IOPINTYPE_NORMAL}, \
     {UART_RTS_PORT, UART_RTS_PIN, UART_RTS_PINOP, IOPINDIR_OUTPUT, IOPINRES_NONE, IOPINTYPE_NORMAL}, \
 }
+
+/* Low frequency clock of the network core. The 32 kHz crystal needs its load
+ * capacitance set from the application core, and mpsl_init waits for the
+ * clock to run, so a crystal that never starts holds the controller in
+ * mpsl_init. The RC oscillator starts by itself. Define HCI_LFCLK_XTAL to
+ * use the crystal once the application core sets it up. */
+#ifndef HCI_LFCLK_XTAL
+#define MCU_OSC { {OSC_TYPE_XTAL, 32000000, 20, 0}, {OSC_TYPE_RC, 32768, 250, 0}, false }
+#endif
 
 #endif /* __BOARD_H__ */

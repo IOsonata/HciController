@@ -201,13 +201,11 @@ static const char *HciModeName(HciAppMode_t Mode)
     }
 }
 
+/* Native HCI over USB is the USB default; CDC H:4 is a press of the mode
+ * button away. */
 static HciAppMode_t HciUsbBuildDefaultMode(void)
 {
-#if HCI_USB_HCI_TRANSPORT == HCI_USB_HCI_TRANSPORT_NATIVE
     return HCI_APP_MODE_USB_NATIVE;
-#else
-    return HCI_APP_MODE_USB_H4;
-#endif
 }
 
 static HciAppMode_t HciBoardDefaultMode(void)
@@ -317,13 +315,13 @@ static bool HciModeNvmSetup(void)
     if (addr == 0U || cfg.EraseSize == 0U || size < cfg.EraseSize ||
         (addr % cfg.EraseSize) != 0U)
     {
-        HciTrace("mode: nvm geometry invalid\r\n");
+        HciTraceError("mode: nvm geometry invalid\r\n");
         return false;
     }
 
     if (!s_ModeNvmIntrf.Init(nullptr, false))
     {
-        HciTrace("mode: nvm interface init failed\r\n");
+        HciTraceError("mode: nvm interface init failed\r\n");
         return false;
     }
 
@@ -469,6 +467,9 @@ static void HciModeButtonProcess(void)
 
 static void HciStatusThread(void *)
 {
+    uint32_t seconds = 0U;
+    uint32_t elapsedMs = 0U;
+
     for (;;)
     {
         if (!s_HciApp.Runtime.Started)
@@ -487,6 +488,20 @@ static void HciStatusThread(void *)
 #if HCI_MODE_SWITCH
         HciModeButtonProcess();
 #endif
+
+        /* Send what the trace output could not take earlier. */
+        (void)HciTraceFlush();
+
+        /* A line every 5 s shows the trace output is alive for a terminal
+         * opened after the boot lines went by. */
+        elapsedMs += STATUS_UPDATE_MS;
+        if (elapsedMs >= 5000U && HciTraceCommandsEnabled())
+        {
+            elapsedMs -= 5000U;
+            seconds += 5U;
+            HciTrace("alive %lus host=%u\r\n", (unsigned long)seconds,
+                     (unsigned)HciAppHostIsOpen(&s_HciApp));
+        }
 
         (void)TaktOSThreadSleep(TaktOSCurrentThread(), STATUS_UPDATE_MS);
     }
@@ -516,24 +531,7 @@ int main(void)
 #if UART_HW_FLOWCTRL
     HciUartHostNotReady();
 #endif
-    HciTarget_t target =
-#if HCI_TARGET_IS_NRF5340_NET
-        HciNrf5340NetTarget();
-#elif defined(NRF54LM20B_XXAA) || defined(NRF54LM20A_XXAA)
-        HciNrf54lm20Target();
-#else
-        HciNrf52840Target();
-#endif
-    const bool earlyUartReady = HciAppUartEarlyInit(&s_HciApp, target);
-#else
-    HciTarget_t target =
-#if HCI_TARGET_IS_NRF5340_NET
-        HciNrf5340NetTarget();
-#elif defined(NRF54LM20B_XXAA) || defined(NRF54LM20A_XXAA)
-        HciNrf54lm20Target();
-#else
-        HciNrf52840Target();
-#endif
+    const bool earlyUartReady = HciAppUartEarlyInit(&s_HciApp);
 #endif
 
 #if HCI_STATUS_LEDS
@@ -548,6 +546,8 @@ int main(void)
 #endif
 
     HciTraceInit();
+    /* Command log is off. HciTraceCommands(true, false) turns it on. */
+    HciTraceCommands(false, false);
 #if !HCI_TARGET_IS_NRF5340_NET && \
     !defined(NRF54LM20B_XXAA) && !defined(NRF54LM20A_XXAA)
     HciNrf52840ResetTrace();
@@ -556,9 +556,9 @@ int main(void)
 #if HCI_UART_EARLY_STARTUP
     if (!earlyUartReady)
     {
-        HciTrace("fatal: early UART init err=%d target=%ld\r\n",
+        HciTraceError("fatal: early UART init err=%d target=%ld\r\n",
                  s_HciApp.LastError,
-                 (long)HciTargetLastError(&s_HciApp.Target));
+                 (long)HciTargetLastError());
         HciFatal();
     }
 #endif
@@ -569,7 +569,7 @@ int main(void)
 #if HCI_MODE_SWITCH
     if (!HciModeNvmSetup())
     {
-        HciTrace("fatal: mode NVM region unavailable\r\n");
+        HciTraceError("fatal: mode NVM region unavailable\r\n");
         HciFatal();
     }
     s_HciMode = HciModeNvmLoad(defaultMode, &storedMode);
@@ -579,7 +579,7 @@ int main(void)
 
     if (!HciModeAllowed(s_HciMode))
     {
-        HciTrace("fatal: mode %u not allowed on BOARD=%u\r\n",
+        HciTraceError("fatal: mode %u not allowed on BOARD=%u\r\n",
                  (unsigned)s_HciMode, (unsigned)BOARD);
         HciFatal();
     }
@@ -610,15 +610,15 @@ int main(void)
     HciTrace("boot: coreclk=%lu\r\n", (unsigned long)kernelCfg.KernClockHz);
     if (TaktOSInit(&kernelCfg) != TAKTOS_OK)
     {
-        HciTrace("fatal: TaktOSInit\r\n");
+        HciTraceError("fatal: TaktOSInit\r\n");
         HciFatal();
     }
 
-    if (!HciAppInitMode(&s_HciApp, s_HciMode, target))
+    if (!HciAppInitMode(&s_HciApp, s_HciMode))
     {
-        HciTrace("fatal: HciAppInitMode err=%d target=%ld\r\n",
+        HciTraceError("fatal: HciAppInitMode err=%d target=%ld\r\n",
                  s_HciApp.LastError,
-                 (long)HciTargetLastError(&s_HciApp.Target));
+                 (long)HciTargetLastError());
         HciFatal();
     }
 
@@ -630,7 +630,7 @@ int main(void)
                            HCI_THREAD_PRIORITY) == nullptr)
     {
         HciTaktOsThreadDisarm(&s_HciApp.Runtime);
-        HciTrace("fatal: hci thread create\r\n");
+        HciTraceError("fatal: hci thread create\r\n");
         HciFatal();
     }
 
@@ -640,10 +640,11 @@ int main(void)
                            nullptr,
                            STATUS_THREAD_PRIORITY) == nullptr)
     {
-        HciTrace("fatal: status thread create\r\n");
+        HciTraceError("fatal: status thread create\r\n");
         HciFatal();
     }
 
     HciTrace("boot: starting scheduler\r\n");
+    HciTraceBootDrain(false);
     TaktOSStart();
 }

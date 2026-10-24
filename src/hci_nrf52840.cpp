@@ -65,6 +65,7 @@
 /* The entropy source SDC requires is absent or produces nothing. */
 #define HCI_NRF52840_ERR_NO_ENTROPY         (-1005)
 
+static HciNrf52840_t s_Nrf52840;
 static HciNrf52840_t *s_pTarget;
 
 /*
@@ -194,7 +195,7 @@ static bool HciNrf52840HfclkStart(HciNrf52840_t *pTarget)
         }
     }
 
-    HciTrace("hfclk: timeout\r\n");
+    HciTraceError("hfclk: timeout\r\n");
     return HciNrf52840HfclkStartFailed(
         pTarget, HCI_NRF52840_ERR_HFCLK_TIMEOUT);
 }
@@ -384,7 +385,7 @@ static bool HciNrf52840RandSourceReady(HciNrf52840_t *pTarget)
 
     if (rng == nullptr)
     {
-        HciTrace("rand: no source instance\r\n");
+        HciTraceError("rand: no source instance\r\n");
         pTarget->LastError = HCI_NRF52840_ERR_NO_ENTROPY;
         return false;
     }
@@ -398,7 +399,7 @@ static bool HciNrf52840RandSourceReady(HciNrf52840_t *pTarget)
         }
     }
 
-    HciTrace("rand: source did not produce bytes\r\n");
+    HciTraceError("rand: source did not produce bytes\r\n");
     pTarget->LastError = HCI_NRF52840_ERR_NO_ENTROPY;
     return false;
 }
@@ -496,7 +497,7 @@ static bool HciNrf52840SdcInit(HciNrf52840_t *pTarget)
     if ((size_t)result > pTarget->SdcMemCapacity ||
         (((uintptr_t)pTarget->pSdcMem & 7U) != 0U))
     {
-        HciTrace("sdc: memory pool too small or misaligned\r\n");
+        HciTraceError("sdc: memory pool too small or misaligned\r\n");
         pTarget->LastError = -1;
         return false;
     }
@@ -513,10 +514,10 @@ static bool HciNrf52840SdcInit(HciNrf52840_t *pTarget)
     return true;
 }
 
-static bool HciNrf52840Start(void *pContext)
+bool HciTargetStart(void)
 {
-    HciNrf52840_t *pTarget = static_cast<HciNrf52840_t *>(pContext);
-    if (pTarget == nullptr || pTarget->MpslInitialized || pTarget->SdcInitialized ||
+    HciNrf52840_t *pTarget = &s_Nrf52840;
+    if (pTarget->MpslInitialized || pTarget->SdcInitialized ||
         pTarget->SdcEnabled ||
         (s_pTarget != nullptr && s_pTarget != pTarget))
     {
@@ -537,68 +538,46 @@ static bool HciNrf52840Start(void *pContext)
     if ((UsbGetCfg(0) != nullptr && !HciNrf52840HfclkStart(pTarget)) ||
         !HciNrf52840SdcInit(pTarget))
     {
-        HciNrf52840Stop(pTarget);
+        HciTargetStop();
         return false;
     }
 
     return true;
 }
 
-static void HciNrf52840ProcessMpsl(void *pContext)
+void HciTargetProcessMpsl(void)
 {
     mpsl_low_priority_process();
-    (void)pContext;
 }
 
-static void HciNrf52840Fault(void *pContext, int Error)
+void HciTargetFault(int Error)
 {
-    HciNrf52840_t *pTarget = static_cast<HciNrf52840_t *>(pContext);
-    if (pTarget != nullptr)
+    s_Nrf52840.FaultCount++;
+    if (s_Nrf52840.LastError == 0)
     {
-        pTarget->FaultCount++;
-        if (pTarget->LastError == 0)
-        {
-            pTarget->LastError = Error;
-        }
+        s_Nrf52840.LastError = Error;
     }
 }
 
-
-bool HciNrf52840Init(HciNrf52840_t *pTarget,
-                     HciTaktOs_t *pRuntime,
-                     uint8_t *pSdcMem,
-                     size_t SdcMemCapacity)
+bool HciTargetInit(HciTaktOs_t *pRuntime, uint8_t *pSdcMem, size_t SdcMemCapacity)
 {
-    if (pTarget == nullptr || pRuntime == nullptr || pSdcMem == nullptr ||
+    if (pRuntime == nullptr || pSdcMem == nullptr ||
         SdcMemCapacity == 0U || (((uintptr_t)pSdcMem & 7U) != 0U))
     {
         return false;
     }
 
-    memset(pTarget, 0, sizeof(*pTarget));
-    pTarget->pRuntime = pRuntime;
-    pTarget->pSdcMem = pSdcMem;
-    pTarget->SdcMemCapacity = SdcMemCapacity;
+    memset(&s_Nrf52840, 0, sizeof(s_Nrf52840));
+    s_Nrf52840.pRuntime = pRuntime;
+    s_Nrf52840.pSdcMem = pSdcMem;
+    s_Nrf52840.SdcMemCapacity = SdcMemCapacity;
     return true;
 }
 
-void HciNrf52840GetTaktOsOps(HciNrf52840_t *pTarget,
-                             HciTaktOsOps_t *pOps)
+void HciTargetStop(void)
 {
-    if (pOps == nullptr)
-    {
-        return;
-    }
-
-    pOps->Start = HciNrf52840Start;
-    pOps->ProcessMpsl = HciNrf52840ProcessMpsl;
-    pOps->Fault = HciNrf52840Fault;
-    pOps->pContext = pTarget;
-}
-
-void HciNrf52840Stop(HciNrf52840_t *pTarget)
-{
-    if (pTarget == nullptr || pTarget != s_pTarget)
+    HciNrf52840_t *pTarget = s_pTarget;
+    if (pTarget == nullptr)
     {
         return;
     }
@@ -664,25 +643,6 @@ extern "C" void nRFClockIrqHandler(void)
 }
 
 
-/*
- * The target interface. Thin wrappers rather than casting the function
- * pointers, so the compiler checks each signature rather than trusting a cast.
- */
-static bool HciNrf52840TargetInit(void *pContext,
-                                  HciTaktOs_t *pRuntime,
-                                  uint8_t *pSdcMem,
-                                  size_t SdcMemCapacity)
-{
-    return HciNrf52840Init(static_cast<HciNrf52840_t *>(pContext), pRuntime,
-                           pSdcMem, SdcMemCapacity);
-}
-
-static void HciNrf52840TargetGetTaktOsOps(void *pContext,
-                                          HciTaktOsOps_t *pOps)
-{
-    HciNrf52840GetTaktOsOps(static_cast<HciNrf52840_t *>(pContext), pOps);
-}
-
 
 #define HCI_NRF52840_PSEL_DISCONNECTED 0x80000000UL
 #define HCI_NRF52840_UARTE_HWFC_MASK   0x00000001UL
@@ -728,7 +688,7 @@ static uint32_t HciNrf52840Baud(uint32_t RegisterValue)
                        0x80000000ULL) >> 32);
 }
 
-static void HciNrf52840TargetUartTrace(const void *, uint8_t DevNo)
+void HciTargetUartTrace(uint8_t DevNo)
 {
     NRF_UARTE_Type *pReg = DevNo == 0U ? NRF_UARTE0 : NRF_UARTE1;
     char rxd[6];
@@ -769,61 +729,24 @@ static void HciNrf52840TargetUartTrace(const void *, uint8_t DevNo)
                                        "low(peer-ready)") : "not-connected",
                  rxd, txd, cts, rts);
     }
-
-    (void)DevNo;
 }
 
-static void HciNrf52840TargetStop(void *pContext)
+void HciTargetGetSdcMem(uint32_t *pRequired, uint32_t *pCapacity)
 {
-    HciNrf52840Stop(static_cast<HciNrf52840_t *>(pContext));
-}
-
-static void HciNrf52840TargetGetSdcMem(const void *pContext,
-                                       uint32_t *pRequired,
-                                       uint32_t *pCapacity)
-{
-    const HciNrf52840_t *pTarget =
-        static_cast<const HciNrf52840_t *>(pContext);
-
-    if (pTarget == nullptr)
-    {
-        return;
-    }
-
     if (pRequired != nullptr)
     {
-        *pRequired = pTarget->RequiredSdcMem > 0 ?
-                     (uint32_t)pTarget->RequiredSdcMem : 0U;
+        *pRequired = s_Nrf52840.RequiredSdcMem > 0 ?
+                     (uint32_t)s_Nrf52840.RequiredSdcMem : 0U;
     }
 
     if (pCapacity != nullptr)
     {
-        *pCapacity = (uint32_t)pTarget->SdcMemCapacity;
+        *pCapacity = (uint32_t)s_Nrf52840.SdcMemCapacity;
     }
 }
 
-static int32_t HciNrf52840TargetLastError(const void *pContext)
+int32_t HciTargetLastError(void)
 {
-    const HciNrf52840_t *pTarget =
-        static_cast<const HciNrf52840_t *>(pContext);
-
-    return pTarget != nullptr ? pTarget->LastError : 0;
-}
-
-static const HciTargetOps_t s_Nrf52840Ops = {
-    HciNrf52840TargetInit,
-    HciNrf52840TargetGetTaktOsOps,
-    HciNrf52840TargetUartTrace,
-    HciNrf52840TargetStop,
-    HciNrf52840TargetGetSdcMem,
-    HciNrf52840TargetLastError,
-};
-
-static HciNrf52840_t s_Nrf52840;
-
-HciTarget_t HciNrf52840Target(void)
-{
-    HciTarget_t target = { &s_Nrf52840Ops, &s_Nrf52840 };
-    return target;
+    return s_Nrf52840.LastError;
 }
 

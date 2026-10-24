@@ -31,6 +31,8 @@ static const SysLogCfg_t s_LogCfg = {
 };
 static SysLog_t s_Log;
 static bool s_LogInitialized;
+static bool s_BootDrain;
+static bool s_SinkSet;
 
 static bool HciTraceEnsureInit(void)
 {
@@ -62,15 +64,36 @@ static void HciTraceWrite0(const char *pStr)
 }
 #endif
 
-void HciTrace(const char *pFormat, ...)
+/* Push out what is stored and wait until the output takes no more, giving up
+ * after a fixed time so a stalled output cannot hold the start up. */
+static void HciTraceDrain(void)
+{
+    int idle = 0;
+
+    for (int i = 0; i < 400 && idle < 2; i++)
+    {
+        if (SysLogFlush(&s_Log) > 0)
+        {
+            idle = 0;
+        }
+        else
+        {
+            idle++;
+        }
+        /* about 0.5 ms at 64 MHz */
+        for (uint32_t d = 0U; d < 8000U; d++)
+        {
+            __asm__ volatile ("" ::: "memory");
+        }
+    }
+}
+
+static void HciTraceVa(const char *pFormat, va_list args, bool bDrain)
 {
     if (pFormat == nullptr || !HciTraceEnsureInit())
     {
         return;
     }
-
-    va_list args;
-    va_start(args, pFormat);
 
 #if HCI_TRACE
     va_list debugArgs;
@@ -93,6 +116,26 @@ void HciTrace(const char *pFormat, ...)
 #endif
 
     (void)SysLogVPrintf(&s_Log, pFormat, args);
+
+    if ((bDrain || s_BootDrain) && s_SinkSet)
+    {
+        HciTraceDrain();
+    }
+}
+
+void HciTrace(const char *pFormat, ...)
+{
+    va_list args;
+    va_start(args, pFormat);
+    HciTraceVa(pFormat, args, false);
+    va_end(args);
+}
+
+void HciTraceError(const char *pFormat, ...)
+{
+    va_list args;
+    va_start(args, pFormat);
+    HciTraceVa(pFormat, args, true);
     va_end(args);
 }
 
@@ -108,10 +151,54 @@ void HciTraceSetSink(DevIntrf_t *pSink, uint32_t SinkAddr)
         return;
     }
 
+    s_SinkSet = pSink != nullptr;
     SysLogSetSink(&s_Log, pSink, SinkAddr);
 }
 
 int HciTraceFlush(void)
 {
     return HciTraceEnsureInit() ? SysLogFlush(&s_Log) : 0;
+}
+
+void HciTraceBootDrain(bool bEnable)
+{
+    s_BootDrain = bEnable;
+}
+
+static bool s_bCmdTrace;
+static bool s_bCmdTraceSync;
+
+void HciTraceCommands(bool bEnable, bool bSync)
+{
+    s_bCmdTrace = bEnable;
+    s_bCmdTraceSync = bSync;
+}
+
+bool HciTraceCommandsEnabled(void)
+{
+    return s_bCmdTrace;
+}
+
+void HciTraceCommandLine(const char *pFormat, ...)
+{
+    if (!s_bCmdTrace)
+    {
+        return;
+    }
+
+    char line[96];
+    va_list args;
+
+    va_start(args, pFormat);
+    vsnprintf(line, sizeof(line), pFormat, args);
+    va_end(args);
+
+    if (s_bCmdTraceSync)
+    {
+        HciTraceError("%s", line);
+    }
+    else
+    {
+        HciTrace("%s", line);
+    }
 }

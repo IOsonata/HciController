@@ -20,6 +20,12 @@
 #include <string.h>
 
 #include "sdc_hci.h"
+#include "hci_sdc_resources.h"
+
+static_assert(HCI_SDC_PACKET_SIZE >= HCI_MSG_BUFFER_MAX_SIZE,
+              "the held packet must take the largest SDC message");
+static_assert(HCI_SDC_PACKET_SIZE >= HCI_SDC_ISO_PACKET_SIZE,
+              "the held packet must take the largest configured ISO SDU");
 #include "sdc_hci_cmd_controller_baseband.h"
 #include "sdc_hci_vs.h"
 #if HCI_CONTROLLER_TARGET_CORE_VERSION >= HCI_CORE_VERSION_6_2
@@ -1029,12 +1035,11 @@ static bool HciSdcDelayCommandComplete(HciSdc_t *pSdc,
     return true;
 }
 
-static bool HciSdcPutPacket(void *pContext,
-                            HciH4PacketType_t Type,
-                            const uint8_t *pPacket,
-                            size_t PacketLen)
+bool HciSdcPutPacket(HciSdc_t *pSdc,
+                     HciH4PacketType_t Type,
+                     const uint8_t *pPacket,
+                     size_t PacketLen)
 {
-    HciSdc_t *pSdc = static_cast<HciSdc_t *>(pContext);
 
     switch (Type)
     {
@@ -1125,8 +1130,8 @@ static bool HciSdcPutPacket(void *pContext,
             }
 #endif
 
-            int32_t result = pSdc->Ops.AclPut(pSdc->Ops.pContext, pPacket);
-            if (result == pSdc->Ops.RetryError)
+            int32_t result = sdc_hci_data_put(pPacket);
+            if (result == -NRF_EAGAIN)
             {
                 pSdc->PutRetryCount++;
                 return false;
@@ -1146,14 +1151,8 @@ static bool HciSdcPutPacket(void *pContext,
 
         case HCI_H4_PACKET_ISO:
         {
-            if (pSdc->Ops.IsoPut == NULL)
-            {
-                pSdc->IsoPutErrorCount++;
-                return true;
-            }
-
-            int32_t result = pSdc->Ops.IsoPut(pSdc->Ops.pContext, pPacket);
-            if (result == pSdc->Ops.RetryError)
+            int32_t result = sdc_hci_iso_data_put(pPacket);
+            if (result == -NRF_EAGAIN)
             {
                 pSdc->IsoDropCount++;
                 return true;
@@ -1174,7 +1173,7 @@ static bool HciSdcPutPacket(void *pContext,
     }
 }
 
-static HciControllerGetResult_t HciSdcGetDispatchEvent(
+static HciSdcGetResult_t HciSdcGetDispatchEvent(
     HciSdc_t *pSdc,
     HciCmdDispatch_t *pDispatch,
     bool PatchSupportedCommands,
@@ -1186,7 +1185,7 @@ static HciControllerGetResult_t HciSdcGetDispatchEvent(
     if (!HciCmdDispatchGet(pDispatch, pPacket, PacketCapacity, pPacketLen))
     {
         pSdc->InvalidOutputLengthCount++;
-        return HCI_CONTROLLER_GET_ERROR;
+        return HCI_SDC_GET_ERROR;
     }
 
     if (PatchSupportedCommands)
@@ -1196,16 +1195,15 @@ static HciControllerGetResult_t HciSdcGetDispatchEvent(
 
     pSdc->CommandEventLast = true;
     *pType = HCI_H4_PACKET_EVENT;
-    return HCI_CONTROLLER_GET_PACKET;
+    return HCI_SDC_GET_PACKET;
 }
 
-static HciControllerGetResult_t HciSdcGetPacket(void *pContext,
-                                                 HciH4PacketType_t *pType,
-                                                 uint8_t *pPacket,
-                                                 size_t PacketCapacity,
-                                                 size_t *pPacketLen)
+HciSdcGetResult_t HciSdcGetPacket(HciSdc_t *pSdc,
+                                  HciH4PacketType_t *pType,
+                                  uint8_t *pPacket,
+                                  size_t PacketCapacity,
+                                  size_t *pPacketLen)
 {
-    HciSdc_t *pSdc = static_cast<HciSdc_t *>(pContext);
 
     if (HciCmdDispatchEventPending(&pSdc->Commands))
     {
@@ -1226,11 +1224,11 @@ static HciControllerGetResult_t HciSdcGetPacket(void *pContext,
     {
         pSdc->CreditEventLast = true;
         *pType = HCI_H4_PACKET_EVENT;
-        return HCI_CONTROLLER_GET_PACKET;
+        return HCI_SDC_GET_PACKET;
     }
 
     uint8_t sdcType = HCI_SDC_MSG_TYPE_NONE;
-    int32_t result = pSdc->Ops.Get(pSdc->Ops.pContext, pPacket, &sdcType);
+    int32_t result = sdc_hci_get(pPacket, &sdcType);
 
     /*
      * The controller queue has had its turn, even when it was empty or
@@ -1241,15 +1239,15 @@ static HciControllerGetResult_t HciSdcGetPacket(void *pContext,
     pSdc->CommandEventLast = false;
     pSdc->CreditEventLast = false;
 
-    if (result == pSdc->Ops.RetryError)
+    if (result == -NRF_EAGAIN)
     {
-        return HCI_CONTROLLER_GET_EMPTY;
+        return HCI_SDC_GET_EMPTY;
     }
 
     if (result != 0)
     {
         pSdc->GetErrorCount++;
-        return HCI_CONTROLLER_GET_ERROR;
+        return HCI_SDC_GET_ERROR;
     }
 
     switch (sdcType)
@@ -1268,13 +1266,13 @@ static HciControllerGetResult_t HciSdcGetPacket(void *pContext,
 
         default:
             pSdc->InvalidOutputTypeCount++;
-            return HCI_CONTROLLER_GET_ERROR;
+            return HCI_SDC_GET_ERROR;
     }
 
     if (!HciSdcPacketLength(*pType, pPacket, PacketCapacity, pPacketLen))
     {
         pSdc->InvalidOutputLengthCount++;
-        return HCI_CONTROLLER_GET_ERROR;
+        return HCI_SDC_GET_ERROR;
     }
 
     if (*pType == HCI_H4_PACKET_EVENT)
@@ -1297,37 +1295,167 @@ static HciControllerGetResult_t HciSdcGetPacket(void *pContext,
         HciSdcAclTrackEvent(pSdc, pPacket, *pPacketLen);
     }
 
-    return HCI_CONTROLLER_GET_PACKET;
+    return HCI_SDC_GET_PACKET;
 }
 
-static void HciSdcProcessBackend(void *pContext)
+/*---------------------------------------------------------------------------
+ * The packet DeviceIntrf the bridge drives. StartRx(type) fetches the next
+ * packet into the hold when it is empty and says whether it is of that
+ * type; RxData hands it over. StartTx(type) keeps the type for TxData.
+ *-------------------------------------------------------------------------*/
+
+static HciSdc_t *HciSdcIntrfOwner(DevIntrf_t * const pIntrf)
 {
-    HciSdc_t *pSdc = static_cast<HciSdc_t *>(pContext);
-    if (pSdc->Ops.Process != NULL)
-    {
-        pSdc->Ops.Process(pSdc->Ops.pContext);
-    }
+    return static_cast<HciSdc_t *>(pIntrf->pDevData);
 }
+
+static void HciSdcIntrfDisable(DevIntrf_t * const)
+{
+}
+
+static void HciSdcIntrfEnable(DevIntrf_t * const)
+{
+}
+
+static uint32_t HciSdcIntrfRate(DevIntrf_t * const)
+{
+    return 0U;
+}
+
+static uint32_t HciSdcIntrfSetRate(DevIntrf_t * const, uint32_t)
+{
+    return 0U;
+}
+
+static bool HciSdcIntrfStartRx(DevIntrf_t * const pIntrf, uint32_t DevAddr)
+{
+    HciSdc_t *pSdc = HciSdcIntrfOwner(pIntrf);
+
+    if (pSdc->HeldLen == 0U)
+    {
+        HciH4PacketType_t type = HCI_H4_PACKET_NONE;
+        size_t len = 0U;
+        HciSdcGetResult_t result = HciSdcGetPacket(pSdc, &type, pSdc->HeldPacket,
+                                                   sizeof(pSdc->HeldPacket), &len);
+
+        /*
+         * An error is counted by HciSdcGetPacket (GetErrorCount and the
+         * invalid output counters) and leaves nothing to read: the reader
+         * sees an empty controller and comes back on its next pass.
+         */
+        if (result != HCI_SDC_GET_PACKET || len == 0U)
+        {
+            return false;
+        }
+        pSdc->HeldType = type;
+        pSdc->HeldLen = len;
+    }
+
+    return (uint32_t)pSdc->HeldType == DevAddr;
+}
+
+static int HciSdcIntrfRxData(DevIntrf_t * const pIntrf, uint8_t *pBuffer, int BufferLen)
+{
+    HciSdc_t *pSdc = HciSdcIntrfOwner(pIntrf);
+
+    if (pSdc->HeldLen == 0U || pBuffer == NULL || BufferLen < (int)pSdc->HeldLen)
+    {
+        return 0;
+    }
+
+    int l = (int)pSdc->HeldLen;
+    memcpy(pBuffer, pSdc->HeldPacket, pSdc->HeldLen);
+    pSdc->HeldLen = 0U;
+    return l;
+}
+
+static void HciSdcIntrfStopRx(DevIntrf_t * const)
+{
+}
+
+static bool HciSdcIntrfStartTx(DevIntrf_t * const pIntrf, uint32_t DevAddr)
+{
+    HciSdc_t *pSdc = HciSdcIntrfOwner(pIntrf);
+
+    pSdc->TxType = (HciH4PacketType_t)DevAddr;
+    return true;
+}
+
+static int HciSdcIntrfTxData(DevIntrf_t * const pIntrf, const uint8_t *pData, int DataLen)
+{
+    HciSdc_t *pSdc = HciSdcIntrfOwner(pIntrf);
+
+    if (pData == NULL || DataLen <= 0)
+    {
+        return 0;
+    }
+
+    return HciSdcPutPacket(pSdc, pSdc->TxType, pData, (size_t)DataLen) ? DataLen : 0;
+}
+
+static void HciSdcIntrfStopTx(DevIntrf_t * const)
+{
+}
+
+static void HciSdcIntrfReset(DevIntrf_t * const pIntrf)
+{
+    HciSdc_t *pSdc = HciSdcIntrfOwner(pIntrf);
+
+    pSdc->HeldLen = 0U;
+}
+
+static void HciSdcIntrfPowerOff(DevIntrf_t * const)
+{
+}
+
+static void *HciSdcIntrfHandle(DevIntrf_t * const pIntrf)
+{
+    return HciSdcIntrfOwner(pIntrf);
+}
+
+static void HciSdcIntrfInit(HciSdc_t *pSdc)
+{
+    DevIntrf_t *d = &pSdc->DevIntrf;
+
+    d->pDevData = pSdc;
+    d->Type = DEVINTRF_TYPE_BT;
+    d->bDma = false;
+    d->bIntEn = false;
+    d->MaxRetry = 1;
+    atomic_flag_clear(&d->bBusy);
+    atomic_store(&d->EnCnt, 0);
+    atomic_store(&d->bTxReady, true);
+    atomic_store(&d->bNoStop, false);
+    d->Disable = HciSdcIntrfDisable;
+    d->Enable = HciSdcIntrfEnable;
+    d->GetRate = HciSdcIntrfRate;
+    d->SetRate = HciSdcIntrfSetRate;
+    d->StartRx = HciSdcIntrfStartRx;
+    d->RxData = HciSdcIntrfRxData;
+    d->StopRx = HciSdcIntrfStopRx;
+    d->StartTx = HciSdcIntrfStartTx;
+    d->TxData = HciSdcIntrfTxData;
+    d->TxSrData = HciSdcIntrfTxData;
+    d->StopTx = HciSdcIntrfStopTx;
+    d->Reset = HciSdcIntrfReset;
+    d->PowerOff = HciSdcIntrfPowerOff;
+    d->GetHandle = HciSdcIntrfHandle;
+}
+
 
 bool HciSdcInit(HciSdc_t *pSdc,
-                const HciSdcOps_t *pOps,
                 const HciCmdEntry_t *pCommands,
                 size_t CommandCount,
                 void *pCommandContext,
                 uint8_t *pCommandEvent,
                 size_t CommandEventCapacity)
 {
-    if (pSdc == NULL || pOps == NULL || pOps->AclPut == NULL || pOps->Get == NULL)
+    if (pSdc == NULL)
     {
         return false;
     }
 
     memset(pSdc, 0, sizeof(*pSdc));
-    pSdc->Ops = *pOps;
-    if (pSdc->Ops.RetryError == 0)
-    {
-        pSdc->Ops.RetryError = HCI_SDC_RETRY_ERROR;
-    }
 
     if (!HciCmdDispatchInit(&pSdc->Commands,
                             pCommands,
@@ -1350,16 +1478,8 @@ bool HciSdcInit(HciSdc_t *pSdc,
         return false;
     }
 
-    pSdc->ControllerOps.Put = HciSdcPutPacket;
-    pSdc->ControllerOps.Get = HciSdcGetPacket;
-    pSdc->ControllerOps.Process = HciSdcProcessBackend;
-    pSdc->ControllerOps.pContext = pSdc;
+    HciSdcIntrfInit(pSdc);
 
     return true;
-}
-
-const HciControllerOps_t *HciSdcGetControllerOps(HciSdc_t *pSdc)
-{
-    return pSdc != NULL ? &pSdc->ControllerOps : NULL;
 }
 

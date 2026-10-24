@@ -283,11 +283,16 @@ bool HciCmdDispatchPut(HciCmdDispatch_t *pDispatch,
     uint8_t *pReturn = &pDispatch->pEvent[HCI_COMMAND_COMPLETE_BASE_SIZE];
     const size_t returnCapacity = pDispatch->EventCapacity - HCI_COMMAND_COMPLETE_BASE_SIZE;
     pDispatch->HandlerCallCount++;
-    HciCmdResult_t result = pEntry->Handler(pDispatch->pContext,
-                                            &pPacket[HCI_DISPATCH_COMMAND_HEADER_SIZE],
-                                            paramLen,
-                                            pReturn,
-                                            returnCapacity);
+    HciCmdResult_t result = pEntry->Kind != HCI_CMD_KIND_HANDLER ?
+        HciCmdGenericCall(pEntry,
+                          &pPacket[HCI_DISPATCH_COMMAND_HEADER_SIZE],
+                          pReturn,
+                          returnCapacity) :
+        pEntry->Handler(pDispatch->pContext,
+                        &pPacket[HCI_DISPATCH_COMMAND_HEADER_SIZE],
+                        paramLen,
+                        pReturn,
+                        returnCapacity);
 
     /*
      * Response kind is a property of the opcode, not a handler choice. The
@@ -378,4 +383,64 @@ bool HciCmdDispatchGet(HciCmdDispatch_t *pDispatch,
 bool HciCmdDispatchEventPending(const HciCmdDispatch_t *pDispatch)
 {
     return pDispatch != NULL && pDispatch->EventPending;
+}
+
+/*
+ * The SDC functions behind a shared row take pointers to their own structure
+ * types. Every one of them passes the pointers the same way, so the row holds
+ * the function as a handler pointer and this casts it back to the shape its
+ * Kind names.
+ */
+typedef uint8_t (*HciCmdFnP_t)(const void *);
+typedef uint8_t (*HciCmdFnPR_t)(const void *, void *);
+typedef uint8_t (*HciCmdFnN_t)(void);
+typedef uint8_t (*HciCmdFnNR_t)(void *);
+typedef void (*HciCmdFnAny_t)(void);
+
+HciCmdResult_t HciCmdGenericCall(const HciCmdEntry_t *pEntry,
+                                 const uint8_t *pParams,
+                                 uint8_t *pReturn,
+                                 size_t ReturnCapacity)
+{
+    HciCmdResult_t result = {HCI_STATUS_SUCCESS,
+                             (HciCmdResponse_t)pEntry->Response, 0U};
+
+    if (pEntry->ReturnLen > ReturnCapacity)
+    {
+        result.Status = HCI_STATUS_MEMORY_CAPACITY_EXCEEDED;
+        return result;
+    }
+
+    alignas(4) uint8_t in[HCI_CMD_GENERIC_IN_MAX];
+    alignas(4) uint8_t out[HCI_CMD_GENERIC_OUT_MAX];
+    const HciCmdFnAny_t fn = reinterpret_cast<HciCmdFnAny_t>(pEntry->Handler);
+
+    if (pEntry->ParamLen != 0U)
+    {
+        memcpy(in, pParams, pEntry->ParamLen);
+    }
+
+    switch (pEntry->Kind)
+    {
+        case HCI_CMD_KIND_P:
+            result.Status = reinterpret_cast<HciCmdFnP_t>(fn)(in);
+            break;
+        case HCI_CMD_KIND_PR:
+            result.Status = reinterpret_cast<HciCmdFnPR_t>(fn)(in, out);
+            break;
+        case HCI_CMD_KIND_N:
+            result.Status = reinterpret_cast<HciCmdFnN_t>(fn)();
+            break;
+        default:
+            result.Status = reinterpret_cast<HciCmdFnNR_t>(fn)(out);
+            break;
+    }
+
+    if (result.Status == HCI_STATUS_SUCCESS && pEntry->ReturnLen != 0U)
+    {
+        memcpy(pReturn, out, pEntry->ReturnLen);
+        result.ReturnLen = pEntry->ReturnLen;
+    }
+
+    return result;
 }

@@ -3,6 +3,7 @@
  */
 
 #include "hci_sdc.h"
+#include "sdc_hci.h"
 #include "hci_core_profile.h"
 #include "sdc_hci_vs.h"
 
@@ -20,16 +21,23 @@ struct FakeSdc
     unsigned GetCount;
 };
 
-static int32_t AclPut(void *pContext, const uint8_t *)
+/* The nrfxlib controller entry points hci_sdc.cpp calls, over a fake. */
+static FakeSdc *s_pFake;
+
+int32_t sdc_hci_data_put(uint8_t const *)
 {
-    FakeSdc *pSdc = static_cast<FakeSdc *>(pContext);
-    pSdc->AclCount++;
-    return pSdc->AclResult;
+    s_pFake->AclCount++;
+    return s_pFake->AclResult;
 }
 
-static int32_t Get(void *pContext, uint8_t *pPacket, uint8_t *pType)
+int32_t sdc_hci_iso_data_put(uint8_t const *)
 {
-    FakeSdc *pSdc = static_cast<FakeSdc *>(pContext);
+    return -NRF_EAGAIN;
+}
+
+int32_t sdc_hci_get(uint8_t *pPacket, uint8_t *pType)
+{
+    FakeSdc *pSdc = s_pFake;
     pSdc->GetCount++;
 
     if (pSdc->GetResult == 0)
@@ -65,17 +73,12 @@ static const HciCmdEntry_t s_Commands[] = {
     {0x1002U, 0U, 64U, HCI_CMD_RESPONSE_COMPLETE, ReadSupportedCommands},
 };
 
-static void Init(HciSdc_t *pSdc, FakeSdc *pBackend, uint8_t *pCommandEvent,
+static void Init(HciSdc_t *pSdc, FakeSdc *pCtlr, uint8_t *pCommandEvent,
                  size_t CommandEventCapacity)
 {
-    HciSdcOps_t ops = {};
-    ops.AclPut = AclPut;
-    ops.Get = Get;
-    ops.pContext = pBackend;
-    ops.RetryError = HCI_SDC_RETRY_ERROR;
-
-    pBackend->GetResult = HCI_SDC_RETRY_ERROR;
-    assert(HciSdcInit(pSdc, &ops, s_Commands,
+    s_pFake = pCtlr;
+    pCtlr->GetResult = -NRF_EAGAIN;
+    assert(HciSdcInit(pSdc, s_Commands,
                       sizeof(s_Commands) / sizeof(s_Commands[0]), NULL,
                       pCommandEvent, CommandEventCapacity));
 }
@@ -97,9 +100,9 @@ static size_t RunSupplementalCommand(uint16_t Opcode,
     assert(ParamLen <= 32U);
 
     HciSdc_t sdc;
-    FakeSdc backend = {};
+    FakeSdc ctlr = {};
     uint8_t commandEvent[80];
-    Init(&sdc, &backend, commandEvent, sizeof(commandEvent));
+    Init(&sdc, &ctlr, commandEvent, sizeof(commandEvent));
 
     uint8_t command[HCI_DISPATCH_COMMAND_HEADER_SIZE + 32U];
     command[0] = (uint8_t)Opcode;
@@ -110,30 +113,30 @@ static size_t RunSupplementalCommand(uint16_t Opcode,
         memcpy(&command[HCI_DISPATCH_COMMAND_HEADER_SIZE], pParams, ParamLen);
     }
 
-    const HciControllerOps_t *controller = HciSdcGetControllerOps(&sdc);
+    HciSdc_t *controller = &sdc;
     assert(controller != NULL);
-    assert(controller->Put(controller->pContext, HCI_H4_PACKET_COMMAND,
+    assert(HciSdcPutPacket(controller, HCI_H4_PACKET_COMMAND,
                            command,
                            HCI_DISPATCH_COMMAND_HEADER_SIZE + ParamLen));
 
     HciH4PacketType_t type = HCI_H4_PACKET_NONE;
     size_t packetLen = 0U;
-    assert(controller->Get(controller->pContext, &type, pPacket,
+    assert(HciSdcGetPacket(controller, &type, pPacket,
                            PacketCapacity, &packetLen) ==
-           HCI_CONTROLLER_GET_PACKET);
+           HCI_SDC_GET_PACKET);
     assert(type == HCI_H4_PACKET_EVENT);
-    assert(backend.GetCount == 0U);
+    assert(ctlr.GetCount == 0U);
     return packetLen;
 }
 
 static void TestReadSupportedStatesCompatibilityCommand(void)
 {
     HciSdc_t sdc;
-    FakeSdc backend = {};
+    FakeSdc ctlr = {};
     uint8_t commandEvent[80];
-    Init(&sdc, &backend, commandEvent, sizeof(commandEvent));
+    Init(&sdc, &ctlr, commandEvent, sizeof(commandEvent));
 
-    const HciControllerOps_t *controller = HciSdcGetControllerOps(&sdc);
+    HciSdc_t *controller = &sdc;
     assert(controller != NULL);
 
     assert(HciSdcKnowsCommand(&sdc,
@@ -144,15 +147,15 @@ static void TestReadSupportedStatesCompatibilityCommand(void)
                                1U));
 
     const uint8_t command[] = {0x1CU, 0x20U, 0x00U};
-    assert(controller->Put(controller->pContext, HCI_H4_PACKET_COMMAND,
+    assert(HciSdcPutPacket(controller, HCI_H4_PACKET_COMMAND,
                            command, sizeof(command)));
 
     HciH4PacketType_t type = HCI_H4_PACKET_NONE;
     uint8_t packet[80];
     size_t packetLen = 0U;
-    assert(controller->Get(controller->pContext, &type, packet,
+    assert(HciSdcGetPacket(controller, &type, packet,
                            sizeof(packet), &packetLen) ==
-           HCI_CONTROLLER_GET_PACKET);
+           HCI_SDC_GET_PACKET);
 
     static const uint8_t expectedStates[8] = {
         0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFFU, 0x03U, 0x00U, 0x00U
@@ -164,7 +167,7 @@ static void TestReadSupportedStatesCompatibilityCommand(void)
     assert(packet[3] == 0x1CU && packet[4] == 0x20U);
     assert(packet[5] == HCI_STATUS_SUCCESS);
     assert(memcmp(&packet[6], expectedStates, sizeof(expectedStates)) == 0);
-    assert(backend.GetCount == 0U);
+    assert(ctlr.GetCount == 0U);
 
     printf("[ok] mandatory LE Read Supported States is synthesized locally\n");
 }
@@ -172,21 +175,21 @@ static void TestReadSupportedStatesCompatibilityCommand(void)
 static void TestSupportedCommandsAdvertisesCompatibilityCommand(void)
 {
     HciSdc_t sdc;
-    FakeSdc backend = {};
+    FakeSdc ctlr = {};
     uint8_t commandEvent[80];
-    Init(&sdc, &backend, commandEvent, sizeof(commandEvent));
+    Init(&sdc, &ctlr, commandEvent, sizeof(commandEvent));
 
-    const HciControllerOps_t *controller = HciSdcGetControllerOps(&sdc);
+    HciSdc_t *controller = &sdc;
     const uint8_t command[] = {0x02U, 0x10U, 0x00U};
-    assert(controller->Put(controller->pContext, HCI_H4_PACKET_COMMAND,
+    assert(HciSdcPutPacket(controller, HCI_H4_PACKET_COMMAND,
                            command, sizeof(command)));
 
     HciH4PacketType_t type = HCI_H4_PACKET_NONE;
     uint8_t packet[80];
     size_t packetLen = 0U;
-    assert(controller->Get(controller->pContext, &type, packet,
+    assert(HciSdcGetPacket(controller, &type, packet,
                            sizeof(packet), &packetLen) ==
-           HCI_CONTROLLER_GET_PACKET);
+           HCI_SDC_GET_PACKET);
 
     assert(type == HCI_H4_PACKET_EVENT);
     assert(packetLen == 70U);
@@ -211,9 +214,9 @@ static void TestCore62SupplementalCommands(void)
     const uint16_t readMinSupportedConnInterval = 0x20A3U;
 
     HciSdc_t sdc;
-    FakeSdc backend = {};
+    FakeSdc ctlr = {};
     uint8_t commandEvent[80];
-    Init(&sdc, &backend, commandEvent, sizeof(commandEvent));
+    Init(&sdc, &ctlr, commandEvent, sizeof(commandEvent));
 
     assert(HciSdcKnowsCommand(&sdc, frameSpaceUpdate, 9U));
     assert(!HciSdcKnowsCommand(&sdc, frameSpaceUpdate, 8U));
@@ -311,9 +314,9 @@ static void TestVendorSupplementalCommands(void)
     };
 
     HciSdc_t sdc;
-    FakeSdc backend = {};
+    FakeSdc ctlr = {};
     uint8_t commandEvent[80];
-    Init(&sdc, &backend, commandEvent, sizeof(commandEvent));
+    Init(&sdc, &ctlr, commandEvent, sizeof(commandEvent));
 
     uint8_t params[16] = {};
     uint8_t packet[80];
@@ -402,18 +405,18 @@ static void TestVendorSupplementalCommands(void)
 static void TestEveryFailedAclCanReturnItsCredit(void)
 {
     HciSdc_t sdc;
-    FakeSdc backend = {};
+    FakeSdc ctlr = {};
     uint8_t commandEvent[80];
-    Init(&sdc, &backend, commandEvent, sizeof(commandEvent));
+    Init(&sdc, &ctlr, commandEvent, sizeof(commandEvent));
 
-    backend.AclResult = -1;
-    const HciControllerOps_t *controller = HciSdcGetControllerOps(&sdc);
+    ctlr.AclResult = -1;
+    HciSdc_t *controller = &sdc;
     uint8_t acl[HCI_SDC_ACL_HEADER_SIZE];
 
     for (uint16_t handle = 0U; handle < HCI_SDC_ACL_TRACK_HANDLES; handle++)
     {
         MakeAcl(handle, acl);
-        assert(controller->Put(controller->pContext, HCI_H4_PACKET_ACL,
+        assert(HciSdcPutPacket(controller, HCI_H4_PACKET_ACL,
                                acl, sizeof(acl)));
     }
 
@@ -423,9 +426,9 @@ static void TestEveryFailedAclCanReturnItsCredit(void)
     HciH4PacketType_t type = HCI_H4_PACKET_NONE;
     uint8_t packet[80];
     size_t packetLen = 0U;
-    assert(controller->Get(controller->pContext, &type, packet,
+    assert(HciSdcGetPacket(controller, &type, packet,
                            sizeof(packet), &packetLen) ==
-           HCI_CONTROLLER_GET_PACKET);
+           HCI_SDC_GET_PACKET);
     assert(type == HCI_H4_PACKET_EVENT);
     assert(packet[0] == HCI_SDC_EVENT_NUM_COMPLETED_PACKETS);
     assert(packet[2] == HCI_SDC_ACL_TRACK_HANDLES);
@@ -437,47 +440,47 @@ static void TestEveryFailedAclCanReturnItsCredit(void)
 static void TestSyntheticCreditsCannotStarveControllerQueue(void)
 {
     HciSdc_t sdc;
-    FakeSdc backend = {};
+    FakeSdc ctlr = {};
     uint8_t commandEvent[80];
-    Init(&sdc, &backend, commandEvent, sizeof(commandEvent));
+    Init(&sdc, &ctlr, commandEvent, sizeof(commandEvent));
 
-    backend.AclResult = -1;
-    const HciControllerOps_t *controller = HciSdcGetControllerOps(&sdc);
+    ctlr.AclResult = -1;
+    HciSdc_t *controller = &sdc;
     uint8_t acl[HCI_SDC_ACL_HEADER_SIZE];
     MakeAcl(0U, acl);
 
-    assert(controller->Put(controller->pContext, HCI_H4_PACKET_ACL,
+    assert(HciSdcPutPacket(controller, HCI_H4_PACKET_ACL,
                            acl, sizeof(acl)));
 
     HciH4PacketType_t type = HCI_H4_PACKET_NONE;
     uint8_t packet[80];
     size_t packetLen = 0U;
-    assert(controller->Get(controller->pContext, &type, packet,
+    assert(HciSdcGetPacket(controller, &type, packet,
                            sizeof(packet), &packetLen) ==
-           HCI_CONTROLLER_GET_PACKET);
+           HCI_SDC_GET_PACKET);
     assert(packet[0] == HCI_SDC_EVENT_NUM_COMPLETED_PACKETS);
-    assert(backend.GetCount == 0U);
+    assert(ctlr.GetCount == 0U);
 
     MakeAcl(1U, acl);
-    assert(controller->Put(controller->pContext, HCI_H4_PACKET_ACL,
+    assert(HciSdcPutPacket(controller, HCI_H4_PACKET_ACL,
                            acl, sizeof(acl)));
 
-    backend.GetResult = 0;
-    backend.GetType = HCI_SDC_MSG_TYPE_EVENT;
-    backend.GetPacket[0] = 0x3EU;
-    backend.GetPacket[1] = 1U;
-    backend.GetPacket[2] = 0xAAU;
+    ctlr.GetResult = 0;
+    ctlr.GetType = HCI_SDC_MSG_TYPE_EVENT;
+    ctlr.GetPacket[0] = 0x3EU;
+    ctlr.GetPacket[1] = 1U;
+    ctlr.GetPacket[2] = 0xAAU;
 
-    assert(controller->Get(controller->pContext, &type, packet,
+    assert(HciSdcGetPacket(controller, &type, packet,
                            sizeof(packet), &packetLen) ==
-           HCI_CONTROLLER_GET_PACKET);
-    assert(backend.GetCount == 1U);
+           HCI_SDC_GET_PACKET);
+    assert(ctlr.GetCount == 1U);
     assert(packet[0] == 0x3EU && packet[2] == 0xAAU);
 
-    backend.GetResult = HCI_SDC_RETRY_ERROR;
-    assert(controller->Get(controller->pContext, &type, packet,
+    ctlr.GetResult = -NRF_EAGAIN;
+    assert(HciSdcGetPacket(controller, &type, packet,
                            sizeof(packet), &packetLen) ==
-           HCI_CONTROLLER_GET_PACKET);
+           HCI_SDC_GET_PACKET);
     assert(packet[0] == HCI_SDC_EVENT_NUM_COMPLETED_PACKETS);
 
     printf("[ok] synthetic ACL credits cannot starve the controller queue\n");
@@ -486,26 +489,26 @@ static void TestSyntheticCreditsCannotStarveControllerQueue(void)
 static void TestUnsafeDefensiveCreditGuardIsOffByDefault(void)
 {
     HciSdc_t sdc;
-    FakeSdc backend = {};
+    FakeSdc ctlr = {};
     uint8_t commandEvent[80];
-    Init(&sdc, &backend, commandEvent, sizeof(commandEvent));
+    Init(&sdc, &ctlr, commandEvent, sizeof(commandEvent));
 
-    backend.AclResult = 0;
+    ctlr.AclResult = 0;
     HciSdcSetAclLimit(&sdc, 1U);
-    const HciControllerOps_t *controller = HciSdcGetControllerOps(&sdc);
+    HciSdc_t *controller = &sdc;
     uint8_t acl[HCI_SDC_ACL_HEADER_SIZE];
     MakeAcl(3U, acl);
 
     for (unsigned i = 0U; i < 4U; i++)
     {
-        assert(controller->Put(controller->pContext, HCI_H4_PACKET_ACL,
+        assert(HciSdcPutPacket(controller, HCI_H4_PACKET_ACL,
                                acl, sizeof(acl)));
     }
 
 #if HCI_SDC_ENFORCE_ACL_CREDITS
 #error "critical routing test expects the unsafe defensive guard off by default"
 #endif
-    assert(backend.AclCount == 4U);
+    assert(ctlr.AclCount == 4U);
     assert(sdc.AclCreditOverrunCount == 0U);
 
     printf("[ok] host-maskable disconnect events cannot stale-throttle ACL\n");

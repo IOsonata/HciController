@@ -50,7 +50,7 @@ extern "C" int32_t HciSdcResourcesRequired(void)
     return s_Required;
 }
 
-static bool HciSdcCfgSet(uint8_t Type, const sdc_cfg_t *pCfg)
+extern "C" bool HciSdcCfgSet(uint8_t Type, const sdc_cfg_t *pCfg)
 {
     int32_t required = sdc_cfg_set(SDC_DEFAULT_RESOURCE_CFG_TAG, Type, pCfg);
 
@@ -59,7 +59,7 @@ static bool HciSdcCfgSet(uint8_t Type, const sdc_cfg_t *pCfg)
      */
     if (required < 0)
     {
-        HciTrace("sdc: cfg type=%u failed result=%ld\r\n", (unsigned)Type,
+        HciTraceError("sdc: cfg type=%u failed result=%ld\r\n", (unsigned)Type,
                  (long)required);
         s_Required = required;
         return false;
@@ -69,8 +69,43 @@ static bool HciSdcCfgSet(uint8_t Type, const sdc_cfg_t *pCfg)
     return true;
 }
 
+extern "C" __attribute__((weak)) bool HciSdcFeatSubratingSupport(void)
+{
+    return false;
+}
+
+extern "C" __attribute__((weak)) bool HciSdcFeatExtSupport(bool)
+{
+    return false;
+}
+
+extern "C" __attribute__((weak)) bool HciSdcFeatExtConfig(void)
+{
+    return true;
+}
+
+extern "C" __attribute__((weak)) bool HciSdcFeatPastSupport(void)
+{
+    return false;
+}
+
+extern "C" __attribute__((weak)) bool HciSdcFeatPawrSupport(bool)
+{
+    return false;
+}
+
+extern "C" __attribute__((weak)) bool HciSdcFeatPawrConfig(void)
+{
+    return true;
+}
+
 int32_t HciSdcResourcesApply(void)
 {
+    bool bSubrating;
+    bool bExt;
+    bool bPast;
+    bool bPawr;
+
     s_Required = 0;
 
     sdc_support_ext_adv();
@@ -114,26 +149,9 @@ int32_t HciSdcResourcesApply(void)
     sdc_support_sca_central();
     sdc_support_sca_peripheral();
 
-    sdc_support_connection_subrating_central();
-    sdc_support_connection_subrating_peripheral();
-
-#if HCI_CONTROLLER_TARGET_CORE_VERSION >= HCI_CORE_VERSION_6_0
-    sdc_support_extended_feature_set_central();
-    sdc_support_extended_feature_set_peripheral();
-#endif
-
-#if HCI_CONTROLLER_TARGET_CORE_VERSION >= HCI_CORE_VERSION_6_2
-    /*
-     * Both Core 6.2 additions depend on the Extended Feature Set above, and
-     * Shorter Connection Intervals also depends on Connection Subrating. Keep
-     * the calls after both prerequisites and behind the same profile gate as
-     * their HCI commands and memory terms.
-     */
-    sdc_support_frame_space_update_central();
-    sdc_support_frame_space_update_peripheral();
-    sdc_support_shorter_connection_intervals_central();
-    sdc_support_shorter_connection_intervals_peripheral();
-#endif
+    /* Optional features. Each hook is a file the project links. */
+    bSubrating = HciSdcFeatSubratingSupport();
+    bExt = HciSdcFeatExtSupport(bSubrating);
 
     /*
      * sdk-nrfxlib asks for a central role before this, which
@@ -151,19 +169,14 @@ int32_t HciSdcResourcesApply(void)
      * sync out still needs both sender calls, and this image supports both
      * roles.
      */
-    sdc_support_periodic_adv_sync_transfer_sender_central();
-    sdc_support_periodic_adv_sync_transfer_sender_peripheral();
-    sdc_support_periodic_adv_sync_transfer_receiver_central();
-    sdc_support_periodic_adv_sync_transfer_receiver_peripheral();
+    bPast = HciSdcFeatPastSupport();
 
     /*
-     * Periodic advertising with responses, last because sdk-nrfxlib requires
+     * Periodic advertising with responses last, because sdk-nrfxlib requires
      * extended advertising, the matching plain periodic half, and a sync
      * transfer sender or receiver, all of which are above.
      */
-    sdc_support_le_periodic_adv_with_rsp();
-
-    sdc_support_le_periodic_sync_with_rsp();
+    bPawr = HciSdcFeatPawrSupport(bPast);
 
     /*
      * Isochronous channels, four roles. A controller does not get to decide
@@ -216,20 +229,10 @@ int32_t HciSdcResourcesApply(void)
     cfg.fal_size = HCI_SDC_FAL_SIZE;
     if (!HciSdcCfgSet(SDC_CFG_TYPE_FAL_SIZE, &cfg)) return s_Required;
 
-#if HCI_CONTROLLER_TARGET_CORE_VERSION >= HCI_CORE_VERSION_6_0
-    /*
-     * How many feature pages the controller keeps per link. The pool in
-     * hci_sdc_resources.h is computed from the same macro, so the two cannot
-     * disagree about what was reserved.
-     */
-    cfg = {};
-    cfg.extended_feature_page_count = HCI_SDC_EXTENDED_FEATURE_PAGES;
-    if (!HciSdcCfgSet(SDC_CFG_TYPE_EXTENDED_FEATURE_PAGE_COUNT,
-                           &cfg))
+    if (bExt && !HciSdcFeatExtConfig())
     {
         return s_Required;
     }
-#endif
 
     /*
      * Periodic advertisers. Each takes one of the advertising sets configured
@@ -272,28 +275,7 @@ int32_t HciSdcResourcesApply(void)
         return s_Required;
     }
 
-    cfg = {};
-    cfg.periodic_adv_rsp_count.count = HCI_SDC_PERIODIC_ADV_RSP_COUNT;
-    if (!HciSdcCfgSet(SDC_CFG_TYPE_PERIODIC_ADV_RSP_COUNT, &cfg))
-    {
-        return s_Required;
-    }
-
-    /*
-     * All three buffer numbers together, because the vendor structure holds
-     * them in one member and the pool macro takes all three. Setting one and
-     * leaving the others to their defaults would compute a pool for numbers the
-     * controller was never given.
-     */
-    cfg = {};
-    cfg.periodic_adv_rsp_buffer_cfg.tx_buffer_count =
-        HCI_SDC_PERIODIC_ADV_RSP_TX_BUFFERS;
-    cfg.periodic_adv_rsp_buffer_cfg.rx_buffer_count =
-        HCI_SDC_PERIODIC_ADV_RSP_RX_BUFFERS;
-    cfg.periodic_adv_rsp_buffer_cfg.max_tx_data_size =
-        HCI_SDC_PERIODIC_ADV_RSP_MAX_TX_DATA;
-    if (!HciSdcCfgSet(SDC_CFG_TYPE_PERIODIC_ADV_RSP_BUFFER_CFG,
-                           &cfg))
+    if (bPawr && !HciSdcFeatPawrConfig())
     {
         return s_Required;
     }

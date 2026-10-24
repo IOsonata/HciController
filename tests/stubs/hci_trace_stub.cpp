@@ -46,6 +46,21 @@ extern "C" void HciTrace(const char *pFormat, ...)
     s_Trace[s_TraceLen] = '\0';
 }
 
+extern "C" void HciTraceError(const char *pFormat, ...)
+{
+    if (pFormat == nullptr)
+    {
+        return;
+    }
+
+    char line[HCI_TRACE_RECORD_SIZE];
+    va_list args;
+    va_start(args, pFormat);
+    (void)vsnprintf(line, sizeof(line), pFormat, args);
+    va_end(args);
+    HciTrace("%s", line);
+}
+
 extern "C" void HciTraceInit(void)
 {
     HciTrace("\r\n--- HciController trace ---\r\n");
@@ -92,4 +107,17 @@ extern "C" size_t HciTraceTestTake(char *pOut, size_t Capacity)
     memcpy(pOut, s_Trace, count);
     pOut[count] = '\0';
     return count;
+}
+
+extern "C" void HciTraceCommands(bool, bool)
+{
+}
+
+extern "C" bool HciTraceCommandsEnabled(void)
+{
+    return false;
+}
+
+extern "C" void HciTraceCommandLine(const char *, ...)
+{
 }

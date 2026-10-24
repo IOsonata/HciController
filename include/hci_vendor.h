@@ -107,6 +107,28 @@ extern "C" {
 /* Return parameters a Command Complete carries after its status octet. */
 #define HCI_VENDOR_RETURN_MAX                   251U
 
+#define HCI_VENDOR_STATUS_SUCCESS           0x00U
+#define HCI_VENDOR_STATUS_UNSUPPORTED       0x11U  /* Unsupported Feature */
+#define HCI_VENDOR_STATUS_INVALID_PARAMS    0x12U
+#define HCI_VENDOR_STATUS_AUTH_FAILURE      0x05U
+#define HCI_VENDOR_STATUS_HW_FAILURE        0x03U
+
+/**
+ * @brief	Crypto commands 0xFFF5 to 0xFFFB. Defined in hci_vendor_crypto.cpp,
+ * 			which a project links to offer them.
+ *
+ * The library defaults answer false (not handled) and 0 (no bits), and the
+ * commands then answer Unsupported Feature.
+ *
+ * @return	true when the opcode was handled and *pStatus is set
+ */
+bool HciVendorCryptoCommand(uint16_t Opcode, const uint8_t *pParam,
+                            size_t ParamLen, uint8_t *pRet, size_t *pRetLen,
+                            uint8_t *pStatus);
+
+/** @brief	HCI_VENDOR_CRYPTO_* bits of what the linked engines offer. */
+uint32_t HciVendorCryptoBits(void);
+
 /**
  * @brief	Whether an opcode is one of these commands.
  */
@@ -147,14 +169,6 @@ bool HciVendorStaticAddr(uint8_t Addr[6]);
 
 class RngEngine;
 
-/**
- * @brief	Entropy source of the crypto commands. Defined by the target.
- *
- * The library default answers NULL, and the commands that need random
- * numbers (Random, ECDSA sign) are then left out of the supported bitmap and
- * answer Unsupported Feature.
- */
-RngEngine *HciVendorRng(void);
 #endif
 
 #endif /* HCI_VENDOR_H */

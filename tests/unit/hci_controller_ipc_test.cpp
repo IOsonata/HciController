@@ -12,6 +12,7 @@
  */
 
 #include "hci_controller.h"
+#include "hci_ctlr_fake_intrf.h"
 #include "bluetooth/bt_hci_ipc.h"
 #include "ipc/ipc_intrf.h"
 
@@ -59,25 +60,25 @@ static bool FakePut(void *, HciH4PacketType_t Type, const uint8_t *pPacket, size
     return true;
 }
 
-static HciControllerGetResult_t FakeGet(void *, HciH4PacketType_t *pType, uint8_t *pPacket,
+static HciSdcGetResult_t FakeGet(void *, HciH4PacketType_t *pType, uint8_t *pPacket,
                                         size_t Capacity, size_t *pLen)
 {
     if (g_Ctrl.OutHead == g_Ctrl.OutTail)
     {
-        return HCI_CONTROLLER_GET_EMPTY;
+        return HCI_SDC_GET_EMPTY;
     }
 
     const unsigned i = g_Ctrl.OutHead % 8U;
     if (g_Ctrl.OutLen[i] > Capacity)
     {
-        return HCI_CONTROLLER_GET_ERROR;
+        return HCI_SDC_GET_ERROR;
     }
 
     memcpy(pPacket, g_Ctrl.Out[i], g_Ctrl.OutLen[i]);
     *pType = g_Ctrl.OutType[i];
     *pLen = g_Ctrl.OutLen[i];
     g_Ctrl.OutHead++;
-    return HCI_CONTROLLER_GET_PACKET;
+    return HCI_SDC_GET_PACKET;
 }
 
 static bool QueueOut(HciH4PacketType_t Type, const uint8_t *pPacket, size_t Len)
@@ -149,13 +150,14 @@ static bool Setup(void)
     }
     s_Peer.DevIntrf.MaxRetry = 1;
 
-    HciControllerOps_t ops = {};
-    ops.Put = FakePut;
-    ops.Get = FakeGet;
+    static HciCtlrFakeIntrf_t fake;
+
+
+    DevIntrf_t *ctlr = HciCtlrFakeIntrfInit(&fake, FakePut, FakeGet, NULL);
 
     if (!HciControllerInitPacketTransport(&s_Hci, BtHciIpcIntrfGet(&s_Owner),
                                           s_HostPacket, sizeof(s_HostPacket),
-                                          s_CtrlPacket, sizeof(s_CtrlPacket), &ops))
+                                          s_CtrlPacket, sizeof(s_CtrlPacket), ctlr))
     {
         return false;
     }

@@ -4,8 +4,10 @@
 @brief	HciController application runtime and host transport selection.
 
 		Defines the application state used to connect the HCI controller,
-		SoftDevice Controller backend, target port, runtime, UART H:4,
-		CDC H:4, native USB HCI, and diagnostic log transport.
+		SoftDevice Controller backend, target port, runtime and the host
+		transport the project links: UART H:4 (hci_host_uart.cpp), CDC H:4
+		or native USB HCI with the diagnostic log port (hci_host_usb.cpp),
+		IPC to another core (hci_host_ipc.cpp).
 
 @author	Nguyen Hoan Hoang
 @date	August 2026
@@ -19,52 +21,24 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/*
- * A part with no USB device, such as the nRF5340 network core, builds without
- * the USB host and diagnostic classes: set HCI_APP_HAS_USB to 0. The host is
- * then the UART or the IPC link to another core.
- */
-#ifndef HCI_APP_HAS_USB
-#define HCI_APP_HAS_USB             1
-#endif
-
 #include "cfifo.h"
-#include "coredev/uart.h"
+#include "device_intrf.h"
 #include "hci_controller.h"
 #include "hci_sdc_resources.h"
 #include "hci_target.h"
 #include "hci_sdc_nrfxlib.h"
 #include "hci_taktos.h"
-#include "hci_usb_mode.h"
-#if HCI_APP_HAS_USB
-#include "hci_usb.h"
-#include "usb/usbd_cdc.h"
-#endif
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/* A UART host. A part that reaches its host only through IPC sets it to 0. */
-#ifndef HCI_APP_HAS_UART
-#define HCI_APP_HAS_UART            1
-#endif
-
-/* The host is reached through an IpcIntrf, this part is the IPC owner. */
-#ifndef HCI_APP_HAS_IPC
-#define HCI_APP_HAS_IPC             0
-#endif
-
 #define HCI_APP_PACKET_SIZE         1024U
 #define HCI_APP_COMMAND_EVENT_SIZE  260U
+#ifndef HCI_APP_FIFO_DATA_SIZE
 #define HCI_APP_FIFO_DATA_SIZE      4096U
-#define HCI_APP_FIFO_MEM_SIZE       CFIFO_MEMSIZE(HCI_APP_FIFO_DATA_SIZE)
-#if HCI_APP_HAS_USB
-/* Diagnostic CDC input is consumed without processing. Keep two USB RX
- * packet slots; its TX log retention uses the original full FIFO. */
-#define HCI_APP_LOG_RX_MEM_SIZE      \
-    USB_INTRF_RXMEM_SIZE(2U, USBD_CDC_TRANS_WORDS * sizeof(uint32_t))
 #endif
+#define HCI_APP_FIFO_MEM_SIZE       CFIFO_MEMSIZE(HCI_APP_FIFO_DATA_SIZE)
 
 typedef enum
 {
@@ -88,7 +62,7 @@ typedef enum
 typedef struct
 {
     HciController_t Controller;
-    HciSdc_t Sdc;
+    HciSdcNrfxlib Sdc;
 
     /* Which layers the vendor specific counter readout reports. */
     HciCounters_t Counters;
@@ -99,20 +73,9 @@ typedef struct
      * CDC DeviceIntrf when USB is running. It is never mixed with the HCI stream.
      */
 
-#if defined(HCI_UART_BRIDGE) && HCI_UART_BRIDGE
-    bool BridgeUartReady;
-    uint32_t BridgeBaudRate;
-    uint8_t BridgePending[64];
-    uint16_t BridgePendingLen;
-    uint16_t BridgePendingOffset;
-    uint8_t BridgeInputPending[64];
-    uint16_t BridgeInputLen;
-    uint16_t BridgeInputOffset;
-#endif
     DevIntrf_t *pHostIntrf;
     HciAppHost_t HostType;
     HciAppMode_t Mode;
-    HciUsbDescriptorMode_t UsbDescriptorMode;
     bool UsbHciNative;
     bool HostOpen;
 
@@ -139,35 +102,18 @@ typedef struct
     uint32_t LinkIdlePasses;
 
     HciTaktOs_t Runtime;
-    /*
-     * The part, held through its interface. The instance belongs to the port,
-     * so nothing here has to know how large it is or which part it is.
-     */
-    HciTarget_t Target;
 
     uint8_t HostPacket[HCI_APP_PACKET_SIZE];
     uint8_t ControllerPacket[HCI_APP_PACKET_SIZE];
     uint8_t CommandEvent[HCI_APP_COMMAND_EVENT_SIZE];
     uint64_t SdcMem[(HCI_SDC_MEM_SIZE + 7U) / 8U];
 
-#if HCI_APP_HAS_USB || HCI_APP_HAS_UART
     /* UART H:4 and USB HCI are exclusive host modes. These FIFO buffers
-     * are reused by whichever host transport is active. The diagnostic
-     * CDC and optional nRF91 UART bridge retain independent storage. An IPC
-     * host keeps its rings in the shared memory block instead. */
+     * are reused by whichever of the two is active. An IPC host keeps its
+     * rings in the shared memory block instead; the diagnostic CDC and the
+     * UART bridge have storage of their own in hci_host_usb.cpp. */
     alignas(4) uint8_t HostRxFifoMem[HCI_APP_FIFO_MEM_SIZE];
     alignas(4) uint8_t HostTxFifoMem[HCI_APP_FIFO_MEM_SIZE];
-#endif
-#if defined(HCI_UART_BRIDGE) && HCI_UART_BRIDGE
-    alignas(4) uint8_t BridgeUartRxMem[HCI_APP_FIFO_MEM_SIZE];
-    alignas(4) uint8_t BridgeUartTxMem[HCI_APP_FIFO_MEM_SIZE];
-    alignas(4) uint8_t BridgeUsbRxMem[HCI_APP_FIFO_MEM_SIZE];
-    alignas(4) uint8_t BridgeUsbTxMem[HCI_APP_FIFO_MEM_SIZE];
-#endif
-#if HCI_APP_HAS_USB
-    alignas(4) uint8_t LogRxFifoMem[HCI_APP_LOG_RX_MEM_SIZE];
-    alignas(4) uint8_t LogTxFifoMem[HCI_APP_FIFO_MEM_SIZE];
-#endif
 
     int LastError;
     bool Initialized;
@@ -176,23 +122,66 @@ typedef struct
 /*
  * The target is passed in rather than chosen here, so this layer names no
  * part. A board decides which port it has and hands over the pair.
+ *
+ * The host transports are the same: each one is a file a project links,
+ * hci_host_uart.cpp, hci_host_usb.cpp or hci_host_ipc.cpp, and this layer
+ * has a weak default for every entry below that reports the transport as
+ * absent. A mode whose transport is not in the image fails at HciAppInitMode
+ * with the host interface error; nothing here names what a board has.
  */
+
+/* Wake the worker: a transport has data in or room out. */
+void HciAppWake(void);
+
+/* UART H:4 host. Opens the UART of board.h and sets pApp->pHostIntrf. */
+bool HciHostUartInit(HciApp_t *pApp);
+void HciHostUartRelease(HciApp_t *pApp);
+
+/*
+ * Send the trace out of the UART. For a host that does not use the UART, such
+ * as IPC: the UART and the host FIFO memory are idle, so they carry the trace
+ * at no cost in RAM. No flow control, transmit and receive pins only.
+ */
+bool HciHostUartLogOpen(HciApp_t *pApp);
+
+/*
+ * USB host: the device stack with the HCI function the mode asks for (none
+ * for a UART or IPC host that only wants the diagnostic CDC port), the
+ * diagnostic CDC and, on a board that has one, the UART bridge.
+ */
+bool HciHostUsbSetup(HciApp_t *pApp);
+void HciHostUsbRelease(HciApp_t *pApp);
+/* Enable the bus and wait for the host to configure the device. */
+bool HciHostUsbStart(HciApp_t *pApp);
+/* The log port alone, for a UART or IPC host on a board with a socket. */
+void HciHostUsbStartLogPort(HciApp_t *pApp);
+/* One pass: queued USB work, host open state, log port, bridge. */
+void HciHostUsbProcess(HciApp_t *pApp);
+bool HciHostUsbIsOpen(const HciApp_t *pApp);
+/* The host DeviceIntrf of the USB mode in use, CDC H:4 or native. */
+DevIntrf_t *HciHostUsbIntrf(const HciApp_t *pApp);
+/* Native HCI over USB is a packet transport, CDC H:4 a byte stream. */
+bool HciHostUsbIsPacket(const HciApp_t *pApp);
+
+/* IPC host on another core, a packet transport. */
+bool HciHostIpcInit(HciApp_t *pApp);
+void HciHostIpcRelease(HciApp_t *pApp);
 
 /*
  * Arm only the physical UART receive path before full controller startup.
  * The caller owns the object storage and must supply its cold-boot initialized
  * instance. H:4/controller processing remains deferred until HciAppInit().
  */
-bool HciAppUartEarlyInit(HciApp_t *pApp, HciTarget_t Target);
+bool HciAppUartEarlyInit(HciApp_t *pApp);
 
 /* Runtime transport selection used by the persistent board mode setting. */
-bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode, HciTarget_t Target);
+bool HciAppInitMode(HciApp_t *pApp, HciAppMode_t Mode);
 
 /*
  * Compatibility entry point. USB keeps the compile-time
  * HCI_USB_HCI_TRANSPORT default; UART is H:4.
  */
-bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType, HciTarget_t Target);
+bool HciAppInit(HciApp_t *pApp, HciAppHost_t HostType);
 void HciAppStop(HciApp_t *pApp);
 void HciAppThread(void *pContext);
 bool HciAppHostIsOpen(const HciApp_t *pApp);

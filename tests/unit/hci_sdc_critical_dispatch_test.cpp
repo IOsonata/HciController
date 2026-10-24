@@ -18,7 +18,7 @@
 #include "sdc_hci_cmd_le.h"
 #include "sdc_stub.h"
 
-static const HciControllerOps_t *Init(HciSdc_t *pSdc,
+static HciSdc_t *Init(HciSdc_t *pSdc,
                                       HciCounters_t *pCounters,
                                       uint8_t *pCommandEvent,
                                       size_t CommandEventCapacity)
@@ -28,12 +28,12 @@ static const HciControllerOps_t *Init(HciSdc_t *pSdc,
     assert(HciSdcNrfxlibInit(pSdc, pCommandEvent, CommandEventCapacity,
                              pCounters));
 
-    const HciControllerOps_t *controller = HciSdcGetControllerOps(pSdc);
+    HciSdc_t *controller = pSdc;
     assert(controller != NULL);
     return controller;
 }
 
-static size_t SendCommand(const HciControllerOps_t *controller,
+static size_t SendCommand(HciSdc_t *controller,
                           uint16_t Opcode,
                           const uint8_t *pParams,
                           size_t ParamLen,
@@ -50,14 +50,14 @@ static size_t SendCommand(const HciControllerOps_t *controller,
         memcpy(&command[3], pParams, ParamLen);
     }
 
-    assert(controller->Put(controller->pContext, HCI_H4_PACKET_COMMAND,
+    assert(HciSdcPutPacket(controller, HCI_H4_PACKET_COMMAND,
                            command, 3U + ParamLen));
 
     HciH4PacketType_t type = HCI_H4_PACKET_NONE;
     size_t eventLen = 0U;
-    assert(controller->Get(controller->pContext, &type, pEvent,
+    assert(HciSdcGetPacket(controller, &type, pEvent,
                            EventCapacity, &eventLen) ==
-           HCI_CONTROLLER_GET_PACKET);
+           HCI_SDC_GET_PACKET);
     assert(type == HCI_H4_PACKET_EVENT);
     assert(pEvent[0] == HCI_EVENT_COMMAND_COMPLETE);
     assert(pEvent[3] == (uint8_t)Opcode);
@@ -66,7 +66,7 @@ static size_t SendCommand(const HciControllerOps_t *controller,
     return eventLen;
 }
 
-static uint8_t SendCommandStatus(const HciControllerOps_t *controller,
+static uint8_t SendCommandStatus(HciSdc_t *controller,
                                  uint16_t Opcode,
                                  const uint8_t *pParams,
                                  size_t ParamLen,
@@ -83,14 +83,14 @@ static uint8_t SendCommandStatus(const HciControllerOps_t *controller,
         memcpy(&command[3], pParams, ParamLen);
     }
 
-    assert(controller->Put(controller->pContext, HCI_H4_PACKET_COMMAND,
+    assert(HciSdcPutPacket(controller, HCI_H4_PACKET_COMMAND,
                            command, 3U + ParamLen));
 
     HciH4PacketType_t type = HCI_H4_PACKET_NONE;
     size_t eventLen = 0U;
-    assert(controller->Get(controller->pContext, &type, pEvent,
+    assert(HciSdcGetPacket(controller, &type, pEvent,
                            EventCapacity, &eventLen) ==
-           HCI_CONTROLLER_GET_PACKET);
+           HCI_SDC_GET_PACKET);
     assert(type == HCI_H4_PACKET_EVENT);
     assert(eventLen >= HCI_COMMAND_COMPLETE_BASE_SIZE);
     assert(pEvent[0] == HCI_EVENT_COMMAND_COMPLETE);
@@ -99,7 +99,7 @@ static uint8_t SendCommandStatus(const HciControllerOps_t *controller,
     return pEvent[5];
 }
 
-static void GiveControllerQueueItsTurn(const HciControllerOps_t *controller)
+static void GiveControllerQueueItsTurn(HciSdc_t *controller)
 {
     HciH4PacketType_t type = HCI_H4_PACKET_NONE;
     uint8_t packet[300];
@@ -112,11 +112,11 @@ static void GiveControllerQueueItsTurn(const HciControllerOps_t *controller)
      * A second Command Complete or Command Status is still a failure because
      * the send helper already consumed the command response.
      */
-    const HciControllerGetResult_t result =
-        controller->Get(controller->pContext, &type, packet,
+    const HciSdcGetResult_t result =
+        HciSdcGetPacket(controller, &type, packet,
                         sizeof(packet), &packetLen);
-    assert(result != HCI_CONTROLLER_GET_ERROR);
-    if (result == HCI_CONTROLLER_GET_PACKET &&
+    assert(result != HCI_SDC_GET_ERROR);
+    if (result == HCI_SDC_GET_PACKET &&
         type == HCI_H4_PACKET_EVENT && packetLen != 0U)
     {
         assert(packet[0] != HCI_EVENT_COMMAND_COMPLETE);
@@ -151,7 +151,7 @@ static int32_t TestSdcGet(void *pContext, uint8_t *pPacket, uint8_t *pType)
 #endif
 
 template <typename CmdT, typename ReturnT>
-static void TestCigVariableReturn(const HciControllerOps_t *controller,
+static void TestCigVariableReturn(HciSdc_t *controller,
                                   uint16_t Opcode,
                                   const char *pExpectedCall)
 {
@@ -192,7 +192,7 @@ static void TestCigVariableReturn(const HciControllerOps_t *controller,
 }
 
 static void TestAdvertisingSetRandomAddressGuard(
-    const HciControllerOps_t *controller)
+    HciSdc_t *controller)
 {
     uint8_t event[64];
     uint8_t legacy[sizeof(sdc_hci_cmd_le_set_adv_params_t)] = {0};
@@ -234,7 +234,7 @@ static void TestAdvertisingSetRandomAddressGuard(
     printf("[ok] LE Set Advertising Set Random Address selects extended mode\n");
 }
 
-static void TestEventMaskPage2(const HciControllerOps_t *controller)
+static void TestEventMaskPage2(HciSdc_t *controller)
 {
     uint8_t event[HCI_COMMAND_COMPLETE_BASE_SIZE +
                   sizeof(sdc_hci_cmd_ip_read_local_supported_commands_return_t)];
@@ -269,7 +269,7 @@ static void TestEventMaskPage2(const HciControllerOps_t *controller)
  * Connection answers with Command Status on success and on failure alike,
  * Vol 4 Part E 7.8.66, so it needs its own reader.
  */
-static uint8_t SendForCommandStatusEvent(const HciControllerOps_t *controller,
+static uint8_t SendForCommandStatusEvent(HciSdc_t *controller,
                                          uint16_t Opcode,
                                          const uint8_t *pParams,
                                          size_t ParamLen,
@@ -286,14 +286,14 @@ static uint8_t SendForCommandStatusEvent(const HciControllerOps_t *controller,
         memcpy(&command[3], pParams, ParamLen);
     }
 
-    assert(controller->Put(controller->pContext, HCI_H4_PACKET_COMMAND,
+    assert(HciSdcPutPacket(controller, HCI_H4_PACKET_COMMAND,
                            command, 3U + ParamLen));
 
     HciH4PacketType_t type = HCI_H4_PACKET_NONE;
     size_t eventLen = 0U;
-    assert(controller->Get(controller->pContext, &type, pEvent,
+    assert(HciSdcGetPacket(controller, &type, pEvent,
                            EventCapacity, &eventLen) ==
-           HCI_CONTROLLER_GET_PACKET);
+           HCI_SDC_GET_PACKET);
     assert(type == HCI_H4_PACKET_EVENT);
     assert(eventLen == HCI_COMMAND_STATUS_SIZE);
     assert(pEvent[0] == HCI_EVENT_COMMAND_STATUS);
@@ -309,7 +309,7 @@ static uint8_t SendForCommandStatusEvent(const HciControllerOps_t *controller,
  * is the only way a synchronised device turns a train into a link. Both were
  * absent from the dispatch table while the feature was enabled.
  */
-static void TestExtendedAdvertisingV2(const HciControllerOps_t *controller)
+static void TestExtendedAdvertisingV2(HciSdc_t *controller)
 {
     uint8_t event[64];
 
@@ -387,7 +387,7 @@ static void TestExtendedAdvertisingV2(const HciControllerOps_t *controller)
 }
 
 static void TestPawrResponseCompletion(HciSdc_t *pSdc,
-                                       const HciControllerOps_t *controller)
+                                       HciSdc_t *controller)
 {
     const uint16_t opcode =
         SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_RESPONSE_DATA;
@@ -512,7 +512,7 @@ static void TestPawrResponseCompletion(HciSdc_t *pSdc,
     const uint8_t markLenBefore = pSdc->Commands.RspMarkLen;
     g_SdcStub.NextStatus = HCI_STATUS_SUCCESS;
     g_SdcStub.LastCall = NULL;
-    assert(controller->Put(controller->pContext, HCI_H4_PACKET_COMMAND,
+    assert(HciSdcPutPacket(controller, HCI_H4_PACKET_COMMAND,
                            command, 3U + head));
     assert(strcmp(g_SdcStub.LastCall,
                   "sdc_hci_cmd_le_set_periodic_adv_response_data") == 0);
@@ -523,14 +523,14 @@ static void TestPawrResponseCompletion(HciSdc_t *pSdc,
 
     HciH4PacketType_t type = HCI_H4_PACKET_NONE;
     size_t eventLen = 0U;
-    assert(controller->Get(controller->pContext, &type, event, sizeof(event),
-                           &eventLen) == HCI_CONTROLLER_GET_EMPTY);
+    assert(HciSdcGetPacket(controller, &type, event, sizeof(event),
+                           &eventLen) == HCI_SDC_GET_EMPTY);
     assert(pSdc->DelayedCommandPending);
     printf("[ok] legacy SDC has no synthetic PAwR completion\n");
 
     const uint8_t reset[] = {0x03U, 0x0CU, 0x00U};
     const uint32_t deferred = pSdc->CommandDeferredCount;
-    assert(!controller->Put(controller->pContext, HCI_H4_PACKET_COMMAND,
+    assert(!HciSdcPutPacket(controller, HCI_H4_PACKET_COMMAND,
                             reset, sizeof(reset)));
     assert(pSdc->CommandDeferredCount == deferred + 1U);
 
@@ -540,8 +540,8 @@ static void TestPawrResponseCompletion(HciSdc_t *pSdc,
     queue.Packet[0] = 0x3EU;
     queue.Packet[1] = 0x01U;
     queue.Packet[2] = 0x27U;
-    assert(controller->Get(controller->pContext, &type, event, sizeof(event),
-                           &eventLen) == HCI_CONTROLLER_GET_PACKET);
+    assert(HciSdcGetPacket(controller, &type, event, sizeof(event),
+                           &eventLen) == HCI_SDC_GET_PACKET);
     assert(type == HCI_H4_PACKET_EVENT);
     assert(eventLen == 3U && event[0] == 0x3EU && event[2] == 0x27U);
     assert(pSdc->DelayedCommandPending);
@@ -552,8 +552,8 @@ static void TestPawrResponseCompletion(HciSdc_t *pSdc,
     };
     memset(queue.Packet, 0, sizeof(queue.Packet));
     memcpy(queue.Packet, realComplete, sizeof(realComplete));
-    assert(controller->Get(controller->pContext, &type, event, sizeof(event),
-                           &eventLen) == HCI_CONTROLLER_GET_PACKET);
+    assert(HciSdcGetPacket(controller, &type, event, sizeof(event),
+                           &eventLen) == HCI_SDC_GET_PACKET);
     assert(type == HCI_H4_PACKET_EVENT);
     assert(eventLen == sizeof(realComplete));
     assert(memcmp(event, realComplete, sizeof(realComplete)) == 0);
@@ -561,10 +561,10 @@ static void TestPawrResponseCompletion(HciSdc_t *pSdc,
     assert(pSdc->DelayedCommandOpcode == 0U);
 
     queue.Result = pSdc->Ops.RetryError;
-    assert(controller->Put(controller->pContext, HCI_H4_PACKET_COMMAND,
+    assert(HciSdcPutPacket(controller, HCI_H4_PACKET_COMMAND,
                            reset, sizeof(reset)));
-    assert(controller->Get(controller->pContext, &type, event, sizeof(event),
-                           &eventLen) == HCI_CONTROLLER_GET_PACKET);
+    assert(HciSdcGetPacket(controller, &type, event, sizeof(event),
+                           &eventLen) == HCI_SDC_GET_PACKET);
     assert(event[0] == HCI_EVENT_COMMAND_COMPLETE);
     assert(event[3] == 0x03U && event[4] == 0x0CU);
     GiveControllerQueueItsTurn(controller);
@@ -574,13 +574,13 @@ static void TestPawrResponseCompletion(HciSdc_t *pSdc,
     g_SdcStub.NextStatus = HCI_STATUS_COMMAND_DISALLOWED;
     g_SdcStub.LastCall = NULL;
     queue.Result = pSdc->Ops.RetryError;
-    assert(controller->Put(controller->pContext, HCI_H4_PACKET_COMMAND,
+    assert(HciSdcPutPacket(controller, HCI_H4_PACKET_COMMAND,
                            command, 3U + head));
     assert(strcmp(g_SdcStub.LastCall,
                   "sdc_hci_cmd_le_set_periodic_adv_response_data") == 0);
     assert(pSdc->DelayedCommandPending);
-    assert(controller->Get(controller->pContext, &type, event, sizeof(event),
-                           &eventLen) == HCI_CONTROLLER_GET_EMPTY);
+    assert(HciSdcGetPacket(controller, &type, event, sizeof(event),
+                           &eventLen) == HCI_SDC_GET_EMPTY);
 
     const uint8_t realError[] = {
         HCI_EVENT_COMMAND_COMPLETE, 0x06U, 0x01U,
@@ -589,8 +589,8 @@ static void TestPawrResponseCompletion(HciSdc_t *pSdc,
     memset(queue.Packet, 0, sizeof(queue.Packet));
     memcpy(queue.Packet, realError, sizeof(realError));
     queue.Result = 0;
-    assert(controller->Get(controller->pContext, &type, event, sizeof(event),
-                           &eventLen) == HCI_CONTROLLER_GET_PACKET);
+    assert(HciSdcGetPacket(controller, &type, event, sizeof(event),
+                           &eventLen) == HCI_SDC_GET_PACKET);
     assert(eventLen == sizeof(realError));
     assert(memcmp(event, realError, sizeof(realError)) == 0);
     assert(!pSdc->DelayedCommandPending);
@@ -604,7 +604,7 @@ int main(void)
     HciSdc_t sdc;
     HciCounters_t counters;
     uint8_t commandEvent[HCI_COMMAND_COMPLETE_BASE_SIZE + HCI_CMD_MAX_RETURN_LEN];
-    const HciControllerOps_t *controller =
+    HciSdc_t *controller =
         Init(&sdc, &counters, commandEvent, sizeof(commandEvent));
 
     /* V2 must establish the same ACL allowance as the V1 command does. */

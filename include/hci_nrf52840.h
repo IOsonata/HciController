@@ -3,8 +3,8 @@
 
 @brief	nRF52840 HciController target interface and runtime state.
 
-		Declares the nRF52840 target state, retained reset
-		diagnostics, TaktOS integration, and the target instance factory.
+		Declares the nRF52840 target state and the retained reset
+		diagnostics. The target functions are those of hci_target.h.
 
 @author	Nguyen Hoan Hoang
 @date	August 2026
@@ -47,14 +47,6 @@ typedef struct {
     uint32_t RandRetryCount;
 } HciNrf52840_t;
 
-bool HciNrf52840Init(HciNrf52840_t *pTarget,
-                     HciTaktOs_t *pRuntime,
-                     uint8_t *pSdcMem,
-                     size_t SdcMemCapacity);
-
-void HciNrf52840GetTaktOsOps(HciNrf52840_t *pTarget,
-                             HciTaktOsOps_t *pOps);
-
 /*
  * Print the reset reason and, when the previous reset followed an MPSL/SDC
  * assertion, the retained assertion source and line. Call once after the trace
@@ -62,15 +54,6 @@ void HciNrf52840GetTaktOsOps(HciNrf52840_t *pTarget,
  * state.
  */
 void HciNrf52840ResetTrace(void);
-
-void HciNrf52840Stop(HciNrf52840_t *pTarget);
-
-/*
- * This part as a target the application can hold without naming it. The
- * instance is owned here because there is one radio, so there is nothing to
- * allocate and nothing for the caller to size.
- */
-HciTarget_t HciNrf52840Target(void);
 
 #ifdef __cplusplus
 }

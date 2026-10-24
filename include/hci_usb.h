@@ -26,7 +26,13 @@
 #ifdef __cplusplus
 #include "bluetooth/bt_hci_usb.h"
 #endif
-#include "hci_usb_mode.h"
+
+typedef enum {
+	HCI_USB_DESCRIPTOR_LOG_ONLY = 0,
+	HCI_USB_DESCRIPTOR_CDC_H4 = 1,
+	HCI_USB_DESCRIPTOR_NATIVE_HCI = 2,
+} HciUsbDescriptorMode_t;
+
 
 #define HCI_USB_STRING_FUNCTION	4U
 

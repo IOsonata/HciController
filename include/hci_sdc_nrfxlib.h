@@ -60,6 +60,52 @@ void HciSdcNrfxlibResetAdvCommandType(void);
 
 #ifdef __cplusplus
 }
+
+/*
+ * The SoftDevice Controller as an IOsonata interface object: the packet
+ * DeviceIntrf the bridge drives, DevAddr the packet type, over the nrfxlib
+ * controller. Init takes what HciSdcNrfxlibInit takes.
+ */
+class HciSdcNrfxlib : public DeviceIntrf {
+public:
+    HciSdcNrfxlib() = default;
+    HciSdcNrfxlib(const HciSdcNrfxlib &) = delete;
+    HciSdcNrfxlib &operator = (const HciSdcNrfxlib &) = delete;
+
+    bool Init(uint8_t *pCommandEvent, size_t CommandEventCapacity, HciCounters_t *pCounters) {
+        return HciSdcNrfxlibInit(&vDevData, pCommandEvent, CommandEventCapacity, pCounters);
+    }
+    bool KnowsCommand(uint16_t Opcode, size_t ParamLen) { return HciSdcKnowsCommand(&vDevData, Opcode, ParamLen); }
+
+    operator DevIntrf_t * () override { return &vDevData.DevIntrf; }
+    DevIntrf_t *Data(void) { return &vDevData.DevIntrf; }
+    operator HciSdc_t * () { return &vDevData; }
+    operator const HciSdc_t * () const { return &vDevData; }
+
+    uint32_t Rate(uint32_t DataRate) override { return DeviceIntrfSetRate(&vDevData.DevIntrf, DataRate); }
+    uint32_t Rate(void) override { return DeviceIntrfGetRate(&vDevData.DevIntrf); }
+    void Disable(void) override { DeviceIntrfDisable(&vDevData.DevIntrf); }
+    void Enable(void) override { DeviceIntrfEnable(&vDevData.DevIntrf); }
+    bool StartRx(uint32_t DevAddr) override { return DeviceIntrfStartRx(&vDevData.DevIntrf, DevAddr); }
+    void StopRx(void) override { DeviceIntrfStopRx(&vDevData.DevIntrf); }
+    bool StartTx(uint32_t DevAddr) override { return DeviceIntrfStartTx(&vDevData.DevIntrf, DevAddr); }
+    void StopTx(void) override { DeviceIntrfStopTx(&vDevData.DevIntrf); }
+    int Tx(uint32_t DevAddr, const uint8_t *pData, int DataLen) override {
+        return DeviceIntrfTx(&vDevData.DevIntrf, DevAddr, pData, DataLen);
+    }
+    int Rx(uint32_t DevAddr, uint8_t *pBuff, int BuffLen) override {
+        return DeviceIntrfRx(&vDevData.DevIntrf, DevAddr, pBuff, BuffLen);
+    }
+    int TxData(const uint8_t *pData, int DataLen) override {
+        return DeviceIntrfTxData(&vDevData.DevIntrf, pData, DataLen);
+    }
+    int RxData(uint8_t *pBuff, int BuffLen) override {
+        return DeviceIntrfRxData(&vDevData.DevIntrf, pBuff, BuffLen);
+    }
+
+private:
+    HciSdc_t vDevData = {};
+};
 #endif
 
 #endif /* HCI_SDC_NRFXLIB_H */

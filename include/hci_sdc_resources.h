@@ -16,6 +16,7 @@
 #ifndef HCI_SDC_RESOURCES_H
 #define HCI_SDC_RESOURCES_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "hci_core_profile.h"
@@ -178,7 +179,7 @@ extern "C" {
  * the counter block.
  */
 #define HCI_SDC_MEM_PERIODIC_ADV_RSP                                 \
-    (SDC_MEM_PER_PERIODIC_ADV_RSP_SET(                                        \
+    (SDC_MEM_PER_PERIODIC_ADV_RSP_SET(                                  \
          HCI_SDC_MAX_ADV_DATA,                                           \
          HCI_SDC_PERIODIC_ADV_RSP_TX_BUFFERS,                            \
          HCI_SDC_PERIODIC_ADV_RSP_RX_BUFFERS,                            \
@@ -281,6 +282,32 @@ static_assert(HCI_SDC_ISO_RX_SDU_SIZE <= HCI_SDC_ISO_SDU_LIMIT,
     (HCI_SDC_ISO_RX_SDU_SIZE + HCI_ISO_DATA_HEADER_SIZE)
 
 /*
+ * Optional controller features. The pool below is sized for all of them. Each
+ * one is a source file that a project links to turn it on, and the library
+ * code a feature needs is only linked through that file's sdc_support_ call:
+ *
+ *   hci_sdc_feat_subrating.cpp  connection subrating, and with it shorter
+ *                               connection intervals
+ *   hci_sdc_feat_extfeat.cpp    extended feature set and frame space update
+ *   hci_sdc_feat_past.cpp       periodic advertising sync transfer
+ *   hci_sdc_feat_pawr.cpp       periodic advertising with responses, which
+ *                               needs the sync transfer above
+ *
+ * HciSdcResourcesApply() calls the hooks below. The defaults here are weak and
+ * report the feature absent. A feature that is not linked costs no flash.
+ */
+bool HciSdcFeatSubratingSupport(void);
+bool HciSdcFeatExtSupport(bool bSubrating);
+bool HciSdcFeatExtConfig(void);
+bool HciSdcFeatPastSupport(void);
+bool HciSdcFeatPawrSupport(bool bPast);
+bool HciSdcFeatPawrConfig(void);
+
+/* sdc_cfg_set with the failure trace and the running requirement. For the
+ * feature files. */
+bool HciSdcCfgSet(uint8_t Type, const sdc_cfg_t *pCfg);
+
+/*
  * Core 6.2 adds Frame Space Update and Shorter Connection Intervals. They are
  * real nRF52 multirole SDC capabilities, but their memory must enter the pool
  * only with the same product-profile gate as their sdc_support_* calls and HCI
@@ -291,11 +318,17 @@ static_assert(HCI_SDC_ISO_RX_SDU_SIZE <= HCI_SDC_ISO_SDU_LIMIT,
 #define HCI_SDC_MEM_FRAME_SPACE_UPDATE                                  \
     SDC_MEM_FRAME_SPACE_UPDATE(HCI_SDC_PERIPHERAL_COUNT +               \
                                HCI_SDC_CENTRAL_COUNT)
+#else
+#define HCI_SDC_MEM_FRAME_SPACE_UPDATE 0U
+#endif
+
+/* Shorter Connection Intervals need Connection Subrating and the extended
+ * feature set. */
+#if HCI_CONTROLLER_TARGET_CORE_VERSION >= HCI_CORE_VERSION_6_2
 #define HCI_SDC_MEM_SHORTER_CONNECTION_INTERVALS                        \
     SDC_MEM_SHORTER_CONNECTION_INTERVALS(HCI_SDC_PERIPHERAL_COUNT +     \
                                          HCI_SDC_CENTRAL_COUNT)
 #else
-#define HCI_SDC_MEM_FRAME_SPACE_UPDATE 0U
 #define HCI_SDC_MEM_SHORTER_CONNECTION_INTERVALS 0U
 #endif
 
@@ -321,7 +354,7 @@ static_assert(HCI_SDC_ISO_RX_SDU_SIZE <= HCI_SDC_ISO_SDU_LIMIT,
      SDC_MEM_SUBRATING(HCI_SDC_PERIPHERAL_COUNT +                        \
                        HCI_SDC_CENTRAL_COUNT) +                          \
      SDC_MEM_EXTENDED_FEATURE_SET(HCI_SDC_PERIPHERAL_COUNT +             \
-                                      HCI_SDC_CENTRAL_COUNT,             \
+                                  HCI_SDC_CENTRAL_COUNT,                 \
                                   HCI_SDC_EXTENDED_FEATURE_PAGES) +      \
      HCI_SDC_MEM_FRAME_SPACE_UPDATE +                                    \
      HCI_SDC_MEM_SHORTER_CONNECTION_INTERVALS +                          \

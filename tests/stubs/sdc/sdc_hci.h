@@ -14,6 +14,7 @@
 #define SDC_HCI_H__
 
 #include <stdint.h>
+#include "nrf_errno.h"
 
 #define HCI_CMD_HEADER_SIZE      (3)
 #define HCI_DATA_HEADER_SIZE     (4)
@@ -40,6 +41,7 @@ extern "C" {
 
 int32_t sdc_hci_cmd_put(uint8_t const *p_cmd_in);
 int32_t sdc_hci_data_put(uint8_t const *p_data_in);
+int32_t sdc_hci_iso_data_put(uint8_t const *p_data_in);
 int32_t sdc_hci_get(uint8_t *p_packet_out, uint8_t *p_msg_type_out);
 
 #ifdef __cplusplus

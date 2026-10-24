@@ -23,7 +23,11 @@ network core has no NVM interface port, so the mode survives a reset but not
 a power loss: after a power cycle IPC is used again. A vendor HCI command to
 change the mode is planned.
 
-The button and the UART pins are set in `src/board.h` (nRF5340 DK values).
+The button and the UART pins are set in `src/board.h`: the nRF5340 Audio DK
+by default (VOL- button, the network core's own virtual COM port P1.09 TXD,
+P1.08 RXD, P1.10 RTS, P1.11 CTS, the second port the board enumerates; the
+first one is the application core console), the nRF5340 DK with
+`NRF5340_DK_PCA10095`.
 The application core must hand those pins to the network core (GPIO MCUSEL)
 before it starts the network core.
 
@@ -45,10 +49,28 @@ libraries, and the nrfxlib nrf53 soft-float multirole SDC and MPSL archives.
 The IOsonata library must contain `ipc_intrf.cpp`, `ipc_ctrlr_nrf53.cpp`,
 `bt_hci_ipc.cpp` and `bt_hci_h4.cpp`.
 
-Defined symbols: `NRF5340_XXAA_NETWORK`, `NRFXLIB_SDC`,
-`HCI_APP_HAS_USB=0`, `HCI_APP_HAS_UART=1`, `HCI_APP_HAS_IPC=1`. The
-`HCI_APP_HAS_*` switches leave out the USB code and statics of
-`hci_app.cpp`; the other targets keep their defaults.
+Defined symbols: `NRF5340_XXAA_NETWORK`, `NRFXLIB_SDC`.
+
+Release uses GCC link-time optimization (`-flto`) in the C/C++ compilers
+and final link. Build `IOsonata_nRF5340_Net` Release with the same GCC
+version: its C/C++ objects carry LTO information and ordinary machine code
+(`-ffat-lto-objects`). This lets the final link optimize across the application
+and library, including crypto constructors and virtual calls. The Nordic
+SDC/MPSL archives and TaktOS can remain ordinary non-LTO libraries.
+
+After changing these options or upgrading GCC, clean and rebuild the
+IOsonata library first, then HciController. Reusing the old library prevents
+optimization across that boundary. Debug remains without LTO. Feature
+selection still follows the linked source files; LTO does not require
+disabling crypto, PAwR, PAST, subrating, or extended features. Check the final
+firmware map for both flash and RAM use with the selected feature set.
+
+The host transports are files the project links, the way a target port
+is: this project links `hci_host_uart.cpp` and `hci_host_ipc.cpp` and not
+`hci_host_usb.cpp`, since the network core has no USB. `hci_app.cpp` has a
+weak default for every transport entry that reports it absent, so a mode
+whose file is not in the image fails at init with the host interface
+error, and nothing is selected with a define.
 
 ## Shared memory
 

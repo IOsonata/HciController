@@ -28,6 +28,8 @@ class Nrf54lm20ProjectTest(unittest.TestCase):
                      "src/hci_nrf54lm20.cpp",
                      "src/main.cpp",
                      "src/hci_app.cpp",
+                     "src/hci_host_uart.cpp",
+                     "src/hci_host_usb.cpp",
                      "src/hci_sdc.cpp"):
             with self.subTest(link=name):
                 self.assertIn(name, links)
@@ -124,39 +126,45 @@ class Nrf54lm20ProjectTest(unittest.TestCase):
 
     def test_startup_failure_rollback_and_uart_bridge(self):
         app = (ROOT / "src" / "hci_app.cpp").read_text()
-        self.assertIn("static void HciAppUartRelease(", app)
-        self.assertIn("hostReady && pApp->UsbRunning &&", app)
+        self.assertIn("static void HciAppHostRelease(", app)
+        self.assertIn("hostType != HCI_APP_HOST_USB && HCI_USB_SOCKET &&", app)
         init = app.split("bool HciAppInitMode(", 1)[1].split(
             "bool HciAppInit(", 1)[0]
-        self.assertGreaterEqual(init.count("HciAppUartRelease(pApp);"), 4)
+        self.assertGreaterEqual(init.count("HciAppHostRelease(pApp);"), 4)
         stop = app.split("void HciAppStop(", 1)[1]
-        self.assertIn("HciAppUartRelease(pApp);", stop)
+        self.assertIn("HciAppHostRelease(pApp);", stop)
+        # The transports are files a project links, never compile switches.
+        for name in ("hci_app.cpp", "hci_host_uart.cpp", "hci_host_usb.cpp",
+                     "hci_host_ipc.cpp"):
+            self.assertNotIn("HCI_APP_HAS_", (ROOT / "src" / name).read_text())
+        self.assertNotIn("HCI_APP_HAS_", (ROOT / "include" / "hci_app.h").read_text())
 
     def test_nrf54_sdc_partial_startup_cleanup(self):
         target = (ROOT / "src" / "hci_nrf54lm20.cpp").read_text()
-        stop = target.split("static void HciStop(", 1)[1].split(
-            "static bool HciStart(", 1)[0]
+        stop = target.split("void HciTargetStop(", 1)[1].split(
+            "bool HciTargetStart(", 1)[0]
         self.assertIn("if (pTarget->SdcEnabled)", stop)
         self.assertIn("(void)sdc_disable();", stop)
         self.assertNotIn("if (pTarget->SdcInitialized)", stop)
 
     def test_uart_bridge_simple_forwarding(self):
-        app = (ROOT / "src" / "hci_app.cpp").read_text()
+        usb = (ROOT / "src" / "hci_host_usb.cpp").read_text()
+        uart = (ROOT / "src" / "hci_host_uart.cpp").read_text()
         header = (ROOT / "include" / "hci_app.h").read_text()
-        bridge = app.split("static void HciUartBridgePump(", 1)[1].split(
-            "\n#endif", 1)[0]
+        bridge = usb.split("static void HciBridgePump(", 1)[1].split(
+            "\n#else", 1)[0]
         self.assertIn("s_BridgeUart.Rx(", bridge)
-        self.assertIn("s_HciUart.Init(cfg)", app)
-        self.assertIn("static UART s_HciUart;", app)
-        self.assertIn("static UART s_BridgeUart;", app)
+        self.assertIn("s_HciUart.Init(cfg)", uart)
+        self.assertIn("static UART s_HciUart;", uart)
+        self.assertIn("static UART s_BridgeUart;", usb)
         self.assertNotIn("UARTDev_t Uart;", header)
         self.assertNotIn("UARTDev_t BridgeUart;", header)
         self.assertRegex(bridge, r"s_BridgeCdc\.Tx\(\s*0U\s*,")
-        self.assertNotIn("DeviceIntrfTx(", app)
-        self.assertNotIn("DeviceIntrfDisable(", app)
-        self.assertIn("app->BridgePendingOffset += (uint16_t)sent", bridge)
+        for name in (usb, uart):
+            self.assertNotIn("DeviceIntrfTx(", name)
+            self.assertNotIn("DeviceIntrfDisable(", name)
+        self.assertIn("s_Bridge.PendingOffset += (uint16_t)sent", bridge)
         self.assertIn("s_BridgeCdc.IsPortOpen()", bridge)
-        self.assertIn("BridgePendingLen", header)
         self.assertNotIn("TraceDroppedBytes", header)
         self.assertIn("s_BridgeCdc.Rx(", bridge)
         self.assertIn("s_BridgeCdc.LineCoding()", bridge)
@@ -164,21 +172,25 @@ class Nrf54lm20ProjectTest(unittest.TestCase):
         self.assertLess(bridge.index("s_BridgeUart.Rate(pLine->dwDTERate)"),
                         bridge.index("s_BridgeCdc.Rx("))
         self.assertIn("if (actual != 0U)", bridge)
-        self.assertIn("app->BridgeBaudRate = pLine->dwDTERate;", bridge)
-        self.assertIn("BridgeBaudRate", header)
+        self.assertIn("s_Bridge.BaudRate = pLine->dwDTERate;", bridge)
         self.assertIn("s_BridgeUart.Tx(", bridge)
-        self.assertIn("app->BridgeInputPending + app->BridgeInputOffset", bridge)
-        self.assertIn("app->BridgeInputOffset += (uint16_t)sent", bridge)
-        self.assertIn("app->BridgeInputOffset == app->BridgeInputLen", bridge)
-        self.assertIn("BridgeInputPending[64]", header)
-        self.assertIn("BridgeInputLen", header)
-        self.assertIn("BridgeInputOffset", header)
+        self.assertIn("s_Bridge.InputPending + s_Bridge.InputOffset", bridge)
+        self.assertIn("s_Bridge.InputOffset += (uint16_t)sent", bridge)
+        self.assertIn("s_Bridge.InputOffset == s_Bridge.InputLen", bridge)
+        self.assertIn("InputPending[64]", usb)
 
     def test_target_selection_and_mpsl_separation(self):
         startup = (ROOT / "src" / "main.cpp").read_text()
         source = (ROOT / "src" / "hci_nrf54lm20.cpp").read_text()
-        self.assertIn("HciNrf54lm20Target()", startup)
-        self.assertIn("HciNrf52840Target()", startup)
+        # The target is the file a project links: main names none of them.
+        for name in ("HciNrf54lm20Target", "HciNrf52840Target",
+                     "HciNrf5340NetTarget", "HciTarget_t"):
+            with self.subTest(name=name):
+                self.assertNotIn(name, startup)
+        for token in ("bool HciTargetInit(", "bool HciTargetStart(",
+                      "void HciTargetStop(", "void HciTargetProcessMpsl("):
+            with self.subTest(token=token):
+                self.assertIn(token, source)
         self.assertIn("NRF54LM20B_XXAA", startup)
         for token in ("NRF_GRTC->TASKS_START", "SWI00_IRQHandler",
                       "RADIO_0_IRQHandler", "GRTC_3_IRQHandler",

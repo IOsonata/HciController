@@ -594,74 +594,57 @@ static HciCmdResult_t HciSdcCmdLeSetScanEnable(void *,
 }
 
 /*
- * The handlers below are all the same few shapes, so they are generated to
- * keep the mapping between an opcode and its SDC call in one line each. The
- * shapes are: parameters only, parameters with a return, no parameters, no
- * parameters with a return, and the variable length forms where the command
- * has an array whose size comes from the packet.
+ * Most commands are the same few shapes, so they have no handler of their
+ * own. The row names the SDC function and the dispatcher makes the call
+ * (HciCmdGenericCall in hci_cmd_dispatch.cpp). The shapes are: parameters
+ * only, parameters with a return, no parameters, and no parameters with a
+ * return. Only the commands with an array whose size comes from the packet,
+ * and the ones that do more than pass through, keep a handler below.
+ *
+ * The length the row gives is checked against the SDC structure at compile
+ * time, and so is the size of the buffers the shared path keeps.
  */
-#define HCI_SDC_CMD_P(Name, SdcFunc, SdcType, Reply)                          \
-    static HciCmdResult_t Name(void *,                                        \
-                               const uint8_t *pParams,                        \
-                               size_t,                                        \
-                               uint8_t *,                                     \
-                               size_t)                                        \
-    {                                                                         \
-        SdcType params;                                                       \
-        memcpy(&params, pParams, sizeof(params));                             \
-        return Reply(SdcFunc(&params), 0U);                                   \
-    }
+template <size_t Size, size_t Given>
+constexpr uint16_t HciSdcRowLen()
+{
+    static_assert(Size == Given, "row length differs from the SDC structure");
+    static_assert(Size <= HCI_CMD_GENERIC_IN_MAX, "structure too large for a shared row");
+    return (uint16_t)Size;
+}
 
-#define HCI_SDC_CMD_PR(Name, SdcFunc, SdcType, SdcReturn)                     \
-    static HciCmdResult_t Name(void *,                                        \
-                               const uint8_t *pParams,                        \
-                               size_t,                                        \
-                               uint8_t *pReturn,                              \
-                               size_t ReturnCapacity)                         \
-    {                                                                         \
-        SdcType params;                                                       \
-        SdcReturn result;                                                     \
-        if (!HciSdcReturnFits(sizeof(result), ReturnCapacity))                \
-        {                                                                     \
-            return HciSdcComplete(HCI_STATUS_MEMORY_CAPACITY_EXCEEDED, 0U);   \
-        }                                                                     \
-        memcpy(&params, pParams, sizeof(params));                             \
-        uint8_t status = SdcFunc(&params, &result);                           \
-        if (status != HCI_STATUS_SUCCESS)                                     \
-        {                                                                     \
-            return HciSdcComplete(status, 0U);                                \
-        }                                                                     \
-        memcpy(pReturn, &result, sizeof(result));                             \
-        return HciSdcComplete(status, sizeof(result));                        \
-    }
+template <size_t Given>
+constexpr uint16_t HciSdcRowLenN()
+{
+    static_assert(Given == 0, "a command without parameters has no length");
+    return 0U;
+}
 
-#define HCI_SDC_CMD_N(Name, SdcFunc)                                          \
-    static HciCmdResult_t Name(void *, const uint8_t *, size_t, uint8_t *,    \
-                               size_t)                                        \
-    {                                                                         \
-        return HciSdcComplete(SdcFunc(), 0U);                                 \
-    }
+template <size_t Size>
+constexpr uint16_t HciSdcRowRet()
+{
+    static_assert(Size <= HCI_CMD_GENERIC_OUT_MAX, "return too large for a shared row");
+    return (uint16_t)Size;
+}
 
-#define HCI_SDC_CMD_NR(Name, SdcFunc, SdcReturn)                              \
-    static HciCmdResult_t Name(void *,                                        \
-                               const uint8_t *,                               \
-                               size_t,                                        \
-                               uint8_t *pReturn,                              \
-                               size_t ReturnCapacity)                         \
-    {                                                                         \
-        SdcReturn result;                                                     \
-        if (!HciSdcReturnFits(sizeof(result), ReturnCapacity))                \
-        {                                                                     \
-            return HciSdcComplete(HCI_STATUS_MEMORY_CAPACITY_EXCEEDED, 0U);   \
-        }                                                                     \
-        uint8_t status = SdcFunc(&result);                                    \
-        if (status != HCI_STATUS_SUCCESS)                                     \
-        {                                                                     \
-            return HciSdcComplete(status, 0U);                                \
-        }                                                                     \
-        memcpy(pReturn, &result, sizeof(result));                             \
-        return HciSdcComplete(status, sizeof(result));                        \
-    }
+#define HCI_SDC_ROW_FN(Func) \
+    reinterpret_cast<HciCmdHandler_t>(reinterpret_cast<void (*)(void)>(Func))
+
+#define HCI_SDC_ROW_P(Opcode, Resp, SdcType, ParamLen, Func)                  \
+    {Opcode, HciSdcRowLen<sizeof(SdcType), (ParamLen)>(), 0U, Resp,           \
+     HCI_SDC_ROW_FN(Func), HCI_CMD_KIND_P}
+
+#define HCI_SDC_ROW_PR(Opcode, SdcType, ParamLen, SdcReturn, Func)            \
+    {Opcode, HciSdcRowLen<sizeof(SdcType), (ParamLen)>(),                     \
+     HciSdcRowRet<sizeof(SdcReturn)>(), HCI_CMD_RESPONSE_COMPLETE,            \
+     HCI_SDC_ROW_FN(Func), HCI_CMD_KIND_PR}
+
+#define HCI_SDC_ROW_N(Opcode, Resp, ParamLen, Func)                           \
+    {Opcode, HciSdcRowLenN<(ParamLen)>(), 0U, Resp,                           \
+     HCI_SDC_ROW_FN(Func), HCI_CMD_KIND_N}
+
+#define HCI_SDC_ROW_NR(Opcode, ParamLen, SdcReturn, Func)                     \
+    {Opcode, HciSdcRowLenN<(ParamLen)>(), HciSdcRowRet<sizeof(SdcReturn)>(),  \
+     HCI_CMD_RESPONSE_COMPLETE, HCI_SDC_ROW_FN(Func), HCI_CMD_KIND_NR}
 
 /*
  * Variable-length commands contain a trailing array in a packed SDC type.
@@ -879,23 +862,6 @@ static HciCmdResult_t HciSdcCmdVsReadStaticAddresses(void *,
     return HciSdcComplete(status, length);
 }
 
-HCI_SDC_CMD_NR(HciSdcCmdVsZephyrReadVersionInfo,
-               sdc_hci_cmd_vs_zephyr_read_version_info,
-               sdc_hci_cmd_vs_zephyr_read_version_info_return_t)
-HCI_SDC_CMD_P(HciSdcCmdVsZephyrWriteBdAddr,
-              sdc_hci_cmd_vs_zephyr_write_bd_addr,
-              sdc_hci_cmd_vs_zephyr_write_bd_addr_t, HciSdcComplete)
-HCI_SDC_CMD_NR(HciSdcCmdVsZephyrReadChipTemp,
-               sdc_hci_cmd_vs_zephyr_read_chip_temp,
-               sdc_hci_cmd_vs_zephyr_read_chip_temp_return_t)
-HCI_SDC_CMD_PR(HciSdcCmdVsZephyrWriteTxPower,
-               sdc_hci_cmd_vs_zephyr_write_tx_power,
-               sdc_hci_cmd_vs_zephyr_write_tx_power_t,
-               sdc_hci_cmd_vs_zephyr_write_tx_power_return_t)
-HCI_SDC_CMD_PR(HciSdcCmdVsZephyrReadTxPower,
-               sdc_hci_cmd_vs_zephyr_read_tx_power,
-               sdc_hci_cmd_vs_zephyr_read_tx_power_t,
-               sdc_hci_cmd_vs_zephyr_read_tx_power_return_t)
 
 /*
  * The vendor equivalent of Read Local Supported Commands, and it needs the
@@ -950,42 +916,8 @@ static HciCmdResult_t HciSdcCmdVsZephyrReadSupportedCommands(void *,
     return HciSdcComplete(status, sizeof(result.raw));
 }
 
-HCI_SDC_CMD_NR(HciSdcCmdVsZephyrReadKeyHierarchyRoots,
-               sdc_hci_cmd_vs_zephyr_read_key_hierarchy_roots,
-               sdc_hci_cmd_vs_zephyr_read_key_hierarchy_roots_return_t)
 
-HCI_SDC_CMD_P(HciSdcCmdVsQosConnEventReportEnable,
-              sdc_hci_cmd_vs_qos_conn_event_report_enable,
-              sdc_hci_cmd_vs_qos_conn_event_report_enable_t, HciSdcComplete)
-HCI_SDC_CMD_P(HciSdcCmdVsQosChannelSurveyEnable,
-              sdc_hci_cmd_vs_qos_channel_survey_enable,
-              sdc_hci_cmd_vs_qos_channel_survey_enable_t, HciSdcComplete)
-HCI_SDC_CMD_PR(HciSdcCmdVsReadAverageRssi, sdc_hci_cmd_vs_read_average_rssi,
-               sdc_hci_cmd_vs_read_average_rssi_t,
-               sdc_hci_cmd_vs_read_average_rssi_return_t)
-HCI_SDC_CMD_PR(HciSdcCmdVsGetNextConnEventCounter,
-               sdc_hci_cmd_vs_get_next_conn_event_counter,
-               sdc_hci_cmd_vs_get_next_conn_event_counter_t,
-               sdc_hci_cmd_vs_get_next_conn_event_counter_return_t)
-HCI_SDC_CMD_P(HciSdcCmdVsConnAnchorPointUpdateEnable,
-              sdc_hci_cmd_vs_conn_anchor_point_update_event_report_enable,
-              sdc_hci_cmd_vs_conn_anchor_point_update_event_report_enable_t,
-              HciSdcComplete)
 
-HCI_SDC_CMD_PR(HciSdcCmdReadTransmitPowerLevel,
-               sdc_hci_cmd_cb_read_transmit_power_level,
-               sdc_hci_cmd_cb_read_transmit_power_level_t,
-               sdc_hci_cmd_cb_read_transmit_power_level_return_t)
-HCI_SDC_CMD_NR(HciSdcCmdLeReadRfPathCompensation,
-               sdc_hci_cmd_le_read_rf_path_compensation,
-               sdc_hci_cmd_le_read_rf_path_compensation_return_t)
-HCI_SDC_CMD_P(HciSdcCmdLeWriteRfPathCompensation,
-              sdc_hci_cmd_le_write_rf_path_compensation,
-              sdc_hci_cmd_le_write_rf_path_compensation_t, HciSdcComplete)
-HCI_SDC_CMD_PR(HciSdcCmdLeEnhancedReadTransmitPower,
-               sdc_hci_cmd_le_enhanced_read_transmit_power_level,
-               sdc_hci_cmd_le_enhanced_read_transmit_power_level_t,
-               sdc_hci_cmd_le_enhanced_read_transmit_power_level_return_t)
 
 /*
  * The odd one. Vol 4 Part E 7.8.118 answers this with a Command Status and
@@ -995,27 +927,8 @@ HCI_SDC_CMD_PR(HciSdcCmdLeEnhancedReadTransmitPower,
  * there is nothing to put in a Command Complete that has not been asked for
  * over the air yet.
  */
-HCI_SDC_CMD_P(HciSdcCmdLeReadRemoteTransmitPower,
-              sdc_hci_cmd_le_read_remote_transmit_power_level,
-              sdc_hci_cmd_le_read_remote_transmit_power_level_t, HciSdcStatus)
 
-HCI_SDC_CMD_PR(HciSdcCmdLeSetPathLossReportingParams,
-               sdc_hci_cmd_le_set_path_loss_reporting_params,
-               sdc_hci_cmd_le_set_path_loss_reporting_params_t,
-               sdc_hci_cmd_le_set_path_loss_reporting_params_return_t)
-HCI_SDC_CMD_PR(HciSdcCmdLeSetPathLossReportingEnable,
-               sdc_hci_cmd_le_set_path_loss_reporting_enable,
-               sdc_hci_cmd_le_set_path_loss_reporting_enable_t,
-               sdc_hci_cmd_le_set_path_loss_reporting_enable_return_t)
-HCI_SDC_CMD_PR(HciSdcCmdLeSetTransmitPowerReportingEnable,
-               sdc_hci_cmd_le_set_transmit_power_reporting_enable,
-               sdc_hci_cmd_le_set_transmit_power_reporting_enable_t,
-               sdc_hci_cmd_le_set_transmit_power_reporting_enable_return_t)
 
-HCI_SDC_CMD_P(HciSdcCmdLeSetHostChannelClassification,
-              sdc_hci_cmd_le_set_host_channel_classification,
-              sdc_hci_cmd_le_set_host_channel_classification_t,
-              HciSdcComplete)
 
 /*
  * The three below answer with a Command Status and finish in an LE meta event
@@ -1024,36 +937,14 @@ HCI_SDC_CMD_P(HciSdcCmdLeSetHostChannelClassification,
  * in LE Subrate Change, Read All Remote Features in LE Read All Remote
  * Features Complete. Vol 4 Part E 7.8.108, 7.8.124 and 7.8.150.
  */
-HCI_SDC_CMD_P(HciSdcCmdLeRequestPeerSca, sdc_hci_cmd_le_request_peer_sca,
-              sdc_hci_cmd_le_request_peer_sca_t, HciSdcStatus)
 
-HCI_SDC_CMD_P(HciSdcCmdLeSetDefaultSubrate,
-              sdc_hci_cmd_le_set_default_subrate,
-              sdc_hci_cmd_le_set_default_subrate_t, HciSdcComplete)
-HCI_SDC_CMD_P(HciSdcCmdLeSubrateRequest, sdc_hci_cmd_le_subrate_request,
-              sdc_hci_cmd_le_subrate_request_t, HciSdcStatus)
 
-HCI_SDC_CMD_NR(HciSdcCmdLeReadAllLocalSupportedFeatures,
-               sdc_hci_cmd_le_read_all_local_supported_features,
-               sdc_hci_cmd_le_read_all_local_supported_features_return_t)
 
-HCI_SDC_CMD_P(HciSdcCmdLeReadAllRemoteFeatures,
-              sdc_hci_cmd_le_read_all_remote_features,
-              sdc_hci_cmd_le_read_all_remote_features_t, HciSdcStatus)
 
-HCI_SDC_CMD_P(HciSdcCmdVsSetAdvRandomness, sdc_hci_cmd_vs_set_adv_randomness,
-              sdc_hci_cmd_vs_set_adv_randomness_t, HciSdcComplete)
 
-HCI_SDC_CMD_P(HciSdcCmdVsLlpmModeSet, sdc_hci_cmd_vs_llpm_mode_set,
-              sdc_hci_cmd_vs_llpm_mode_set_t, HciSdcComplete)
 /* Command Status, then a VS Connection Update Complete event. */
-HCI_SDC_CMD_P(HciSdcCmdVsConnUpdate, sdc_hci_cmd_vs_conn_update,
-              sdc_hci_cmd_vs_conn_update_t, HciSdcStatus)
 
 /* Periodic advertising, the transmitting half. */
-HCI_SDC_CMD_P(HciSdcCmdLeSetPeriodicAdvParams,
-              sdc_hci_cmd_le_set_periodic_adv_params,
-              sdc_hci_cmd_le_set_periodic_adv_params_t, HciSdcComplete)
 /*
  * The same shape as LE Set Extended Advertising Data, a byte counted trailing
  * array, so it gets the same check. Vol 4 Part E 7.8.62.
@@ -1062,9 +953,6 @@ HCI_SDC_CMD_VB(HciSdcCmdLeSetPeriodicAdvData,
                sdc_hci_cmd_le_set_periodic_adv_data,
                sdc_hci_cmd_le_set_periodic_adv_data_t, adv_data,
                adv_data_length, HciSdcComplete)
-HCI_SDC_CMD_P(HciSdcCmdLeSetPeriodicAdvEnable,
-              sdc_hci_cmd_le_set_periodic_adv_enable,
-              sdc_hci_cmd_le_set_periodic_adv_enable_t, HciSdcComplete)
 
 /* Following a train. */
 /*
@@ -1073,54 +961,9 @@ HCI_SDC_CMD_P(HciSdcCmdLeSetPeriodicAdvEnable,
  * Vol 4 Part E 7.8.67. Nothing useful exists to put in a Command Complete at
  * the moment the command is accepted, which is why it has no return type.
  */
-HCI_SDC_CMD_P(HciSdcCmdLePeriodicAdvCreateSync,
-              sdc_hci_cmd_le_periodic_adv_create_sync,
-              sdc_hci_cmd_le_periodic_adv_create_sync_t, HciSdcStatus)
-HCI_SDC_CMD_N(HciSdcCmdLePeriodicAdvCreateSyncCancel,
-              sdc_hci_cmd_le_periodic_adv_create_sync_cancel)
-HCI_SDC_CMD_P(HciSdcCmdLePeriodicAdvTerminateSync,
-              sdc_hci_cmd_le_periodic_adv_terminate_sync,
-              sdc_hci_cmd_le_periodic_adv_terminate_sync_t, HciSdcComplete)
-HCI_SDC_CMD_P(HciSdcCmdLeAddDeviceToPeriodicAdvList,
-              sdc_hci_cmd_le_add_device_to_periodic_adv_list,
-              sdc_hci_cmd_le_add_device_to_periodic_adv_list_t,
-              HciSdcComplete)
-HCI_SDC_CMD_P(HciSdcCmdLeRemoveDeviceFromPeriodicAdvList,
-              sdc_hci_cmd_le_remove_device_from_periodic_adv_list,
-              sdc_hci_cmd_le_remove_device_from_periodic_adv_list_t,
-              HciSdcComplete)
-HCI_SDC_CMD_N(HciSdcCmdLeClearPeriodicAdvList,
-              sdc_hci_cmd_le_clear_periodic_adv_list)
-HCI_SDC_CMD_NR(HciSdcCmdLeReadPeriodicAdvListSize,
-               sdc_hci_cmd_le_read_periodic_adv_list_size,
-               sdc_hci_cmd_le_read_periodic_adv_list_size_return_t)
 
 /* Handing a sync to a peer over a connection. */
-HCI_SDC_CMD_P(HciSdcCmdLeSetPeriodicAdvReceiveEnable,
-              sdc_hci_cmd_le_set_periodic_adv_receive_enable,
-              sdc_hci_cmd_le_set_periodic_adv_receive_enable_t,
-              HciSdcComplete)
-HCI_SDC_CMD_PR(HciSdcCmdLePeriodicAdvSyncTransfer,
-               sdc_hci_cmd_le_periodic_adv_sync_transfer,
-               sdc_hci_cmd_le_periodic_adv_sync_transfer_t,
-               sdc_hci_cmd_le_periodic_adv_sync_transfer_return_t)
-HCI_SDC_CMD_PR(HciSdcCmdLePeriodicAdvSetInfoTransfer,
-               sdc_hci_cmd_le_periodic_adv_set_info_transfer,
-               sdc_hci_cmd_le_periodic_adv_set_info_transfer_t,
-               sdc_hci_cmd_le_periodic_adv_set_info_transfer_return_t)
-HCI_SDC_CMD_PR(HciSdcCmdLeSetPeriodicAdvSyncTransferParams,
-               sdc_hci_cmd_le_set_periodic_adv_sync_transfer_params,
-               sdc_hci_cmd_le_set_periodic_adv_sync_transfer_params_t,
-               sdc_hci_cmd_le_set_periodic_adv_sync_transfer_params_return_t)
-HCI_SDC_CMD_P(HciSdcCmdLeSetDefaultPeriodicAdvSyncTransferParams,
-              sdc_hci_cmd_le_set_default_periodic_adv_sync_transfer_params,
-              sdc_hci_cmd_le_set_default_periodic_adv_sync_transfer_params_t,
-              HciSdcComplete)
 
-HCI_SDC_CMD_PR(HciSdcCmdLeSetPeriodicAdvParamsV2,
-               sdc_hci_cmd_le_set_periodic_adv_params_v2,
-               sdc_hci_cmd_le_set_periodic_adv_params_v2_t,
-               sdc_hci_cmd_le_set_periodic_adv_params_v2_return_t)
 
 /*
  * The one command in this table whose trailing array is not an array. Vol 4
@@ -1215,14 +1058,6 @@ HCI_SDC_CMD_VBR(HciSdcCmdLeSetPeriodicSyncSubevent,
                 subevents, num_subevents_to_sync)
 
 /* Controller and baseband. */
-HCI_SDC_CMD_PR(HciSdcCmdReadAuthPayloadTimeout,
-               sdc_hci_cmd_cb_read_authenticated_payload_timeout,
-               sdc_hci_cmd_cb_read_authenticated_payload_timeout_t,
-               sdc_hci_cmd_cb_read_authenticated_payload_timeout_return_t)
-HCI_SDC_CMD_PR(HciSdcCmdWriteAuthPayloadTimeout,
-               sdc_hci_cmd_cb_write_authenticated_payload_timeout,
-               sdc_hci_cmd_cb_write_authenticated_payload_timeout_t,
-               sdc_hci_cmd_cb_write_authenticated_payload_timeout_return_t)
 
 /*
  * Controller-to-host flow control (Core Vol 4 Part E 7.3.38-7.3.40) is
@@ -1230,36 +1065,10 @@ HCI_SDC_CMD_PR(HciSdcCmdWriteAuthPayloadTimeout,
  */
 
 /* Link control. */
-HCI_SDC_CMD_P(HciSdcCmdDisconnect, sdc_hci_cmd_lc_disconnect,
-              sdc_hci_cmd_lc_disconnect_t, HciSdcStatus)
-HCI_SDC_CMD_P(HciSdcCmdReadRemoteVersion,
-              sdc_hci_cmd_lc_read_remote_version_information,
-              sdc_hci_cmd_lc_read_remote_version_information_t, HciSdcStatus)
 
 /* Connection management. */
-HCI_SDC_CMD_P(HciSdcCmdLeCreateConn, sdc_hci_cmd_le_create_conn,
-              sdc_hci_cmd_le_create_conn_t, HciSdcStatus)
-HCI_SDC_CMD_N(HciSdcCmdLeCreateConnCancel, sdc_hci_cmd_le_create_conn_cancel)
-HCI_SDC_CMD_P(HciSdcCmdLeConnUpdate, sdc_hci_cmd_le_conn_update,
-              sdc_hci_cmd_le_conn_update_t, HciSdcStatus)
-HCI_SDC_CMD_PR(HciSdcCmdLeReadChannelMap, sdc_hci_cmd_le_read_channel_map,
-               sdc_hci_cmd_le_read_channel_map_t,
-               sdc_hci_cmd_le_read_channel_map_return_t)
-HCI_SDC_CMD_P(HciSdcCmdLeReadRemoteFeatures, sdc_hci_cmd_le_read_remote_features,
-              sdc_hci_cmd_le_read_remote_features_t, HciSdcStatus)
 
 /* Filter accept list. */
-HCI_SDC_CMD_NR(HciSdcCmdLeReadAcceptListSize,
-               sdc_hci_cmd_le_read_filter_accept_list_size,
-               sdc_hci_cmd_le_read_filter_accept_list_size_return_t)
-HCI_SDC_CMD_N(HciSdcCmdLeClearAcceptList, sdc_hci_cmd_le_clear_filter_accept_list)
-HCI_SDC_CMD_P(HciSdcCmdLeAddToAcceptList,
-              sdc_hci_cmd_le_add_device_to_filter_accept_list,
-              sdc_hci_cmd_le_add_device_to_filter_accept_list_t, HciSdcComplete)
-HCI_SDC_CMD_P(HciSdcCmdLeRemoveFromAcceptList,
-              sdc_hci_cmd_le_remove_device_from_filter_accept_list,
-              sdc_hci_cmd_le_remove_device_from_filter_accept_list_t,
-              HciSdcComplete)
 
 /*
  * Privacy and the resolving list.
@@ -1273,56 +1082,14 @@ HCI_SDC_CMD_P(HciSdcCmdLeRemoveFromAcceptList,
  * The list is the controller's, not the host's, so every entry has to be put
  * there over HCI. Vol 4 Part E 7.8.38 to 7.8.45 and 7.8.77.
  */
-HCI_SDC_CMD_P(HciSdcCmdLeAddToResolvingList,
-              sdc_hci_cmd_le_add_device_to_resolving_list,
-              sdc_hci_cmd_le_add_device_to_resolving_list_t, HciSdcComplete)
-HCI_SDC_CMD_P(HciSdcCmdLeRemoveFromResolvingList,
-              sdc_hci_cmd_le_remove_device_from_resolving_list,
-              sdc_hci_cmd_le_remove_device_from_resolving_list_t,
-              HciSdcComplete)
-HCI_SDC_CMD_N(HciSdcCmdLeClearResolvingList,
-              sdc_hci_cmd_le_clear_resolving_list)
-HCI_SDC_CMD_NR(HciSdcCmdLeReadResolvingListSize,
-               sdc_hci_cmd_le_read_resolving_list_size,
-               sdc_hci_cmd_le_read_resolving_list_size_return_t)
-HCI_SDC_CMD_P(HciSdcCmdLeSetAddressResolutionEnable,
-              sdc_hci_cmd_le_set_address_resolution_enable,
-              sdc_hci_cmd_le_set_address_resolution_enable_t, HciSdcComplete)
-HCI_SDC_CMD_P(HciSdcCmdLeSetRpaTimeout,
-              sdc_hci_cmd_le_set_resolvable_private_address_timeout,
-              sdc_hci_cmd_le_set_resolvable_private_address_timeout_t,
-              HciSdcComplete)
-HCI_SDC_CMD_P(HciSdcCmdLeSetPrivacyMode, sdc_hci_cmd_le_set_privacy_mode,
-              sdc_hci_cmd_le_set_privacy_mode_t, HciSdcComplete)
-HCI_SDC_CMD_P(HciSdcCmdLeSetDataRelatedAddressChanges,
-              sdc_hci_cmd_le_set_data_related_address_changes,
-              sdc_hci_cmd_le_set_data_related_address_changes_t,
-              HciSdcComplete)
 
 /* Security. */
-HCI_SDC_CMD_PR(HciSdcCmdLeEncrypt, sdc_hci_cmd_le_encrypt,
-               sdc_hci_cmd_le_encrypt_t, sdc_hci_cmd_le_encrypt_return_t)
-HCI_SDC_CMD_NR(HciSdcCmdLeRand, sdc_hci_cmd_le_rand,
-               sdc_hci_cmd_le_rand_return_t)
-HCI_SDC_CMD_P(HciSdcCmdLeEnableEncryption, sdc_hci_cmd_le_enable_encryption,
-              sdc_hci_cmd_le_enable_encryption_t, HciSdcStatus)
-HCI_SDC_CMD_PR(HciSdcCmdLeLtkReply,
-               sdc_hci_cmd_le_long_term_key_request_reply,
-               sdc_hci_cmd_le_long_term_key_request_reply_t,
-               sdc_hci_cmd_le_long_term_key_request_reply_return_t)
-HCI_SDC_CMD_PR(HciSdcCmdLeLtkNegativeReply,
-               sdc_hci_cmd_le_long_term_key_request_negative_reply,
-               sdc_hci_cmd_le_long_term_key_request_negative_reply_t,
-               sdc_hci_cmd_le_long_term_key_request_negative_reply_return_t)
 
 /*
  * SDC command availability depends on the linked library variant.
  * Only commands exported by the multirole archive are dispatched.
  */
 
-HCI_SDC_CMD_NR(HciSdcCmdLeReadTransmitPower,
-               sdc_hci_cmd_le_read_transmit_power,
-               sdc_hci_cmd_le_read_transmit_power_return_t)
 
 /*
  * Direct test mode: v1 uses LE 1M PHY; v2 selects the PHY; v3 supports
@@ -1330,14 +1097,6 @@ HCI_SDC_CMD_NR(HciSdcCmdLeReadTransmitPower,
  * Antenna switching requires supported direction-finding hardware.
  * A zero-length switching pattern does not require antenna switching.
  */
-HCI_SDC_CMD_P(HciSdcCmdLeReceiverTest, sdc_hci_cmd_le_receiver_test_v1,
-              sdc_hci_cmd_le_receiver_test_v1_t, HciSdcComplete)
-HCI_SDC_CMD_P(HciSdcCmdLeTransmitterTest, sdc_hci_cmd_le_transmitter_test_v1,
-              sdc_hci_cmd_le_transmitter_test_v1_t, HciSdcComplete)
-HCI_SDC_CMD_P(HciSdcCmdLeReceiverTestV2, sdc_hci_cmd_le_receiver_test_v2,
-              sdc_hci_cmd_le_receiver_test_v2_t, HciSdcComplete)
-HCI_SDC_CMD_P(HciSdcCmdLeTransmitterTestV2, sdc_hci_cmd_le_transmitter_test_v2,
-              sdc_hci_cmd_le_transmitter_test_v2_t, HciSdcComplete)
 
 /*
  * Switching_Pattern_Length counts antenna identifiers and each one is a byte,
@@ -1383,8 +1142,6 @@ static HciCmdResult_t HciSdcCmdLeTransmitterTestV4(void *,
     return HciSdcComplete(sdc_hci_cmd_le_transmitter_test_v4(pCmd), 0U);
 }
 
-HCI_SDC_CMD_NR(HciSdcCmdLeTestEnd, sdc_hci_cmd_le_test_end,
-               sdc_hci_cmd_le_test_end_return_t)
 
 /*
  * The standalone VS transmitter carrier test command was deprecated and dropped
@@ -1418,57 +1175,22 @@ static HciCmdResult_t HciSdcCmdVsTransmitterCarrierTest(void *,
 /* Read RSSI of the most recently received connection packet
  * (Core Vol 4 Part E 7.5.4).
  */
-HCI_SDC_CMD_PR(HciSdcCmdReadRssi, sdc_hci_cmd_sp_read_rssi,
-               sdc_hci_cmd_sp_read_rssi_t, sdc_hci_cmd_sp_read_rssi_return_t)
 
 /*
  * LE Set Host Feature declares supported optional Host features
  * (Core Vol 4 Part E 7.8.115).
  */
-HCI_SDC_CMD_P(HciSdcCmdLeSetHostFeature, sdc_hci_cmd_le_set_host_feature,
-              sdc_hci_cmd_le_set_host_feature_t, HciSdcComplete)
-HCI_SDC_CMD_P(HciSdcCmdLeSetHostFeatureV2, sdc_hci_cmd_le_set_host_feature_v2,
-              sdc_hci_cmd_le_set_host_feature_v2_t, HciSdcComplete)
 
 /* Data length. */
-HCI_SDC_CMD_PR(HciSdcCmdLeSetDataLength, sdc_hci_cmd_le_set_data_length,
-               sdc_hci_cmd_le_set_data_length_t,
-               sdc_hci_cmd_le_set_data_length_return_t)
-HCI_SDC_CMD_NR(HciSdcCmdLeReadSuggestedDataLength,
-               sdc_hci_cmd_le_read_suggested_default_data_length,
-               sdc_hci_cmd_le_read_suggested_default_data_length_return_t)
-HCI_SDC_CMD_P(HciSdcCmdLeWriteSuggestedDataLength,
-              sdc_hci_cmd_le_write_suggested_default_data_length,
-              sdc_hci_cmd_le_write_suggested_default_data_length_t,
-              HciSdcComplete)
-HCI_SDC_CMD_NR(HciSdcCmdLeReadMaxDataLength,
-               sdc_hci_cmd_le_read_max_data_length,
-               sdc_hci_cmd_le_read_max_data_length_return_t)
 
 /* PHY. */
-HCI_SDC_CMD_PR(HciSdcCmdLeReadPhy, sdc_hci_cmd_le_read_phy,
-               sdc_hci_cmd_le_read_phy_t, sdc_hci_cmd_le_read_phy_return_t)
-HCI_SDC_CMD_P(HciSdcCmdLeSetDefaultPhy, sdc_hci_cmd_le_set_default_phy,
-              sdc_hci_cmd_le_set_default_phy_t, HciSdcComplete)
-HCI_SDC_CMD_P(HciSdcCmdLeSetPhy, sdc_hci_cmd_le_set_phy,
-              sdc_hci_cmd_le_set_phy_t, HciSdcStatus)
 
 /* Extended advertising. */
-HCI_SDC_CMD_P(HciSdcCmdLeSetAdvSetRandomAddr,
-              sdc_hci_cmd_le_set_adv_set_random_address,
-              sdc_hci_cmd_le_set_adv_set_random_address_t, HciSdcComplete)
-HCI_SDC_CMD_PR(HciSdcCmdLeSetExtAdvParams, sdc_hci_cmd_le_set_ext_adv_params,
-               sdc_hci_cmd_le_set_ext_adv_params_t,
-               sdc_hci_cmd_le_set_ext_adv_params_return_t)
 /*
  * The v2 form adds the primary and secondary PHY options that periodic
  * advertising with responses needs to place its subevents. Everything else is
  * the v1 parameter block, so the shape and the generator are the same.
  */
-HCI_SDC_CMD_PR(HciSdcCmdLeSetExtAdvParamsV2,
-               sdc_hci_cmd_le_set_ext_adv_params_v2,
-               sdc_hci_cmd_le_set_ext_adv_params_v2_t,
-               sdc_hci_cmd_le_set_ext_adv_params_v2_return_t)
 HCI_SDC_CMD_VB(HciSdcCmdLeSetExtAdvData, sdc_hci_cmd_le_set_ext_adv_data,
                sdc_hci_cmd_le_set_ext_adv_data_t, adv_data, adv_data_length,
                HciSdcComplete)
@@ -1479,22 +1201,11 @@ HCI_SDC_CMD_VB(HciSdcCmdLeSetExtScanRsp,
 HCI_SDC_CMD_VN(HciSdcCmdLeSetExtAdvEnable, sdc_hci_cmd_le_set_ext_adv_enable,
                sdc_hci_cmd_le_set_ext_adv_enable_t, array_params, num_sets,
                HciSdcComplete)
-HCI_SDC_CMD_NR(HciSdcCmdLeReadMaxAdvDataLength,
-               sdc_hci_cmd_le_read_max_adv_data_length,
-               sdc_hci_cmd_le_read_max_adv_data_length_return_t)
-HCI_SDC_CMD_NR(HciSdcCmdLeReadNumAdvSets,
-               sdc_hci_cmd_le_read_number_of_supported_adv_sets,
-               sdc_hci_cmd_le_read_number_of_supported_adv_sets_return_t)
-HCI_SDC_CMD_P(HciSdcCmdLeRemoveAdvSet, sdc_hci_cmd_le_remove_adv_set,
-              sdc_hci_cmd_le_remove_adv_set_t, HciSdcComplete)
-HCI_SDC_CMD_N(HciSdcCmdLeClearAdvSets, sdc_hci_cmd_le_clear_adv_sets)
 
 /* Extended scanning and initiating. */
 HCI_SDC_CMD_VP(HciSdcCmdLeSetExtScanParams, sdc_hci_cmd_le_set_ext_scan_params,
                sdc_hci_cmd_le_set_ext_scan_params_t, array_params,
                scanning_phys, HciSdcComplete)
-HCI_SDC_CMD_P(HciSdcCmdLeSetExtScanEnable, sdc_hci_cmd_le_set_ext_scan_enable,
-              sdc_hci_cmd_le_set_ext_scan_enable_t, HciSdcComplete)
 HCI_SDC_CMD_VP(HciSdcCmdLeExtCreateConn, sdc_hci_cmd_le_ext_create_conn,
                sdc_hci_cmd_le_ext_create_conn_t, array_params,
                initiating_phys, HciSdcStatus)
@@ -1573,10 +1284,6 @@ static HciCmdResult_t HciSdcCmdLeReadBufferSizeV2(void *pContext,
     return HciSdcComplete(status, 0U);
 }
 
-HCI_SDC_CMD_PR(HciSdcCmdLeReadIsoTxSync,
-               sdc_hci_cmd_le_read_iso_tx_sync,
-               sdc_hci_cmd_le_read_iso_tx_sync_t,
-               sdc_hci_cmd_le_read_iso_tx_sync_return_t)
 
 /* One array element per stream, and a handle returned for each. */
 HCI_SDC_CMD_VNR(HciSdcCmdLeSetCigParams,
@@ -1600,35 +1307,11 @@ HCI_SDC_CMD_VN(HciSdcCmdLeCreateCis,
                sdc_hci_cmd_le_create_cis_t,
                array_params, cis_count, HciSdcStatus)
 
-HCI_SDC_CMD_PR(HciSdcCmdLeRemoveCig,
-               sdc_hci_cmd_le_remove_cig,
-               sdc_hci_cmd_le_remove_cig_t,
-               sdc_hci_cmd_le_remove_cig_return_t)
 
-HCI_SDC_CMD_P(HciSdcCmdLeAcceptCisRequest,
-              sdc_hci_cmd_le_accept_cis_request,
-              sdc_hci_cmd_le_accept_cis_request_t,
-              HciSdcStatus)
 
-HCI_SDC_CMD_PR(HciSdcCmdLeRejectCisRequest,
-               sdc_hci_cmd_le_reject_cis_request,
-               sdc_hci_cmd_le_reject_cis_request_t,
-               sdc_hci_cmd_le_reject_cis_request_return_t)
 
-HCI_SDC_CMD_P(HciSdcCmdLeCreateBig,
-              sdc_hci_cmd_le_create_big,
-              sdc_hci_cmd_le_create_big_t,
-              HciSdcStatus)
 
-HCI_SDC_CMD_P(HciSdcCmdLeCreateBigTest,
-              sdc_hci_cmd_le_create_big_test,
-              sdc_hci_cmd_le_create_big_test_t,
-              HciSdcStatus)
 
-HCI_SDC_CMD_P(HciSdcCmdLeTerminateBig,
-              sdc_hci_cmd_le_terminate_big,
-              sdc_hci_cmd_le_terminate_big_t,
-              HciSdcStatus)
 
 /* One array element per broadcast stream the host wants from the group. */
 HCI_SDC_CMD_VN(HciSdcCmdLeBigCreateSync,
@@ -1636,10 +1319,6 @@ HCI_SDC_CMD_VN(HciSdcCmdLeBigCreateSync,
                sdc_hci_cmd_le_big_create_sync_t,
                array_params, num_bis, HciSdcStatus)
 
-HCI_SDC_CMD_PR(HciSdcCmdLeBigTerminateSync,
-               sdc_hci_cmd_le_big_terminate_sync,
-               sdc_hci_cmd_le_big_terminate_sync_t,
-               sdc_hci_cmd_le_big_terminate_sync_return_t)
 
 /*
  * Byte counted, not element counted: the tail is a codec configuration whose
@@ -1652,55 +1331,15 @@ HCI_SDC_CMD_VBR(HciSdcCmdLeSetupIsoDataPath,
                 sdc_hci_cmd_le_setup_iso_data_path_return_t,
                 codec_config, codec_config_length)
 
-HCI_SDC_CMD_PR(HciSdcCmdLeRemoveIsoDataPath,
-               sdc_hci_cmd_le_remove_iso_data_path,
-               sdc_hci_cmd_le_remove_iso_data_path_t,
-               sdc_hci_cmd_le_remove_iso_data_path_return_t)
 
-HCI_SDC_CMD_PR(HciSdcCmdLeIsoTransmitTest,
-               sdc_hci_cmd_le_iso_transmit_test,
-               sdc_hci_cmd_le_iso_transmit_test_t,
-               sdc_hci_cmd_le_iso_transmit_test_return_t)
 
-HCI_SDC_CMD_PR(HciSdcCmdLeIsoReceiveTest,
-               sdc_hci_cmd_le_iso_receive_test,
-               sdc_hci_cmd_le_iso_receive_test_t,
-               sdc_hci_cmd_le_iso_receive_test_return_t)
 
-HCI_SDC_CMD_PR(HciSdcCmdLeIsoReadTestCounters,
-               sdc_hci_cmd_le_iso_read_test_counters,
-               sdc_hci_cmd_le_iso_read_test_counters_t,
-               sdc_hci_cmd_le_iso_read_test_counters_return_t)
 
-HCI_SDC_CMD_PR(HciSdcCmdLeIsoTestEnd,
-               sdc_hci_cmd_le_iso_test_end,
-               sdc_hci_cmd_le_iso_test_end_t,
-               sdc_hci_cmd_le_iso_test_end_return_t)
 
-HCI_SDC_CMD_PR(HciSdcCmdLeReadIsoLinkQuality,
-               sdc_hci_cmd_le_read_iso_link_quality,
-               sdc_hci_cmd_le_read_iso_link_quality_t,
-               sdc_hci_cmd_le_read_iso_link_quality_return_t)
 
-HCI_SDC_CMD_PR(HciSdcCmdVsIsoReadTxTimestamp,
-               sdc_hci_cmd_vs_iso_read_tx_timestamp,
-               sdc_hci_cmd_vs_iso_read_tx_timestamp_t,
-               sdc_hci_cmd_vs_iso_read_tx_timestamp_return_t)
 
-HCI_SDC_CMD_P(HciSdcCmdVsBigReservedTimeSet,
-              sdc_hci_cmd_vs_big_reserved_time_set,
-              sdc_hci_cmd_vs_big_reserved_time_set_t,
-              HciSdcComplete)
 
-HCI_SDC_CMD_P(HciSdcCmdVsCigReservedTimeSet,
-              sdc_hci_cmd_vs_cig_reserved_time_set,
-              sdc_hci_cmd_vs_cig_reserved_time_set_t,
-              HciSdcComplete)
 
-HCI_SDC_CMD_P(HciSdcCmdVsCisSubeventLengthSet,
-              sdc_hci_cmd_vs_cis_subevent_length_set,
-              sdc_hci_cmd_vs_cis_subevent_length_set_t,
-              HciSdcComplete)
 
 static const HciCmdEntry_t s_HciSdcCommands[] = {
     /* Controller and baseband. */
@@ -1749,16 +1388,8 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
      * the feature is supposed to produce. The bitmap below drops the three
      * bits to match, since a row and a bit have to agree in both directions.
      */
-    HCI_SDC_ENTRY_CR(
-        SDC_HCI_OPCODE_CMD_CB_READ_AUTHENTICATED_PAYLOAD_TIMEOUT,
-        sizeof(sdc_hci_cmd_cb_read_authenticated_payload_timeout_t),
-        HciSdcCmdReadAuthPayloadTimeout,
-        sdc_hci_cmd_cb_read_authenticated_payload_timeout_return_t),
-    HCI_SDC_ENTRY_CR(
-        SDC_HCI_OPCODE_CMD_CB_WRITE_AUTHENTICATED_PAYLOAD_TIMEOUT,
-        sizeof(sdc_hci_cmd_cb_write_authenticated_payload_timeout_t),
-        HciSdcCmdWriteAuthPayloadTimeout,
-        sdc_hci_cmd_cb_write_authenticated_payload_timeout_return_t),
+    HCI_SDC_ROW_PR(SDC_HCI_OPCODE_CMD_CB_READ_AUTHENTICATED_PAYLOAD_TIMEOUT, sdc_hci_cmd_cb_read_authenticated_payload_timeout_t, sizeof(sdc_hci_cmd_cb_read_authenticated_payload_timeout_t), sdc_hci_cmd_cb_read_authenticated_payload_timeout_return_t, sdc_hci_cmd_cb_read_authenticated_payload_timeout),
+    HCI_SDC_ROW_PR(SDC_HCI_OPCODE_CMD_CB_WRITE_AUTHENTICATED_PAYLOAD_TIMEOUT, sdc_hci_cmd_cb_write_authenticated_payload_timeout_t, sizeof(sdc_hci_cmd_cb_write_authenticated_payload_timeout_t), sdc_hci_cmd_cb_write_authenticated_payload_timeout_return_t, sdc_hci_cmd_cb_write_authenticated_payload_timeout),
 
     /* Informational parameters. */
     HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_IP_READ_LOCAL_VERSION_INFORMATION, 0U,
@@ -1775,9 +1406,7 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
                      sdc_hci_cmd_ip_read_bd_addr_return_t),
 
     /* Status parameters. */
-    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_SP_READ_RSSI,
-                     sizeof(sdc_hci_cmd_sp_read_rssi_t), HciSdcCmdReadRssi,
-                     sdc_hci_cmd_sp_read_rssi_return_t),
+    HCI_SDC_ROW_PR(SDC_HCI_OPCODE_CMD_SP_READ_RSSI, sdc_hci_cmd_sp_read_rssi_t, sizeof(sdc_hci_cmd_sp_read_rssi_t), sdc_hci_cmd_sp_read_rssi_return_t, sdc_hci_cmd_sp_read_rssi),
 
     /* LE basics. */
     HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_EVENT_MASK, 8U,
@@ -1809,324 +1438,142 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
                     HciSdcCmdLeSetScanEnable),
 
     /* Link control. */
-    HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LC_DISCONNECT,
-                    sizeof(sdc_hci_cmd_lc_disconnect_t), HciSdcCmdDisconnect),
-    HCI_SDC_ENTRY_S(
-        SDC_HCI_OPCODE_CMD_LC_READ_REMOTE_VERSION_INFORMATION,
-        sizeof(sdc_hci_cmd_lc_read_remote_version_information_t),
-        HciSdcCmdReadRemoteVersion),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LC_DISCONNECT, HCI_CMD_RESPONSE_STATUS, sdc_hci_cmd_lc_disconnect_t, sizeof(sdc_hci_cmd_lc_disconnect_t), sdc_hci_cmd_lc_disconnect),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LC_READ_REMOTE_VERSION_INFORMATION, HCI_CMD_RESPONSE_STATUS, sdc_hci_cmd_lc_read_remote_version_information_t, sizeof(sdc_hci_cmd_lc_read_remote_version_information_t), sdc_hci_cmd_lc_read_remote_version_information),
 
     /* Connection management. */
-    HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_CREATE_CONN,
-                    sizeof(sdc_hci_cmd_le_create_conn_t),
-                    HciSdcCmdLeCreateConn),
-    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_CREATE_CONN_CANCEL, 0U,
-                    HciSdcCmdLeCreateConnCancel),
-    HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_CONN_UPDATE,
-                    sizeof(sdc_hci_cmd_le_conn_update_t),
-                    HciSdcCmdLeConnUpdate),
-    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_READ_CHANNEL_MAP,
-                     sizeof(sdc_hci_cmd_le_read_channel_map_t),
-                     HciSdcCmdLeReadChannelMap,
-                     sdc_hci_cmd_le_read_channel_map_return_t),
-    HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_READ_REMOTE_FEATURES,
-                    sizeof(sdc_hci_cmd_le_read_remote_features_t),
-                    HciSdcCmdLeReadRemoteFeatures),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_CREATE_CONN, HCI_CMD_RESPONSE_STATUS, sdc_hci_cmd_le_create_conn_t, sizeof(sdc_hci_cmd_le_create_conn_t), sdc_hci_cmd_le_create_conn),
+    HCI_SDC_ROW_N(SDC_HCI_OPCODE_CMD_LE_CREATE_CONN_CANCEL, HCI_CMD_RESPONSE_COMPLETE, 0U, sdc_hci_cmd_le_create_conn_cancel),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_CONN_UPDATE, HCI_CMD_RESPONSE_STATUS, sdc_hci_cmd_le_conn_update_t, sizeof(sdc_hci_cmd_le_conn_update_t), sdc_hci_cmd_le_conn_update),
+    HCI_SDC_ROW_PR(SDC_HCI_OPCODE_CMD_LE_READ_CHANNEL_MAP, sdc_hci_cmd_le_read_channel_map_t, sizeof(sdc_hci_cmd_le_read_channel_map_t), sdc_hci_cmd_le_read_channel_map_return_t, sdc_hci_cmd_le_read_channel_map),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_READ_REMOTE_FEATURES, HCI_CMD_RESPONSE_STATUS, sdc_hci_cmd_le_read_remote_features_t, sizeof(sdc_hci_cmd_le_read_remote_features_t), sdc_hci_cmd_le_read_remote_features),
 
     /* Filter accept list. */
-    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_READ_FILTER_ACCEPT_LIST_SIZE, 0U,
-                     HciSdcCmdLeReadAcceptListSize,
-                     sdc_hci_cmd_le_read_filter_accept_list_size_return_t),
-    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_CLEAR_FILTER_ACCEPT_LIST, 0U,
-                    HciSdcCmdLeClearAcceptList),
-    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_ADD_DEVICE_TO_FILTER_ACCEPT_LIST,
-                    sizeof(sdc_hci_cmd_le_add_device_to_filter_accept_list_t),
-                    HciSdcCmdLeAddToAcceptList),
-    HCI_SDC_ENTRY_C(
-        SDC_HCI_OPCODE_CMD_LE_REMOVE_DEVICE_FROM_FILTER_ACCEPT_LIST,
-        sizeof(sdc_hci_cmd_le_remove_device_from_filter_accept_list_t),
-        HciSdcCmdLeRemoveFromAcceptList),
+    HCI_SDC_ROW_NR(SDC_HCI_OPCODE_CMD_LE_READ_FILTER_ACCEPT_LIST_SIZE, 0U, sdc_hci_cmd_le_read_filter_accept_list_size_return_t, sdc_hci_cmd_le_read_filter_accept_list_size),
+    HCI_SDC_ROW_N(SDC_HCI_OPCODE_CMD_LE_CLEAR_FILTER_ACCEPT_LIST, HCI_CMD_RESPONSE_COMPLETE, 0U, sdc_hci_cmd_le_clear_filter_accept_list),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_ADD_DEVICE_TO_FILTER_ACCEPT_LIST, HCI_CMD_RESPONSE_COMPLETE, sdc_hci_cmd_le_add_device_to_filter_accept_list_t, sizeof(sdc_hci_cmd_le_add_device_to_filter_accept_list_t), sdc_hci_cmd_le_add_device_to_filter_accept_list),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_REMOVE_DEVICE_FROM_FILTER_ACCEPT_LIST, HCI_CMD_RESPONSE_COMPLETE, sdc_hci_cmd_le_remove_device_from_filter_accept_list_t, sizeof(sdc_hci_cmd_le_remove_device_from_filter_accept_list_t), sdc_hci_cmd_le_remove_device_from_filter_accept_list),
 
     /* Privacy and the resolving list. */
-    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_ADD_DEVICE_TO_RESOLVING_LIST,
-                    sizeof(sdc_hci_cmd_le_add_device_to_resolving_list_t),
-                    HciSdcCmdLeAddToResolvingList),
-    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_REMOVE_DEVICE_FROM_RESOLVING_LIST,
-                    sizeof(sdc_hci_cmd_le_remove_device_from_resolving_list_t),
-                    HciSdcCmdLeRemoveFromResolvingList),
-    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_CLEAR_RESOLVING_LIST, 0U,
-                    HciSdcCmdLeClearResolvingList),
-    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_READ_RESOLVING_LIST_SIZE, 0U,
-                     HciSdcCmdLeReadResolvingListSize,
-                     sdc_hci_cmd_le_read_resolving_list_size_return_t),
-    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_ADDRESS_RESOLUTION_ENABLE,
-                    sizeof(sdc_hci_cmd_le_set_address_resolution_enable_t),
-                    HciSdcCmdLeSetAddressResolutionEnable),
-    HCI_SDC_ENTRY_C(
-        SDC_HCI_OPCODE_CMD_LE_SET_RESOLVABLE_PRIVATE_ADDRESS_TIMEOUT,
-        sizeof(sdc_hci_cmd_le_set_resolvable_private_address_timeout_t),
-        HciSdcCmdLeSetRpaTimeout),
-    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_PRIVACY_MODE,
-                    sizeof(sdc_hci_cmd_le_set_privacy_mode_t),
-                    HciSdcCmdLeSetPrivacyMode),
-    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_DATA_RELATED_ADDRESS_CHANGES,
-                    sizeof(sdc_hci_cmd_le_set_data_related_address_changes_t),
-                    HciSdcCmdLeSetDataRelatedAddressChanges),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_ADD_DEVICE_TO_RESOLVING_LIST, HCI_CMD_RESPONSE_COMPLETE, sdc_hci_cmd_le_add_device_to_resolving_list_t, sizeof(sdc_hci_cmd_le_add_device_to_resolving_list_t), sdc_hci_cmd_le_add_device_to_resolving_list),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_REMOVE_DEVICE_FROM_RESOLVING_LIST, HCI_CMD_RESPONSE_COMPLETE, sdc_hci_cmd_le_remove_device_from_resolving_list_t, sizeof(sdc_hci_cmd_le_remove_device_from_resolving_list_t), sdc_hci_cmd_le_remove_device_from_resolving_list),
+    HCI_SDC_ROW_N(SDC_HCI_OPCODE_CMD_LE_CLEAR_RESOLVING_LIST, HCI_CMD_RESPONSE_COMPLETE, 0U, sdc_hci_cmd_le_clear_resolving_list),
+    HCI_SDC_ROW_NR(SDC_HCI_OPCODE_CMD_LE_READ_RESOLVING_LIST_SIZE, 0U, sdc_hci_cmd_le_read_resolving_list_size_return_t, sdc_hci_cmd_le_read_resolving_list_size),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_SET_ADDRESS_RESOLUTION_ENABLE, HCI_CMD_RESPONSE_COMPLETE, sdc_hci_cmd_le_set_address_resolution_enable_t, sizeof(sdc_hci_cmd_le_set_address_resolution_enable_t), sdc_hci_cmd_le_set_address_resolution_enable),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_SET_RESOLVABLE_PRIVATE_ADDRESS_TIMEOUT, HCI_CMD_RESPONSE_COMPLETE, sdc_hci_cmd_le_set_resolvable_private_address_timeout_t, sizeof(sdc_hci_cmd_le_set_resolvable_private_address_timeout_t), sdc_hci_cmd_le_set_resolvable_private_address_timeout),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_SET_PRIVACY_MODE, HCI_CMD_RESPONSE_COMPLETE, sdc_hci_cmd_le_set_privacy_mode_t, sizeof(sdc_hci_cmd_le_set_privacy_mode_t), sdc_hci_cmd_le_set_privacy_mode),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_SET_DATA_RELATED_ADDRESS_CHANGES, HCI_CMD_RESPONSE_COMPLETE, sdc_hci_cmd_le_set_data_related_address_changes_t, sizeof(sdc_hci_cmd_le_set_data_related_address_changes_t), sdc_hci_cmd_le_set_data_related_address_changes),
 
     /* Security. */
-    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_ENCRYPT,
-                     sizeof(sdc_hci_cmd_le_encrypt_t), HciSdcCmdLeEncrypt,
-                     sdc_hci_cmd_le_encrypt_return_t),
-    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_RAND, 0U, HciSdcCmdLeRand,
-                     sdc_hci_cmd_le_rand_return_t),
-    HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_ENABLE_ENCRYPTION,
-                    sizeof(sdc_hci_cmd_le_enable_encryption_t),
-                    HciSdcCmdLeEnableEncryption),
-    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_LONG_TERM_KEY_REQUEST_REPLY,
-                     sizeof(sdc_hci_cmd_le_long_term_key_request_reply_t),
-                     HciSdcCmdLeLtkReply,
-                     sdc_hci_cmd_le_long_term_key_request_reply_return_t),
-    HCI_SDC_ENTRY_CR(
-        SDC_HCI_OPCODE_CMD_LE_LONG_TERM_KEY_REQUEST_NEGATIVE_REPLY,
-        sizeof(sdc_hci_cmd_le_long_term_key_request_negative_reply_t),
-        HciSdcCmdLeLtkNegativeReply,
-        sdc_hci_cmd_le_long_term_key_request_negative_reply_return_t),
+    HCI_SDC_ROW_PR(SDC_HCI_OPCODE_CMD_LE_ENCRYPT, sdc_hci_cmd_le_encrypt_t, sizeof(sdc_hci_cmd_le_encrypt_t), sdc_hci_cmd_le_encrypt_return_t, sdc_hci_cmd_le_encrypt),
+    HCI_SDC_ROW_NR(SDC_HCI_OPCODE_CMD_LE_RAND, 0U, sdc_hci_cmd_le_rand_return_t, sdc_hci_cmd_le_rand),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_ENABLE_ENCRYPTION, HCI_CMD_RESPONSE_STATUS, sdc_hci_cmd_le_enable_encryption_t, sizeof(sdc_hci_cmd_le_enable_encryption_t), sdc_hci_cmd_le_enable_encryption),
+    HCI_SDC_ROW_PR(SDC_HCI_OPCODE_CMD_LE_LONG_TERM_KEY_REQUEST_REPLY, sdc_hci_cmd_le_long_term_key_request_reply_t, sizeof(sdc_hci_cmd_le_long_term_key_request_reply_t), sdc_hci_cmd_le_long_term_key_request_reply_return_t, sdc_hci_cmd_le_long_term_key_request_reply),
+    HCI_SDC_ROW_PR(SDC_HCI_OPCODE_CMD_LE_LONG_TERM_KEY_REQUEST_NEGATIVE_REPLY, sdc_hci_cmd_le_long_term_key_request_negative_reply_t, sizeof(sdc_hci_cmd_le_long_term_key_request_negative_reply_t), sdc_hci_cmd_le_long_term_key_request_negative_reply_return_t, sdc_hci_cmd_le_long_term_key_request_negative_reply),
 
-    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_READ_TRANSMIT_POWER, 0U,
-                     HciSdcCmdLeReadTransmitPower,
-                     sdc_hci_cmd_le_read_transmit_power_return_t),
+    HCI_SDC_ROW_NR(SDC_HCI_OPCODE_CMD_LE_READ_TRANSMIT_POWER, 0U, sdc_hci_cmd_le_read_transmit_power_return_t, sdc_hci_cmd_le_read_transmit_power),
 
     /* Direct test mode. */
-    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_RECEIVER_TEST_V1,
-                    sizeof(sdc_hci_cmd_le_receiver_test_v1_t),
-                    HciSdcCmdLeReceiverTest),
-    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_TRANSMITTER_TEST_V1,
-                    sizeof(sdc_hci_cmd_le_transmitter_test_v1_t),
-                    HciSdcCmdLeTransmitterTest),
-    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_RECEIVER_TEST_V2,
-                    sizeof(sdc_hci_cmd_le_receiver_test_v2_t),
-                    HciSdcCmdLeReceiverTestV2),
-    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_TRANSMITTER_TEST_V2,
-                    sizeof(sdc_hci_cmd_le_transmitter_test_v2_t),
-                    HciSdcCmdLeTransmitterTestV2),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_RECEIVER_TEST_V1, HCI_CMD_RESPONSE_COMPLETE, sdc_hci_cmd_le_receiver_test_v1_t, sizeof(sdc_hci_cmd_le_receiver_test_v1_t), sdc_hci_cmd_le_receiver_test_v1),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_TRANSMITTER_TEST_V1, HCI_CMD_RESPONSE_COMPLETE, sdc_hci_cmd_le_transmitter_test_v1_t, sizeof(sdc_hci_cmd_le_transmitter_test_v1_t), sdc_hci_cmd_le_transmitter_test_v1),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_RECEIVER_TEST_V2, HCI_CMD_RESPONSE_COMPLETE, sdc_hci_cmd_le_receiver_test_v2_t, sizeof(sdc_hci_cmd_le_receiver_test_v2_t), sdc_hci_cmd_le_receiver_test_v2),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_TRANSMITTER_TEST_V2, HCI_CMD_RESPONSE_COMPLETE, sdc_hci_cmd_le_transmitter_test_v2_t, sizeof(sdc_hci_cmd_le_transmitter_test_v2_t), sdc_hci_cmd_le_transmitter_test_v2),
     HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_RECEIVER_TEST_V3,
                     HCI_CMD_VARIABLE_PARAM_LEN, HciSdcCmdLeReceiverTestV3),
     HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_TRANSMITTER_TEST_V3,
                     HCI_CMD_VARIABLE_PARAM_LEN, HciSdcCmdLeTransmitterTestV3),
     HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_TRANSMITTER_TEST_V4,
                     HCI_CMD_VARIABLE_PARAM_LEN, HciSdcCmdLeTransmitterTestV4),
-    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_TEST_END, 0U, HciSdcCmdLeTestEnd,
-                     sdc_hci_cmd_le_test_end_return_t),
+    HCI_SDC_ROW_NR(SDC_HCI_OPCODE_CMD_LE_TEST_END, 0U, sdc_hci_cmd_le_test_end_return_t, sdc_hci_cmd_le_test_end),
 
     /* Data length. */
-    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_SET_DATA_LENGTH,
-                     sizeof(sdc_hci_cmd_le_set_data_length_t),
-                     HciSdcCmdLeSetDataLength,
-                     sdc_hci_cmd_le_set_data_length_return_t),
-    HCI_SDC_ENTRY_CR(
-        SDC_HCI_OPCODE_CMD_LE_READ_SUGGESTED_DEFAULT_DATA_LENGTH, 0U,
-        HciSdcCmdLeReadSuggestedDataLength,
-        sdc_hci_cmd_le_read_suggested_default_data_length_return_t),
-    HCI_SDC_ENTRY_C(
-        SDC_HCI_OPCODE_CMD_LE_WRITE_SUGGESTED_DEFAULT_DATA_LENGTH,
-        sizeof(sdc_hci_cmd_le_write_suggested_default_data_length_t),
-        HciSdcCmdLeWriteSuggestedDataLength),
-    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_READ_MAX_DATA_LENGTH, 0U,
-                     HciSdcCmdLeReadMaxDataLength,
-                     sdc_hci_cmd_le_read_max_data_length_return_t),
+    HCI_SDC_ROW_PR(SDC_HCI_OPCODE_CMD_LE_SET_DATA_LENGTH, sdc_hci_cmd_le_set_data_length_t, sizeof(sdc_hci_cmd_le_set_data_length_t), sdc_hci_cmd_le_set_data_length_return_t, sdc_hci_cmd_le_set_data_length),
+    HCI_SDC_ROW_NR(SDC_HCI_OPCODE_CMD_LE_READ_SUGGESTED_DEFAULT_DATA_LENGTH, 0U, sdc_hci_cmd_le_read_suggested_default_data_length_return_t, sdc_hci_cmd_le_read_suggested_default_data_length),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_WRITE_SUGGESTED_DEFAULT_DATA_LENGTH, HCI_CMD_RESPONSE_COMPLETE, sdc_hci_cmd_le_write_suggested_default_data_length_t, sizeof(sdc_hci_cmd_le_write_suggested_default_data_length_t), sdc_hci_cmd_le_write_suggested_default_data_length),
+    HCI_SDC_ROW_NR(SDC_HCI_OPCODE_CMD_LE_READ_MAX_DATA_LENGTH, 0U, sdc_hci_cmd_le_read_max_data_length_return_t, sdc_hci_cmd_le_read_max_data_length),
 
     /* PHY. */
-    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_READ_PHY,
-                     sizeof(sdc_hci_cmd_le_read_phy_t), HciSdcCmdLeReadPhy,
-                     sdc_hci_cmd_le_read_phy_return_t),
-    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_DEFAULT_PHY,
-                    sizeof(sdc_hci_cmd_le_set_default_phy_t),
-                    HciSdcCmdLeSetDefaultPhy),
-    HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_SET_PHY,
-                    sizeof(sdc_hci_cmd_le_set_phy_t), HciSdcCmdLeSetPhy),
+    HCI_SDC_ROW_PR(SDC_HCI_OPCODE_CMD_LE_READ_PHY, sdc_hci_cmd_le_read_phy_t, sizeof(sdc_hci_cmd_le_read_phy_t), sdc_hci_cmd_le_read_phy_return_t, sdc_hci_cmd_le_read_phy),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_SET_DEFAULT_PHY, HCI_CMD_RESPONSE_COMPLETE, sdc_hci_cmd_le_set_default_phy_t, sizeof(sdc_hci_cmd_le_set_default_phy_t), sdc_hci_cmd_le_set_default_phy),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_SET_PHY, HCI_CMD_RESPONSE_STATUS, sdc_hci_cmd_le_set_phy_t, sizeof(sdc_hci_cmd_le_set_phy_t), sdc_hci_cmd_le_set_phy),
 
     /* Extended advertising. */
-    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_ADV_SET_RANDOM_ADDRESS,
-                    sizeof(sdc_hci_cmd_le_set_adv_set_random_address_t),
-                    HciSdcCmdLeSetAdvSetRandomAddr),
-    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_SET_EXT_ADV_PARAMS,
-                     sizeof(sdc_hci_cmd_le_set_ext_adv_params_t),
-                     HciSdcCmdLeSetExtAdvParams,
-                     sdc_hci_cmd_le_set_ext_adv_params_return_t),
-    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_SET_EXT_ADV_PARAMS_V2,
-                     sizeof(sdc_hci_cmd_le_set_ext_adv_params_v2_t),
-                     HciSdcCmdLeSetExtAdvParamsV2,
-                     sdc_hci_cmd_le_set_ext_adv_params_v2_return_t),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_SET_ADV_SET_RANDOM_ADDRESS, HCI_CMD_RESPONSE_COMPLETE, sdc_hci_cmd_le_set_adv_set_random_address_t, sizeof(sdc_hci_cmd_le_set_adv_set_random_address_t), sdc_hci_cmd_le_set_adv_set_random_address),
+    HCI_SDC_ROW_PR(SDC_HCI_OPCODE_CMD_LE_SET_EXT_ADV_PARAMS, sdc_hci_cmd_le_set_ext_adv_params_t, sizeof(sdc_hci_cmd_le_set_ext_adv_params_t), sdc_hci_cmd_le_set_ext_adv_params_return_t, sdc_hci_cmd_le_set_ext_adv_params),
+    HCI_SDC_ROW_PR(SDC_HCI_OPCODE_CMD_LE_SET_EXT_ADV_PARAMS_V2, sdc_hci_cmd_le_set_ext_adv_params_v2_t, sizeof(sdc_hci_cmd_le_set_ext_adv_params_v2_t), sdc_hci_cmd_le_set_ext_adv_params_v2_return_t, sdc_hci_cmd_le_set_ext_adv_params_v2),
     HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_EXT_ADV_DATA,
                     HCI_CMD_VARIABLE_PARAM_LEN, HciSdcCmdLeSetExtAdvData),
     HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_EXT_SCAN_RESPONSE_DATA,
                     HCI_CMD_VARIABLE_PARAM_LEN, HciSdcCmdLeSetExtScanRsp),
     HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_EXT_ADV_ENABLE,
                     HCI_CMD_VARIABLE_PARAM_LEN, HciSdcCmdLeSetExtAdvEnable),
-    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_READ_MAX_ADV_DATA_LENGTH, 0U,
-                     HciSdcCmdLeReadMaxAdvDataLength,
-                     sdc_hci_cmd_le_read_max_adv_data_length_return_t),
-    HCI_SDC_ENTRY_CR(
-        SDC_HCI_OPCODE_CMD_LE_READ_NUMBER_OF_SUPPORTED_ADV_SETS, 0U,
-        HciSdcCmdLeReadNumAdvSets,
-        sdc_hci_cmd_le_read_number_of_supported_adv_sets_return_t),
-    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_REMOVE_ADV_SET,
-                    sizeof(sdc_hci_cmd_le_remove_adv_set_t),
-                    HciSdcCmdLeRemoveAdvSet),
-    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_CLEAR_ADV_SETS, 0U,
-                    HciSdcCmdLeClearAdvSets),
+    HCI_SDC_ROW_NR(SDC_HCI_OPCODE_CMD_LE_READ_MAX_ADV_DATA_LENGTH, 0U, sdc_hci_cmd_le_read_max_adv_data_length_return_t, sdc_hci_cmd_le_read_max_adv_data_length),
+    HCI_SDC_ROW_NR(SDC_HCI_OPCODE_CMD_LE_READ_NUMBER_OF_SUPPORTED_ADV_SETS, 0U, sdc_hci_cmd_le_read_number_of_supported_adv_sets_return_t, sdc_hci_cmd_le_read_number_of_supported_adv_sets),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_REMOVE_ADV_SET, HCI_CMD_RESPONSE_COMPLETE, sdc_hci_cmd_le_remove_adv_set_t, sizeof(sdc_hci_cmd_le_remove_adv_set_t), sdc_hci_cmd_le_remove_adv_set),
+    HCI_SDC_ROW_N(SDC_HCI_OPCODE_CMD_LE_CLEAR_ADV_SETS, HCI_CMD_RESPONSE_COMPLETE, 0U, sdc_hci_cmd_le_clear_adv_sets),
 
     /* Extended scanning and initiating. */
     HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_EXT_SCAN_PARAMS,
                     HCI_CMD_VARIABLE_PARAM_LEN, HciSdcCmdLeSetExtScanParams),
-    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_EXT_SCAN_ENABLE,
-                    sizeof(sdc_hci_cmd_le_set_ext_scan_enable_t),
-                    HciSdcCmdLeSetExtScanEnable),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_SET_EXT_SCAN_ENABLE, HCI_CMD_RESPONSE_COMPLETE, sdc_hci_cmd_le_set_ext_scan_enable_t, sizeof(sdc_hci_cmd_le_set_ext_scan_enable_t), sdc_hci_cmd_le_set_ext_scan_enable),
     HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_EXT_CREATE_CONN,
                     HCI_CMD_VARIABLE_PARAM_LEN, HciSdcCmdLeExtCreateConn),
     HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_EXT_CREATE_CONN_V2,
                     HCI_CMD_VARIABLE_PARAM_LEN, HciSdcCmdLeExtCreateConnV2),
 
     /* Host declared features. */
-    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_HOST_FEATURE,
-                    sizeof(sdc_hci_cmd_le_set_host_feature_t),
-                    HciSdcCmdLeSetHostFeature),
-    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_HOST_FEATURE_V2,
-                    sizeof(sdc_hci_cmd_le_set_host_feature_v2_t),
-                    HciSdcCmdLeSetHostFeatureV2),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_SET_HOST_FEATURE, HCI_CMD_RESPONSE_COMPLETE, sdc_hci_cmd_le_set_host_feature_t, sizeof(sdc_hci_cmd_le_set_host_feature_t), sdc_hci_cmd_le_set_host_feature),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_SET_HOST_FEATURE_V2, HCI_CMD_RESPONSE_COMPLETE, sdc_hci_cmd_le_set_host_feature_v2_t, sizeof(sdc_hci_cmd_le_set_host_feature_v2_t), sdc_hci_cmd_le_set_host_feature_v2),
 
     /* Transmit power, and the path loss the two ends work out from it. */
-    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_CB_READ_TRANSMIT_POWER_LEVEL,
-                     sizeof(sdc_hci_cmd_cb_read_transmit_power_level_t),
-                     HciSdcCmdReadTransmitPowerLevel,
-                     sdc_hci_cmd_cb_read_transmit_power_level_return_t),
-    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_READ_RF_PATH_COMPENSATION, 0U,
-                     HciSdcCmdLeReadRfPathCompensation,
-                     sdc_hci_cmd_le_read_rf_path_compensation_return_t),
-    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_WRITE_RF_PATH_COMPENSATION,
-                    sizeof(sdc_hci_cmd_le_write_rf_path_compensation_t),
-                    HciSdcCmdLeWriteRfPathCompensation),
-    HCI_SDC_ENTRY_CR(
-        SDC_HCI_OPCODE_CMD_LE_ENHANCED_READ_TRANSMIT_POWER_LEVEL,
-        sizeof(sdc_hci_cmd_le_enhanced_read_transmit_power_level_t),
-        HciSdcCmdLeEnhancedReadTransmitPower,
-        sdc_hci_cmd_le_enhanced_read_transmit_power_level_return_t),
+    HCI_SDC_ROW_PR(SDC_HCI_OPCODE_CMD_CB_READ_TRANSMIT_POWER_LEVEL, sdc_hci_cmd_cb_read_transmit_power_level_t, sizeof(sdc_hci_cmd_cb_read_transmit_power_level_t), sdc_hci_cmd_cb_read_transmit_power_level_return_t, sdc_hci_cmd_cb_read_transmit_power_level),
+    HCI_SDC_ROW_NR(SDC_HCI_OPCODE_CMD_LE_READ_RF_PATH_COMPENSATION, 0U, sdc_hci_cmd_le_read_rf_path_compensation_return_t, sdc_hci_cmd_le_read_rf_path_compensation),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_WRITE_RF_PATH_COMPENSATION, HCI_CMD_RESPONSE_COMPLETE, sdc_hci_cmd_le_write_rf_path_compensation_t, sizeof(sdc_hci_cmd_le_write_rf_path_compensation_t), sdc_hci_cmd_le_write_rf_path_compensation),
+    HCI_SDC_ROW_PR(SDC_HCI_OPCODE_CMD_LE_ENHANCED_READ_TRANSMIT_POWER_LEVEL, sdc_hci_cmd_le_enhanced_read_transmit_power_level_t, sizeof(sdc_hci_cmd_le_enhanced_read_transmit_power_level_t), sdc_hci_cmd_le_enhanced_read_transmit_power_level_return_t, sdc_hci_cmd_le_enhanced_read_transmit_power_level),
     /* Command Status, then an LE Transmit Power Reporting event. 7.8.118. */
-    HCI_SDC_ENTRY_S(
-        SDC_HCI_OPCODE_CMD_LE_READ_REMOTE_TRANSMIT_POWER_LEVEL,
-        sizeof(sdc_hci_cmd_le_read_remote_transmit_power_level_t),
-        HciSdcCmdLeReadRemoteTransmitPower),
-    HCI_SDC_ENTRY_CR(
-        SDC_HCI_OPCODE_CMD_LE_SET_PATH_LOSS_REPORTING_PARAMS,
-        sizeof(sdc_hci_cmd_le_set_path_loss_reporting_params_t),
-        HciSdcCmdLeSetPathLossReportingParams,
-        sdc_hci_cmd_le_set_path_loss_reporting_params_return_t),
-    HCI_SDC_ENTRY_CR(
-        SDC_HCI_OPCODE_CMD_LE_SET_PATH_LOSS_REPORTING_ENABLE,
-        sizeof(sdc_hci_cmd_le_set_path_loss_reporting_enable_t),
-        HciSdcCmdLeSetPathLossReportingEnable,
-        sdc_hci_cmd_le_set_path_loss_reporting_enable_return_t),
-    HCI_SDC_ENTRY_CR(
-        SDC_HCI_OPCODE_CMD_LE_SET_TRANSMIT_POWER_REPORTING_ENABLE,
-        sizeof(sdc_hci_cmd_le_set_transmit_power_reporting_enable_t),
-        HciSdcCmdLeSetTransmitPowerReportingEnable,
-        sdc_hci_cmd_le_set_transmit_power_reporting_enable_return_t),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_READ_REMOTE_TRANSMIT_POWER_LEVEL, HCI_CMD_RESPONSE_STATUS, sdc_hci_cmd_le_read_remote_transmit_power_level_t, sizeof(sdc_hci_cmd_le_read_remote_transmit_power_level_t), sdc_hci_cmd_le_read_remote_transmit_power_level),
+    HCI_SDC_ROW_PR(SDC_HCI_OPCODE_CMD_LE_SET_PATH_LOSS_REPORTING_PARAMS, sdc_hci_cmd_le_set_path_loss_reporting_params_t, sizeof(sdc_hci_cmd_le_set_path_loss_reporting_params_t), sdc_hci_cmd_le_set_path_loss_reporting_params_return_t, sdc_hci_cmd_le_set_path_loss_reporting_params),
+    HCI_SDC_ROW_PR(SDC_HCI_OPCODE_CMD_LE_SET_PATH_LOSS_REPORTING_ENABLE, sdc_hci_cmd_le_set_path_loss_reporting_enable_t, sizeof(sdc_hci_cmd_le_set_path_loss_reporting_enable_t), sdc_hci_cmd_le_set_path_loss_reporting_enable_return_t, sdc_hci_cmd_le_set_path_loss_reporting_enable),
+    HCI_SDC_ROW_PR(SDC_HCI_OPCODE_CMD_LE_SET_TRANSMIT_POWER_REPORTING_ENABLE, sdc_hci_cmd_le_set_transmit_power_reporting_enable_t, sizeof(sdc_hci_cmd_le_set_transmit_power_reporting_enable_t), sdc_hci_cmd_le_set_transmit_power_reporting_enable_return_t, sdc_hci_cmd_le_set_transmit_power_reporting_enable),
 
     /* Which channels the host believes are usable. Five octets of bitmap. */
-    HCI_SDC_ENTRY_C(
-        SDC_HCI_OPCODE_CMD_LE_SET_HOST_CHANNEL_CLASSIFICATION,
-        sizeof(sdc_hci_cmd_le_set_host_channel_classification_t),
-        HciSdcCmdLeSetHostChannelClassification),
-    HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_REQUEST_PEER_SCA,
-                    sizeof(sdc_hci_cmd_le_request_peer_sca_t),
-                    HciSdcCmdLeRequestPeerSca),
-    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_DEFAULT_SUBRATE,
-                    sizeof(sdc_hci_cmd_le_set_default_subrate_t),
-                    HciSdcCmdLeSetDefaultSubrate),
-    HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_SUBRATE_REQUEST,
-                    sizeof(sdc_hci_cmd_le_subrate_request_t),
-                    HciSdcCmdLeSubrateRequest),
-    HCI_SDC_ENTRY_CR(
-        SDC_HCI_OPCODE_CMD_LE_READ_ALL_LOCAL_SUPPORTED_FEATURES, 0U,
-        HciSdcCmdLeReadAllLocalSupportedFeatures,
-        sdc_hci_cmd_le_read_all_local_supported_features_return_t),
-    HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_READ_ALL_REMOTE_FEATURES,
-                    sizeof(sdc_hci_cmd_le_read_all_remote_features_t),
-                    HciSdcCmdLeReadAllRemoteFeatures),
-    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_VS_SET_ADV_RANDOMNESS,
-                    sizeof(sdc_hci_cmd_vs_set_adv_randomness_t),
-                    HciSdcCmdVsSetAdvRandomness),
-    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_VS_LLPM_MODE_SET,
-                    sizeof(sdc_hci_cmd_vs_llpm_mode_set_t),
-                    HciSdcCmdVsLlpmModeSet),
-    HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_VS_CONN_UPDATE,
-                    sizeof(sdc_hci_cmd_vs_conn_update_t),
-                    HciSdcCmdVsConnUpdate),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_SET_HOST_CHANNEL_CLASSIFICATION, HCI_CMD_RESPONSE_COMPLETE, sdc_hci_cmd_le_set_host_channel_classification_t, sizeof(sdc_hci_cmd_le_set_host_channel_classification_t), sdc_hci_cmd_le_set_host_channel_classification),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_REQUEST_PEER_SCA, HCI_CMD_RESPONSE_STATUS, sdc_hci_cmd_le_request_peer_sca_t, sizeof(sdc_hci_cmd_le_request_peer_sca_t), sdc_hci_cmd_le_request_peer_sca),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_SET_DEFAULT_SUBRATE, HCI_CMD_RESPONSE_COMPLETE, sdc_hci_cmd_le_set_default_subrate_t, sizeof(sdc_hci_cmd_le_set_default_subrate_t), sdc_hci_cmd_le_set_default_subrate),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_SUBRATE_REQUEST, HCI_CMD_RESPONSE_STATUS, sdc_hci_cmd_le_subrate_request_t, sizeof(sdc_hci_cmd_le_subrate_request_t), sdc_hci_cmd_le_subrate_request),
+    HCI_SDC_ROW_NR(SDC_HCI_OPCODE_CMD_LE_READ_ALL_LOCAL_SUPPORTED_FEATURES, 0U, sdc_hci_cmd_le_read_all_local_supported_features_return_t, sdc_hci_cmd_le_read_all_local_supported_features),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_READ_ALL_REMOTE_FEATURES, HCI_CMD_RESPONSE_STATUS, sdc_hci_cmd_le_read_all_remote_features_t, sizeof(sdc_hci_cmd_le_read_all_remote_features_t), sdc_hci_cmd_le_read_all_remote_features),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_VS_SET_ADV_RANDOMNESS, HCI_CMD_RESPONSE_COMPLETE, sdc_hci_cmd_vs_set_adv_randomness_t, sizeof(sdc_hci_cmd_vs_set_adv_randomness_t), sdc_hci_cmd_vs_set_adv_randomness),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_VS_LLPM_MODE_SET, HCI_CMD_RESPONSE_COMPLETE, sdc_hci_cmd_vs_llpm_mode_set_t, sizeof(sdc_hci_cmd_vs_llpm_mode_set_t), sdc_hci_cmd_vs_llpm_mode_set),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_VS_CONN_UPDATE, HCI_CMD_RESPONSE_STATUS, sdc_hci_cmd_vs_conn_update_t, sizeof(sdc_hci_cmd_vs_conn_update_t), sdc_hci_cmd_vs_conn_update),
 
     /* Periodic advertising, transmitting. */
-    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_PARAMS,
-                    sizeof(sdc_hci_cmd_le_set_periodic_adv_params_t),
-                    HciSdcCmdLeSetPeriodicAdvParams),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_PARAMS, HCI_CMD_RESPONSE_COMPLETE, sdc_hci_cmd_le_set_periodic_adv_params_t, sizeof(sdc_hci_cmd_le_set_periodic_adv_params_t), sdc_hci_cmd_le_set_periodic_adv_params),
     HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_DATA,
                     HCI_CMD_VARIABLE_PARAM_LEN,
                     HciSdcCmdLeSetPeriodicAdvData),
-    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_ENABLE,
-                    sizeof(sdc_hci_cmd_le_set_periodic_adv_enable_t),
-                    HciSdcCmdLeSetPeriodicAdvEnable),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_ENABLE, HCI_CMD_RESPONSE_COMPLETE, sdc_hci_cmd_le_set_periodic_adv_enable_t, sizeof(sdc_hci_cmd_le_set_periodic_adv_enable_t), sdc_hci_cmd_le_set_periodic_adv_enable),
     /* Following a train. Create Sync finishes in a Sync Established event. */
-    HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_PERIODIC_ADV_CREATE_SYNC,
-                    sizeof(sdc_hci_cmd_le_periodic_adv_create_sync_t),
-                    HciSdcCmdLePeriodicAdvCreateSync),
-    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_PERIODIC_ADV_CREATE_SYNC_CANCEL, 0U,
-                    HciSdcCmdLePeriodicAdvCreateSyncCancel),
-    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_PERIODIC_ADV_TERMINATE_SYNC,
-                    sizeof(sdc_hci_cmd_le_periodic_adv_terminate_sync_t),
-                    HciSdcCmdLePeriodicAdvTerminateSync),
-    HCI_SDC_ENTRY_C(
-        SDC_HCI_OPCODE_CMD_LE_ADD_DEVICE_TO_PERIODIC_ADV_LIST,
-        sizeof(sdc_hci_cmd_le_add_device_to_periodic_adv_list_t),
-        HciSdcCmdLeAddDeviceToPeriodicAdvList),
-    HCI_SDC_ENTRY_C(
-        SDC_HCI_OPCODE_CMD_LE_REMOVE_DEVICE_FROM_PERIODIC_ADV_LIST,
-        sizeof(sdc_hci_cmd_le_remove_device_from_periodic_adv_list_t),
-        HciSdcCmdLeRemoveDeviceFromPeriodicAdvList),
-    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_LE_CLEAR_PERIODIC_ADV_LIST, 0U,
-                    HciSdcCmdLeClearPeriodicAdvList),
-    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_READ_PERIODIC_ADV_LIST_SIZE, 0U,
-                     HciSdcCmdLeReadPeriodicAdvListSize,
-                     sdc_hci_cmd_le_read_periodic_adv_list_size_return_t),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_PERIODIC_ADV_CREATE_SYNC, HCI_CMD_RESPONSE_STATUS, sdc_hci_cmd_le_periodic_adv_create_sync_t, sizeof(sdc_hci_cmd_le_periodic_adv_create_sync_t), sdc_hci_cmd_le_periodic_adv_create_sync),
+    HCI_SDC_ROW_N(SDC_HCI_OPCODE_CMD_LE_PERIODIC_ADV_CREATE_SYNC_CANCEL, HCI_CMD_RESPONSE_COMPLETE, 0U, sdc_hci_cmd_le_periodic_adv_create_sync_cancel),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_PERIODIC_ADV_TERMINATE_SYNC, HCI_CMD_RESPONSE_COMPLETE, sdc_hci_cmd_le_periodic_adv_terminate_sync_t, sizeof(sdc_hci_cmd_le_periodic_adv_terminate_sync_t), sdc_hci_cmd_le_periodic_adv_terminate_sync),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_ADD_DEVICE_TO_PERIODIC_ADV_LIST, HCI_CMD_RESPONSE_COMPLETE, sdc_hci_cmd_le_add_device_to_periodic_adv_list_t, sizeof(sdc_hci_cmd_le_add_device_to_periodic_adv_list_t), sdc_hci_cmd_le_add_device_to_periodic_adv_list),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_REMOVE_DEVICE_FROM_PERIODIC_ADV_LIST, HCI_CMD_RESPONSE_COMPLETE, sdc_hci_cmd_le_remove_device_from_periodic_adv_list_t, sizeof(sdc_hci_cmd_le_remove_device_from_periodic_adv_list_t), sdc_hci_cmd_le_remove_device_from_periodic_adv_list),
+    HCI_SDC_ROW_N(SDC_HCI_OPCODE_CMD_LE_CLEAR_PERIODIC_ADV_LIST, HCI_CMD_RESPONSE_COMPLETE, 0U, sdc_hci_cmd_le_clear_periodic_adv_list),
+    HCI_SDC_ROW_NR(SDC_HCI_OPCODE_CMD_LE_READ_PERIODIC_ADV_LIST_SIZE, 0U, sdc_hci_cmd_le_read_periodic_adv_list_size_return_t, sdc_hci_cmd_le_read_periodic_adv_list_size),
     /* Handing a sync to a peer over a connection. */
-    HCI_SDC_ENTRY_C(
-        SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_RECEIVE_ENABLE,
-        sizeof(sdc_hci_cmd_le_set_periodic_adv_receive_enable_t),
-        HciSdcCmdLeSetPeriodicAdvReceiveEnable),
-    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_PERIODIC_ADV_SYNC_TRANSFER,
-                     sizeof(sdc_hci_cmd_le_periodic_adv_sync_transfer_t),
-                     HciSdcCmdLePeriodicAdvSyncTransfer,
-                     sdc_hci_cmd_le_periodic_adv_sync_transfer_return_t),
-    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_PERIODIC_ADV_SET_INFO_TRANSFER,
-                     sizeof(sdc_hci_cmd_le_periodic_adv_set_info_transfer_t),
-                     HciSdcCmdLePeriodicAdvSetInfoTransfer,
-                     sdc_hci_cmd_le_periodic_adv_set_info_transfer_return_t),
-    HCI_SDC_ENTRY_CR(
-        SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_SYNC_TRANSFER_PARAMS,
-        sizeof(sdc_hci_cmd_le_set_periodic_adv_sync_transfer_params_t),
-        HciSdcCmdLeSetPeriodicAdvSyncTransferParams,
-        sdc_hci_cmd_le_set_periodic_adv_sync_transfer_params_return_t),
-    HCI_SDC_ENTRY_C(
-        SDC_HCI_OPCODE_CMD_LE_SET_DEFAULT_PERIODIC_ADV_SYNC_TRANSFER_PARAMS,
-        sizeof(
-            sdc_hci_cmd_le_set_default_periodic_adv_sync_transfer_params_t),
-        HciSdcCmdLeSetDefaultPeriodicAdvSyncTransferParams),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_RECEIVE_ENABLE, HCI_CMD_RESPONSE_COMPLETE, sdc_hci_cmd_le_set_periodic_adv_receive_enable_t, sizeof(sdc_hci_cmd_le_set_periodic_adv_receive_enable_t), sdc_hci_cmd_le_set_periodic_adv_receive_enable),
+    HCI_SDC_ROW_PR(SDC_HCI_OPCODE_CMD_LE_PERIODIC_ADV_SYNC_TRANSFER, sdc_hci_cmd_le_periodic_adv_sync_transfer_t, sizeof(sdc_hci_cmd_le_periodic_adv_sync_transfer_t), sdc_hci_cmd_le_periodic_adv_sync_transfer_return_t, sdc_hci_cmd_le_periodic_adv_sync_transfer),
+    HCI_SDC_ROW_PR(SDC_HCI_OPCODE_CMD_LE_PERIODIC_ADV_SET_INFO_TRANSFER, sdc_hci_cmd_le_periodic_adv_set_info_transfer_t, sizeof(sdc_hci_cmd_le_periodic_adv_set_info_transfer_t), sdc_hci_cmd_le_periodic_adv_set_info_transfer_return_t, sdc_hci_cmd_le_periodic_adv_set_info_transfer),
+    HCI_SDC_ROW_PR(SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_SYNC_TRANSFER_PARAMS, sdc_hci_cmd_le_set_periodic_adv_sync_transfer_params_t, sizeof(sdc_hci_cmd_le_set_periodic_adv_sync_transfer_params_t), sdc_hci_cmd_le_set_periodic_adv_sync_transfer_params_return_t, sdc_hci_cmd_le_set_periodic_adv_sync_transfer_params),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_SET_DEFAULT_PERIODIC_ADV_SYNC_TRANSFER_PARAMS, HCI_CMD_RESPONSE_COMPLETE, sdc_hci_cmd_le_set_default_periodic_adv_sync_transfer_params_t, sizeof(
+            sdc_hci_cmd_le_set_default_periodic_adv_sync_transfer_params_t), sdc_hci_cmd_le_set_default_periodic_adv_sync_transfer_params),
     /*
      * Periodic advertising with responses, the advertiser. Subevent Data
      * declares the return length it produces on success, which is the handle,
      * and that is also what an error is padded out to.
      */
-    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_PARAMS_V2,
-                     sizeof(sdc_hci_cmd_le_set_periodic_adv_params_v2_t),
-                     HciSdcCmdLeSetPeriodicAdvParamsV2,
-                     sdc_hci_cmd_le_set_periodic_adv_params_v2_return_t),
+    HCI_SDC_ROW_PR(SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_PARAMS_V2, sdc_hci_cmd_le_set_periodic_adv_params_v2_t, sizeof(sdc_hci_cmd_le_set_periodic_adv_params_v2_t), sdc_hci_cmd_le_set_periodic_adv_params_v2_return_t, sdc_hci_cmd_le_set_periodic_adv_params_v2),
     {SDC_HCI_OPCODE_CMD_LE_SET_PERIODIC_ADV_SUBEVENT_DATA,
      HCI_CMD_VARIABLE_PARAM_LEN,
      (uint16_t)sizeof(sdc_hci_cmd_le_set_periodic_adv_subevent_data_return_t),
@@ -2162,50 +1609,23 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
      * The rest of the Zephyr family. Read Supported Commands declares the full
      * 64 octet bitmap, which is what it always returns, masked or not.
      */
-    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_VS_ZEPHYR_READ_VERSION_INFO, 0U,
-                     HciSdcCmdVsZephyrReadVersionInfo,
-                     sdc_hci_cmd_vs_zephyr_read_version_info_return_t),
+    HCI_SDC_ROW_NR(SDC_HCI_OPCODE_CMD_VS_ZEPHYR_READ_VERSION_INFO, 0U, sdc_hci_cmd_vs_zephyr_read_version_info_return_t, sdc_hci_cmd_vs_zephyr_read_version_info),
     {SDC_HCI_OPCODE_CMD_VS_ZEPHYR_READ_SUPPORTED_COMMANDS, 0U,
      (uint16_t)sizeof(
          sdc_hci_cmd_vs_zephyr_read_supported_commands_return_t),
      HCI_CMD_RESPONSE_COMPLETE, HciSdcCmdVsZephyrReadSupportedCommands},
-    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_VS_ZEPHYR_WRITE_BD_ADDR,
-                    sizeof(sdc_hci_cmd_vs_zephyr_write_bd_addr_t),
-                    HciSdcCmdVsZephyrWriteBdAddr),
-    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_VS_ZEPHYR_READ_CHIP_TEMP, 0U,
-                     HciSdcCmdVsZephyrReadChipTemp,
-                     sdc_hci_cmd_vs_zephyr_read_chip_temp_return_t),
-    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_VS_ZEPHYR_WRITE_TX_POWER,
-                     sizeof(sdc_hci_cmd_vs_zephyr_write_tx_power_t),
-                     HciSdcCmdVsZephyrWriteTxPower,
-                     sdc_hci_cmd_vs_zephyr_write_tx_power_return_t),
-    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_VS_ZEPHYR_READ_TX_POWER,
-                     sizeof(sdc_hci_cmd_vs_zephyr_read_tx_power_t),
-                     HciSdcCmdVsZephyrReadTxPower,
-                     sdc_hci_cmd_vs_zephyr_read_tx_power_return_t),
-    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_VS_ZEPHYR_READ_KEY_HIERARCHY_ROOTS, 0U,
-                     HciSdcCmdVsZephyrReadKeyHierarchyRoots,
-                     sdc_hci_cmd_vs_zephyr_read_key_hierarchy_roots_return_t),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_VS_ZEPHYR_WRITE_BD_ADDR, HCI_CMD_RESPONSE_COMPLETE, sdc_hci_cmd_vs_zephyr_write_bd_addr_t, sizeof(sdc_hci_cmd_vs_zephyr_write_bd_addr_t), sdc_hci_cmd_vs_zephyr_write_bd_addr),
+    HCI_SDC_ROW_NR(SDC_HCI_OPCODE_CMD_VS_ZEPHYR_READ_CHIP_TEMP, 0U, sdc_hci_cmd_vs_zephyr_read_chip_temp_return_t, sdc_hci_cmd_vs_zephyr_read_chip_temp),
+    HCI_SDC_ROW_PR(SDC_HCI_OPCODE_CMD_VS_ZEPHYR_WRITE_TX_POWER, sdc_hci_cmd_vs_zephyr_write_tx_power_t, sizeof(sdc_hci_cmd_vs_zephyr_write_tx_power_t), sdc_hci_cmd_vs_zephyr_write_tx_power_return_t, sdc_hci_cmd_vs_zephyr_write_tx_power),
+    HCI_SDC_ROW_PR(SDC_HCI_OPCODE_CMD_VS_ZEPHYR_READ_TX_POWER, sdc_hci_cmd_vs_zephyr_read_tx_power_t, sizeof(sdc_hci_cmd_vs_zephyr_read_tx_power_t), sdc_hci_cmd_vs_zephyr_read_tx_power_return_t, sdc_hci_cmd_vs_zephyr_read_tx_power),
+    HCI_SDC_ROW_NR(SDC_HCI_OPCODE_CMD_VS_ZEPHYR_READ_KEY_HIERARCHY_ROOTS, 0U, sdc_hci_cmd_vs_zephyr_read_key_hierarchy_roots_return_t, sdc_hci_cmd_vs_zephyr_read_key_hierarchy_roots),
     /* Quality of service. What the radio saw, rather than what the link did. */
-    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_VS_QOS_CONN_EVENT_REPORT_ENABLE,
-                    sizeof(sdc_hci_cmd_vs_qos_conn_event_report_enable_t),
-                    HciSdcCmdVsQosConnEventReportEnable),
-    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_VS_QOS_CHANNEL_SURVEY_ENABLE,
-                    sizeof(sdc_hci_cmd_vs_qos_channel_survey_enable_t),
-                    HciSdcCmdVsQosChannelSurveyEnable),
-    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_VS_READ_AVERAGE_RSSI,
-                     sizeof(sdc_hci_cmd_vs_read_average_rssi_t),
-                     HciSdcCmdVsReadAverageRssi,
-                     sdc_hci_cmd_vs_read_average_rssi_return_t),
-    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_VS_GET_NEXT_CONN_EVENT_COUNTER,
-                     sizeof(sdc_hci_cmd_vs_get_next_conn_event_counter_t),
-                     HciSdcCmdVsGetNextConnEventCounter,
-                     sdc_hci_cmd_vs_get_next_conn_event_counter_return_t),
-    HCI_SDC_ENTRY_C(
-        SDC_HCI_OPCODE_CMD_VS_CONN_ANCHOR_POINT_UPDATE_EVENT_REPORT_ENABLE,
-        sizeof(
-            sdc_hci_cmd_vs_conn_anchor_point_update_event_report_enable_t),
-        HciSdcCmdVsConnAnchorPointUpdateEnable),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_VS_QOS_CONN_EVENT_REPORT_ENABLE, HCI_CMD_RESPONSE_COMPLETE, sdc_hci_cmd_vs_qos_conn_event_report_enable_t, sizeof(sdc_hci_cmd_vs_qos_conn_event_report_enable_t), sdc_hci_cmd_vs_qos_conn_event_report_enable),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_VS_QOS_CHANNEL_SURVEY_ENABLE, HCI_CMD_RESPONSE_COMPLETE, sdc_hci_cmd_vs_qos_channel_survey_enable_t, sizeof(sdc_hci_cmd_vs_qos_channel_survey_enable_t), sdc_hci_cmd_vs_qos_channel_survey_enable),
+    HCI_SDC_ROW_PR(SDC_HCI_OPCODE_CMD_VS_READ_AVERAGE_RSSI, sdc_hci_cmd_vs_read_average_rssi_t, sizeof(sdc_hci_cmd_vs_read_average_rssi_t), sdc_hci_cmd_vs_read_average_rssi_return_t, sdc_hci_cmd_vs_read_average_rssi),
+    HCI_SDC_ROW_PR(SDC_HCI_OPCODE_CMD_VS_GET_NEXT_CONN_EVENT_COUNTER, sdc_hci_cmd_vs_get_next_conn_event_counter_t, sizeof(sdc_hci_cmd_vs_get_next_conn_event_counter_t), sdc_hci_cmd_vs_get_next_conn_event_counter_return_t, sdc_hci_cmd_vs_get_next_conn_event_counter),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_VS_CONN_ANCHOR_POINT_UPDATE_EVENT_REPORT_ENABLE, HCI_CMD_RESPONSE_COMPLETE, sdc_hci_cmd_vs_conn_anchor_point_update_event_report_enable_t, sizeof(
+            sdc_hci_cmd_vs_conn_anchor_point_update_event_report_enable_t), sdc_hci_cmd_vs_conn_anchor_point_update_event_report_enable),
     /*
      * Answered by the routing layer rather than by SDC, so it reports what
      * this firmware refused rather than what the radio did. The length is a
@@ -2220,10 +1640,7 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
     HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_READ_BUFFER_SIZE_V2, 0U,
                      HciSdcCmdLeReadBufferSizeV2,
                      sdc_hci_cmd_le_read_buffer_size_v2_return_t),
-    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_READ_ISO_TX_SYNC,
-                     sizeof(sdc_hci_cmd_le_read_iso_tx_sync_t),
-                     HciSdcCmdLeReadIsoTxSync,
-                     sdc_hci_cmd_le_read_iso_tx_sync_return_t),
+    HCI_SDC_ROW_PR(SDC_HCI_OPCODE_CMD_LE_READ_ISO_TX_SYNC, sdc_hci_cmd_le_read_iso_tx_sync_t, sizeof(sdc_hci_cmd_le_read_iso_tx_sync_t), sdc_hci_cmd_le_read_iso_tx_sync_return_t, sdc_hci_cmd_le_read_iso_tx_sync),
     {SDC_HCI_OPCODE_CMD_LE_SET_CIG_PARAMS, HCI_CMD_VARIABLE_PARAM_LEN,
      (uint16_t)sizeof(sdc_hci_cmd_le_set_cig_params_return_t),
      HCI_CMD_RESPONSE_COMPLETE, HciSdcCmdLeSetCigParams},
@@ -2232,72 +1649,28 @@ static const HciCmdEntry_t s_HciSdcCommands[] = {
      HCI_CMD_RESPONSE_COMPLETE, HciSdcCmdLeSetCigParamsTest},
     HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_CREATE_CIS,
                     HCI_CMD_VARIABLE_PARAM_LEN, HciSdcCmdLeCreateCis),
-    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_REMOVE_CIG,
-                     sizeof(sdc_hci_cmd_le_remove_cig_t),
-                     HciSdcCmdLeRemoveCig,
-                     sdc_hci_cmd_le_remove_cig_return_t),
-    HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_ACCEPT_CIS_REQUEST,
-                    sizeof(sdc_hci_cmd_le_accept_cis_request_t),
-                    HciSdcCmdLeAcceptCisRequest),
-    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_REJECT_CIS_REQUEST,
-                     sizeof(sdc_hci_cmd_le_reject_cis_request_t),
-                     HciSdcCmdLeRejectCisRequest,
-                     sdc_hci_cmd_le_reject_cis_request_return_t),
-    HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_CREATE_BIG,
-                    sizeof(sdc_hci_cmd_le_create_big_t),
-                    HciSdcCmdLeCreateBig),
-    HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_CREATE_BIG_TEST,
-                    sizeof(sdc_hci_cmd_le_create_big_test_t),
-                    HciSdcCmdLeCreateBigTest),
-    HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_TERMINATE_BIG,
-                    sizeof(sdc_hci_cmd_le_terminate_big_t),
-                    HciSdcCmdLeTerminateBig),
+    HCI_SDC_ROW_PR(SDC_HCI_OPCODE_CMD_LE_REMOVE_CIG, sdc_hci_cmd_le_remove_cig_t, sizeof(sdc_hci_cmd_le_remove_cig_t), sdc_hci_cmd_le_remove_cig_return_t, sdc_hci_cmd_le_remove_cig),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_ACCEPT_CIS_REQUEST, HCI_CMD_RESPONSE_STATUS, sdc_hci_cmd_le_accept_cis_request_t, sizeof(sdc_hci_cmd_le_accept_cis_request_t), sdc_hci_cmd_le_accept_cis_request),
+    HCI_SDC_ROW_PR(SDC_HCI_OPCODE_CMD_LE_REJECT_CIS_REQUEST, sdc_hci_cmd_le_reject_cis_request_t, sizeof(sdc_hci_cmd_le_reject_cis_request_t), sdc_hci_cmd_le_reject_cis_request_return_t, sdc_hci_cmd_le_reject_cis_request),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_CREATE_BIG, HCI_CMD_RESPONSE_STATUS, sdc_hci_cmd_le_create_big_t, sizeof(sdc_hci_cmd_le_create_big_t), sdc_hci_cmd_le_create_big),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_CREATE_BIG_TEST, HCI_CMD_RESPONSE_STATUS, sdc_hci_cmd_le_create_big_test_t, sizeof(sdc_hci_cmd_le_create_big_test_t), sdc_hci_cmd_le_create_big_test),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_LE_TERMINATE_BIG, HCI_CMD_RESPONSE_STATUS, sdc_hci_cmd_le_terminate_big_t, sizeof(sdc_hci_cmd_le_terminate_big_t), sdc_hci_cmd_le_terminate_big),
     HCI_SDC_ENTRY_S(SDC_HCI_OPCODE_CMD_LE_BIG_CREATE_SYNC,
                     HCI_CMD_VARIABLE_PARAM_LEN, HciSdcCmdLeBigCreateSync),
-    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_BIG_TERMINATE_SYNC,
-                     sizeof(sdc_hci_cmd_le_big_terminate_sync_t),
-                     HciSdcCmdLeBigTerminateSync,
-                     sdc_hci_cmd_le_big_terminate_sync_return_t),
+    HCI_SDC_ROW_PR(SDC_HCI_OPCODE_CMD_LE_BIG_TERMINATE_SYNC, sdc_hci_cmd_le_big_terminate_sync_t, sizeof(sdc_hci_cmd_le_big_terminate_sync_t), sdc_hci_cmd_le_big_terminate_sync_return_t, sdc_hci_cmd_le_big_terminate_sync),
     {SDC_HCI_OPCODE_CMD_LE_SETUP_ISO_DATA_PATH, HCI_CMD_VARIABLE_PARAM_LEN,
      (uint16_t)sizeof(sdc_hci_cmd_le_setup_iso_data_path_return_t),
      HCI_CMD_RESPONSE_COMPLETE, HciSdcCmdLeSetupIsoDataPath},
-    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_REMOVE_ISO_DATA_PATH,
-                     sizeof(sdc_hci_cmd_le_remove_iso_data_path_t),
-                     HciSdcCmdLeRemoveIsoDataPath,
-                     sdc_hci_cmd_le_remove_iso_data_path_return_t),
-    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_ISO_TRANSMIT_TEST,
-                     sizeof(sdc_hci_cmd_le_iso_transmit_test_t),
-                     HciSdcCmdLeIsoTransmitTest,
-                     sdc_hci_cmd_le_iso_transmit_test_return_t),
-    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_ISO_RECEIVE_TEST,
-                     sizeof(sdc_hci_cmd_le_iso_receive_test_t),
-                     HciSdcCmdLeIsoReceiveTest,
-                     sdc_hci_cmd_le_iso_receive_test_return_t),
-    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_ISO_READ_TEST_COUNTERS,
-                     sizeof(sdc_hci_cmd_le_iso_read_test_counters_t),
-                     HciSdcCmdLeIsoReadTestCounters,
-                     sdc_hci_cmd_le_iso_read_test_counters_return_t),
-    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_ISO_TEST_END,
-                     sizeof(sdc_hci_cmd_le_iso_test_end_t),
-                     HciSdcCmdLeIsoTestEnd,
-                     sdc_hci_cmd_le_iso_test_end_return_t),
-    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_LE_READ_ISO_LINK_QUALITY,
-                     sizeof(sdc_hci_cmd_le_read_iso_link_quality_t),
-                     HciSdcCmdLeReadIsoLinkQuality,
-                     sdc_hci_cmd_le_read_iso_link_quality_return_t),
-    HCI_SDC_ENTRY_CR(SDC_HCI_OPCODE_CMD_VS_ISO_READ_TX_TIMESTAMP,
-                     sizeof(sdc_hci_cmd_vs_iso_read_tx_timestamp_t),
-                     HciSdcCmdVsIsoReadTxTimestamp,
-                     sdc_hci_cmd_vs_iso_read_tx_timestamp_return_t),
-    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_VS_BIG_RESERVED_TIME_SET,
-                    sizeof(sdc_hci_cmd_vs_big_reserved_time_set_t),
-                    HciSdcCmdVsBigReservedTimeSet),
-    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_VS_CIG_RESERVED_TIME_SET,
-                    sizeof(sdc_hci_cmd_vs_cig_reserved_time_set_t),
-                    HciSdcCmdVsCigReservedTimeSet),
-    HCI_SDC_ENTRY_C(SDC_HCI_OPCODE_CMD_VS_CIS_SUBEVENT_LENGTH_SET,
-                    sizeof(sdc_hci_cmd_vs_cis_subevent_length_set_t),
-                    HciSdcCmdVsCisSubeventLengthSet),
+    HCI_SDC_ROW_PR(SDC_HCI_OPCODE_CMD_LE_REMOVE_ISO_DATA_PATH, sdc_hci_cmd_le_remove_iso_data_path_t, sizeof(sdc_hci_cmd_le_remove_iso_data_path_t), sdc_hci_cmd_le_remove_iso_data_path_return_t, sdc_hci_cmd_le_remove_iso_data_path),
+    HCI_SDC_ROW_PR(SDC_HCI_OPCODE_CMD_LE_ISO_TRANSMIT_TEST, sdc_hci_cmd_le_iso_transmit_test_t, sizeof(sdc_hci_cmd_le_iso_transmit_test_t), sdc_hci_cmd_le_iso_transmit_test_return_t, sdc_hci_cmd_le_iso_transmit_test),
+    HCI_SDC_ROW_PR(SDC_HCI_OPCODE_CMD_LE_ISO_RECEIVE_TEST, sdc_hci_cmd_le_iso_receive_test_t, sizeof(sdc_hci_cmd_le_iso_receive_test_t), sdc_hci_cmd_le_iso_receive_test_return_t, sdc_hci_cmd_le_iso_receive_test),
+    HCI_SDC_ROW_PR(SDC_HCI_OPCODE_CMD_LE_ISO_READ_TEST_COUNTERS, sdc_hci_cmd_le_iso_read_test_counters_t, sizeof(sdc_hci_cmd_le_iso_read_test_counters_t), sdc_hci_cmd_le_iso_read_test_counters_return_t, sdc_hci_cmd_le_iso_read_test_counters),
+    HCI_SDC_ROW_PR(SDC_HCI_OPCODE_CMD_LE_ISO_TEST_END, sdc_hci_cmd_le_iso_test_end_t, sizeof(sdc_hci_cmd_le_iso_test_end_t), sdc_hci_cmd_le_iso_test_end_return_t, sdc_hci_cmd_le_iso_test_end),
+    HCI_SDC_ROW_PR(SDC_HCI_OPCODE_CMD_LE_READ_ISO_LINK_QUALITY, sdc_hci_cmd_le_read_iso_link_quality_t, sizeof(sdc_hci_cmd_le_read_iso_link_quality_t), sdc_hci_cmd_le_read_iso_link_quality_return_t, sdc_hci_cmd_le_read_iso_link_quality),
+    HCI_SDC_ROW_PR(SDC_HCI_OPCODE_CMD_VS_ISO_READ_TX_TIMESTAMP, sdc_hci_cmd_vs_iso_read_tx_timestamp_t, sizeof(sdc_hci_cmd_vs_iso_read_tx_timestamp_t), sdc_hci_cmd_vs_iso_read_tx_timestamp_return_t, sdc_hci_cmd_vs_iso_read_tx_timestamp),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_VS_BIG_RESERVED_TIME_SET, HCI_CMD_RESPONSE_COMPLETE, sdc_hci_cmd_vs_big_reserved_time_set_t, sizeof(sdc_hci_cmd_vs_big_reserved_time_set_t), sdc_hci_cmd_vs_big_reserved_time_set),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_VS_CIG_RESERVED_TIME_SET, HCI_CMD_RESPONSE_COMPLETE, sdc_hci_cmd_vs_cig_reserved_time_set_t, sizeof(sdc_hci_cmd_vs_cig_reserved_time_set_t), sdc_hci_cmd_vs_cig_reserved_time_set),
+    HCI_SDC_ROW_P(SDC_HCI_OPCODE_CMD_VS_CIS_SUBEVENT_LENGTH_SET, HCI_CMD_RESPONSE_COMPLETE, sdc_hci_cmd_vs_cis_subevent_length_set_t, sizeof(sdc_hci_cmd_vs_cis_subevent_length_set_t), sdc_hci_cmd_vs_cis_subevent_length_set),
     {HCI_COUNTERS_OPCODE, 0U, (uint16_t)HCI_COUNTERS_RETURN_LEN,
      HCI_CMD_RESPONSE_COMPLETE, HciCountersRead},
 };
@@ -2587,24 +1960,6 @@ HCI_SDC_SPEC_LEN(sdc_hci_cmd_cb_write_authenticated_payload_timeout_return_t, 2U
 
 #undef HCI_SDC_SPEC_LEN
 
-static int32_t HciSdcNrfxlibAclPut(void *, const uint8_t *pPacket)
-{
-    return sdc_hci_data_put(pPacket);
-}
-
-static int32_t HciSdcNrfxlibIsoPut(void *, const uint8_t *pPacket)
-{
-    return sdc_hci_iso_data_put(pPacket);
-}
-
-static int32_t HciSdcNrfxlibGet(void *, uint8_t *pPacket, uint8_t *pType)
-{
-    uint8_t type = SDC_HCI_MSG_TYPE_NONE;
-    int32_t result = sdc_hci_get(pPacket, &type);
-    *pType = type;
-    return result;
-}
-
 /*
  * Legacy and extended advertising, Vol 4 Part E 3.1.1.
  *
@@ -2704,18 +2059,8 @@ bool HciSdcNrfxlibInit(HciSdc_t *pSdc,
                        size_t CommandEventCapacity,
                        HciCounters_t *pCounters)
 {
-    HciSdcOps_t ops = {
-        HciSdcNrfxlibAclPut,
-        HciSdcNrfxlibIsoPut,
-        HciSdcNrfxlibGet,
-        NULL,
-        NULL,
-        -NRF_EAGAIN,
-    };
-
     /* The counter readout uses the command context; other handlers access SDC directly. */
     if (!HciSdcInit(pSdc,
-                    &ops,
                     s_HciSdcCommands,
                     sizeof(s_HciSdcCommands) / sizeof(s_HciSdcCommands[0]),
                     pCounters,

@@ -3,8 +3,7 @@
 @brief	Nordic side of the I-SYST vendor commands.
 
 The static address is the factory device address, two top bits set as the
-Core specification asks of a static random address, and the entropy source
-is the one the link layer draws on.
+Core specification asks of a static random address.
 
 @author	Nguyen Hoan Hoang
 @date	October 2026
@@ -13,7 +12,6 @@ is the one the link layer draws on.
 #include "hci_vendor.h"
 
 #include "nrf.h"
-#include "crypto_rng_nrf.h"
 
 #if defined(NRF5340_XXAA_NETWORK) && !defined(NRF_FICR)
 #define NRF_FICR    NRF_FICR_NS
@@ -32,9 +30,4 @@ extern "C" bool HciVendorStaticAddr(uint8_t Addr[6])
     Addr[5] = (uint8_t)((hi >> 8) | 0xC0U);
 
     return true;
-}
-
-RngEngine *HciVendorRng(void)
-{
-    return CryptoRngNrfInstance();
 }

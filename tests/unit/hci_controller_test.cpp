@@ -5,14 +5,17 @@
 
 #include "hci_controller.h"
 
-#include <assert.h>
-#include <stdio.h>
-#include <string.h>
-
 #define FAKE_RX_SIZE 512
 #define FAKE_TX_SIZE 2048
 #define FAKE_QUEUE_DEPTH 4
 #define FAKE_PACKET_SIZE (HCI_INTRF_TX_STREAM_SIZE + 16U)
+#define HCI_CTLR_FAKE_HOLD_SIZE FAKE_PACKET_SIZE
+
+#include "hci_ctlr_fake_intrf.h"
+
+#include <assert.h>
+#include <stdio.h>
+#include <string.h>
 
 struct FakeIntrf
 {
@@ -46,16 +49,7 @@ int DeviceIntrfRx(DevIntrf_t *pDev,
 {
     if (pDev != &gIntrf.Base)
     {
-        if (!DeviceIntrfStartRx(pDev, DevAddr))
-        {
-            return 0;
-        }
-        const int result = DeviceIntrfRxData(pDev, pBuffer, BufferLen);
-        if (result >= 0)
-        {
-            DeviceIntrfStopRx(pDev);
-        }
-        return result;
+        return HciCtlrFakeRx(pDev, DevAddr, pBuffer, BufferLen);
     }
 
     if (gIntrf.PacketMode)
@@ -91,16 +85,7 @@ int DeviceIntrfTx(DevIntrf_t *pDev,
 {
     if (pDev != &gIntrf.Base)
     {
-        if (!DeviceIntrfStartTx(pDev, DevAddr))
-        {
-            return 0;
-        }
-        const int result = DeviceIntrfTxData(pDev, pData, DataLen);
-        if (result >= 0)
-        {
-            DeviceIntrfStopTx(pDev);
-        }
-        return result;
+        return HciCtlrFakeTx(pDev, DevAddr, pData, DataLen);
     }
 
     if (DataLen <= 0)
@@ -145,9 +130,8 @@ struct FakeController
     HciH4PacketType_t GetType[FAKE_QUEUE_DEPTH];
     size_t GetLen[FAKE_QUEUE_DEPTH];
     uint8_t GetData[FAKE_QUEUE_DEPTH][FAKE_PACKET_SIZE];
-    HciControllerGetResult_t GetOverride;
+    HciSdcGetResult_t GetOverride;
 
-    unsigned ProcessCount;
 };
 
 static FakeController gController;
@@ -170,23 +154,23 @@ static bool FakePut(void *, HciH4PacketType_t Type, const uint8_t *pPacket,
     return true;
 }
 
-static HciControllerGetResult_t FakeGet(void *, HciH4PacketType_t *pType,
+static HciSdcGetResult_t FakeGet(void *, HciH4PacketType_t *pType,
                                         uint8_t *pPacket,
                                         size_t PacketCapacity,
                                         size_t *pPacketLen)
 {
     gController.GetCount++;
 
-    if (gController.GetOverride != HCI_CONTROLLER_GET_EMPTY)
+    if (gController.GetOverride != HCI_SDC_GET_EMPTY)
     {
-        HciControllerGetResult_t result = gController.GetOverride;
-        gController.GetOverride = HCI_CONTROLLER_GET_EMPTY;
+        HciSdcGetResult_t result = gController.GetOverride;
+        gController.GetOverride = HCI_SDC_GET_EMPTY;
         return result;
     }
 
     if (gController.GetIndex >= gController.Pending)
     {
-        return HCI_CONTROLLER_GET_EMPTY;
+        return HCI_SDC_GET_EMPTY;
     }
 
     unsigned index = gController.GetIndex++;
@@ -196,20 +180,11 @@ static HciControllerGetResult_t FakeGet(void *, HciH4PacketType_t *pType,
     *pType = gController.GetType[index];
     memcpy(pPacket, gController.GetData[index], len);
     *pPacketLen = len;
-    return HCI_CONTROLLER_GET_PACKET;
+    return HCI_SDC_GET_PACKET;
 }
 
-static void FakeProcess(void *)
-{
-    gController.ProcessCount++;
-}
-
-static const HciControllerOps_t gOps = {
-    FakePut,
-    FakeGet,
-    FakeProcess,
-    NULL,
-};
+static HciCtlrFakeIntrf_t gFake;
+static DevIntrf_t *gCtlr;
 
 struct Fixture
 {
@@ -224,7 +199,8 @@ static void ResetFixture(Fixture *pFixture)
     memset(&gController, 0, sizeof(gController));
     memset(pFixture, 0, sizeof(*pFixture));
     gController.PutAccept = true;
-    gController.GetOverride = HCI_CONTROLLER_GET_EMPTY;
+    gController.GetOverride = HCI_SDC_GET_EMPTY;
+    gCtlr = HciCtlrFakeIntrfInit(&gFake, FakePut, FakeGet, NULL);
 }
 
 static void SetupClosed(Fixture *pFixture)
@@ -235,7 +211,7 @@ static void SetupClosed(Fixture *pFixture)
                              sizeof(pFixture->HostPacket),
                              pFixture->ControllerPacket,
                              sizeof(pFixture->ControllerPacket),
-                             &gOps));
+                             gCtlr));
 }
 
 static void Setup(Fixture *pFixture)
@@ -254,7 +230,7 @@ static void SetupPacket(Fixture *pFixture)
                                             sizeof(pFixture->HostPacket),
                                             pFixture->ControllerPacket,
                                             sizeof(pFixture->ControllerPacket),
-                                            &gOps));
+                                            gCtlr));
     HciControllerPortOpen(&pFixture->Controller);
 }
 
@@ -502,9 +478,10 @@ static void TestControllerError(void)
     Fixture fixture;
     Setup(&fixture);
 
-    gController.GetOverride = HCI_CONTROLLER_GET_ERROR;
+    gController.GetOverride = HCI_SDC_GET_ERROR;
     HciControllerProcess(&fixture.Controller);
-    assert(fixture.Controller.ControllerGetErrorCount == 1U);
+    assert(gFake.GetErrorCount == 1U);
+    assert(!fixture.Controller.ControllerPacketPending);
     assert(gIntrf.TxLen == 0);
 
     const uint8_t event[] = {0x0E, 0x01, 0x33};
@@ -523,9 +500,10 @@ static void TestInvalidControllerType(void)
     QueueController(HCI_H4_PACKET_COMMAND, command, sizeof(command));
     HciControllerProcess(&fixture.Controller);
 
-    assert(fixture.Controller.InvalidControllerPacketCount == 1U);
+    assert(gFake.DroppedCount == 1U);
+    assert(!fixture.Controller.ControllerPacketPending);
     assert(gIntrf.TxLen == 0);
-    printf("[ok] a command indicator from the controller is rejected\n");
+    printf("[ok] a command indicator from the controller never reaches the host\n");
 }
 
 static void TestZeroLengthRejected(void)
@@ -537,7 +515,8 @@ static void TestZeroLengthRejected(void)
     QueueController(HCI_H4_PACKET_EVENT, nothing, 0U);
     HciControllerProcess(&fixture.Controller);
 
-    assert(fixture.Controller.InvalidControllerPacketCount == 1U);
+    assert(gFake.DroppedCount == 1U);
+    assert(!fixture.Controller.ControllerPacketPending);
     assert(gIntrf.TxLen == 0);
 
     const uint8_t event[] = {0x0E, 0x01, 0x44};
@@ -573,28 +552,19 @@ static void TestInitGuards(void)
     HciController_t controller;
     uint8_t host[64];
     uint8_t ctlr[64];
-    HciControllerOps_t ops = gOps;
-
     memset(&gIntrf, 0, sizeof(gIntrf));
+    gCtlr = HciCtlrFakeIntrfInit(&gFake, FakePut, FakeGet, NULL);
 
     assert(!HciControllerInit(NULL, &gIntrf.Base, host, sizeof(host), ctlr,
-                              sizeof(ctlr), &ops));
+                              sizeof(ctlr), gCtlr));
     assert(!HciControllerInit(&controller, NULL, host, sizeof(host), ctlr,
-                              sizeof(ctlr), &ops));
+                              sizeof(ctlr), gCtlr));
     assert(!HciControllerInit(&controller, &gIntrf.Base, host, 0U, ctlr,
-                              sizeof(ctlr), &ops));
+                              sizeof(ctlr), gCtlr));
     assert(!HciControllerInit(&controller, &gIntrf.Base, host, sizeof(host),
-                              NULL, sizeof(ctlr), &ops));
+                              NULL, sizeof(ctlr), gCtlr));
     assert(!HciControllerInit(&controller, &gIntrf.Base, host, sizeof(host),
                               ctlr, sizeof(ctlr), NULL));
-
-    ops.Put = NULL;
-    assert(!HciControllerInit(&controller, &gIntrf.Base, host, sizeof(host),
-                              ctlr, sizeof(ctlr), &ops));
-    ops = gOps;
-    ops.Get = NULL;
-    assert(!HciControllerInit(&controller, &gIntrf.Base, host, sizeof(host),
-                              ctlr, sizeof(ctlr), &ops));
     printf("[ok] init rejects unusable arguments\n");
 }
 

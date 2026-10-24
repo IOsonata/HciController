@@ -8,8 +8,10 @@
  */
 
 #include "hci_controller.h"
+#include "hci_ctlr_fake_intrf.h"
 #include "hci_vendor.h"
 #include "crypto/icrypto.h"
+#include "crypto/crypto.h"
 
 #include <assert.h>
 #include <stddef.h>
@@ -34,39 +36,43 @@ extern "C" bool HciVendorStaticAddr(uint8_t Addr[6])
     return true;
 }
 
-class TestRng : public RngEngine {
-public:
-    bool Enable() override { vbValid = true; return true; }
-    void Disable() override {}
-    void Reset() override {}
-    CRYPTO_STATUS Random(uint8_t *pOut, size_t Len) override
-    {
-        for (size_t i = 0; i < Len; i++)
-        {
-            vState = vState * 1103515245U + 12345U;
-            pOut[i] = (uint8_t)(vState >> 16);
-        }
-        return CRYPTO_STATUS_OK;
-    }
-    /* The engine signs only over a source that calls itself secure; this
-     * one is a test counter and nothing more. */
-    bool IsSecure() const override { return true; }
-    uint32_t vState = 0x1234567U;
-};
+/*
+ * The IOsonata Crypto object takes its entropy from the MCU library. The
+ * test stands in for that library: a counter source that calls itself secure,
+ * and a switch that turns it off.
+ */
+static uint32_t s_RngState = 0x1234567U;
 
-static TestRng s_Rng;
-
-RngEngine *HciVendorRng(void)
+bool Crypto::IsSecure() const
 {
-    return s_bHaveRng ? &s_Rng : nullptr;
+    return vbValid && s_bHaveRng;
+}
+
+CRYPTO_STATUS Crypto::Random(uint8_t *pOut, size_t Len)
+{
+    if (!vbValid || !s_bHaveRng)
+    {
+        return CRYPTO_STATUS_FAIL;
+    }
+    for (size_t i = 0; i < Len; i++)
+    {
+        s_RngState = s_RngState * 1103515245U + 12345U;
+        pOut[i] = (uint8_t)(s_RngState >> 16);
+    }
+    return CRYPTO_STATUS_OK;
 }
 
 /* Transport stand-ins the bridge test needs. */
 
-int DeviceIntrfRx(DevIntrf_t * const, uint32_t, uint8_t *, int) { return 0; }
-int DeviceIntrfTx(DevIntrf_t * const, uint32_t, const uint8_t *, int DataLen)
+static HciCtlrFakeIntrf_t s_Fake;
+
+int DeviceIntrfRx(DevIntrf_t * const pDev, uint32_t DevAddr, uint8_t *pBuffer, int BufferLen)
 {
-    return DataLen;
+    return pDev == &s_Fake.Intrf ? HciCtlrFakeRx(pDev, DevAddr, pBuffer, BufferLen) : 0;
+}
+int DeviceIntrfTx(DevIntrf_t * const pDev, uint32_t DevAddr, const uint8_t *pData, int DataLen)
+{
+    return pDev == &s_Fake.Intrf ? HciCtlrFakeTx(pDev, DevAddr, pData, DataLen) : DataLen;
 }
 void DeviceIntrfEnable(DevIntrf_t *) {}
 void DeviceIntrfDisable(DevIntrf_t *) {}
@@ -79,13 +85,12 @@ static bool BackendPut(void *, HciH4PacketType_t, const uint8_t *, size_t)
     return true;
 }
 
-static HciControllerGetResult_t BackendGet(void *, HciH4PacketType_t *,
+static HciSdcGetResult_t BackendGet(void *, HciH4PacketType_t *,
                                             uint8_t *, size_t, size_t *)
 {
-    return HCI_CONTROLLER_GET_EMPTY;
+    return HCI_SDC_GET_EMPTY;
 }
 
-static void BackendProcess(void *) {}
 
 /* Helpers. */
 
@@ -446,14 +451,11 @@ static void TestBridge(void)
     memset(&f, 0, sizeof(f));
     s_BackendPutCount = 0U;
 
-    HciControllerOps_t ops = {};
-    ops.Put = BackendPut;
-    ops.Get = BackendGet;
-    ops.Process = BackendProcess;
+    DevIntrf_t *ctlr = HciCtlrFakeIntrfInit(&s_Fake, BackendPut, BackendGet, NULL);
     assert(HciControllerInitPacketTransport(&f.Controller, &f.Host,
                                             f.HostPacket, sizeof(f.HostPacket),
                                             f.ControllerPacket,
-                                            sizeof(f.ControllerPacket), &ops));
+                                            sizeof(f.ControllerPacket), ctlr));
 
     const uint8_t cmd[] = {0xF3U, 0xFFU, 0x00U};
     assert(HciControllerPutHostPacket(&f.Controller, HCI_H4_PACKET_COMMAND,

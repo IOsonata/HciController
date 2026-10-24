@@ -126,8 +126,7 @@ COMPILE_SRC := $(filter-out $(SRC)/hci_sdc_nrfxlib.cpp \
 
 OBJECTS := $(patsubst $(SRC)/%.cpp,$(BUILD_DIR)/trace/%.o,$(COMPILE_SRC)) \
            $(BUILD_DIR)/notrace/hci_app.o \
-           $(BUILD_DIR)/logport/hci_app.o \
-           $(BUILD_DIR)/ipchost/hci_app.o
+           $(BUILD_DIR)/logport/hci_app.o
 
 # The dispatch test compiles the real command table against the real
 # SoftDevice Controller headers, with only the SDC entry points stubbed. It is
@@ -219,6 +218,7 @@ $(IPC_TARGET): $(IPC_SOURCES) $(HEADERS) $(IOSONATA_ROOT)/include/ipc/ipc_intrf.
                $(IOSONATA_ROOT)/include/bluetooth/bt_hci_ipc.h | check-root
 	@mkdir -p $(dir $@)
 	$(CXX) -I$(IOSONATA_ROOT)/include -I$(ROOT)/include -I$(STUBS)/nrfficr \
+	  -I$(STUBS)/sdc -I$(STUBS) \
 	  -I$(IOSONATA_ROOT)/tests/dfu/hostport \
 	  $(MOCK_DEFINES) -DHCI_TRACE=0 $(CXXFLAGS) \
 	  $(filter %.cpp %.o,$^) -o $@
@@ -244,16 +244,6 @@ $(BUILD_DIR)/notrace/%.o: $(SRC)/%.cpp $(HEADERS) | check-root
 $(BUILD_DIR)/logport/%.o: $(SRC)/%.cpp $(HEADERS) | check-root
 	@mkdir -p $(dir $@)
 	$(CXX) $(MOCK_INCLUDES) $(MOCK_DEFINES) -DHCI_TRACE=1 -DHCI_USB_SOCKET=1 \
-	  $(CXXFLAGS) -c $< -o $@
-
-# The same file again as a part with no USB and no UART whose host is another
-# core, which is how the nRF5340 network core builds it. Nothing else compiles
-# the IPC host path or the build without the USB classes.
-$(BUILD_DIR)/ipchost/%.o: $(SRC)/%.cpp $(HEADERS) | check-root
-	@mkdir -p $(dir $@)
-	$(CXX) $(MOCK_INCLUDES) $(MOCK_DEFINES) -DHCI_TRACE=1 \
-	  -DHCI_APP_HAS_USB=0 -DHCI_APP_HAS_UART=1 -DHCI_APP_HAS_IPC=1 \
-	  -DHCI_IPC_MEM_ADDR=0x20070000UL -DHCI_IPC_MEM_SIZE=0x10000UL \
 	  $(CXXFLAGS) -c $< -o $@
 
 ifneq ($(strip $(SDC_INCLUDE)),)

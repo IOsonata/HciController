@@ -374,8 +374,9 @@ in thread context. On boards with a mode switch, a short critical-priority
 control thread polls/debounces the button so a continuously ready HCI thread
 cannot starve the control path.
 
-Target-specific clock, USB peripheral, interrupt, SDC and MPSL code is isolated
-behind `HciTarget_t`. The parser, H:4 transport, routing, command dispatch,
+Target-specific clock, USB peripheral, interrupt, SDC and MPSL code is in the
+target file a project links (`hci_nrf52840.cpp`, `hci_nrf5340_net.cpp`,
+`hci_nrf54lm20.cpp`), which defines the functions of `hci_target.h`. The parser, H:4 transport, routing, command dispatch,
 counters and resource profile do not depend on a concrete UART or USB class.
 
 ## Controller capability profile
