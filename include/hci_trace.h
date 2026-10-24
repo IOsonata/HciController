@@ -20,6 +20,16 @@
 struct __device_intrf;
 typedef struct __device_intrf DevIntrf_t;
 
+/*
+ * HCI_TRACE_COMMANDS=1 logs every command from the host and every event to
+ * the host on the trace output: opcode, status and length. Data packets are
+ * left out. It also adds a line every 5 s. It is for finding which command a
+ * host stack stops at.
+ */
+#ifndef HCI_TRACE_COMMANDS
+#define HCI_TRACE_COMMANDS 0
+#endif
+
 #ifndef HCI_TRACE
 #define HCI_TRACE 0
 #endif

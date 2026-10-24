@@ -467,6 +467,11 @@ static void HciModeButtonProcess(void)
 
 static void HciStatusThread(void *)
 {
+#if HCI_TRACE_COMMANDS
+    uint32_t seconds = 0U;
+    uint32_t elapsedMs = 0U;
+#endif
+
     for (;;)
     {
         if (!s_HciApp.Runtime.Started)
@@ -488,6 +493,19 @@ static void HciStatusThread(void *)
 
         /* Send what the trace output could not take earlier. */
         (void)HciTraceFlush();
+
+#if HCI_TRACE_COMMANDS
+        /* A line every 5 s shows the trace output is alive for a terminal
+         * opened after the boot lines went by. */
+        elapsedMs += STATUS_UPDATE_MS;
+        if (elapsedMs >= 5000U)
+        {
+            elapsedMs -= 5000U;
+            seconds += 5U;
+            HciTrace("alive %lus host=%u\r\n", (unsigned long)seconds,
+                     (unsigned)HciAppHostIsOpen(&s_HciApp));
+        }
+#endif
 
         (void)TaktOSThreadSleep(TaktOSCurrentThread(), STATUS_UPDATE_MS);
     }

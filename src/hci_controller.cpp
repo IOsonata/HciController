@@ -21,15 +21,6 @@
 #include <limits.h>
 #include <string.h>
 
-/*
- * HCI_TRACE_COMMANDS=1 logs every command from the host and every event to
- * the host on the trace output: opcode, status and length. Data packets are
- * left out. It is for finding which command a host stack stops at.
- */
-#ifndef HCI_TRACE_COMMANDS
-#define HCI_TRACE_COMMANDS 0
-#endif
-
 #define HCI_CONTROLLER_EVENT_COMMAND_COMPLETE          0x0EU
 #define HCI_CONTROLLER_STATUS_SUCCESS                  0x00U
 #define HCI_CONTROLLER_STATUS_UNKNOWN_HCI_COMMAND      0x01U
