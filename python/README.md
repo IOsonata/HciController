@@ -140,3 +140,17 @@ The package contains both low-level and procedure-level helpers:
 The programs under `tests/harness/` remain HciController's own release and
 hardware acceptance tests. They consume this Python implementation rather than
 maintaining a separate HCI library.
+
+## Auracast source
+
+`hcicontroller.auracast` builds the Auracast broadcast data (Broadcast Audio
+Announcement, Public Broadcast Announcement, Broadcast Name and the BASE) and
+runs a broadcast source on a controller. `examples/auracast_source.py` uses it
+with LC3 encoding on the PC (`pip install lc3py`) to broadcast a stereo tone or
+a WAV file in one BIG with two BIS:
+
+```sh
+python3 examples/auracast_source.py --port /dev/ttyACM0 --name "IOsonata Test"
+```
+
+The controller needs two BIS in the BIG (`HCI_SDC_BIS_SOURCE_COUNT` of 2).

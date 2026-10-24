@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Auracast
+
+- Python library: `hcicontroller.auracast` and `examples/auracast_source.py`
+  broadcast a stereo LC3 stream from the PC through a controller, one BIG
+  with two BIS. Unit test: `tests/auracast_test.py`.
+
 ### Features are linked, not compiled in
 
 - The vendor crypto commands moved to `hci_vendor_crypto.cpp` and the four
