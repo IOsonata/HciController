@@ -4,8 +4,9 @@
 
 The crypto runs on one IOsonata Crypto object. Its Init() binds the engines
 of the linked MCU library, hardware where the library has a driver (the ECB
-block on the nRF5340 network core) and software for the rest. HciVendorRng
-only tells whether the target has a secure entropy source.
+block on the nRF5340 network core) and software for the rest. The object
+reports a secure entropy source through IsSecure(); without one, Random and
+ECDSA sign answer Unsupported Feature.
 
 @author	Nguyen Hoan Hoang
 @date	October 2026
@@ -56,22 +57,12 @@ extern "C" __attribute__((weak)) bool HciVendorStaticAddr(uint8_t Addr[6])
     return false;
 }
 
-__attribute__((weak)) RngEngine *HciVendorRng(void)
-{
-    return nullptr;
-}
-
 #if HCI_VENDOR_CRYPTO
 static bool HciVendorEnginesPrepare(void)
 {
     if (!s_bEnginesReady)
     {
         s_bEnginesReady = s_Crypto.Init();
-        if (s_bEnginesReady && HciVendorRng() != nullptr)
-        {
-            /* software P-256 draws from the secure source the target names */
-            s_Crypto.SetRng(HciVendorRng());
-        }
     }
 
     return s_bEnginesReady;
@@ -83,7 +74,7 @@ static uint32_t HciVendorSupported(void)
                     HCI_VENDOR_CRYPTO_SHA256 | HCI_VENDOR_CRYPTO_HMAC_SHA256 |
                     HCI_VENDOR_CRYPTO_ECDSA_P256_VERIFY;
 
-    if (HciVendorRng() != nullptr)
+    if (s_Crypto.IsSecure())
     {
         bits |= HCI_VENDOR_CRYPTO_RANDOM | HCI_VENDOR_CRYPTO_ECDSA_P256_SIGN;
     }
@@ -246,13 +237,12 @@ static uint8_t HciVendorRandom(const uint8_t *pParam, size_t ParamLen,
         return HCI_VENDOR_STATUS_INVALID_PARAMS;
     }
 
-    RngEngine *pRng = HciVendorRng();
-    if (pRng == nullptr)
+    if (!s_Crypto.IsSecure())
     {
         return HCI_VENDOR_STATUS_UNSUPPORTED;
     }
 
-    if (pRng->Random(pRet, pParam[0]) != CRYPTO_STATUS_OK)
+    if (s_Crypto.Random(pRet, pParam[0]) != CRYPTO_STATUS_OK)
     {
         return HCI_VENDOR_STATUS_HW_FAILURE;
     }
@@ -319,7 +309,7 @@ static uint8_t HciVendorEcdsaSign(const uint8_t *pParam, size_t ParamLen,
         return HCI_VENDOR_STATUS_INVALID_PARAMS;
     }
 
-    if (HciVendorRng() == nullptr)
+    if (!s_Crypto.IsSecure())
     {
         return HCI_VENDOR_STATUS_UNSUPPORTED;
     }

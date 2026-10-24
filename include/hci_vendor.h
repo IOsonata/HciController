@@ -147,14 +147,6 @@ bool HciVendorStaticAddr(uint8_t Addr[6]);
 
 class RngEngine;
 
-/**
- * @brief	Entropy source of the crypto commands. Defined by the target.
- *
- * The library default answers NULL, and the commands that need random
- * numbers (Random, ECDSA sign) are then left out of the supported bitmap and
- * answer Unsupported Feature.
- */
-RngEngine *HciVendorRng(void);
 #endif
 
 #endif /* HCI_VENDOR_H */

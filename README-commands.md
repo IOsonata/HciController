@@ -198,8 +198,8 @@ Unsupported Feature. A CCM decrypt whose tag does not check and a signature
 that does not verify answer Authentication Failure (0x05). A length that does
 not add up to the parameter count answers Invalid HCI Command Parameters.
 
-The target supplies the two hooks `HciVendorStaticAddr` and `HciVendorRng`;
-`hci_vendor_nrf.cpp` has the Nordic ones. A build without `hci_vendor.cpp`
+The target supplies the hook `HciVendorStaticAddr`; `hci_vendor_nrf.cpp` has
+the Nordic one. The entropy source comes from the IOsonata `Crypto` object. A build without `hci_vendor.cpp`
 answers these opcodes Unknown HCI Command.
 
 ## Handler rules
