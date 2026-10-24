@@ -764,11 +764,19 @@ static void HciControllerH4Open(HciController_t *pController)
 
 #if HCI_TRACE_COMMANDS
 /*
- * The command log goes out as it is written, and waits for the UART the way
- * the error log does. A burst of commands would otherwise overrun the trace
- * store and lose or cut lines, which makes the log useless for ordering.
+ * The command log is stored like the other trace lines and goes out as the
+ * UART takes it. HCI_TRACE_COMMANDS_SYNC=1 writes each line out at once and
+ * waits for the UART, which loses nothing in a burst but holds up the command
+ * path by about a millisecond a line.
  */
+#ifndef HCI_TRACE_COMMANDS_SYNC
+#define HCI_TRACE_COMMANDS_SYNC 0
+#endif
+#if HCI_TRACE_COMMANDS_SYNC
 #define HCI_CONTROLLER_CMD_LOG HciTraceError
+#else
+#define HCI_CONTROLLER_CMD_LOG HciTrace
+#endif
 
 static void HciControllerTraceFromHost(HciH4PacketType_t Type,
                                        const uint8_t *pPacket, size_t Len)
