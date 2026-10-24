@@ -51,6 +51,20 @@ The IOsonata library must contain `ipc_intrf.cpp`, `ipc_ctrlr_nrf53.cpp`,
 
 Defined symbols: `NRF5340_XXAA_NETWORK`, `NRFXLIB_SDC`.
 
+Release uses GCC link-time optimization (`-flto`) in the C/C++ compilers
+and final link. Build `IOsonata_nRF5340_Net` Release with the same GCC
+version: its C/C++ objects carry LTO information and ordinary machine code
+(`-ffat-lto-objects`). This lets the final link optimize across the application
+and library, including crypto constructors and virtual calls. The Nordic
+SDC/MPSL archives and TaktOS can remain ordinary non-LTO libraries.
+
+After changing these options or upgrading GCC, clean and rebuild the
+IOsonata library first, then HciController. Reusing the old library prevents
+optimization across that boundary. Debug remains without LTO. Feature
+selection still follows the linked source files; LTO does not require
+disabling crypto, PAwR, PAST, subrating, or extended features. Check the final
+firmware map for both flash and RAM use with the selected feature set.
+
 The host transports are files the project links, the way a target port
 is: this project links `hci_host_uart.cpp` and `hci_host_ipc.cpp` and not
 `hci_host_usb.cpp`, since the network core has no USB. `hci_app.cpp` has a
