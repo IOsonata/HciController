@@ -177,3 +177,11 @@ all: $(BUILD_DIR)/hci_usb_test \
 run: check-hci-transport check-python-api check-native-usb-review \
      check-counter-schema check-harness-layout check-mode-policy
 
+
+
+.PHONY: check-core54
+check-core54:
+	@$(PYTHON) $(THIS_DIR)/harness/hcicontroller/hci_core_conditions_test.py
+	@$(PYTHON) $(THIS_DIR)/harness/hcicontroller/core54_features_test.py
+
+run: check-core54
