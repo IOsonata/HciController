@@ -185,8 +185,6 @@ run: check-hci-transport check-python-api check-native-usb-review \
      check-counter-schema check-harness-layout check-mode-policy \
      check-cis-retry
 
-
-
 .PHONY: check-core54
 check-core54:
 	@$(PYTHON) $(THIS_DIR)/harness/hcicontroller/hci_core_conditions_test.py

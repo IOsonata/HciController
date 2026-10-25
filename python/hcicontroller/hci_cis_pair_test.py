@@ -494,7 +494,6 @@ def counter_delta(before, after, index):
     return after[index] - before[index]
 
 
-
 def _retryable_acl_establishment(err):
     """Retry only the initial ACL setup, never an established CIS/ISO failure."""
     detail = str(err)

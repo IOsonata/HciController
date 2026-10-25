@@ -151,8 +151,6 @@ cannot create the required state, the release result is incomplete/failing;
 `N/A` is reserved for capability outside the target profile.
 
 
-
-
 ## Bluetooth 5.4 acceptance
 
 Run the controller additions in both advertiser/scanner roles:
@@ -178,7 +176,11 @@ PHYs, missing OTA data, and reset failures are FAIL, not skips.
 
 `make -C tests check-core54` runs the hardware-independent regression tests.
 These tests validate the acceptance runner, not the radio implementation.
-The new OTA phases still need execution on each supported board pair.
+Hardware acceptance has been completed on a UDG-nRF52840 pair using mixed
+native USB Bulk Serialization and serial H:4 transport: 77 PASS, 0 FAIL,
+including both Bluetooth 5.4 advertiser/scanner directions, CIS, BIS, recovery,
+and 10,000 bidirectional ACL plus 1,000 bidirectional ISO stress iterations.
+Other target ports still require their own hardware acceptance run.
 
 ### Ownership of the four 5.4 additions
 

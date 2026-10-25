@@ -82,6 +82,60 @@ def run_timeout_retry():
         ) = originals
 
 
+
+def run_retry_exhaustion():
+    originals = (
+        cis.IsoHci,
+        cis.prepare,
+        cis.start_advertising,
+        cis.start_connection,
+        cis.wait_acl_pair,
+        cis.cleanup,
+    )
+    calls = {"wait": 0, "cleanup": 0}
+    FakeHci.instances = []
+
+    def wait_acl_pair(central, peripheral):
+        calls["wait"] += 1
+        raise cis.HciError(
+            "timed out waiting for both ACL connection events"
+        )
+
+    def cleanup(*args):
+        calls["cleanup"] += 1
+
+    cis.IsoHci = FakeHci
+    cis.prepare = fake_prepare
+    cis.start_advertising = lambda *args: None
+    cis.start_connection = lambda *args: None
+    cis.wait_acl_pair = wait_acl_pair
+    cis.cleanup = cleanup
+    try:
+        try:
+            cis.establish_acl_pair("central", "peripheral")
+        except cis.HciError:
+            pass
+        else:
+            raise AssertionError("retry exhaustion did not fail")
+        check(calls["wait"] == cis.ESTABLISHMENT_ATTEMPTS,
+              "retry count exceeded or stopped before the configured bound")
+        check(calls["cleanup"] == cis.ESTABLISHMENT_ATTEMPTS,
+              "not every failed setup attempt was cleaned")
+        check(len(FakeHci.instances) == 2 * cis.ESTABLISHMENT_ATTEMPTS,
+              "retry exhaustion did not open a fresh pair each time")
+        check(all(hci.closed for hci in FakeHci.instances),
+              "retry exhaustion left a controller open")
+    finally:
+        (
+            cis.IsoHci,
+            cis.prepare,
+            cis.start_advertising,
+            cis.start_connection,
+            cis.wait_acl_pair,
+            cis.cleanup,
+        ) = originals
+
+
 def run_nonretryable_failure():
     originals = (
         cis.IsoHci,
@@ -141,6 +195,7 @@ def main():
     check(not cis._retryable_acl_establishment(
         cis.HciError("CIS data mismatch")), "CIS failure became retryable")
     run_timeout_retry()
+    run_retry_exhaustion()
     run_nonretryable_failure()
     print("CIS ACL establishment retry tests passed.")
 
