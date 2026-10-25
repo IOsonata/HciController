@@ -79,6 +79,8 @@ ISO_PACKET_STATUS_NAMES = {
 # already covers all three, along with the rest of the LE events this test may see.
 LE_EVENT_MASK_WITH_CIS = bytes.fromhex("ffffffffffffff1f")
 
+ESTABLISHMENT_ATTEMPTS = 3
+
 
 class IsoHci(Hci):
     """The hardware HCI helper with H:4 ISO transmit support."""
@@ -492,6 +494,72 @@ def counter_delta(before, after, index):
     return after[index] - before[index]
 
 
+
+def _retryable_acl_establishment(err):
+    """Retry only the initial ACL setup, never an established CIS/ISO failure."""
+    detail = str(err)
+    return (
+        "ACL connection failed: 0x3E" in detail
+        or "Connection Failed To Be Established" in detail
+        or "timed out waiting for both ACL connection events" in detail
+    )
+
+
+def _close_acl_setup_attempt(central, peripheral):
+    cleanup(central, peripheral, None, None, None, None, None)
+    central.close()
+    peripheral.close()
+
+
+def establish_acl_pair(central_port, peripheral_port, raw=False,
+                       attempts=ESTABLISHMENT_ATTEMPTS):
+    """Open a fresh pair and retry only transient ACL establishment failures."""
+    for attempt in range(1, attempts + 1):
+        central = IsoHci(central_port, raw=raw)
+        peripheral = IsoHci(peripheral_port, raw=raw)
+
+        try:
+            peripheral_id, peripheral_type, peripheral_source = prepare(peripheral)
+            central_id, central_type, central_source = prepare(central)
+
+            print("Peripheral identity %s (%s)"
+                  % (addr_str(peripheral_id), peripheral_source))
+            print("Central identity    %s (%s)"
+                  % (addr_str(central_id), central_source))
+
+            start_advertising(peripheral, peripheral_id, peripheral_type)
+            start_connection(
+                central, central_type, peripheral_id, peripheral_type
+            )
+            central_acl, peripheral_acl = wait_acl_pair(central, peripheral)
+        except (HciError, HciGone) as err:
+            retryable = _retryable_acl_establishment(err)
+            _close_acl_setup_attempt(central, peripheral)
+
+            if retryable and attempt < attempts:
+                print(
+                    "HOST-RETRY: CIS ACL setup attempt %u/%u failed; "
+                    "retrying fresh setup"
+                    % (attempt, attempts)
+                )
+                continue
+            if retryable:
+                print(
+                    "HOST-RETRY: CIS ACL setup still failed after %u attempts"
+                    % attempts
+                )
+            raise
+
+        if attempt > 1:
+            print(
+                "HOST-RETRY: CIS ACL setup recovered on attempt %u/%u"
+                % (attempt, attempts)
+            )
+        return central, peripheral, central_acl, peripheral_acl
+
+    raise HciError("unreachable CIS ACL establishment retry state")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Create a CIS between two controllers and move HCI ISO SDUs"
@@ -526,8 +594,8 @@ def main():
     print("   central    %s" % central_port)
     print("   peripheral %s" % peripheral_port)
 
-    central = IsoHci(central_port, raw=args.raw)
-    peripheral = IsoHci(peripheral_port, raw=args.raw)
+    central = None
+    peripheral = None
 
     cig_id = None
     central_cis = None
@@ -536,19 +604,9 @@ def main():
     peripheral_acl = None
 
     try:
-        peripheral_id, peripheral_type, peripheral_source = prepare(peripheral)
-        central_id, central_type, central_source = prepare(central)
-
-        print("Peripheral identity %s (%s)"
-              % (addr_str(peripheral_id), peripheral_source))
-        print("Central identity    %s (%s)"
-              % (addr_str(central_id), central_source))
-
-        start_advertising(peripheral, peripheral_id, peripheral_type)
-        start_connection(
-            central, central_type, peripheral_id, peripheral_type
+        central, peripheral, central_acl, peripheral_acl = establish_acl_pair(
+            central_port, peripheral_port, args.raw
         )
-        central_acl, peripheral_acl = wait_acl_pair(central, peripheral)
 
         cig_id, central_cis, cis_id = create_cig(central)
 
@@ -645,17 +703,20 @@ def main():
         print("FAIL: %s" % err, file=sys.stderr)
         return 1
     finally:
-        cleanup(
-            central,
-            peripheral,
-            cig_id,
-            central_cis,
-            peripheral_cis,
-            central_acl,
-            peripheral_acl,
-        )
-        central.close()
-        peripheral.close()
+        if central is not None and peripheral is not None:
+            cleanup(
+                central,
+                peripheral,
+                cig_id,
+                central_cis,
+                peripheral_cis,
+                central_acl,
+                peripheral_acl,
+            )
+        if central is not None:
+            central.close()
+        if peripheral is not None:
+            peripheral.close()
 
 
 if __name__ == "__main__":

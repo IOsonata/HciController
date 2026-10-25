@@ -132,7 +132,8 @@ $(USB_DESC_OBJ): $(SRC)/usb_descriptors.c $(ROOT)/include/hci_usb.h \
 	  -c $< -o $@
 
 .PHONY: check-hci-transport check-python-api check-native-usb-review \
-        check-counter-schema check-harness-layout check-mode-policy
+        check-counter-schema check-harness-layout check-mode-policy \
+        check-cis-retry
 
 check-hci-transport:
 	@command -v $(PYTHON) >/dev/null 2>&1 || { \
@@ -170,12 +171,19 @@ check-mode-policy:
 	@echo "[TEST] mode_policy.py"
 	@$(PYTHON) $(THIS_DIR)/mode_policy.py $(ROOT)
 
+check-cis-retry:
+	@command -v $(PYTHON) >/dev/null 2>&1 || { \
+	  echo "[TEST] hci_cis_pair_retry_test.py skipped, no $(PYTHON)"; exit 0; }
+	@echo "[TEST] hci_cis_pair_retry_test.py"
+	@$(PYTHON) $(THIS_DIR)/harness/hcicontroller/hci_cis_pair_retry_test.py
+
 all: $(BUILD_DIR)/hci_usb_test \
      $(BUILD_DIR)/hci_controller_invalid_host_test \
      $(BUILD_DIR)/hci_controller_local_commands_test \
      $(BUILD_DIR)/hci_vendor_test
 run: check-hci-transport check-python-api check-native-usb-review \
-     check-counter-schema check-harness-layout check-mode-policy
+     check-counter-schema check-harness-layout check-mode-policy \
+     check-cis-retry
 
 
 
