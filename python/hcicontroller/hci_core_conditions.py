@@ -132,7 +132,7 @@ def validate_conditional_commands(commands, features, errors):
             (44, 0, 0x2073, "LE ISO Test End"),
         ), errors)
 
-    if cis_central or cis_peripheral or subrating:
+    if cis_central or cis_peripheral or subrating or adv_coding:
         require_group(commands, "C.49 Host-set feature bits", (
             (44, 1, 0x2074, "LE Set Host Feature"),
         ), errors)
@@ -196,7 +196,7 @@ def validate_conditional_commands(commands, features, errors):
         ("C.45", tx_iso),
         ("C.46", rx_iso),
         ("C.47", any_iso),
-        ("C.49", cis_central or cis_peripheral or subrating),
+        ("C.49", cis_central or cis_peripheral or subrating or adv_coding),
         ("C.51", power_control),
         ("C.52", path_loss),
         ("C.55", tx_iso),

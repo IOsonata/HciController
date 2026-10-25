@@ -151,3 +151,57 @@ cannot create the required state, the release result is incomplete/failing;
 `N/A` is reserved for capability outside the target profile.
 
 
+## Bluetooth 5.4 acceptance
+
+Run the controller additions in both advertiser/scanner roles:
+
+```sh
+python tests/harness/hcicontroller/release_test.py --only-54 --a <controller-a> --b <controller-b>
+```
+
+The default full release run includes these same phases. `--transport serial`
+and `--transport usb` select the existing transports; auto also supports a mixed
+pair. Use full-feature images with PAwR enabled on both controllers.
+
+The focused run first checks that both controllers report Core 5.4 or newer,
+advertise Advertising Coding Selection plus both PAwR feature bits, and report
+the corresponding conditional HCI commands. It then checks extended advertising
+parameters v2, required S=2 and S=8 on both advertising PHYs, coding-aware
+scanner reports with host feature bit 41, legacy Coded reporting with that bit
+disabled, and byte-exact transport of an
+Encrypted Advertising Data AD structure. Each case uses a fresh marker and
+matches the selected advertiser address and SID. It then runs the existing PAwR
+subevent/response procedure in both directions. Unsupported commands, unexpected
+PHYs, missing OTA data, and reset failures are FAIL, not skips.
+
+`make -C tests check-core54` runs the hardware-independent regression tests.
+These tests validate the acceptance runner, not the radio implementation.
+Hardware acceptance has been completed on a UDG-nRF52840 pair using mixed
+native USB Bulk Serialization and serial H:4 transport: 77 PASS, 0 FAIL,
+including both Bluetooth 5.4 advertiser/scanner directions, CIS, BIS, recovery,
+and 10,000 bidirectional ACL plus 1,000 bidirectional ISO stress iterations.
+Other target ports still require their own hardware acceptance run.
+
+### Ownership of the four 5.4 additions
+
+| Feature | Implementation | Acceptance evidence |
+| --- | --- | --- |
+| PAwR | HciController `hci_sdc_feat_pawr.cpp` and SDC HCI dispatch | Two-controller PAwR subevent and response exchange, both roles |
+| Advertising Coding Selection | HciController v2 dispatch; IOsonata `BtAdvCodingSet` and `BtAdvCodingSelectionEnable` | Required S=2/S=8 and host reporting checks above |
+| Encrypted Advertising Data | IOsonata `bt_ead.cpp` | IOsonata CSS known-answer, authentication-failure and bounds tests; controller runner checks opaque OTA transport only |
+| LE GATT Security Levels | IOsonata GAP service in `bt_gap.cpp`, `BtGapSecLevelsSet` | IOsonata `bt_gap_srvc_test.cpp`; requires a host application for GATT interoperability testing |
+
+EAD encryption and GATT service implementation belong to the host, not this HCI
+firmware. The public CSS Part A 2.3.1 EAD sample used by the runner is fixed test
+data; it must not be used as production key/randomizer material. This runner does
+not test key distribution, production randomizer generation, or GATT discovery.
+
+This inventory is scoped to the four additions in Bluetooth 5.4. It is not a
+claim that every optional feature from earlier Core versions is implemented or
+that a product has completed Bluetooth qualification. Keep the existing Core
+version reporting and feature masks; do not infer feature support from the
+version alone. nRF5340 full-feature images must also pass the 256 KiB flash and
+64 KiB RAM link checks; passing this host suite does not establish memory fit.
+
+References: Bluetooth Core 5.4 Vol 4 Part E 7.8.53 and 7.7.65.13;
+Core Specification Supplement Part A 1.23 and 2.3.1.

@@ -1187,8 +1187,8 @@ static HciCmdResult_t HciSdcCmdVsTransmitterCarrierTest(void *,
 
 /* Extended advertising. */
 /*
- * The v2 form adds the primary and secondary PHY options that periodic
- * advertising with responses needs to place its subevents. Everything else is
+ * The v2 form adds primary and secondary PHY options for Bluetooth 5.4
+ * Advertising Coding Selection. Everything else is
  * the v1 parameter block, so the shape and the generator are the same.
  */
 HCI_SDC_CMD_VB(HciSdcCmdLeSetExtAdvData, sdc_hci_cmd_le_set_ext_adv_data,
@@ -2087,3 +2087,4 @@ void HciSdcNrfxlibQueueStartupNop(HciSdc_t *pSdc)
         HciCmdDispatchQueueNop(&pSdc->Commands);
     }
 }
+

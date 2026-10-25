@@ -11,6 +11,7 @@ import subprocess
 import sys
 
 import _bootstrap  # noqa: F401
+from hcicontroller.core54_features import run_advertising54_phase, run_profile54_phase
 from hcicontroller import bis_features
 from hcicontroller import hci_cis_pair_test as cis_pair
 from hcicontroller import stress_features
@@ -250,6 +251,14 @@ def run_iso_phase(module, callback, book, label, spec_a, spec_b,
         module.IsoHci = old_iso_hci
 
 
+def run_54_phases(book, spec_a, spec_b, raw):
+    with_pair(spec_a, spec_b, raw, run_profile54_phase, book)
+    for first, second, label in ((spec_a, spec_b, "A Advertiser / B Scanner"),
+                                 (spec_b, spec_a, "B Advertiser / A Scanner")):
+        with_pair(first, second, raw, run_advertising54_phase, book, label)
+        with_pair(first, second, raw, run_pawr_phase, book, label)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Run release-strict validation with two HciController dongles"
@@ -267,6 +276,8 @@ def main():
         help="second controller selector: serial device or native USB serial number",
     )
     parser.add_argument("--raw", action="store_true", help="show raw HCI traffic")
+    parser.add_argument("--only-54", action="store_true",
+                        help="run 5.4 advertising and PAwR in both roles")
     parser.add_argument("--only-pawr", action="store_true",
                         help="run only the PAwR advertiser/scanner phase")
     parser.add_argument("--only-recovery", action="store_true",
@@ -295,11 +306,11 @@ def main():
 
     if args.stress_count <= 0:
         parser.error("--stress-count must be positive")
-    only_modes = sum((args.only_pawr, args.only_recovery,
+    only_modes = sum((args.only_54, args.only_pawr, args.only_recovery,
                       args.only_bis_recovery))
     if only_modes > 1:
         parser.error(
-            "--only-pawr, --only-recovery and --only-bis-recovery are mutually exclusive"
+            "--only-54, --only-pawr, --only-recovery and --only-bis-recovery are mutually exclusive"
         )
 
     try:
@@ -312,6 +323,11 @@ def main():
     print("Dongle B: %s" % spec_b)
 
     book = ResultBook("HciController cross-platform release validation")
+
+    if args.only_54:
+        run_54_phases(book, spec_a, spec_b, args.raw)
+        book.print_report()
+        return book.exit_code()
 
     if args.only_pawr:
         with_pair(
@@ -396,11 +412,7 @@ def main():
         run_past_phase,
         book, "A Sender / B Receiver",
     )
-    with_pair(
-        spec_a, spec_b, args.raw,
-        run_pawr_phase,
-        book, "A Advertiser / B Scanner",
-    )
+    run_54_phases(book, spec_a, spec_b, args.raw)
 
     if args.skip_cis:
         book.incomplete("ISO", "CIS Central/Peripheral + bidirectional HCI ISO",
@@ -451,3 +463,4 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
