@@ -13,6 +13,7 @@
 #include "mpsl.h"
 #include "mpsl_clock.h"
 #include "sdc.h"
+#include "sdc_hci_vs.h"
 #include "coredev/system_core_clock.h"
 #include "crypto_rng_nrf.h"
 #include "usb/usb.h"
@@ -128,9 +129,35 @@ extern "C" int32_t sdc_init(sdc_fault_handler_t Handler)
     return 0;
 }
 extern "C" int32_t sdc_rand_source_register(const sdc_rand_source_t *) { return 0; }
-extern "C" int32_t sdc_cfg_set(uint8_t, uint8_t, const sdc_cfg_t *) { return 4096; }
-extern "C" int32_t sdc_enable(sdc_callback_t, uint8_t *) { return 0; }
-extern "C" int32_t sdc_disable(void) { return 0; }
+static bool gSdcEnabled;
+static unsigned gTimingCalls;
+static unsigned gTimingFailAt;
+
+static uint8_t TimingHook(bool Extend, uint32_t Value)
+{
+    assert(gSdcEnabled);
+    ++gTimingCalls;
+    assert(Extend ? (gTimingCalls == 2U && Value == 1U) :
+                    (gTimingCalls == 1U && Value == 11250U));
+    return gTimingCalls == gTimingFailAt ? 0x0cU : 0U;
+}
+
+extern "C" int32_t sdc_cfg_set(uint8_t, uint8_t Type, const sdc_cfg_t *pCfg)
+{
+    if (Type == SDC_CFG_TYPE_BUFFER_CFG)
+    {
+        assert(pCfg->buffer_cfg.rx_packet_count == 10U);
+        assert(pCfg->buffer_cfg.tx_packet_count == 10U);
+    }
+    return 4096;
+}
+extern "C" int32_t sdc_enable(sdc_callback_t, uint8_t *)
+{
+    gSdcEnabled = true;
+    gTimingCalls = 0U;
+    return 0;
+}
+extern "C" int32_t sdc_disable(void) { gSdcEnabled = false; return 0; }
 extern "C" void sdc_support_ext_adv(void) {}
 extern "C" void sdc_support_peripheral(void) {}
 extern "C" void sdc_support_ext_central(void) {}
@@ -177,6 +204,8 @@ extern "C" void HciUsbPlatformIrqStorm(uint32_t Inten,
 
 static void ResetCounters(void)
 {
+    gTimingFailAt = 0U;
+    g_TestSdcTimingHook = TimingHook;
     gHfclkRequests = 0U;
     gHfclkReleases = 0U;
     gLowPrioProcess = 0U;
@@ -323,8 +352,31 @@ static void TestResetTraceKeepsSdcAssert(void)
     printf("[ok] reset trace keeps the SDC assertion across reset state\n");
 }
 
+static void TestTimingFailureCleanup(void)
+{
+    alignas(8) static uint8_t mem[10000];
+    HciTaktOs_t runtime = {};
+
+    ResetCounters();
+    assert(HciTargetInit(&runtime, mem, sizeof(mem)));
+    for (unsigned failAt = 1U; failAt <= 2U; ++failAt)
+    {
+        gTimingFailAt = failAt;
+        assert(!HciTargetStart());
+        assert(gTimingCalls == failAt);
+        assert(!gSdcEnabled);
+    }
+    gTimingFailAt = 0U;
+    assert(HciTargetStart());
+    assert(gTimingCalls == 2U);
+    HciTargetStop();
+    assert(!gSdcEnabled);
+    printf("[ok] timing commands run after enable and failures clean up\n");
+}
+
 int main(void)
 {
+    TestTimingFailureCleanup();
     TestUsbClockOwnership();
     TestUartTraceUsesDatasheetPinNames();
     TestResetTraceKeepsSdcAssert();

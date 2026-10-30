@@ -209,6 +209,12 @@ static bool HciSdcInit(HciNrf54lm20_t *pTarget)
         return false;
     }
     pTarget->SdcEnabled = true;
+    result = HciSdcTimingApply();
+    if (result != 0)
+    {
+        pTarget->LastError = result;
+        return false;
+    }
     return true;
 }
 void HciTargetStop(void)
