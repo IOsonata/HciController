@@ -111,9 +111,9 @@
 			<locationURI>PARENT-2-PROJECT_LOC/include/hci_trace.h</locationURI>
 		</link>
 		<link>
-			<name>include/hci_version.h</name>
+			<name>include/hci_usb.h</name>
 			<type>1</type>
-			<locationURI>PARENT-2-PROJECT_LOC/include/hci_version.h</locationURI>
+			<locationURI>PARENT-2-PROJECT_LOC/include/hci_usb.h</locationURI>
 		</link>
 		<link>
 			<name>include/hci_vendor.h</name>
@@ -121,9 +121,9 @@
 			<locationURI>PARENT-2-PROJECT_LOC/include/hci_vendor.h</locationURI>
 		</link>
 		<link>
-			<name>include/hci_usb.h</name>
+			<name>include/hci_version.h</name>
 			<type>1</type>
-			<locationURI>PARENT-2-PROJECT_LOC/include/hci_usb.h</locationURI>
+			<locationURI>PARENT-2-PROJECT_LOC/include/hci_version.h</locationURI>
 		</link>
 		<link>
 			<name>src/hci_app.cpp</name>
@@ -151,14 +151,14 @@
 			<locationURI>PARENT-2-PROJECT_LOC/src/hci_h4.cpp</locationURI>
 		</link>
 		<link>
-			<name>src/hci_host_uart.cpp</name>
-			<type>1</type>
-			<locationURI>PARENT-2-PROJECT_LOC/src/hci_host_uart.cpp</locationURI>
-		</link>
-		<link>
 			<name>src/hci_host_ipc.cpp</name>
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/src/hci_host_ipc.cpp</locationURI>
+		</link>
+		<link>
+			<name>src/hci_host_uart.cpp</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/src/hci_host_uart.cpp</locationURI>
 		</link>
 		<link>
 			<name>src/hci_intrf_transport.cpp</name>
@@ -168,17 +168,12 @@
 		<link>
 			<name>src/hci_nrf5340_net.cpp</name>
 			<type>1</type>
-			<locationURI>PARENT-2-PROJECT_LOC/src/hci_nrf5340_net.cpp</locationURI>
+			<locationURI>PARENT-1-PROJECT_LOC/src/hci_nrf5340_net.cpp</locationURI>
 		</link>
 		<link>
 			<name>src/hci_sdc.cpp</name>
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/src/hci_sdc.cpp</locationURI>
-		</link>
-		<link>
-			<name>src/hci_sdc_nrfxlib.cpp</name>
-			<type>1</type>
-			<locationURI>PARENT-2-PROJECT_LOC/src/hci_sdc_nrfxlib.cpp</locationURI>
 		</link>
 		<link>
 			<name>src/hci_sdc_feat_extfeat.cpp</name>
@@ -199,6 +194,11 @@
 			<name>src/hci_sdc_feat_subrating.cpp</name>
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/src/hci_sdc_feat_subrating.cpp</locationURI>
+		</link>
+		<link>
+			<name>src/hci_sdc_nrfxlib.cpp</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/src/hci_sdc_nrfxlib.cpp</locationURI>
 		</link>
 		<link>
 			<name>src/hci_sdc_resources.cpp</name>
