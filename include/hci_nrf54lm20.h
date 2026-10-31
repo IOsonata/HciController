@@ -17,9 +17,9 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-/* Temporary PAwR investigation. Set to 0 to remove instrumentation. */
+/* Enable explicitly for PAwR investigation; keep off for timing tests. */
 #ifndef HCI_LM20_SYNC_TRACE
-#define HCI_LM20_SYNC_TRACE 1
+#define HCI_LM20_SYNC_TRACE 0
 #endif
 #if HCI_LM20_SYNC_TRACE
 /* Status thread requests; only the HCI worker formats and drains records. */

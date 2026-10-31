@@ -473,7 +473,7 @@ static void HciStatusThread(void *)
 {
 #if HCI_LM20_SYNC_TRACE
 	uint32_t traceMs = 0U;
-#else
+#elif !defined(NRF54LM20B_XXAA) && !defined(NRF54LM20A_XXAA)
 	uint32_t seconds = 0U;
 	uint32_t elapsedMs = 0U;
 #endif
@@ -507,7 +507,7 @@ static void HciStatusThread(void *)
 			traceMs = 0U;
 			HciNrf54lm20TraceRequest();
 		}
-#else
+#elif !defined(NRF54LM20B_XXAA) && !defined(NRF54LM20A_XXAA)
         /* Send what the trace output could not take earlier. */
         (void)HciTraceFlush();
 
