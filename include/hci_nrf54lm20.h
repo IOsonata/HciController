@@ -17,6 +17,17 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+/* Enable explicitly for PAwR investigation; keep off for timing tests. */
+#ifndef HCI_LM20_SYNC_TRACE
+#define HCI_LM20_SYNC_TRACE 0
+#endif
+#if HCI_LM20_SYNC_TRACE
+/* Status thread requests; only the HCI worker formats and drains records. */
+void HciNrf54lm20TraceRequest(void);
+void HciNrf54lm20TraceProcess(void);
+void HciNrf54lm20TraceCommand(const uint8_t *pPacket, size_t Length);
+void HciNrf54lm20TraceEvent(const uint8_t *pPacket, size_t Length);
+#endif
 typedef struct
 {
     HciTaktOs_t *pRuntime;

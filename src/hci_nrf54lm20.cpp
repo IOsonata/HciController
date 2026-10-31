@@ -40,8 +40,155 @@
 static HciNrf54lm20_t s_Target;
 static HciNrf54lm20_t *s_pTarget;
 
-#if NRF_POWER_HAS_CONST_LATENCY
 static volatile uint32_t s_ConstLatRefs;
+static uint32_t s_RramLowPowerConfig;
+
+#if HCI_LM20_SYNC_TRACE
+/* Each counter has one writer. Status snapshots are approximate: do not mask
+ * radio interrupts merely to make diagnostic fields mutually consistent.
+ */
+static volatile uint32_t s_TraceRadio;
+static volatile uint32_t s_TraceGrtc;
+static volatile uint32_t s_TraceTimer;
+static volatile uint32_t s_TraceSwi;
+static volatile uint32_t s_TraceClock;
+static volatile uint32_t s_TraceMpslEnter;
+static volatile uint32_t s_TraceMpslExit;
+static volatile uint32_t s_TraceSdc;
+static volatile uint32_t s_TraceExtReports;
+static volatile uint32_t s_TracePeriodicReports;
+
+static uint32_t s_TraceRequested;
+static uint32_t s_TraceSequence;
+
+void HciNrf54lm20TraceRequest(void)
+{
+	__atomic_store_n(&s_TraceRequested, 1U, __ATOMIC_RELEASE);
+}
+
+void HciNrf54lm20TraceProcess(void)
+{
+	uint32_t enabled = 0U;
+	uint32_t pending = 0U;
+	uint32_t active = 0U;
+	uint32_t compareEvents = 0U;
+	const IRQn_Type irqs[] = {
+		RADIO_0_IRQn, GRTC_3_IRQn, TIMER10_IRQn, SWI00_IRQn, CLOCK_POWER_IRQn
+	};
+
+	if (__atomic_exchange_n(&s_TraceRequested, 0U, __ATOMIC_ACQ_REL) == 0U)
+	{
+		return;
+	}
+
+	/* Do not read SYSCOUNTER: reading it wakes GRTC and can hide a sleep
+	 * transition fault. Do not clear events or change IRQ state either.
+	 */
+	for (unsigned i = 0U; i < sizeof(irqs) / sizeof(irqs[0]); i++)
+	{
+		enabled |= (NVIC_GetEnableIRQ(irqs[i]) != 0U ? 1U : 0U) << i;
+		pending |= (NVIC_GetPendingIRQ(irqs[i]) != 0U ? 1U : 0U) << i;
+		active |= (NVIC_GetActive(irqs[i]) != 0U ? 1U : 0U) << i;
+	}
+	for (unsigned i = 7U; i <= 11U; i++)
+	{
+		compareEvents |= (NRF_GRTC->EVENTS_COMPARE[i] != 0U ? 1U : 0U) << i;
+	}
+	s_TraceSequence++;
+	HciTrace("lm20 snap=%lu nvic en=%02lx pend=%02lx active=%02lx primask=%lx basepri=%lx\r\n",
+		(unsigned long)s_TraceSequence, (unsigned long)enabled,
+		(unsigned long)pending, (unsigned long)active,
+		(unsigned long)__get_PRIMASK(), (unsigned long)__get_BASEPRI());
+	HciTrace("lm20 grtc mode=%lx inten3=%lx events=%lx\r\n",
+		(unsigned long)NRF_GRTC->MODE, (unsigned long)NRF_GRTC->INTENSET3,
+		(unsigned long)compareEvents);
+	for (unsigned i = 7U; i <= 11U; i++)
+	{
+		HciTrace("lm20 cc%u=%08lx:%08lx\r\n", i,
+			(unsigned long)NRF_GRTC->CC[i].CCH,
+			(unsigned long)NRF_GRTC->CC[i].CCL);
+	}
+	HciTrace("lm20 irq radio=%lu grtc=%lu timer=%lu swi=%lu clock=%lu\r\n",
+		(unsigned long)s_TraceRadio, (unsigned long)s_TraceGrtc,
+		(unsigned long)s_TraceTimer, (unsigned long)s_TraceSwi,
+		(unsigned long)s_TraceClock);
+	HciTrace("lm20 work in=%lu out=%lu sdc=%lu ext=%lu periodic=%lu refs=%lu rram=%lx\r\n",
+		(unsigned long)s_TraceMpslEnter, (unsigned long)s_TraceMpslExit,
+		(unsigned long)s_TraceSdc, (unsigned long)s_TraceExtReports,
+		(unsigned long)s_TracePeriodicReports, (unsigned long)s_ConstLatRefs,
+		(unsigned long)NRF_RRAMC->POWER.LOWPOWERCONFIG);
+	(void)HciTraceFlush();
+}
+
+void HciNrf54lm20TraceCommand(const uint8_t *pPacket, size_t Length)
+{
+	unsigned opcode;
+
+	if (Length < 3U)
+	{
+		return;
+	}
+	opcode = pPacket[0] | ((unsigned)pPacket[1] << 8);
+	if (opcode == 0x2044U || opcode == 0x2045U || opcode == 0x2046U ||
+		opcode == 0x2041U || opcode == 0x2042U || opcode == 0x2084U)
+	{
+		HciTrace("lm20 dispatch op=%04x len=%u\r\n", opcode, (unsigned)Length);
+	}
+}
+
+void HciNrf54lm20TraceEvent(const uint8_t *pPacket, size_t Length)
+{
+	unsigned opcode;
+	unsigned status;
+
+	if (Length < 3U)
+	{
+		return;
+	}
+	if (pPacket[0] == 0x3eU)
+	{
+		if (pPacket[2] == 0x0dU)
+		{
+			s_TraceExtReports = s_TraceExtReports + 1U;
+		}
+		else if (pPacket[2] == 0x0fU || pPacket[2] == 0x25U)
+		{
+			s_TracePeriodicReports = s_TracePeriodicReports + 1U;
+		}
+		else if ((pPacket[2] == 0x0eU || pPacket[2] == 0x24U) && Length >= 6U)
+		{
+			HciTrace("lm20 SDC sync sub=%02x status=%02x handle=%02x%02x\r\n",
+				(unsigned)pPacket[2], (unsigned)pPacket[3],
+				(unsigned)pPacket[5], (unsigned)pPacket[4]);
+		}
+		else if (pPacket[2] == 0x10U && Length >= 5U)
+		{
+			HciTrace("lm20 SDC sync lost handle=%02x%02x\r\n",
+				(unsigned)pPacket[4], (unsigned)pPacket[3]);
+		}
+		return;
+	}
+	if (Length < 6U || (pPacket[0] != 0x0eU && pPacket[0] != 0x0fU))
+	{
+		return;
+	}
+	if (pPacket[0] == 0x0eU)
+	{
+		opcode = pPacket[3] | ((unsigned)pPacket[4] << 8);
+		status = pPacket[5];
+	}
+	else
+	{
+		opcode = pPacket[4] | ((unsigned)pPacket[5] << 8);
+		status = pPacket[2];
+	}
+	if (opcode == 0x2044U || opcode == 0x2045U || opcode == 0x2046U ||
+		opcode == 0x2041U || opcode == 0x2042U || opcode == 0x2084U)
+	{
+		HciTrace("lm20 reply op=%04x status=%02x evt=%02x\r\n",
+			opcode, status, (unsigned)pPacket[0]);
+	}
+}
 #endif
 
 /* Called from a time-critical fault context: never perform blocking
@@ -113,6 +260,9 @@ static bool HciRandSourceReady(HciNrf54lm20_t *pTarget)
 }
 static void HciSdcCallback(void)
 {
+#if HCI_LM20_SYNC_TRACE
+	s_TraceSdc = s_TraceSdc + 1U;
+#endif
     if (s_pTarget != nullptr && s_pTarget->pRuntime != nullptr)
     {
         HciTaktOsWake(s_pTarget->pRuntime, HCI_TAKTOS_EVENT_SDC);
@@ -129,7 +279,12 @@ static bool HciMpslInit(HciNrf54lm20_t *pTarget)
         HciTrace("nRF54L: MPSL requires 128 MHz core clock\r\n");
         return false;
     }
-    NRF_GRTC->MODE |= 2U;
+	/* Keep the high-resolution counter active while the CPU services MPSL.
+	 * SYSCOUNTEREN alone permits it to sleep even with the CPU awake.
+	 * AUTOEN still permits GRTC sleep when the CPU sleeps.
+	 */
+	NRF_GRTC->MODE |= GRTC_MODE_SYSCOUNTEREN_Msk |
+		(GRTC_MODE_AUTOEN_CpuActive << GRTC_MODE_AUTOEN_Pos);
     NRF_GRTC->TASKS_START = 1U;
 
     mpsl_clock_lfclk_cfg_t lfclk = {};
@@ -258,7 +413,13 @@ bool HciTargetStart(void)
 }
 void HciTargetProcessMpsl(void)
 {
+#if HCI_LM20_SYNC_TRACE
+	s_TraceMpslEnter = s_TraceMpslEnter + 1U;
+#endif
     mpsl_low_priority_process();
+#if HCI_LM20_SYNC_TRACE
+	s_TraceMpslExit = s_TraceMpslExit + 1U;
+#endif
 }
 void HciTargetFault(int error)
 {
@@ -301,6 +462,9 @@ int32_t HciTargetLastError(void)
 /* MPSL hardware vectors. Low-priority work is always deferred to TaktOS. */
 extern "C" void SWI00_IRQHandler(void)
 {
+#if HCI_LM20_SYNC_TRACE
+	s_TraceSwi = s_TraceSwi + 1U;
+#endif
     if (s_pTarget != nullptr && s_pTarget->pRuntime != nullptr)
     {
         HciTaktOsWake(s_pTarget->pRuntime, HCI_TAKTOS_EVENT_MPSL);
@@ -308,46 +472,61 @@ extern "C" void SWI00_IRQHandler(void)
 }
 extern "C" void RADIO_0_IRQHandler(void)
 {
+#if HCI_LM20_SYNC_TRACE
+	s_TraceRadio = s_TraceRadio + 1U;
+#endif
     MPSL_IRQ_RADIO_Handler();
 }
 extern "C" void GRTC_3_IRQHandler(void)
 {
+#if HCI_LM20_SYNC_TRACE
+	s_TraceGrtc = s_TraceGrtc + 1U;
+#endif
     MPSL_IRQ_RTC0_Handler();
 }
 extern "C" void TIMER10_IRQHandler(void)
 {
+#if HCI_LM20_SYNC_TRACE
+	s_TraceTimer = s_TraceTimer + 1U;
+#endif
     MPSL_IRQ_TIMER0_Handler();
 }
 extern "C" void CLOCK_POWER_IRQHandler(void)
 {
+#if HCI_LM20_SYNC_TRACE
+	s_TraceClock = s_TraceClock + 1U;
+#endif
     MPSL_IRQ_CLOCK_Handler();
 }
 
 /* nRF54L MPSL low-latency window callbacks. */
+static void HciConstLatAcquire(void)
+{
+	if (s_ConstLatRefs++ == 0U)
+	{
+		/* MPSL needs bounded instruction-fetch latency across radio events.
+		 * SystemInit allows RRAM power-off while idle. Preserve that policy
+		 * and restore it only after the last low-latency request is released.
+		 */
+		s_RramLowPowerConfig = NRF_RRAMC->POWER.LOWPOWERCONFIG;
+		NRF_RRAMC->POWER.LOWPOWERCONFIG =
+			RRAMC_POWER_LOWPOWERCONFIG_MODE_Standby <<
+			RRAMC_POWER_LOWPOWERCONFIG_MODE_Pos;
 #if NRF_POWER_HAS_CONST_LATENCY
-
-static void HciConstLatAcquire(void)
-{
-    if (s_ConstLatRefs++ == 0U)
-    {
-        nrf_power_task_trigger(NRF_POWER, NRF_POWER_TASK_CONSTLAT);
-    }
-}
-static void HciConstLatRelease(void)
-{
-    if (s_ConstLatRefs > 0U && --s_ConstLatRefs == 0U)
-    {
-        nrf_power_task_trigger(NRF_POWER, NRF_POWER_TASK_LOWPWR);
-    }
-}
-#else
-static void HciConstLatAcquire(void)
-{
-}
-static void HciConstLatRelease(void)
-{
-}
+		nrf_power_task_trigger(NRF_POWER, NRF_POWER_TASK_CONSTLAT);
 #endif
+	}
+}
+static void HciConstLatRelease(void)
+{
+	if (s_ConstLatRefs > 0U && --s_ConstLatRefs == 0U)
+	{
+#if NRF_POWER_HAS_CONST_LATENCY
+		nrf_power_task_trigger(NRF_POWER, NRF_POWER_TASK_LOWPWR);
+#endif
+		NRF_RRAMC->POWER.LOWPOWERCONFIG = s_RramLowPowerConfig;
+	}
+}
 extern "C" void mpsl_low_latency_acquire_callback(void)
 {
     HciConstLatAcquire();

@@ -14,6 +14,12 @@
 
 #include "hci_taktos.h"
 #include "hci_target.h"
+#if defined(NRF54LM20B_XXAA) || defined(NRF54LM20A_XXAA)
+#include "hci_nrf54lm20.h"
+#endif
+#ifndef HCI_LM20_SYNC_TRACE
+#define HCI_LM20_SYNC_TRACE 0
+#endif
 
 #include <string.h>
 
@@ -197,6 +203,9 @@ static void HciTaktOsServiceHost(HciTaktOs_t *pRuntime)
     }
 
     HciAppHostProcess();
+#if HCI_LM20_SYNC_TRACE
+	HciNrf54lm20TraceProcess();
+#endif
 }
 
 static void HciTaktOsThreadLeave(HciTaktOs_t *pRuntime)

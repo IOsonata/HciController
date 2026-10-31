@@ -15,6 +15,12 @@
 
 #include "hci_sdc.h"
 #include "hci_core_profile.h"
+#if defined(NRF54LM20B_XXAA) || defined(NRF54LM20A_XXAA)
+#include "hci_nrf54lm20.h"
+#endif
+#ifndef HCI_LM20_SYNC_TRACE
+#define HCI_LM20_SYNC_TRACE 0
+#endif
 
 #include <stddef.h>
 #include <string.h>
@@ -1093,6 +1099,9 @@ bool HciSdcPutPacket(HciSdc_t *pSdc,
                     pSdc->Commands.HandlerCallCount;
                 const uint8_t rspMarkLenBefore = pSdc->Commands.RspMarkLen;
 
+#if HCI_LM20_SYNC_TRACE
+				HciNrf54lm20TraceCommand(pPacket, PacketLen);
+#endif
                 const bool accepted =
                     HciCmdDispatchPut(&pSdc->Commands, pPacket, PacketLen);
                 if (accepted && delayedCandidate &&
@@ -1193,6 +1202,9 @@ static HciSdcGetResult_t HciSdcGetDispatchEvent(
         HciSdcPatchSupportedCommands(pPacket, *pPacketLen);
     }
 
+#if HCI_LM20_SYNC_TRACE
+	HciNrf54lm20TraceEvent(pPacket, *pPacketLen);
+#endif
     pSdc->CommandEventLast = true;
     *pType = HCI_H4_PACKET_EVENT;
     return HCI_SDC_GET_PACKET;
@@ -1292,6 +1304,9 @@ HciSdcGetResult_t HciSdcGetPacket(HciSdc_t *pSdc,
             pSdc->DelayedCommandOpcode = 0U;
         }
 
+#if HCI_LM20_SYNC_TRACE
+		HciNrf54lm20TraceEvent(pPacket, *pPacketLen);
+#endif
         HciSdcAclTrackEvent(pSdc, pPacket, *pPacketLen);
     }
 
