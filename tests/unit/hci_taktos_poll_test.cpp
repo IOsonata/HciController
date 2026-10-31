@@ -4,10 +4,24 @@
 
 #include "hci_taktos.h"
 #include "hci_target.h"
+#if defined(NRF54LM20B_XXAA) || defined(NRF54LM20A_XXAA)
+#include "hci_nrf54lm20.h"
+#endif
+#ifndef HCI_LM20_SYNC_TRACE
+#define HCI_LM20_SYNC_TRACE 0
+#endif
 
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+
+#if HCI_LM20_SYNC_TRACE
+static unsigned gTraceProcess;
+void HciNrf54lm20TraceProcess(void)
+{
+	gTraceProcess++;
+}
+#endif
 
 static unsigned gTargetStart;
 static unsigned gHostStart;
@@ -77,6 +91,9 @@ void HciAppHostProcess(void) { gProcess++; }
 
 static void Reset(void)
 {
+#if HCI_LM20_SYNC_TRACE
+	gTraceProcess = 0U;
+#endif
     gTargetStart = 0U;
     gHostStart = 0U;
     gProcess = 0U;
@@ -105,6 +122,9 @@ static void Run(uint32_t PollMs, bool AlwaysTimeout)
     assert(runtime.Started);
     assert(!runtime.ThreadArmed);
     assert(!runtime.ThreadLive);
+#if HCI_LM20_SYNC_TRACE
+	assert(gTraceProcess == gProcess);
+#endif
 }
 
 int main(void)

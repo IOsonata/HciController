@@ -58,8 +58,61 @@ static volatile uint32_t s_TraceSdc;
 static volatile uint32_t s_TraceExtReports;
 static volatile uint32_t s_TracePeriodicReports;
 
-void HciNrf54lm20TraceStatus(void)
+static uint32_t s_TraceRequested;
+static uint32_t s_TraceSequence;
+
+void HciNrf54lm20TraceRequest(void)
 {
+	__atomic_store_n(&s_TraceRequested, 1U, __ATOMIC_RELEASE);
+}
+
+void HciNrf54lm20TraceProcess(void)
+{
+	uint32_t enabled = 0U;
+	uint32_t pending = 0U;
+	uint32_t active = 0U;
+	uint32_t compareEvents = 0U;
+	uint32_t counterLow;
+	uint32_t counterHigh;
+	const IRQn_Type irqs[] = {
+		RADIO_0_IRQn, GRTC_3_IRQn, TIMER10_IRQn, SWI00_IRQn, CLOCK_POWER_IRQn
+	};
+
+	if (__atomic_exchange_n(&s_TraceRequested, 0U, __ATOMIC_ACQ_REL) == 0U)
+	{
+		return;
+	}
+
+	/* Read only. Do not clear events, capture timers, or change IRQ state.
+	 * Counter low/high is an approximate snapshot; no retry loop in tracing.
+	 */
+	counterLow = NRF_GRTC->SYSCOUNTER[3].SYSCOUNTERL;
+	counterHigh = NRF_GRTC->SYSCOUNTER[3].SYSCOUNTERH;
+	for (unsigned i = 0U; i < sizeof(irqs) / sizeof(irqs[0]); i++)
+	{
+		enabled |= (NVIC_GetEnableIRQ(irqs[i]) != 0U ? 1U : 0U) << i;
+		pending |= (NVIC_GetPendingIRQ(irqs[i]) != 0U ? 1U : 0U) << i;
+		active |= (NVIC_GetActive(irqs[i]) != 0U ? 1U : 0U) << i;
+	}
+	for (unsigned i = 7U; i <= 11U; i++)
+	{
+		compareEvents |= (NRF_GRTC->EVENTS_COMPARE[i] != 0U ? 1U : 0U) << i;
+	}
+	s_TraceSequence++;
+	HciTrace("lm20 snap=%lu nvic en=%02lx pend=%02lx active=%02lx primask=%lx basepri=%lx\r\n",
+		(unsigned long)s_TraceSequence, (unsigned long)enabled,
+		(unsigned long)pending, (unsigned long)active,
+		(unsigned long)__get_PRIMASK(), (unsigned long)__get_BASEPRI());
+	HciTrace("lm20 grtc now=%08lx:%08lx mode=%lx inten3=%lx events=%lx\r\n",
+		(unsigned long)counterHigh, (unsigned long)counterLow,
+		(unsigned long)NRF_GRTC->MODE, (unsigned long)NRF_GRTC->INTENSET3,
+		(unsigned long)compareEvents);
+	for (unsigned i = 7U; i <= 11U; i++)
+	{
+		HciTrace("lm20 cc%u=%08lx:%08lx\r\n", i,
+			(unsigned long)NRF_GRTC->CC[i].CCH,
+			(unsigned long)NRF_GRTC->CC[i].CCL);
+	}
 	HciTrace("lm20 irq radio=%lu grtc=%lu timer=%lu swi=%lu clock=%lu\r\n",
 		(unsigned long)s_TraceRadio, (unsigned long)s_TraceGrtc,
 		(unsigned long)s_TraceTimer, (unsigned long)s_TraceSwi,
@@ -69,6 +122,7 @@ void HciNrf54lm20TraceStatus(void)
 		(unsigned long)s_TraceSdc, (unsigned long)s_TraceExtReports,
 		(unsigned long)s_TracePeriodicReports, (unsigned long)s_ConstLatRefs,
 		(unsigned long)NRF_RRAMC->POWER.LOWPOWERCONFIG);
+	(void)HciTraceFlush();
 }
 
 void HciNrf54lm20TraceCommand(const uint8_t *pPacket, size_t Length)

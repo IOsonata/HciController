@@ -22,7 +22,9 @@ extern "C" {
 #define HCI_LM20_SYNC_TRACE 1
 #endif
 #if HCI_LM20_SYNC_TRACE
-void HciNrf54lm20TraceStatus(void);
+/* Status thread requests; only the HCI worker formats and drains records. */
+void HciNrf54lm20TraceRequest(void);
+void HciNrf54lm20TraceProcess(void);
 void HciNrf54lm20TraceCommand(const uint8_t *pPacket, size_t Length);
 void HciNrf54lm20TraceEvent(const uint8_t *pPacket, size_t Length);
 #endif

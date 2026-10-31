@@ -36,6 +36,23 @@ class Lm20LatencyTest(unittest.TestCase):
 #include <cstdio>
 #include <string>
 static std::string output;
+static unsigned flushes;
+typedef unsigned IRQn_Type;
+enum { RADIO_0_IRQn, GRTC_3_IRQn, TIMER10_IRQn, SWI00_IRQn, CLOCK_POWER_IRQn };
+static unsigned NVIC_GetEnableIRQ(IRQn_Type) { return 1; }
+static unsigned NVIC_GetPendingIRQ(IRQn_Type irq) { return irq == GRTC_3_IRQn; }
+static unsigned NVIC_GetActive(IRQn_Type) { return 0; }
+static unsigned __get_PRIMASK() { return 0; }
+static unsigned __get_BASEPRI() { return 0; }
+struct {
+    struct { uint32_t SYSCOUNTERL; uint32_t SYSCOUNTERH; } SYSCOUNTER[4];
+    struct { uint32_t CCL; uint32_t CCH; } CC[12];
+    uint32_t MODE;
+    uint32_t INTENSET3;
+    uint32_t EVENTS_COMPARE[12];
+} grtc;
+#define NRF_GRTC (&grtc)
+static int HciTraceFlush() { ++flushes; return 0; }
 static uint32_t s_ConstLatRefs;
 struct { struct { uint32_t LOWPOWERCONFIG; } POWER; } rram;
 #define NRF_RRAMC (&rram)
@@ -77,7 +94,23 @@ int main()
     assert(s_TraceExtReports == 100 && s_TracePeriodicReports == 100);
     HciNrf54lm20TraceEvent(nullptr, 0);
     HciNrf54lm20TraceCommand(nullptr, 0);
-    HciNrf54lm20TraceStatus();
+    HciNrf54lm20TraceProcess();
+    assert(output.empty() && flushes == 0);
+    HciNrf54lm20TraceRequest();
+    HciNrf54lm20TraceRequest();
+    // The status thread cannot format or flush unpublished SysLog records.
+    assert(output.empty() && flushes == 0);
+    grtc.INTENSET3 = 0xf80;
+    grtc.EVENTS_COMPARE[7] = 1;
+    grtc.CC[7].CCL = 0x12345678;
+    HciNrf54lm20TraceProcess();
+    assert(flushes == 1);
+    assert(output.find("snap=1 nvic en=1f pend=02 active=00") != std::string::npos);
+    assert(output.find("inten3=f80 events=80") != std::string::npos);
+    assert(output.find("cc7=00000000:12345678") != std::string::npos);
+    assert(grtc.INTENSET3 == 0xf80 && grtc.EVENTS_COMPARE[7] == 1);
+    HciNrf54lm20TraceProcess();
+    assert(flushes == 1);
     assert(output.find("ext=100 periodic=100") != std::string::npos);
 }
 '''

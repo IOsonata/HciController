@@ -47,6 +47,10 @@
 #include "storage/nvm_region.h"
 #endif
 
+#ifndef HCI_LM20_SYNC_TRACE
+#define HCI_LM20_SYNC_TRACE 0
+#endif
+
 #define DEVICE_NAME               "HciController"
 #define HCI_THREAD_STACK_SIZE      3072U
 /* Mode changes stop HCI/MPSL/SDC before the NVM erase/write/verify path. */
@@ -467,12 +471,11 @@ static void HciModeButtonProcess(void)
 
 static void HciStatusThread(void *)
 {
-    uint32_t seconds = 0U;
-    uint32_t elapsedMs = 0U;
-#if defined(NRF54LM20B_XXAA) || defined(NRF54LM20A_XXAA)
 #if HCI_LM20_SYNC_TRACE
 	uint32_t traceMs = 0U;
-#endif
+#else
+	uint32_t seconds = 0U;
+	uint32_t elapsedMs = 0U;
 #endif
 
     for (;;)
@@ -494,17 +497,17 @@ static void HciStatusThread(void *)
         HciModeButtonProcess();
 #endif
 
-#if defined(NRF54LM20B_XXAA) || defined(NRF54LM20A_XXAA)
 #if HCI_LM20_SYNC_TRACE
+		/* SysLog publishes before formatting. Keep both producers and the
+		 * consumer on the HCI worker; this thread only requests a snapshot.
+		 */
 		traceMs += STATUS_UPDATE_MS;
 		if (traceMs >= 1000U)
 		{
 			traceMs = 0U;
-			HciNrf54lm20TraceStatus();
+			HciNrf54lm20TraceRequest();
 		}
-#endif
-#endif
-
+#else
         /* Send what the trace output could not take earlier. */
         (void)HciTraceFlush();
 
@@ -518,6 +521,8 @@ static void HciStatusThread(void *)
             HciTrace("alive %lus host=%u\r\n", (unsigned long)seconds,
                      (unsigned)HciAppHostIsOpen(&s_HciApp));
         }
+
+#endif
 
         (void)TaktOSThreadSleep(TaktOSCurrentThread(), STATUS_UPDATE_MS);
     }
