@@ -72,8 +72,6 @@ void HciNrf54lm20TraceProcess(void)
 	uint32_t pending = 0U;
 	uint32_t active = 0U;
 	uint32_t compareEvents = 0U;
-	uint32_t counterLow;
-	uint32_t counterHigh;
 	const IRQn_Type irqs[] = {
 		RADIO_0_IRQn, GRTC_3_IRQn, TIMER10_IRQn, SWI00_IRQn, CLOCK_POWER_IRQn
 	};
@@ -83,11 +81,9 @@ void HciNrf54lm20TraceProcess(void)
 		return;
 	}
 
-	/* Read only. Do not clear events, capture timers, or change IRQ state.
-	 * Counter low/high is an approximate snapshot; no retry loop in tracing.
+	/* Do not read SYSCOUNTER: reading it wakes GRTC and can hide a sleep
+	 * transition fault. Do not clear events or change IRQ state either.
 	 */
-	counterLow = NRF_GRTC->SYSCOUNTER[3].SYSCOUNTERL;
-	counterHigh = NRF_GRTC->SYSCOUNTER[3].SYSCOUNTERH;
 	for (unsigned i = 0U; i < sizeof(irqs) / sizeof(irqs[0]); i++)
 	{
 		enabled |= (NVIC_GetEnableIRQ(irqs[i]) != 0U ? 1U : 0U) << i;
@@ -103,8 +99,7 @@ void HciNrf54lm20TraceProcess(void)
 		(unsigned long)s_TraceSequence, (unsigned long)enabled,
 		(unsigned long)pending, (unsigned long)active,
 		(unsigned long)__get_PRIMASK(), (unsigned long)__get_BASEPRI());
-	HciTrace("lm20 grtc now=%08lx:%08lx mode=%lx inten3=%lx events=%lx\r\n",
-		(unsigned long)counterHigh, (unsigned long)counterLow,
+	HciTrace("lm20 grtc mode=%lx inten3=%lx events=%lx\r\n",
 		(unsigned long)NRF_GRTC->MODE, (unsigned long)NRF_GRTC->INTENSET3,
 		(unsigned long)compareEvents);
 	for (unsigned i = 7U; i <= 11U; i++)
@@ -284,7 +279,12 @@ static bool HciMpslInit(HciNrf54lm20_t *pTarget)
         HciTrace("nRF54L: MPSL requires 128 MHz core clock\r\n");
         return false;
     }
-    NRF_GRTC->MODE |= 2U;
+	/* Keep the high-resolution counter active while the CPU services MPSL.
+	 * SYSCOUNTEREN alone permits it to sleep even with the CPU awake.
+	 * AUTOEN still permits GRTC sleep when the CPU sleeps.
+	 */
+	NRF_GRTC->MODE |= GRTC_MODE_SYSCOUNTEREN_Msk |
+		(GRTC_MODE_AUTOEN_CpuActive << GRTC_MODE_AUTOEN_Pos);
     NRF_GRTC->TASKS_START = 1U;
 
     mpsl_clock_lfclk_cfg_t lfclk = {};
