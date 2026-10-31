@@ -124,6 +124,9 @@ typedef struct
     HciH4PacketType_t ControllerPacketType;
     bool ControllerPacketPending;
 
+    /* Burst budget exhausted: schedule another worker pass without waiting. */
+    bool ProcessAgain;
+
     uint32_t HostPacketRetryCount;
     uint32_t InvalidHostPacketCount;
     uint32_t UnsendableControllerPacketCount;

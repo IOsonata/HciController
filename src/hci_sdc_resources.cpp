@@ -14,6 +14,7 @@
 
 #include "hci_sdc_resources.h"
 #include "hci_core_profile.h"
+#include "sdc_hci_vs.h"
 
 #include <stddef.h>
 
@@ -347,4 +348,29 @@ int32_t HciSdcResourcesApply(void)
     s_Required =
         sdc_cfg_set(SDC_DEFAULT_RESOURCE_CFG_TAG, SDC_CFG_TYPE_NONE, nullptr);
     return s_Required;
+}
+
+
+uint8_t HciSdcTimingApply(void)
+{
+    sdc_hci_cmd_vs_event_length_set_t length = {};
+    sdc_hci_cmd_vs_conn_event_extend_t extend = {};
+    uint8_t status;
+
+    // HCI commands require an enabled controller.
+    length.event_length_us = 11250U;
+    status = sdc_hci_cmd_vs_event_length_set(&length);
+    if (status != 0U)
+    {
+        HciTraceError("sdc: event length failed status=%u\r\n", (unsigned)status);
+        return status;
+    }
+
+    extend.enable = 1U;
+    status = sdc_hci_cmd_vs_conn_event_extend(&extend);
+    if (status != 0U)
+    {
+        HciTraceError("sdc: event extension failed status=%u\r\n", (unsigned)status);
+    }
+    return status;
 }

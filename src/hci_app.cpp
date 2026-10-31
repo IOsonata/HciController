@@ -287,6 +287,10 @@ void HciAppHostProcess(void)
     }
 
     HciControllerProcess(&pApp->Controller);
+    if (pApp->Controller.ProcessAgain)
+    {
+        HciAppWake();
+    }
     HciAppResyncOnIdle(pApp);
 }
 

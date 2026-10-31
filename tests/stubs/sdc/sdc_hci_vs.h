@@ -104,10 +104,18 @@ typedef struct { uint8_t enable; }
         return 0U; \
     }
 
-TEST_SDC_VS_NO_RETURN(sdc_hci_cmd_vs_conn_event_extend,
-                      sdc_hci_cmd_vs_conn_event_extend_t)
-TEST_SDC_VS_NO_RETURN(sdc_hci_cmd_vs_event_length_set,
-                      sdc_hci_cmd_vs_event_length_set_t)
+inline uint8_t (*g_TestSdcTimingHook)(bool, uint32_t) = nullptr;
+static inline uint8_t sdc_hci_cmd_vs_conn_event_extend(
+    const sdc_hci_cmd_vs_conn_event_extend_t *p_params)
+{
+    return g_TestSdcTimingHook ? g_TestSdcTimingHook(true, p_params->enable) : 0U;
+}
+static inline uint8_t sdc_hci_cmd_vs_event_length_set(
+    const sdc_hci_cmd_vs_event_length_set_t *p_params)
+{
+    return g_TestSdcTimingHook ?
+        g_TestSdcTimingHook(false, p_params->event_length_us) : 0U;
+}
 TEST_SDC_VS_NO_RETURN(sdc_hci_cmd_vs_periodic_adv_event_length_set,
                       sdc_hci_cmd_vs_periodic_adv_event_length_set_t)
 TEST_SDC_VS_NO_RETURN(sdc_hci_cmd_vs_peripheral_latency_mode_set,

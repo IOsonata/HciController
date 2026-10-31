@@ -1030,6 +1030,8 @@ void HciControllerProcess(HciController_t *pController)
         return;
     }
 
+    pController->ProcessAgain = false;
+
     /*
      * The H:4 adapter uses pHostPacket as its parser buffer. Do not feed it new
      * bytes while that same buffer is retained for a backend retry.
@@ -1056,6 +1058,20 @@ void HciControllerProcess(HciController_t *pController)
      * held, and the reply is queued by then. An event driven transport does
      * not wake the loop again, so the reply goes out in this pass.
      */
-    HciControllerFetchPacket(pController);
-    HciControllerStartPacket(pController);
+    // The first packet was offered above. Fill the transport while it has
+    // room, but return to the worker regularly so MPSL work is serviced.
+    for (unsigned pass = 1U; pass < 16U; ++pass)
+    {
+        HciControllerFetchPacket(pController);
+        if (!pController->ControllerPacketPending)
+        {
+            return;
+        }
+        HciControllerStartPacket(pController);
+        if (pController->ControllerPacketPending)
+        {
+            return;
+        }
+    }
+    pController->ProcessAgain = true;
 }

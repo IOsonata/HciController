@@ -560,6 +560,15 @@ class NativeUsbTransport:
             raise TransportError("%s has invalid max packet size" % label)
         return size
 
+    @staticmethod
+    def _bulk_transfer_size(endpoint):
+        mps = NativeUsbTransport._endpoint_mps(
+            endpoint, "Bluetooth USB bulk IN endpoint")
+        # Submit enough space for a complete maximum HCI packet, rounded to
+        # USB packets. Short packets/ZLPs terminate the transfer promptly.
+        # A 251-byte ACL payload otherwise needs four synchronous USB reads.
+        return ((1025 + mps - 1) // mps) * mps
+
     def _open_endpoints(self, interface):
         self.event_ep = None
         self.bulk_in_ep = None
@@ -581,8 +590,7 @@ class NativeUsbTransport:
             raise TransportError("Bluetooth USB bulk endpoints are missing")
         if not self.bulk_serialization and self.event_ep is None:
             raise TransportError("Bluetooth USB event endpoint is missing")
-        self.bulk_read_size = self._endpoint_mps(
-            self.bulk_in_ep, "Bluetooth USB bulk IN endpoint")
+        self.bulk_read_size = self._bulk_transfer_size(self.bulk_in_ep)
         if self.event_ep is not None:
             self.event_read_size = self._endpoint_mps(
                 self.event_ep, "Bluetooth USB event endpoint")

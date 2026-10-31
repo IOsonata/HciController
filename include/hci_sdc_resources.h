@@ -41,12 +41,12 @@ extern "C" {
  * none of it was about the nRF52840. A second part would have had to copy it.
  */
 /*
- * These are constants, not build options. Changing what the controller is
- * configured for means editing the value here, and the pool follows. The costs
- * on an nRF52840 with a 251 octet payload and four packets each way, from the
+ * Defaults may be overridden by a target memory profile; the pool follows.
+ * The costs on an nRF52840 with a 251 octet payload and ten packets each way,
+ * from the
  * current sdk-nrfxlib:
  *
- *   peripheral link  2951 octets      central link  2855 octets
+ *   peripheral link  6119 octets      central link  6039 octets
  *   advertising set   961 octets      scan buffers  1688 for four
  *   accept list        68 for eight   channel survey  40
  *   power control     2227 for eighteen links
@@ -77,7 +77,7 @@ extern "C" {
  */
 #define HCI_SDC_ACL_PACKET_SIZE  251U
 #ifndef HCI_SDC_ACL_PACKET_COUNT
-#define HCI_SDC_ACL_PACKET_COUNT 4U
+#define HCI_SDC_ACL_PACKET_COUNT 10U
 #endif
 /*
  * Advertising sets. Three, because a periodic advertiser needs one of its own
@@ -390,6 +390,10 @@ bool HciSdcCfgSet(uint8_t Type, const sdc_cfg_t *pCfg);
  * reserved, or a negative nrf_errno on failure.
  */
 int32_t HciSdcResourcesApply(void);
+
+/* Apply streaming timing defaults after sdc_enable; returns HCI status.
+ * The host may override these defaults with vendor-specific HCI commands. */
+uint8_t HciSdcTimingApply(void);
 
 #ifdef __cplusplus
 }

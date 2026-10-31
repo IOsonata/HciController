@@ -333,6 +333,19 @@ def main():
     finally:
         transport.close()
 
+    size = ht.NativeUsbTransport._bulk_transfer_size(FakeEndpoint(max_packet_size=64))
+    assert size == 1088
+    # One USB completion carries the whole 255-byte ACL packet; parsing also
+    # tolerates a ZLP and multiple HCI packets in a completion.
+    acl = bytes([1, 0x20, 251, 0]) + bytes(range(251))
+    transport = fake_native(bulk_chunks=[b"", acl, acl + acl], bulk_read_size=size)
+    try:
+        for _ in range(3):
+            assert transport.read_packet(0.2) == (ht.H4_ACL, None, acl)
+        assert not transport._bulk_rx
+    finally:
+        transport.close()
+
     print('hci_transport_test: PASS')
     return 0
 

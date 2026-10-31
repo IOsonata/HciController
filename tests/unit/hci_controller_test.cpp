@@ -7,7 +7,7 @@
 
 #define FAKE_RX_SIZE 512
 #define FAKE_TX_SIZE 2048
-#define FAKE_QUEUE_DEPTH 4
+#define FAKE_QUEUE_DEPTH 32
 #define FAKE_PACKET_SIZE (HCI_INTRF_TX_STREAM_SIZE + 16U)
 #define HCI_CTLR_FAKE_HOLD_SIZE FAKE_PACKET_SIZE
 
@@ -28,6 +28,8 @@ struct FakeIntrf
     uint8_t TxData[FAKE_TX_SIZE];
     int TxLen;
     int TxChunkLimit;
+    int TxPacketSlots;
+    bool TxLimited;
 
     bool PacketMode;
     bool PacketPending;
@@ -93,6 +95,10 @@ int DeviceIntrfTx(DevIntrf_t *pDev,
         return 0;
     }
 
+    if (gIntrf.TxLimited && gIntrf.TxPacketSlots-- <= 0)
+    {
+        return 0;
+    }
     int count = DataLen;
     if (gIntrf.TxChunkLimit > 0 && count > gIntrf.TxChunkLimit)
     {
@@ -568,6 +574,51 @@ static void TestInitGuards(void)
     printf("[ok] init rejects unusable arguments\n");
 }
 
+static void TestControllerBurst(void)
+{
+    Fixture fixture;
+    uint8_t acl[] = {1, 0x20, 1, 0, 0};
+
+    SetupPacket(&fixture);
+    for (unsigned i = 0; i < 20U; ++i)
+    {
+        acl[4] = (uint8_t)i;
+        QueueController(HCI_H4_PACKET_ACL, acl, sizeof(acl));
+    }
+    HciControllerProcess(&fixture.Controller);
+    assert(gIntrf.TxLen == 16 * (int)sizeof(acl));
+    assert(fixture.Controller.ProcessAgain);
+    HciControllerProcess(&fixture.Controller);
+    assert(gIntrf.TxLen == 20 * (int)sizeof(acl));
+    assert(!fixture.Controller.ProcessAgain);
+    for (unsigned i = 0; i < 20U; ++i)
+    {
+        assert(gIntrf.TxData[i * sizeof(acl) + 4] == i);
+    }
+
+    SetupPacket(&fixture);
+    gIntrf.TxLimited = true;
+    gIntrf.TxPacketSlots = 3;
+    for (unsigned i = 0; i < 6U; ++i)
+    {
+        acl[4] = (uint8_t)i;
+        QueueController(HCI_H4_PACKET_ACL, acl, sizeof(acl));
+    }
+    HciControllerProcess(&fixture.Controller);
+    assert(gIntrf.TxLen == 3 * (int)sizeof(acl));
+    assert(fixture.Controller.ControllerPacketPending);
+    assert(!fixture.Controller.ProcessAgain);
+    gIntrf.TxPacketSlots = 3;
+    HciControllerProcess(&fixture.Controller);
+    assert(gIntrf.TxLen == 6 * (int)sizeof(acl));
+    assert(!fixture.Controller.ControllerPacketPending);
+    for (unsigned i = 0; i < 6U; ++i)
+    {
+        assert(gIntrf.TxData[i * sizeof(acl) + 4] == i);
+    }
+    printf("[ok] controller burst drains, yields, and retries in order\n");
+}
+
 int main(void)
 {
     TestHostToController();
@@ -579,6 +630,7 @@ int main(void)
     TestControllerToHost();
     TestControllerOrdering();
     TestPacketDeviceIntrf();
+    TestControllerBurst();
     TestControllerError();
     TestInvalidControllerType();
     TestZeroLengthRejected();

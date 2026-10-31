@@ -242,6 +242,12 @@ static bool HciSdcInit(HciNrf5340Net_t *pTarget)
     }
 
     pTarget->SdcEnabled = true;
+    result = HciSdcTimingApply();
+    if (result != 0)
+    {
+        pTarget->LastError = result;
+        return false;
+    }
     return true;
 }
 
