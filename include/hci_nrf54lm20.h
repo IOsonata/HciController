@@ -17,6 +17,15 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+/* Temporary PAwR investigation. Set to 0 to remove instrumentation. */
+#ifndef HCI_LM20_SYNC_TRACE
+#define HCI_LM20_SYNC_TRACE 1
+#endif
+#if HCI_LM20_SYNC_TRACE
+void HciNrf54lm20TraceStatus(void);
+void HciNrf54lm20TraceCommand(const uint8_t *pPacket, size_t Length);
+void HciNrf54lm20TraceEvent(const uint8_t *pPacket, size_t Length);
+#endif
 typedef struct
 {
     HciTaktOs_t *pRuntime;

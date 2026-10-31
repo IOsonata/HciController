@@ -469,6 +469,11 @@ static void HciStatusThread(void *)
 {
     uint32_t seconds = 0U;
     uint32_t elapsedMs = 0U;
+#if defined(NRF54LM20B_XXAA) || defined(NRF54LM20A_XXAA)
+#if HCI_LM20_SYNC_TRACE
+	uint32_t traceMs = 0U;
+#endif
+#endif
 
     for (;;)
     {
@@ -487,6 +492,17 @@ static void HciStatusThread(void *)
 
 #if HCI_MODE_SWITCH
         HciModeButtonProcess();
+#endif
+
+#if defined(NRF54LM20B_XXAA) || defined(NRF54LM20A_XXAA)
+#if HCI_LM20_SYNC_TRACE
+		traceMs += STATUS_UPDATE_MS;
+		if (traceMs >= 1000U)
+		{
+			traceMs = 0U;
+			HciNrf54lm20TraceStatus();
+		}
+#endif
 #endif
 
         /* Send what the trace output could not take earlier. */
