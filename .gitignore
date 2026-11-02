@@ -38,7 +38,6 @@
 *.out
 *.app
 *.elf
-*.hex
 *.bin
 *.map
 *.lst
