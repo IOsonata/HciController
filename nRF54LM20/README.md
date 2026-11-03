@@ -9,7 +9,7 @@ The target uses IOsonata, TaktOS, and Nordic nrfxlib SoftDevice Controller
 
 Open `nRF54LM20/ioc/.project` in IOcomposer and build the `Debug` or
 `Release` configuration. Use the nRF54LM20 application linker script
-`nrf54lm20a_xxaa_application.ld`, the `IOsonata_nRF54LM20x` and
+`gcc_nrf54lm20a_xxaa.ld`, the `IOsonata_nRF54LM20x` and
 `TaktOS_M33` libraries, and the compatible nrfxlib nRF54LM
 hard-float multirole SDC/MPSL archives.
 
