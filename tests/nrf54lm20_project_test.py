@@ -90,8 +90,7 @@ class Nrf54lm20ProjectTest(unittest.TestCase):
             with self.subTest(config=config.get("id")):
                 self.assertEqual(len(scripts), 2)
                 self.assertTrue(all(
-                    script.endswith("/nrf54lm20a_xxaa_application.ld")
-                    or script == "gcc_nrf54lm20a_xxaa.ld"
+                    script == "../../../../IOsonata/ARM/Nordic/nRF54/ldscript/gcc_nrf54lm20a_xxaa.ld"
                     for script in scripts
                 ))
 
