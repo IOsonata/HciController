@@ -36,70 +36,37 @@ the linker search path instead of embedding one machine-specific absolute path.
 
 ## Build configurations
 
-| Configuration | Use | C++ linker script |
+| Configuration | Use | C/C++ linker script |
 | --- | --- | --- |
-| `Debug` | debugger/no-bootloader development | `nrf52840_xxaa_sdc.ld` |
-| `Release` | optimized no-bootloader build | `nrf52840_xxaa_sdc.ld` |
-| `Release_MBR` | USB DFU/MBR layout | `nrf52840_xxaa_sdc_mbr.ld` |
-| `Release_SD` | S140-compatible application origin | `nrf52840_xxaa_s140_sdc.ld` |
+| `Debug` | bare-metal flash layout with SDC controller | `gcc_nrf52840_xxaa.ld` |
+| `Release` | optimized bare-metal flash layout with SDC controller | `gcc_nrf52840_xxaa.ld` |
+| `Release_MBR` | MBR origin; **DFU/storage map not approved** | `gcc_nrf52840_xxaa_mbr.ld` |
 
-All configurations use the nrfxlib multirole SDC. The `SD` and `MBR` names
-describe the flash/linker memory map, not a second HCI implementation and not a
-board selection.
+All configurations use the nrfxlib SoftDevice Controller (SDC). SDC
+does not require a dedicated linker variant. The IOsonata linker files live
+under `ARM/Nordic/nRF52/ldscript`, with the common section definitions in
+`ARM/ldscript/gcc_arm_flash.ld`.
 
-For the standard UDG-NRF52840 with its USB DFU bootloader, use `Release_MBR`.
+The Eclipse project currently has no `Release_SD` configuration. Supporting
+an application alongside S140 requires a separate, verified memory layout.
 
 ## Persistent HCI mode storage
 
-UDG and IBK persist the selected HCI transport in IOsonata `NVM0`. The linker
-owns that address. A different bootloader therefore requires the matching
-linker layout even though the HciController source is unchanged.
+HciController uses IOsonata `NVM0` for the persistent HCI transport mode.
+The build must reserve storage that does not overlap the bootloader, FDS,
+settings or other nonvolatile data.
 
-The current IOsonata linker layouts used by this project are:
+- `Debug` / `Release`: FLASH starts at 0x00000000, ends before NVM0
+  at 0x000FD000, NVM0 occupies 0x000FD000..0x000FFFFF.
+- `Release_MBR`: FLASH starts at 0x00001000, NVM0 is currently
+  0x000FD000..0x000FFFFF in the IOsonata 0.13 migration script.
 
-### USB DFU/MBR (`Release_MBR`)
-
-```text
-application      0x001000 .. 0x0DCFFF
-NVM0             0x0DD000 .. 0x0DFFFF
-USB DFU loader   0x0E0000 ..
-```
-
-This is the UDG-NRF52840 family USB-DFU layout. At startup the release log should
-include:
-
-```text
-mode: nvm addr=0x000DD000 size=12288
-```
-
-### S140-compatible application origin (`Release_SD`)
-
-The current `nrf52840_xxaa_s140_sdc.ld` starts application flash at `0x27000`
-and reserves the same 12 KiB `NVM0` region used by the MBR layout:
-
-```text
-application      0x027000 .. 0x0DCFFF
-NVM0             0x0DD000 .. 0x0DFFFF
-BT_PDS           0x0FD000 .. 0x0FEFFF
-settings         0x0FF000 .. 0x0FFFFF
-```
-
-The linker script does not define an OTA bootloader region between those
-reservations. Do not infer an `NVM0` address such as `0xF5000` from the
-`Release_SD` configuration name or from a particular board. If a bootloader is
-installed, check its occupied flash against the generated map and the exact
-IOsonata linker-script revision used for the build.
-
-### No bootloader (`Debug` / `Release`)
-
-The no-bootloader SDC linker reserves:
-
-```text
-application      0x000000 .. 0x0FCFFF
-NVM0             0x0FD000 .. 0x0FFFFF
-```
-
-HciController uses only the first erase page of `NVM0` for the mode record.
+**Do not flash `Release_MBR` on a USB DFU dongle yet.** The currently
+selected IOsonata `gcc_nrf52840_xxaa_mbr.ld` is not equivalent to the
+previous HciController UDG layout (NVM0 at 0x000DD000, USB DFU loader
+from 0x000E0000). The new NVM0 range overlaps the conventional USB DFU
+settings and MBR parameter pages. The MBR/DFU/FDS/NVM partition is still
+unresolved. A successful link or HEX merge does not validate that memory map.
 
 ## Board selection
 
@@ -165,9 +132,9 @@ Controller and real-time paths use static/caller-owned storage.
 
 ## Flashing UDG-NRF52840
 
-For a standard UDG-NRF52840 USB DFU build:
-
-1. Build `Release_MBR`.
+For UDG-NRF52840 USB DFU, first validate and correct the MBR/DFU/FDS/NVM
+partition. Do not program the current `Release_MBR` image.
+Once the memory layout is approved and rebuilt:
 2. Connect the dongle over USB.
 3. Press **SW2 (RESET)** to enter DFU mode.
 4. Use Nordic nRF Connect Programmer to load `HciController.hex`.
