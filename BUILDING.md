@@ -123,15 +123,16 @@ The nRF52840 project provides these configurations:
 | --- | --- | --- |
 | `Debug` | no bootloader, SDC controller | `gcc_nrf52840_xxaa.ld` |
 | `Release` | optimized no-bootloader, SDC controller | `gcc_nrf52840_xxaa.ld` |
-| `Release_MBR` | MBR application origin; storage layout pending | `gcc_nrf52840_xxaa_mbr.ld` |
+| `Release_MBR` | MBR + Nordic USB DFU, NVM before bootloader | `gcc_nrf52840_xxaa_mbr.ld` |
 
 There is no `Release_SD` configuration in the checked-in project. SDC
 uses the regular memory layouts; it does not require a separate `_sdc`
 script.
 
-`Release_MBR` must **not** be flashed to an existing UDG USB-DFU device
-until the NVM0, FDS, bootloader, and settings locations are reconciled.
-The standardized script is not equivalent to the previous UDG flash map.
+The `Release_MBR` linker layout reserves NVM0 (8 KB) and NVM1 (4 KB)
+directly below the DFU bootloader. It is designed for the standard Nordic
+USB DFU boundaries; the actual programmed bootloader and map/HEX must still
+be checked before flashing.
 
 The configuration name does not select UDG, IBK, Thingy:91, or a WildThing
 board.
@@ -156,24 +157,29 @@ shows the flash regions actually used by the build.
 
 ## 6. UDG-NRF52840 USB DFU memory layout
 
-The previous HciController UDG memory map reserved NVM0 at
-0x000DD000..0x000DFFFF and placed the USB DFU bootloader at
-0x000E0000. The current IOsonata migration script
-`gcc_nrf52840_xxaa_mbr.ld` instead places NVM0 at
-0x000FD000..0x000FFFFF, which overlaps USB DFU metadata pages.
+The IOsonata `gcc_nrf52840_xxaa_mbr.ld` script reserves:
 
-This is an **unresolved memory-layout incompatibility**. Do not
-program `Release_MBR` until the bootloader, FDS, NVM0, MBR parameter
-and settings boundaries are resolved and checked against the linker
-map and programmed image. Linking successfully is insufficient.
+```text
+MBR                  0x000000 .. 0x000FFF
+Application FLASH    0x001000 .. 0x0DCFFF
+NVM0 (Bluetooth PDS) 0x0DD000 .. 0x0DEFFF  8 KB
+NVM1 (user storage)  0x0DF000 .. 0x0DFFFF  4 KB
+USB DFU bootloader   0x0E0000 .. 0x0FDFFF
+MBR parameters       0x0FE000 .. 0x0FEFFF
+DFU settings         0x0FF000 .. 0x0FFFFF
+```
+
+IOsonata NVM replaces FDS, and `NvmRegionAddr(0)` selects NVM0.
+These are linker reservations, not proof of hardware boot/update behavior.
+The selected board's bootloader, image map, and flash persistence must
+be validated before field programming.
 
 ## 7. Flash a local build
 
-For UDG-NRF52840, these steps are **blocked** pending the approved
-MBR/DFU memory layout. Do not flash the current `Release_MBR` image.
-After the layout is corrected and validated:
+For UDG-NRF52840, first confirm that the installed bootloader matches
+the standard DFU memory map above. Then:
 
-1. Build the corrected `Release_MBR` configuration in IOcomposer.
+1. Build the `Release_MBR` configuration in IOcomposer.
 2. Connect the UDG-NRF52840 to USB.
 3. Press **SW2 (RESET)** to enter DFU mode.
 4. Open Nordic nRF Connect Programmer.
