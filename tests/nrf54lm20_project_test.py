@@ -52,7 +52,7 @@ class Nrf54lm20ProjectTest(unittest.TestCase):
                       "TaktOS_M33", "ARM/cm33/ioc/",
                       "IOsonata_nRF54LM20x", "nrf54lm/hard-float",
                       "softdevice_controller_multirole",
-                      "nrf54lm20a_xxaa_application.ld",
+                      "gcc_nrf54lm20a_xxaa.ld",
                       "nRF54LM20x/lib/include"):
             with self.subTest(token=token):
                 self.assertIn(token, content)
@@ -91,7 +91,7 @@ class Nrf54lm20ProjectTest(unittest.TestCase):
                 self.assertEqual(len(scripts), 2)
                 self.assertTrue(all(
                     script.endswith("/nrf54lm20a_xxaa_application.ld")
-                    or script == "nrf54lm20a_xxaa_application.ld"
+                    or script == "gcc_nrf54lm20a_xxaa.ld"
                     for script in scripts
                 ))
 
