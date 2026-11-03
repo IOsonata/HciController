@@ -38,35 +38,40 @@ the linker search path instead of embedding one machine-specific absolute path.
 
 | Configuration | Use | C/C++ linker script |
 | --- | --- | --- |
-| `Debug` | bare-metal flash layout with SDC controller | `gcc_nrf52840_xxaa.ld` |
-| `Release` | optimized bare-metal flash layout with SDC controller | `gcc_nrf52840_xxaa.ld` |
-| `Release_MBR` | MBR origin; **DFU/storage map not approved** | `gcc_nrf52840_xxaa_mbr.ld` |
+| `Debug` | no MBR/DFU, SDC controller | `gcc_nrf52840_xxaa.ld` |
+| `Release` | optimized no MBR/DFU, SDC controller | `gcc_nrf52840_xxaa.ld` |
+| `Release_MBR` | MBR + Nordic USB DFU layout, SDC controller | `gcc_nrf52840_xxaa_mbr.ld` |
 
-All configurations use the nrfxlib SoftDevice Controller (SDC). SDC
-does not require a dedicated linker variant. The IOsonata linker files live
-under `ARM/Nordic/nRF52/ldscript`, with the common section definitions in
+All configurations use the nrfxlib SoftDevice Controller (SDC), which
+requires no separate linker variant. The IOsonata scripts reside in
+`ARM/Nordic/nRF52/ldscript`; common sections come from
 `ARM/ldscript/gcc_arm_flash.ld`.
 
-The Eclipse project currently has no `Release_SD` configuration. Supporting
-an application alongside S140 requires a separate, verified memory layout.
+## Persistent HCI mode and application storage
 
-## Persistent HCI mode storage
+IOsonata replaces Nordic FDS. The original 12 KB user-data reservation is
+preserved, divided into `NVM0` (8 KB for PDS/persistent Bluetooth data) and
+`NVM1` (4 KB for application storage). Both are independent flash regions.
 
-HciController uses IOsonata `NVM0` for the persistent HCI transport mode.
-The build must reserve storage that does not overlap the bootloader, FDS,
-settings or other nonvolatile data.
+| Region | `Debug` / `Release` | `Release_MBR` |
+| --- | --- | --- |
+| FLASH | 0x00000..0xFCFFF | 0x01000..0xDCFFF |
+| NVM0 (8 KB) | 0xFD000..0xFEFFF | 0xDD000..0xDEFFF |
+| NVM1 (4 KB) | 0xFF000..0xFFFFF | 0xDF000..0xDFFFF |
+| DFU bootloader | none | 0xE0000..0xFDFFF |
+| MBR parameters | none | 0xFE000..0xFEFFF |
+| DFU settings | none | 0xFF000..0xFFFFF |
 
-- `Debug` / `Release`: FLASH starts at 0x00000000, ends before NVM0
-  at 0x000FD000, NVM0 occupies 0x000FD000..0x000FFFFF.
-- `Release_MBR`: FLASH starts at 0x00001000, NVM0 is currently
-  0x000FD000..0x000FFFFF in the IOsonata 0.13 migration script.
+HciController's selected HCI transport record uses IOsonata NVM0.
+The `Release_MBR` NVM0 start is again 0x000DD000, as in the original UDG
+storage placement. The additional NVM1 region is reserved for applications.
 
-**Do not flash `Release_MBR` on a USB DFU dongle yet.** The currently
-selected IOsonata `gcc_nrf52840_xxaa_mbr.ld` is not equivalent to the
-previous HciController UDG layout (NVM0 at 0x000DD000, USB DFU loader
-from 0x000E0000). The new NVM0 range overlaps the conventional USB DFU
-settings and MBR parameter pages. The MBR/DFU/FDS/NVM partition is still
-unresolved. A successful link or HEX merge does not validate that memory map.
+The linker addresses are consistent with the standard Nordic USB DFU
+bootloader boundaries, but this revision has not yet passed an
+HciController cross-compile and hardware DFU test. Confirm the device's
+actual bootloader configuration, generated map/HEX and any existing
+persistent data before programming; shifting storage regions does not
+migrate old flash contents automatically.
 
 ## Board selection
 
@@ -132,9 +137,9 @@ Controller and real-time paths use static/caller-owned storage.
 
 ## Flashing UDG-NRF52840
 
-For UDG-NRF52840 USB DFU, first validate and correct the MBR/DFU/FDS/NVM
-partition. Do not program the current `Release_MBR` image.
-Once the memory layout is approved and rebuilt:
+For UDG-NRF52840 USB DFU, build `Release_MBR`, verify its map and
+the installed bootloader boundaries, then validate programming on hardware.
+The following is the normal programming sequence:
 2. Connect the dongle over USB.
 3. Press **SW2 (RESET)** to enter DFU mode.
 4. Use Nordic nRF Connect Programmer to load `HciController.hex`.
