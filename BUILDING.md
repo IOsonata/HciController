@@ -97,7 +97,7 @@ For the **Nordic DK**, explicitly set
 defaults to `UDG_NRF54LM20`. Keep `NRF54LM20B_XXAA`,
 `NRF_APPLICATION`, and `NRFXLIB_SDC` defined in both the C and
 C++ compiler options. The project uses
-`nrf54lm20a_xxaa_application.ld`. Additional MBR/DFU configurations
+`gcc_nrf54lm20a_xxaa.ld`. Additional MBR/DFU configurations
 may be introduced later, once the DFU approach and memory layout are defined.
 
 Hardware validation performed on October 16, 2026: a DK and a
@@ -121,13 +121,17 @@ The nRF52840 project provides these configurations:
 
 | Configuration | Use | Linker script |
 | --- | --- | --- |
-| `Debug` | debugger/no-bootloader development | `nrf52840_xxaa_sdc.ld` |
-| `Release` | optimized no-bootloader build | `nrf52840_xxaa_sdc.ld` |
-| `Release_MBR` | USB DFU/MBR layout | `nrf52840_xxaa_sdc_mbr.ld` |
-| `Release_SD` | S140-compatible application origin | `nrf52840_xxaa_s140_sdc.ld` |
+| `Debug` | no bootloader, SDC controller | `gcc_nrf52840_xxaa.ld` |
+| `Release` | optimized no-bootloader, SDC controller | `gcc_nrf52840_xxaa.ld` |
+| `Release_MBR` | MBR application origin; storage layout pending | `gcc_nrf52840_xxaa_mbr.ld` |
 
-For the standard UDG-NRF52840 with its USB DFU bootloader, use
-`Release_MBR`.
+There is no `Release_SD` configuration in the checked-in project. SDC
+uses the regular memory layouts; it does not require a separate `_sdc`
+script.
+
+`Release_MBR` must **not** be flashed to an existing UDG USB-DFU device
+until the NVM0, FDS, bootloader, and settings locations are reconciled.
+The standardized script is not equivalent to the previous UDG flash map.
 
 The configuration name does not select UDG, IBK, Thingy:91, or a WildThing
 board.
@@ -152,31 +156,24 @@ shows the flash regions actually used by the build.
 
 ## 6. UDG-NRF52840 USB DFU memory layout
 
-The current `Release_MBR` layout is:
+The previous HciController UDG memory map reserved NVM0 at
+0x000DD000..0x000DFFFF and placed the USB DFU bootloader at
+0x000E0000. The current IOsonata migration script
+`gcc_nrf52840_xxaa_mbr.ld` instead places NVM0 at
+0x000FD000..0x000FFFFF, which overlaps USB DFU metadata pages.
 
-```text
-application      0x001000 .. 0x0DCFFF
-NVM0             0x0DD000 .. 0x0DFFFF
-USB DFU loader   0x0E0000 ..
-```
-
-HciController uses the first erase page of `NVM0` for persistent HCI mode
-selection.
-
-At startup, a UDG build using this layout should report:
-
-```text
-mode: nvm addr=0x000DD000 size=12288
-```
-
-If a different bootloader is installed, use the matching build configuration
-and verify the generated map before programming the board.
+This is an **unresolved memory-layout incompatibility**. Do not
+program `Release_MBR` until the bootloader, FDS, NVM0, MBR parameter
+and settings boundaries are resolved and checked against the linker
+map and programmed image. Linking successfully is insufficient.
 
 ## 7. Flash a local build
 
-For UDG-NRF52840:
+For UDG-NRF52840, these steps are **blocked** pending the approved
+MBR/DFU memory layout. Do not flash the current `Release_MBR` image.
+After the layout is corrected and validated:
 
-1. Build the `Release_MBR` configuration in IOcomposer.
+1. Build the corrected `Release_MBR` configuration in IOcomposer.
 2. Connect the UDG-NRF52840 to USB.
 3. Press **SW2 (RESET)** to enter DFU mode.
 4. Open Nordic nRF Connect Programmer.
