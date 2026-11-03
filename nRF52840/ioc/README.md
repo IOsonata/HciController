@@ -30,9 +30,10 @@ The project expects the normal IOcomposer sibling layout:
     TaktOS/
 ```
 
-The linker script is named in the project configuration by basename. The project
-adds the common IOsonata linker directory and the nRF52840 linker directory to
-the linker search path instead of embedding one machine-specific absolute path.
+The managed-project linker options reference the IOsonata family scripts by
+relative paths from each configuration's build directory. Common sections come
+from `ARM/ldscript/gcc_arm_flash.ld`. Both repositories must be checked out
+as siblings for these paths to resolve.
 
 ## Build configurations
 
@@ -140,10 +141,10 @@ Controller and real-time paths use static/caller-owned storage.
 For UDG-NRF52840 USB DFU, build `Release_MBR`, verify its map and
 the installed bootloader boundaries, then validate programming on hardware.
 The following is the normal programming sequence:
-2. Connect the dongle over USB.
-3. Press **SW2 (RESET)** to enter DFU mode.
-4. Use Nordic nRF Connect Programmer to load `HciController.hex`.
-5. Program the dongle and allow it to reset.
+1. Connect the dongle over USB.
+2. Press **SW2 (RESET)** to enter DFU mode.
+3. Use Nordic nRF Connect Programmer to load `HciController.hex`.
+4. Program the dongle and allow it to reset.
 
 See [../../GETTING_STARTED.md](../../GETTING_STARTED.md) for first-use and HCI
 mode instructions.
