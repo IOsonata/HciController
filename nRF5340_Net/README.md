@@ -44,7 +44,7 @@ this project; it uses the same `BtHciIpc` class from IOsonata.
 
 Open `nRF5340_Net/ioc/.project` in IOcomposer and build `Debug` or
 `Release`. The project uses the network core linker script
-`nrf5340_xxaa_network.ld`, the `IOsonata_nRF5340_Net` and `TaktOS_M33`
+`gcc_nrf5340_xxaa_network.ld`, the `IOsonata_nRF5340_Net` and `TaktOS_M33`
 libraries, and the nrfxlib nrf53 soft-float multirole SDC and MPSL archives.
 The IOsonata library must contain `ipc_intrf.cpp`, `ipc_ctrlr_nrf53.cpp`,
 `bt_hci_ipc.cpp` and `bt_hci_h4.cpp`.
