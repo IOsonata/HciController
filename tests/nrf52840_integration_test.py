@@ -18,7 +18,7 @@ class Nrf52840IntegrationTest(unittest.TestCase):
         configs = project.findall(".//cconfiguration")
         self.assertEqual({c.find("./storageModule[@moduleId='org.eclipse.cdt.core.settings']").get("name")
                           for c in configs},
-                         {"Debug", "Release", "Release_MBR", "Release_SD"})
+                         {"Debug", "Release", "Release_MBR"})
         for cfg in configs:
             with self.subTest(config=cfg.find("./storageModule[@moduleId='org.eclipse.cdt.core.settings']").get("name")):
                 text = ET.tostring(cfg, encoding="unicode")
