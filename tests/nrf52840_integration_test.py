@@ -5,6 +5,7 @@ Checks are independent of the target toolchain. A successful run is not a
 substitute for the ARM link, USB enumeration, or on-board UART validation.
 """
 from pathlib import Path
+import re
 import unittest
 import xml.etree.ElementTree as ET
 
@@ -41,7 +42,8 @@ class Nrf52840IntegrationTest(unittest.TestCase):
         self.assertNotIn("void UsbdXtalRequest(", target)
 
     def test_board_specific_uart_policy(self):
-        board = (ROOT / "nRF52840" / "src" / "board.h").read_text()
+        board = re.sub(r"[ \t]+", " ",
+                       (ROOT / "nRF52840" / "src" / "board.h").read_text())
         udg = board.split("#if BOARD == UDG_NRF52840", 1)[1].split(
             "#elif BOARD == IBK_NRF52840", 1)[0]
         thingy = board.split("#elif BOARD == THINGY91_NRF52840", 1)[1].split(
@@ -51,8 +53,7 @@ class Nrf52840IntegrationTest(unittest.TestCase):
         self.assertIn("#define HCI_BOARD_HAS_UART 0", udg)
         self.assertNotIn("#define UART_PINS", udg)
         self.assertIn("#define HCI_UART_BRIDGE 1", thingy)
-        self.assertIn("#define HCI_BRIDGE_UART_RATE THINGY91_DEBUG_UART_RATE", thingy)
-        self.assertRegex(thingy, r"#define THINGY91_DEBUG_UART_RATE\s+115200\b")
+        self.assertIn("#define HCI_BRIDGE_UART_RATE 115200", thingy)
         self.assertIn("#define UART_HW_FLOWCTRL 0", wildthing)
         self.assertIn("#define HCI_UART_BRIDGE 1", wildthing)
         self.assertIn("#define HCI_BRIDGE_UART_DEVNO 1", wildthing)
