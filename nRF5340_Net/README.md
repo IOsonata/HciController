@@ -27,9 +27,12 @@ The button and the UART pins are set in `src/board.h`: the nRF5340 Audio DK
 by default (VOL- button, the network core's own virtual COM port P1.09 TXD,
 P1.08 RXD, P1.10 RTS, P1.11 CTS, the second port the board enumerates; the
 first one is the application core console), the nRF5340 DK with
-`NRF5340_DK_PCA10095`.
+`BOARD=NRF5340_DK_NET`.
 The application core must hand those pins to the network core (GPIO MCUSEL)
 before it starts the network core.
+
+`BOARD=THINGY91X_NRF5340` is the Nordic Thingy:91 X. Its HCI port is IPC only,
+with no mode button and no UART.
 
 ## Ownership
 
