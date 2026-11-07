@@ -9,7 +9,7 @@ services, unusual connection parameters, extended or periodic advertising,
 PAwR, ISO, or other procedures that a general-purpose BLE application may not
 exercise the way the product requires.
 
-For the 1.0.0 release, the primary user hardware is the I-SYST UDG-NRF52840
+For the 1.1.0 release, the primary user hardware is the I-SYST UDG-NRF52840
 family:
 
 - UDG-NRF52840: USB Type-A;
@@ -20,9 +20,9 @@ modes.
 
 ## 1. Download the firmware
 
-Open the HciController 1.0.0 release page:
+Open the HciController 1.1.0 release page:
 
-https://github.com/IOsonata/HciController/releases/tag/1.0.0
+https://github.com/IOsonata/HciController/releases/tag/1.1.0
 
 Download the published `.hex` firmware image for the UDG-NRF52840.
 
@@ -48,7 +48,7 @@ Use Nordic Semiconductor's **nRF Connect Programmer**:
 4. Program the device.
 5. Allow the dongle to reset and enumerate again.
 
-The 1.0.0 UDG release uses the USB DFU/MBR flash layout. Do not flash a build
+The 1.1.0 UDG release uses the USB DFU/MBR flash layout. Do not flash a build
 made for a different memory layout unless the installed bootloader and linker
 layout are known to match.
 
