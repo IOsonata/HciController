@@ -1,6 +1,25 @@
 # Changelog
 
-## Unreleased
+## 1.1.0 (2026-11-07)
+
+HciController 1.1 expands the common controller across nRF52840,
+nRF5340 network core and nRF54LM20 with USB, UART and IPC host transports.
+Bluetooth Core 6.2 reporting and the exposed features depend on the
+selected target and nrfxlib SoftDevice Controller profile.
+
+### Release validation
+
+- nRF52840 mixed native USB HCI / serial H:4 hardware release suite:
+  **77 PASS, 0 FAIL, 0 N/A, 0 INCOMPLETE**.
+- Verified 10,000 bidirectional ACL and 1,000 bidirectional ISO stress
+  iterations; PAwR tested in both advertiser/scanner directions.
+- The nRF54LM20 DK had earlier heterogeneous native USB validation; the
+  77-test result is specific to the tested nRF52840 pair.
+- Internal mode persistence updated to the IOsonata MCU NVM API
+  (`NvmMcuCfgInit`, `NvmMcuIntrf`) with linker-reserved relative offsets.
+- IOsonata 0.13 standardized nRF52840, nRF5340 and nRF54LM20 project
+  linker-script references.
+
 
 ### Auracast
 
