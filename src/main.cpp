@@ -43,7 +43,7 @@
 
 #if HCI_MODE_SWITCH && !HCI_TARGET_IS_NRF5340_NET
 #include "storage/nvm.h"
-#include "storage/nvm_intrf.h"
+#include "storage/nvm_mcu_intrf.h"
 #include "storage/nvm_region.h"
 #endif
 
@@ -143,7 +143,7 @@ static const IOPinCfg_t s_ModeButtonPin = {
 };
 
 #if !HCI_TARGET_IS_NRF5340_NET
-static NvmIntrf s_ModeNvmIntrf;
+static NvmMcuIntrf s_ModeNvmIntrf;
 static Nvm s_ModeNvm;
 #endif
 static bool s_ModeButtonLatched;
@@ -308,16 +308,18 @@ static uint32_t HciModeRecordCheck(const HciModeRecord_t *pRecord)
 static bool HciModeNvmSetup(void)
 {
     NvmCfg_t cfg = {};
-    NvmMcuCfg(cfg);
 
-    const uintptr_t addr = NvmRegionAddr(HCI_MODE_NVM_REGION);
-    const size_t size = NvmRegionSize(HCI_MODE_NVM_REGION);
+    if (!NvmMcuCfgInit(cfg, HCI_MODE_NVM_REGION))
+    {
+        HciTraceError("mode: nvm config invalid\r\n");
+        return false;
+    }
 
     HciTrace("mode: nvm addr=0x%08lX size=%lu\r\n",
-             (unsigned long)addr, (unsigned long)size);
+             (unsigned long)cfg.BaseAddr,
+             (unsigned long)cfg.TotalSize);
 
-    if (addr == 0U || cfg.EraseSize == 0U || size < cfg.EraseSize ||
-        (addr % cfg.EraseSize) != 0U)
+    if (cfg.EraseSize == 0U || cfg.TotalSize < cfg.EraseSize)
     {
         HciTraceError("mode: nvm geometry invalid\r\n");
         return false;
@@ -330,7 +332,7 @@ static bool HciModeNvmSetup(void)
     }
 
     /* Use one erase page only; the rest of NVM0 remains available. */
-    return s_ModeNvm.Init(cfg, &s_ModeNvmIntrf, addr, cfg.EraseSize);
+    return s_ModeNvm.Init(cfg, &s_ModeNvmIntrf, 0, cfg.EraseSize);
 }
 
 static HciAppMode_t HciModeNvmLoad(HciAppMode_t Default, bool *pStored)
