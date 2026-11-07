@@ -68,11 +68,11 @@ The `Release_MBR` NVM0 start is again 0x000DD000, as in the original UDG
 storage placement. The additional NVM1 region is reserved for applications.
 
 The linker addresses are consistent with the standard Nordic USB DFU
-bootloader boundaries, but this revision has not yet passed an
-HciController cross-compile and hardware DFU test. Confirm the device's
-actual bootloader configuration, generated map/HEX and any existing
-persistent data before programming; shifting storage regions does not
-migrate old flash contents automatically.
+bootloader boundaries, and mixed native USB / H:4 runtime validation passed the 77-case hardware
+release suite on nRF52840. Confirm the device's actual bootloader
+configuration, generated map/HEX and any existing persistent data before
+programming; the release suite does not independently verify DFU update
+behavior or migrate older stored flash contents.
 
 ## Board selection
 
