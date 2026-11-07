@@ -1,22 +1,23 @@
 # HciController
 
 HciController is open-source Bluetooth LE HCI controller firmware for the
-nRF52840 and nRF54LM20. It uses IOsonata and TaktOS, IOsonata's native USB
+nRF52840, nRF5340 network core and nRF54LM20. It uses IOsonata and TaktOS, IOsonata's native USB
 device stack, and Nordic Semiconductor's nrfxlib SoftDevice Controller (SDC)
 and MPSL for radio operation.
 
-Release 1 is version **1.0.0** (`FIRMWARE_VERSION 0x0100`) and targets the
-nRF52840/current SDC capability profile reported by the firmware as Bluetooth
-Core 6.2. This is an implementation/capability statement, not Bluetooth SIG
-qualification or RF certification.
+Release **1.1.0** (`FIRMWARE_VERSION 0x0110`) expands target and transport
+support. The validated nRF52840 SDC release profile reports Bluetooth Core
+6.2. Capability reporting is target/profile-specific and does not constitute
+Bluetooth SIG qualification or RF certification.
 
 The controller boundary is packet-oriented: one `DeviceIntrf` transaction is
-one complete HCI packet, selected by HCI packet type. The same controller code
-therefore accepts three host transports:
+one complete HCI packet, selected by HCI packet type. The shared controller code
+accepts four host transport forms depending on target:
 
 - native Bluetooth USB HCI;
 - USB CDC carrying H:4;
-- UART carrying H:4.
+- UART carrying H:4;
+- IPC carrying complete HCI packets (nRF5340 network core).
 
 UART and CDC are byte streams, so `HciIntrfTransport` adds/removes the H:4
 indicator below the packet `DeviceIntrf`. Native USB is already packet-oriented
@@ -58,12 +59,9 @@ HCI_HOST_SELECT_USB    choose the configured USB transport
 HCI_HOST_SELECT_UART   choose UART H:4
 ```
 
-For USB, `HCI_USB_HCI_TRANSPORT` chooses the default USB transport:
-
-```text
-HCI_USB_HCI_TRANSPORT_NATIVE   native Bluetooth USB HCI
-HCI_USB_HCI_TRANSPORT_CDC_H4   USB CDC carrying H:4
-```
+Native Bluetooth USB HCI is the default USB mode on supported boards.
+The mode button switches to CDC H:4 where available; the removed
+`HCI_USB_HCI_TRANSPORT` build option is no longer used.
 
 On UDG, UART HCI is not allowed. On Thingy:91 and WildThing boards, USB HCI is
 not allowed. Invalid board/mode combinations are rejected rather than left to
@@ -104,26 +102,27 @@ The nRF52840 IOcomposer project has these configurations:
 
 | Configuration | Intended layout | Linker script |
 | --- | --- | --- |
-| `Debug` | no bootloader/debug | `nrf52840_xxaa_sdc.ld` |
-| `Release` | no bootloader | `nrf52840_xxaa_sdc.ld` |
-| `Release_MBR` | USB DFU/MBR | `nrf52840_xxaa_sdc_mbr.ld` |
-| `Release_SD` | S140-compatible application origin | `nrf52840_xxaa_s140_sdc.ld` |
+| `Debug` | no bootloader/debug | `gcc_nrf52840_xxaa.ld` |
+| `Release` | no bootloader | `gcc_nrf52840_xxaa.ld` |
+| `Release_MBR` | USB DFU/MBR | `gcc_nrf52840_xxaa_mbr.ld` |
 
-The configuration name selects a linker layout; it does not select a board.
-The current IOsonata linker-owned NVM regions are:
+There is no checked-in `Release_SD` configuration. SDC uses the regular
+memory layouts without a separate `_sdc` linker script.
+
+The configuration name selects a linker layout, not a board. NVM is reserved
+by the IOsonata linker scripts:
 
 ```text
-USB DFU/MBR:     NVM0 0xDD000 .. 0xDFFFF
-S140-compatible: NVM0 0xDD000 .. 0xDFFFF
-no bootloader:   NVM0 0xFD000 .. 0xFFFFF
+Release_MBR:      NVM0 0xDD000 .. 0xDEFFF (8 KB)
+                  NVM1 0xDF000 .. 0xDFFFF (4 KB)
+Debug / Release:  NVM0 0xFD000 .. 0xFEFFF (8 KB)
+                  NVM1 0xFF000 .. 0xFFFFF (4 KB)
 ```
 
-The current S140-compatible script starts application flash at `0x27000` and
-ends it at `0xDCFFF`; it also reserves `BT_PDS` at `0xFD000..0xFEFFF` and the
-bootloader-settings page at `0xFF000..0xFFFFF`. It does not define an `NVM0`
-region at `0xF5000`, and it does not define an OTA bootloader region itself.
-Any installed bootloader must therefore be checked separately against the exact
-linker-script revision and generated map used for the build.
+`NVM0` is reserved for persistent controller data; HciController's selected
+transport mode record uses only the first erase page. Refer to
+[BUILDING.md](BUILDING.md) for the complete MBR/DFU memory map and ensure
+the installed bootloader matches it.
 
 HciController uses one erase page at the start of `NVM0` for its mode record.
 The rest of the region remains available to the platform/application layout.
@@ -222,7 +221,7 @@ VID       0xCAFE
 CDC/H4    PID 0x4070
 native    PID 0x4071
 log-only  PID 0x4072
-bcdDevice 0x0100
+bcdDevice 0x0110
 ```
 
 Product builds can override `HCI_USB_VID`, `HCI_USB_PID_CDC_H4`,
