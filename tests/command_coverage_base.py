@@ -36,6 +36,20 @@ def read_text(path):
         return handle.read()
 
 
+def resource_sources(root):
+    """hci_sdc_resources.cpp and the feature files the nRF52840 project links.
+
+    Channel Sounding is left out: the nRF52 library does not have it.
+    """
+    src = os.path.join(root, "src")
+    text = read_text(os.path.join(src, "hci_sdc_resources.cpp"))
+    for name in sorted(os.listdir(src)):
+        if name.startswith("hci_sdc_feat_") and name.endswith(".cpp") and \
+                name != "hci_sdc_feat_cs.cpp":
+            text += read_text(os.path.join(src, name))
+    return text
+
+
 def macro_int(text, name):
     match = re.search(
         r"^\s*#define\s+%s\s+([0-9]+|0x[0-9A-Fa-f]+)U?\s*$"
@@ -50,7 +64,7 @@ def macro_int(text, name):
 
 def validate_source_contracts(root):
     resource_header = read_text(os.path.join(root, "include", "hci_sdc_resources.h"))
-    resource_source = read_text(os.path.join(root, "src", "hci_sdc_resources.cpp"))
+    resource_source = resource_sources(root)
     supplemental_source = read_text(os.path.join(root, "src", "hci_sdc.cpp"))
     vendor_source = read_text(os.path.join(root, "src", "hci_sdc_nrfxlib.cpp"))
     profile_header = read_text(os.path.join(root, "include", "hci_core_profile.h"))
@@ -97,7 +111,7 @@ def validate_source_contracts(root):
     sca = "sdc_support_sca_" in resource_source
     cis = "sdc_support_cis_" in resource_source
     peer_sca_row = re.search(
-        r"HCI_SDC_ENTRY_[A-Z]+\s*\(\s*"
+        r"HCI_SDC_(?:ENTRY|ROW)_[A-Z]+\s*\(\s*"
         r"SDC_HCI_OPCODE_CMD_LE_REQUEST_PEER_SCA\s*,",
         vendor_source,
     )
@@ -214,7 +228,7 @@ def firmware_tables(root, values):
     vendor_names = dispatch_names(
         vendor_path,
         "static const HciCmdEntry_t s_HciSdcCommands[] = {",
-        r"(?:HCI_SDC_ENTRY_\w*\s*\(\s*|\{\s*)"
+        r"(?:HCI_SDC_(?:ENTRY|ROW)_\w*\s*\(\s*|\{\s*)"
         r"(SDC_HCI_OPCODE_CMD_[A-Z0-9_]+|HCI_COUNTERS_OPCODE)",
     )
 
@@ -356,7 +370,7 @@ def main(argv):
               % (len(undriven) + len(orphaned)))
         return 1
 
-    resource_source = read_text(os.path.join(root, "src", "hci_sdc_resources.cpp"))
+    resource_source = resource_sources(root)
     if "sdc_support_sca_" in resource_source and "sdc_support_cis_" in resource_source:
         if 0x206D not in firmware:
             print("[!!] 0x206D LE Request Peer SCA required by active SCA+CIS profile, not exposed")

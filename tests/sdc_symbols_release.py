@@ -270,7 +270,15 @@ def main():
     print("Every required SDC HCI function is present and routed.")
 
     declared = support_declarations(sdc_h)
+    # The support calls of a feature sit in its own hci_sdc_feat_*.cpp. The
+    # nRF52840 project links all of them but Channel Sounding, which the
+    # nRF52 library does not have.
     used = support_calls(resource_path)
+    feature_dir = os.path.dirname(resource_path)
+    for name in sorted(os.listdir(feature_dir)):
+        if name.startswith("hci_sdc_feat_") and name.endswith(".cpp") and \
+                name != "hci_sdc_feat_cs.cpp":
+            used |= support_calls(os.path.join(feature_dir, name))
     known = REQUIRED_SUPPORT | NRF52840_EXCLUDED | OPTIONAL_OR_ALTERNATIVE
     unknown = sorted(declared - known)
     impossible = sorted(used & NRF52840_EXCLUDED)

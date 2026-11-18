@@ -33,7 +33,7 @@ class Nrf52840IntegrationTest(unittest.TestCase):
 
     def test_usb_worker_and_shared_clock_irq(self):
         app = (ROOT / "src" / "hci_host_usb.cpp").read_text()
-        target = (ROOT / "src" / "hci_nrf52840.cpp").read_text()
+        target = (ROOT / "nRF52840" / "src" / "hci_nrf52840.cpp").read_text()
         self.assertIn("bool UsbEvtQue(", app)
         self.assertIn("UsbCheckStatus();", app)
         self.assertIn("nRFPowerClockIrqEnable(", target)

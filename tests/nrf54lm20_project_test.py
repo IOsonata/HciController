@@ -139,7 +139,7 @@ class Nrf54lm20ProjectTest(unittest.TestCase):
         self.assertNotIn("HCI_APP_HAS_", (ROOT / "include" / "hci_app.h").read_text())
 
     def test_nrf54_sdc_partial_startup_cleanup(self):
-        target = (ROOT / "src" / "hci_nrf54lm20.cpp").read_text()
+        target = (ROOT / "nRF54LM20" / "src" / "hci_nrf54lm20.cpp").read_text()
         stop = target.split("void HciTargetStop(", 1)[1].split(
             "bool HciTargetStart(", 1)[0]
         self.assertIn("if (pTarget->SdcEnabled)", stop)
@@ -180,7 +180,7 @@ class Nrf54lm20ProjectTest(unittest.TestCase):
 
     def test_target_selection_and_mpsl_separation(self):
         startup = (ROOT / "src" / "main.cpp").read_text()
-        source = (ROOT / "src" / "hci_nrf54lm20.cpp").read_text()
+        source = (ROOT / "nRF54LM20" / "src" / "hci_nrf54lm20.cpp").read_text()
         # The target is the file a project links: main names none of them.
         for name in ("HciNrf54lm20Target", "HciNrf52840Target",
                      "HciNrf5340NetTarget", "HciTarget_t"):

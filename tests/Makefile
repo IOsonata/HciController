@@ -71,7 +71,7 @@ hci_intrf_transport_SRC := $(SRC)/hci_intrf_transport.cpp $(SRC)/hci_h4.cpp
 hci_intrf_transport_integrity_SRC := $(SRC)/hci_intrf_transport.cpp $(SRC)/hci_h4.cpp
 hci_controller_SRC     := $(SRC)/hci_controller.cpp \
                           $(SRC)/hci_intrf_transport.cpp $(SRC)/hci_h4.cpp
-hci_nrf52840_usb_SRC   := $(SRC)/hci_nrf52840.cpp \
+hci_nrf52840_usb_SRC   := $(ROOT)/nRF52840/src/hci_nrf52840.cpp \
                           $(SRC)/hci_sdc_resources.cpp
 hci_taktos_poll_SRC    := $(SRC)/hci_taktos.cpp
 
@@ -123,7 +123,6 @@ TARGETS += $(IPC_TARGET)
 # hci_sdc_feat_cs.cpp is Channel Sounding, which only the nRF54L SDC has and
 # the SDC stubs here do not model.
 COMPILE_SRC := $(filter-out $(SRC)/hci_sdc_nrfxlib.cpp \
-                           $(SRC)/hci_nrf54lm20.cpp \
                            $(SRC)/hci_sdc_feat_cs.cpp \
                            $(SRC)/hci_vendor_nrf.cpp,$(wildcard $(SRC)/hci_*.cpp))
 

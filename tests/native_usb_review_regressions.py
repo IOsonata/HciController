@@ -110,7 +110,7 @@ def main(argv):
         fail("host USB class must register before the diagnostic CDC")
     print("[ok] IOsonata main owns HCI/CDC allocation and composite descriptor assembly")
 
-    target = read(os.path.join(root, "src", "hci_nrf52840.cpp"))
+    target = read(os.path.join(root, "nRF52840", "src", "hci_nrf52840.cpp"))
     if 'extern "C" void nRFClockIrqHandler(void)' not in target or \
             'UsbGetCfg(0) != nullptr && !HciNrf52840HfclkStart(pTarget)' not in target:
         fail("shared clock IRQ or MPSL USB clock ownership is missing")
@@ -163,7 +163,7 @@ def main(argv):
     print("[ok] UDG forced UART is blocked on both MCU families")
 
     dispatch = read(os.path.join(root, "src", "hci_cmd_dispatch.cpp"))
-    handler = dispatch.find("HciCmdResult_t result = pEntry->Handler")
+    handler = dispatch.find("pEntry->Handler(pDispatch->pContext")
     response = dispatch.find("if (result.Response != pEntry->Response)", handler)
     switch = dispatch.find("switch (result.Response)", handler)
     if handler < 0 or response < 0 or switch < 0 or not handler < response < switch:

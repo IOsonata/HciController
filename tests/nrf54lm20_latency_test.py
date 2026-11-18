@@ -21,7 +21,7 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / "src" / "hci_nrf54lm20.cpp"
+SOURCE = ROOT / "nRF54LM20" / "src" / "hci_nrf54lm20.cpp"
 
 
 class Lm20LatencyTest(unittest.TestCase):

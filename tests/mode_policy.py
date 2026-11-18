@@ -115,7 +115,7 @@ def main():
           "HCI_USB_DESCRIPTOR_NATIVE_HCI" in usb_cpp,
           "USB H:4/native descriptors are selected at runtime", failures)
 
-    for token in ("NvmMcuCfg", "NvmRegionAddr", "HciModeNvmLoad",
+    for token in ("NvmMcuCfgInit", "HciModeNvmLoad",
                   "HciModeNvmStore", "HciAppStop", "NVIC_SystemReset"):
         check(token in main_cpp, "persistent mode path contains %s" % token,
               failures)
