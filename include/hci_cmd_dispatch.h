@@ -133,6 +133,13 @@ HciCmdResult_t HciCmdGenericCall(const HciCmdEntry_t *pEntry,
 typedef struct {
     const HciCmdEntry_t *pEntries;
     size_t EntryCount;
+    /*
+     * Optional second table, searched after pEntries. Rows of a feature that
+     * is linked as its own source file, so the main table carries no reference
+     * to library code a target does not have. NULL and 0 when unused.
+     */
+    const HciCmdEntry_t *pExtEntries;
+    size_t ExtEntryCount;
     void *pContext;
 
     uint8_t *pEvent;

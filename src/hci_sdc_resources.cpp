@@ -100,6 +100,16 @@ extern "C" __attribute__((weak)) bool HciSdcFeatPawrConfig(void)
     return true;
 }
 
+extern "C" __attribute__((weak)) bool HciSdcFeatCsSupport(void)
+{
+    return false;
+}
+
+extern "C" __attribute__((weak)) bool HciSdcFeatCsConfig(void)
+{
+    return true;
+}
+
 int32_t HciSdcResourcesApply(void)
 {
     bool bSubrating;
@@ -193,6 +203,9 @@ int32_t HciSdcResourcesApply(void)
     sdc_support_cis_peripheral();
     sdc_support_bis_source();
     sdc_support_bis_sink();
+
+    /* Channel Sounding, only where the project links it. */
+    const bool bCs = HciSdcFeatCsSupport();
 
     sdc_cfg_t cfg = {};
     cfg.buffer_cfg.rx_packet_size = HCI_SDC_ACL_PACKET_SIZE;
@@ -341,6 +354,11 @@ int32_t HciSdcResourcesApply(void)
         HCI_SDC_PERIODIC_SYNC_RSP_TX_BUFFERS;
     if (!HciSdcCfgSet(
             SDC_CFG_TYPE_PERIODIC_SYNC_RSP_TX_BUFFER_CFG, &cfg))
+    {
+        return s_Required;
+    }
+
+    if (bCs && !HciSdcFeatCsConfig())
     {
         return s_Required;
     }

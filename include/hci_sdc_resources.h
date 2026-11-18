@@ -292,6 +292,8 @@ static_assert(HCI_SDC_ISO_RX_SDU_SIZE <= HCI_SDC_ISO_SDU_LIMIT,
  *   hci_sdc_feat_past.cpp       periodic advertising sync transfer
  *   hci_sdc_feat_pawr.cpp       periodic advertising with responses, which
  *                               needs the sync transfer above
+ *   hci_sdc_feat_cs.cpp         Channel Sounding, nRF54L only. Its pool term
+ *                               follows HCI_SDC_CS_COUNT, 0 by default
  *
  * HciSdcResourcesApply() calls the hooks below. The defaults here are weak and
  * report the feature absent. A feature that is not linked costs no flash.
@@ -302,6 +304,8 @@ bool HciSdcFeatExtConfig(void);
 bool HciSdcFeatPastSupport(void);
 bool HciSdcFeatPawrSupport(bool bPast);
 bool HciSdcFeatPawrConfig(void);
+bool HciSdcFeatCsSupport(void);
+bool HciSdcFeatCsConfig(void);
 
 /* sdc_cfg_set with the failure trace and the running requirement. For the
  * feature files. */
@@ -330,6 +334,31 @@ bool HciSdcCfgSet(uint8_t Type, const sdc_cfg_t *pCfg);
                                          HCI_SDC_CENTRAL_COUNT)
 #else
 #define HCI_SDC_MEM_SHORTER_CONNECTION_INTERVALS 0U
+#endif
+
+/*
+ * Channel Sounding. sdk-nrfxlib has it for the nRF54L family only, so the
+ * count is 0 unless the project sets it and the term below is then nothing.
+ * A project that wants it sets HCI_SDC_CS_COUNT and links hci_sdc_feat_cs.cpp.
+ *
+ * HCI_SDC_CS_COUNT is the number of links that can run a CS procedure at the
+ * same time. One antenna, so one antenna path. Step mode 3 is included.
+ */
+#ifndef HCI_SDC_CS_COUNT
+#define HCI_SDC_CS_COUNT                0U
+#endif
+#define HCI_SDC_CS_MAX_ANTENNA_PATHS    1U
+#define HCI_SDC_CS_NUM_ANTENNAS         1U
+#define HCI_SDC_CS_STEP_MODE3           1U
+
+#if HCI_SDC_CS_COUNT > 0U
+#define HCI_SDC_MEM_CS                                                   \
+    (SDC_MEM_CS(HCI_SDC_CS_COUNT, HCI_SDC_CS_MAX_ANTENNA_PATHS,          \
+                HCI_SDC_CS_STEP_MODE3) +                                 \
+     SDC_MEM_CS_SETUP_PHASE_LINKS(HCI_SDC_PERIPHERAL_COUNT +             \
+                                  HCI_SDC_CENTRAL_COUNT))
+#else
+#define HCI_SDC_MEM_CS 0U
 #endif
 
 #define HCI_SDC_MEM_REQUIRED                                         \
@@ -366,7 +395,8 @@ bool HciSdcCfgSet(uint8_t Type, const sdc_cfg_t *pCfg);
      SDC_MEM_SYNC_TRANSFER(HCI_SDC_PERIPHERAL_COUNT +                    \
                            HCI_SDC_CENTRAL_COUNT) +                      \
      HCI_SDC_MEM_PERIODIC_ADV_RSP +                                      \
-     HCI_SDC_MEM_ISO)
+     HCI_SDC_MEM_ISO +                                                   \
+     HCI_SDC_MEM_CS)
 
 /*
  * sdc.h says the memory requirement defines "may change between minor

@@ -54,6 +54,7 @@
 									<listOptionValue builtIn="false" value="NRF54LM20B_XXAA"/>
 									<listOptionValue builtIn="false" value="NRF_APPLICATION"/>
 									<listOptionValue builtIn="false" value="NRFXLIB_SDC"/>
+									<listOptionValue builtIn="false" value="HCI_SDC_CS_COUNT=1U"/>
 									<listOptionValue builtIn="false" value="HCI_USB_VID=0xCAFE"/>
 									<listOptionValue builtIn="false" value="BUILDN=$$(date +&quot;%y%m%d&quot;)"/>
 								</option>
@@ -97,6 +98,7 @@
 									<listOptionValue builtIn="false" value="NRF54LM20B_XXAA"/>
 									<listOptionValue builtIn="false" value="NRF_APPLICATION"/>
 									<listOptionValue builtIn="false" value="NRFXLIB_SDC"/>
+									<listOptionValue builtIn="false" value="HCI_SDC_CS_COUNT=1U"/>
 									<listOptionValue builtIn="false" value="HCI_USB_VID=0xCAFE"/>
 									<listOptionValue builtIn="false" value="BUILDN=$$(date +&quot;%y%m%d&quot;)"/>
 								</option>
@@ -262,6 +264,7 @@
 									<listOptionValue builtIn="false" value="NRF54LM20B_XXAA"/>
 									<listOptionValue builtIn="false" value="NRF_APPLICATION"/>
 									<listOptionValue builtIn="false" value="NRFXLIB_SDC"/>
+									<listOptionValue builtIn="false" value="HCI_SDC_CS_COUNT=1U"/>
 									<listOptionValue builtIn="false" value="HCI_USB_VID=0xCAFE"/>
 									<listOptionValue builtIn="false" value="BUILDN=$$(date +&quot;%y%m%d&quot;)"/>
 								</option>
@@ -306,6 +309,7 @@
 									<listOptionValue builtIn="false" value="NRF54LM20B_XXAA"/>
 									<listOptionValue builtIn="false" value="NRF_APPLICATION"/>
 									<listOptionValue builtIn="false" value="NRFXLIB_SDC"/>
+									<listOptionValue builtIn="false" value="HCI_SDC_CS_COUNT=1U"/>
 									<listOptionValue builtIn="false" value="HCI_USB_VID=0xCAFE"/>
 									<listOptionValue builtIn="false" value="BUILDN=$$(date +&quot;%y%m%d&quot;)"/>
 								</option>

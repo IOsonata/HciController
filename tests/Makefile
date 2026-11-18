@@ -120,8 +120,11 @@ TARGETS += $(IPC_TARGET)
 # compiled by its real nRF54LM20 firmware project.
 # hci_vendor_nrf.cpp reads the factory registers and the Nordic entropy
 # engine that the stubs here do not model; its two hooks are the target's.
+# hci_sdc_feat_cs.cpp is Channel Sounding, which only the nRF54L SDC has and
+# the SDC stubs here do not model.
 COMPILE_SRC := $(filter-out $(SRC)/hci_sdc_nrfxlib.cpp \
                            $(SRC)/hci_nrf54lm20.cpp \
+                           $(SRC)/hci_sdc_feat_cs.cpp \
                            $(SRC)/hci_vendor_nrf.cpp,$(wildcard $(SRC)/hci_*.cpp))
 
 OBJECTS := $(patsubst $(SRC)/%.cpp,$(BUILD_DIR)/trace/%.o,$(COMPILE_SRC)) \

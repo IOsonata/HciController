@@ -113,7 +113,7 @@ def validate_source_contracts(root):
         r"#define\s+HCI_CONTROLLER_TARGET_CORE_VERSION\s+"
         r"HCI_CORE_VERSION_([0-9_]+)", profile_header
     )
-    if target and target.group(1) == "6_2":
+    if target and target.group(1) in ("6_2", "6_3"):
         required_calls = (
             "sdc_support_extended_feature_set_central();",
             "sdc_support_extended_feature_set_peripheral();",
@@ -125,7 +125,7 @@ def validate_source_contracts(root):
         missing = [call for call in required_calls if call not in resource_source]
         if missing:
             raise SystemExit(
-                "Core 6.2 profile is missing SDC support calls:\n  "
+                "Core 6.2+ profile is missing SDC support calls:\n  "
                 + "\n  ".join(missing)
             )
         for macro in (
@@ -133,8 +133,8 @@ def validate_source_contracts(root):
             "HCI_SDC_MEM_SHORTER_CONNECTION_INTERVALS",
         ):
             if macro not in resource_header:
-                raise SystemExit("Core 6.2 resource term %s is missing" % macro)
-        print("[ok] Core 6.2 profile has Extended Features, FSU and SCI resources")
+                raise SystemExit("Core 6.2+ resource term %s is missing" % macro)
+        print("[ok] Core 6.2+ profile has Extended Features, FSU and SCI resources")
 
     stop_at = app_source.find("void HciAppStop(")
     if stop_at < 0:

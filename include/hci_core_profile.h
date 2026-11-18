@@ -20,17 +20,25 @@
 #define HCI_CORE_VERSION_6_0 0x0EU
 #define HCI_CORE_VERSION_6_1 0x0FU
 #define HCI_CORE_VERSION_6_2 0x10U
+#define HCI_CORE_VERSION_6_3 0x11U
 
 /*
  * Release 1 follows the capability intersection of nRF52840 and the current
  * sdk-nrfxlib multirole SDC. That combination supports the Core 6.0 Extended
  * Feature Set and the Core 6.2 Frame Space Update and Shorter Connection
- * Intervals features, so the product-facing HCI/LMP version is Core 6.2.
+ * Intervals features. The SDC link layer itself is at Core 6.3 (LL version
+ * 0x11), so the product-facing HCI/LMP version is Core 6.3.
+ *
+ * The Core 6.3 features are Channel Sounding only (Inline PCT Transfer,
+ * PHY-specific RTT accuracy). sdk-nrfxlib has Channel Sounding for nRF54L and
+ * not for nRF52 or nRF53, so only the nRF54LM20 project links
+ * hci_sdc_feat_cs.cpp. The version is only ever lowered to this value, never
+ * raised: an older SDC keeps reporting its own version.
  *
  * nRF54LM20 is a separate release profile and is audited independently.
  */
 #ifndef HCI_CONTROLLER_TARGET_CORE_VERSION
-#define HCI_CONTROLLER_TARGET_CORE_VERSION HCI_CORE_VERSION_6_2
+#define HCI_CONTROLLER_TARGET_CORE_VERSION HCI_CORE_VERSION_6_3
 #endif
 
 #if HCI_CONTROLLER_TARGET_CORE_VERSION > 0xFFU

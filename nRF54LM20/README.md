@@ -18,6 +18,15 @@ The build uses `NRF54LM20B_XXAA`, `NRF_APPLICATION`, and
 is independent of the Debug/Release configuration; the default board is
 `UDG_NRF54LM20`. Specify `BOARD=NORDIC_DK_NRF54LM20` for the Nordic DK.
 
+## Channel Sounding
+
+The project links `src/hci_sdc_feat_cs.cpp` and sets `HCI_SDC_CS_COUNT=1U`,
+which turns on Channel Sounding in the nRF54LM SDC: initiator and reflector
+roles on central and peripheral links, step mode 3, the CS test command, one
+antenna, one link running a CS procedure at a time. Remove the file from the
+project and the define to build without it. Channel Sounding has not been
+through the hardware release suite.
+
 ## Hardware validation
 
 On October 16, 2026, the Nordic nRF54LM20A DK and UDG-nRF52840

@@ -179,6 +179,43 @@ int main()
         printf("[ok] %-44s\n", "no buffer queues nothing");
     }
 
+    /*
+     * The second table. An opcode only it has is unknown until the table is
+     * attached, then runs through the same path as a first table row.
+     */
+    {
+        static const HciCmdEntry_t extEntries[] = {
+            {0x5678U, 1U, 2U, HCI_CMD_RESPONSE_COMPLETE, CompleteHandler},
+        };
+        static const uint8_t extCommand[] = {0x78U, 0x56U, 0x01U, 0x42U};
+        TestContext extContext = {};
+        uint8_t extStorage[80];
+        uint8_t extEvent[80];
+        size_t extEventLen = 0U;
+        HciCmdDispatch_t ext;
+
+        assert(HciCmdDispatchInit(&ext, entries,
+                                  sizeof(entries) / sizeof(entries[0]),
+                                  &extContext, extStorage, sizeof(extStorage)));
+        assert(!HciCmdDispatchKnows(&ext, 0x5678U, 1U));
+
+        ext.pExtEntries = extEntries;
+        ext.ExtEntryCount = sizeof(extEntries) / sizeof(extEntries[0]);
+        assert(HciCmdDispatchKnows(&ext, 0x5678U, 1U));
+        assert(!HciCmdDispatchKnows(&ext, 0x5678U, 2U));
+        assert(HciCmdDispatchKnows(&ext, 0x1234U, 1U));
+
+        assert(HciCmdDispatchPut(&ext, extCommand, sizeof(extCommand)));
+        assert(extContext.Calls == 1 && extContext.LastParam == 0x42U);
+        assert(HciCmdDispatchGet(&ext, extEvent, sizeof(extEvent), &extEventLen));
+        assert(extEventLen == 8U);
+        assert(extEvent[0] == HCI_EVENT_COMMAND_COMPLETE);
+        assert(extEvent[3] == 0x78U && extEvent[4] == 0x56U);
+        assert(extEvent[5] == HCI_STATUS_SUCCESS);
+        assert(extEvent[6] == 0xAAU && extEvent[7] == 0x55U);
+        printf("[ok] %-44s\n", "second table rows dispatch like the first");
+    }
+
     printf("All command dispatch tests passed.\n");
     return 0;
 }

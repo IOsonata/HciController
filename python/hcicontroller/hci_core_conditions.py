@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Shared Bluetooth Core conditional HCI checks used by release profiles.
 
-The nRF52840 release currently reports Core 6.2, but the Bluetooth 5.4 feature
+The nRF52840 release currently reports Core 6.3, but the Bluetooth 5.4 feature
 bits it advertises still activate the same conditional command requirements.
 Keep those inherited checks here so an old Core-5.4 product profile cannot be
 mistaken for the current release test.

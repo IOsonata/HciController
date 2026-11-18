@@ -1,5 +1,34 @@
 # Changelog
 
+## Unreleased
+
+### Bluetooth Core 6.3
+
+- nRF52840 release profile target moved from Core 6.2 to Core 6.3
+  (`HCI_CORE_VERSION_6_3`, 0x11), matching the LL version of the current
+  sdk-nrfxlib SoftDevice Controller. Requires an sdk-nrfxlib whose SDC
+  reports 0x11; an older SDC still reports its own lower version.
+- No HCI command or event changes on nRF52840 and nRF5340: the Core 6.3
+  features are Channel Sounding only, which sdk-nrfxlib does not have for
+  those parts.
+- Release smoke test expects HCI and LMP version 0x11.
+
+### Channel Sounding on nRF54LM20
+
+- New link-time feature file `src/hci_sdc_feat_cs.cpp`: initiator and
+  reflector roles on central and peripheral links, step mode 3 and the CS
+  test command, one antenna. Routes the 18 LE CS commands (0x2089 to 0x2096,
+  0x20A5 to 0x20A8), including the Core 6.3 Inline PCT Transfer settings
+  carried by LE CS Create Config.
+- `HCI_SDC_CS_COUNT` sizes the pool term and defaults to 0. The nRF54LM20
+  project sets it to 1 and links the file; nRF52840 and nRF5340 are
+  unchanged and their pool is the same size as before.
+- `HciCmdDispatch_t` takes an optional second table (`pExtEntries`), so rows
+  that call library code only some targets have stay out of the main table.
+  The pass-through row macros moved to `include/hci_sdc_row.h`.
+- Not routed: the Nordic vendor command CS Params Set (0xFD22).
+- Not yet built for the target or run on hardware.
+
 ## 1.1.0 (2026-11-07)
 
 HciController 1.1 expands the common controller across nRF52840,

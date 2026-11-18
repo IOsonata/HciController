@@ -25,7 +25,7 @@ from hcicontroller.pair_transport import resolve_pair
 from hcicontroller.profile import read_controller_capabilities
 from hcicontroller.results import ResultBook
 
-EXPECTED_CORE_VERSION = 0x10
+EXPECTED_CORE_VERSION = 0x11
 
 
 def check_profile(book, label, capabilities):
@@ -37,7 +37,7 @@ def check_profile(book, label, capabilities):
     if (len(version) >= 8
             and version[0] == EXPECTED_CORE_VERSION
             and version[3] == EXPECTED_CORE_VERSION):
-        book.passed("Profile", "%s Core version" % label, "6.2")
+        book.passed("Profile", "%s Core version" % label, "6.3")
     else:
         book.failed("Profile", "%s Core version" % label, version.hex(" "))
 

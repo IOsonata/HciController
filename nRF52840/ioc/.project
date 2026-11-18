@@ -96,6 +96,11 @@
 			<locationURI>PARENT-2-PROJECT_LOC/include/hci_sdc_resources.h</locationURI>
 		</link>
 		<link>
+			<name>include/hci_sdc_row.h</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/include/hci_sdc_row.h</locationURI>
+		</link>
+		<link>
 			<name>include/hci_taktos.h</name>
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/include/hci_taktos.h</locationURI>

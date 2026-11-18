@@ -34,6 +34,14 @@ static const HciCmdEntry_t *HciCmdFindEntry(const HciCmdDispatch_t *pDispatch,
         }
     }
 
+    for (size_t i = 0; i < pDispatch->ExtEntryCount; ++i)
+    {
+        if (pDispatch->pExtEntries[i].Opcode == Opcode)
+        {
+            return &pDispatch->pExtEntries[i];
+        }
+    }
+
     return NULL;
 }
 

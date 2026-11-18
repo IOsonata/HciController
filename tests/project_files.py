@@ -73,6 +73,8 @@ def main(argv):
             "include/hci_nrf5340_net.h",
             "src/hci_nrf5340_net.cpp",
             "src/hci_host_ipc.cpp",
+            # Channel Sounding is in the nRF54L SDC library only.
+            "src/hci_sdc_feat_cs.cpp",
         },
         "nRF54LM20": {
             "include/hci_nrf52840.h",
@@ -87,6 +89,7 @@ def main(argv):
             "include/hci_nrf54lm20.h",
             "src/hci_nrf54lm20.cpp",
             "src/hci_host_usb.cpp",
+            "src/hci_sdc_feat_cs.cpp",
         },
     }
 

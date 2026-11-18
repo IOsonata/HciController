@@ -47,7 +47,7 @@ A release run is incomplete if the real-header SDC tests are skipped.
 ## Release profile
 
 `include/hci_core_profile.h` sets the nRF52840 release profile to Bluetooth Core
-6.2. The profile is the intersection of what the product exposes and what the
+6.3. The profile is the intersection of what the product exposes and what the
 selected nRF52840 multirole SoftDevice Controller can actually support. It is
 not a Bluetooth SIG qualification claim.
 
@@ -69,6 +69,8 @@ The exposed command families include:
 - Direct Test Mode command versions exposed by the SDC profile;
 - connected and broadcast isochronous setup/data-path/test commands;
 - Core 6.2 Frame Space Update and Shorter Connection Intervals command paths;
+- Channel Sounding (LE CS commands) on nRF54LM20 only, through
+  `src/hci_sdc_feat_cs.cpp`;
 - Nordic SDC vendor commands used by the release profile;
 - HciController vendor diagnostics and transport-integrity commands.
 
