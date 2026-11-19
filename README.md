@@ -6,9 +6,11 @@ device stack, and Nordic Semiconductor's nrfxlib SoftDevice Controller (SDC)
 and MPSL for radio operation.
 
 Release **1.1.0** (`FIRMWARE_VERSION 0x0110`) expands target and transport
-support. The validated nRF52840 SDC release profile reports Bluetooth Core
-6.2. Capability reporting is target/profile-specific and does not constitute
-Bluetooth SIG qualification or RF certification.
+support; its nRF52840 SDC release profile reports Bluetooth Core 6.2. The
+current source reports Bluetooth Core 6.3 on that profile, validated on a
+UDG-nRF52840 pair, and adds Channel Sounding on nRF54LM20. Capability
+reporting is target/profile-specific and does not constitute Bluetooth SIG
+qualification or RF certification.
 
 The controller boundary is packet-oriented: one `DeviceIntrf` transaction is
 one complete HCI packet, selected by HCI packet type. The shared controller code

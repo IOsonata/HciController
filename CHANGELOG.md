@@ -12,6 +12,10 @@
   features are Channel Sounding only, which sdk-nrfxlib does not have for
   those parts.
 - Release smoke test expects HCI and LMP version 0x11.
+- Hardware validation, November 19, 2026, UDG-nRF52840 pair (A native USB,
+  B serial H:4): smoke test 18 PASS, 0 FAIL; release run 77 PASS, 0 FAIL,
+  0 N/A, 0 INCOMPLETE, including PAwR in both directions, CIS, BIS and the
+  ACL/ISO stress phase.
 
 ### Channel Sounding on nRF54LM20
 
@@ -27,7 +31,10 @@
   that call library code only some targets have stay out of the main table.
   The pass-through row macros moved to `include/hci_sdc_row.h`.
 - Not routed: the Nordic vendor command CS Params Set (0xFD22).
-- Not yet built for the target or run on hardware.
+- Builds for nRF54LM20. On the board, LE feature bit 46 is set and LE CS
+  Read Local Supported Capabilities returns both roles, mode 3 and Inline
+  PCT Transfer in the reflector. No CS procedure between two controllers
+  has been run yet.
 
 ## 1.1.0 (2026-11-07)
 
