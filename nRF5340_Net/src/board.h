@@ -24,7 +24,7 @@
 
 /* -DBOARD=... on the command line wins. */
 #ifndef BOARD
-#define BOARD						NRF5340_AUDIO_DK_NET
+#define BOARD						THINGY91X_NRF5340
 #endif
 
 #define HCI_HOST_SELECT_AUTO		1

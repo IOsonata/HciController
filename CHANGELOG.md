@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 1.2.0 (2026-11-19)
+
+HciController 1.2 moves the controller to Bluetooth Core 6.3 and adds
+Channel Sounding on nRF54LM20. `FIRMWARE_VERSION` and USB `bcdDevice` are
+0x0120.
 
 ### Bluetooth Core 6.3
 

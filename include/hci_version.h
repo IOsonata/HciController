@@ -13,9 +13,9 @@
 #define HCI_VERSION_H
 
 /* IOsonata Vers_t format: 0xMMmm, where MM is major and mm is minor. */
-#define FIRMWARE_VERSION 0x0110U
+#define FIRMWARE_VERSION 0x0120U
 
-/* USB bcdDevice is 1.10 for HciController 1.1.0. */
+/* USB bcdDevice is 1.20 for HciController 1.2.0. */
 #define HCI_CONTROLLER_VERSION_BCD FIRMWARE_VERSION
 
 #endif

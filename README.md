@@ -5,12 +5,11 @@ nRF52840, nRF5340 network core and nRF54LM20. It uses IOsonata and TaktOS, IOson
 device stack, and Nordic Semiconductor's nrfxlib SoftDevice Controller (SDC)
 and MPSL for radio operation.
 
-Release **1.1.0** (`FIRMWARE_VERSION 0x0110`) expands target and transport
-support; its nRF52840 SDC release profile reports Bluetooth Core 6.2. The
-current source reports Bluetooth Core 6.3 on that profile, validated on a
-UDG-nRF52840 pair, and adds Channel Sounding on nRF54LM20. Capability
-reporting is target/profile-specific and does not constitute Bluetooth SIG
-qualification or RF certification.
+Release **1.2.0** (`FIRMWARE_VERSION 0x0120`) moves the controller to
+Bluetooth Core 6.3 and adds Channel Sounding on nRF54LM20. The nRF52840 SDC
+release profile reports Bluetooth Core 6.3, validated on a UDG-nRF52840 pair
+(6.2 in release 1.1.0). Capability reporting is target/profile-specific and
+does not constitute Bluetooth SIG qualification or RF certification.
 
 The controller boundary is packet-oriented: one `DeviceIntrf` transaction is
 one complete HCI packet, selected by HCI packet type. The shared controller code
@@ -223,7 +222,7 @@ VID       0xCAFE
 CDC/H4    PID 0x4070
 native    PID 0x4071
 log-only  PID 0x4072
-bcdDevice 0x0110
+bcdDevice 0x0120
 ```
 
 Product builds can override `HCI_USB_VID`, `HCI_USB_PID_CDC_H4`,

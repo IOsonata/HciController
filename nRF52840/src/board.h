@@ -29,6 +29,8 @@
 /* -DBOARD=... on the command line wins. */
 #ifndef BOARD
 #define BOARD						UDG_NRF52840
+//#define BOARD						WILDTHING51
+//#define BOARD						THINGY91_NRF52840
 #endif
 
 /*
